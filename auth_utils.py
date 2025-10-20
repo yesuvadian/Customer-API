@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 
 from database import get_db
-from models import User, UserSecurity
+from models import User, UserSecurity, UserSession
 from security_utils import verify_password
 from services import user_service
 from utils.common_service import UTCDateTimeMixin
@@ -60,10 +60,11 @@ def decode_access_token(token: str):
 # ==============================
 # Authentication Logic
 # ==============================
-def authenticate_user(db: Session, username: str, password: str):
+def authenticate_user(db: Session, username: str, password: str, request=None):
     """
     Authenticate a user using the user_security table for tracking
     failed logins and lockouts. Uses UTCDateTimeMixin for all datetime operations.
+    Creates a UserSession on successful login.
     """
     if not username or not password:
         return {"error": "Username and password required", "status": 400}
@@ -81,11 +82,10 @@ def authenticate_user(db: Session, username: str, password: str):
         db.commit()
         db.refresh(security)
 
-    now = UTCDateTimeMixin._utc_now()  # ✅ always aware UTC datetime
+    now = UTCDateTimeMixin._utc_now()
 
     # 🚫 Check if account is locked
     locked_until = UTCDateTimeMixin._make_aware(security.login_locked_until)
-
     if locked_until:
         if locked_until <= now:
             # 🔓 Lock expired — clear it automatically
@@ -105,11 +105,9 @@ def authenticate_user(db: Session, username: str, password: str):
     # 🔑 Verify password
     if not verify_password(password, user.password_hash):
         security.failed_login_attempts = (security.failed_login_attempts or 0) + 1
-
         if security.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
             security.login_locked_until = now + timedelta(minutes=LOGIN_LOCK_DURATION_MIN)
-            security.failed_login_attempts = 0  # reset after lockout
-
+            security.failed_login_attempts = 0
         db.commit()
         return {"error": "Invalid credentials", "status": 401}
 
@@ -118,7 +116,32 @@ def authenticate_user(db: Session, username: str, password: str):
     security.login_locked_until = None
     db.commit()
 
-    return {"user": user}
+    # -----------------------------
+    # Create a user session (JWT tracking)
+    # -----------------------------
+    access_token = create_access_token({"sub": str(user.id)})
+    refresh_token = create_refresh_token(str(user.id))
+
+    session = UserSession(
+        user_id=user.id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        created_at=now,
+        expires_at=now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        ip_address=request.client.host if request else None,
+        user_agent=request.headers.get("User-Agent") if request else None
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    return {
+        "user": user,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "session_id": session.id
+    }
 
 
 # ==============================

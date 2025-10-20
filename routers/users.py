@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from urllib.request import Request
+from fastapi import APIRouter, Depends, HTTPException,status
+from models import UserSession
 from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 import schemas
-from services.user_service import UserService  # import class directly
+from services.user_service import UserService
+from utils.common_service import UTCDateTimeMixin  # import class directly
 
 router = APIRouter(
     prefix="/users",
@@ -55,3 +58,33 @@ def delete_user_endpoint(user_id: str, db: Session = Depends(get_db)):
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
     return db_user
+@router.post("/logout", status_code=status.HTTP_200_OK)
+def logout_user(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    refresh_token: str | None = None  # optional: could be passed from client
+):
+    """
+    Logout the current user by revoking the session.
+    If refresh_token is provided, only that session is revoked.
+    Otherwise, all sessions for the user are revoked.
+    """
+    now = UTCDateTimeMixin._utc_now()
+
+    query = db.query(UserSession).filter(UserSession.user_id == current_user.id)
+
+    if refresh_token:
+        query = query.filter(UserSession.refresh_token == refresh_token)
+
+    sessions = query.all()
+
+    if not sessions:
+        raise HTTPException(status_code=404, detail="No active session found")
+
+    for session in sessions:
+        session.revoked_at = now
+
+    db.commit()
+
+    return {"detail": f"{len(sessions)} session(s) successfully logged out"}
