@@ -1,7 +1,7 @@
 from fastapi import HTTPException,status
 from sqlalchemy.orm import Session
 #from auth_utils import get_password_hash
-from models import User
+from models import User, UserSession
 from schemas import UserCreate
 from datetime import datetime, timezone
 import uuid
@@ -88,3 +88,27 @@ class UserService(UTCDateTimeMixin):
             db.delete(db_user)
             db.commit()
         return db_user
+    @staticmethod
+    def logout_user(db: Session, user_id: str, refresh_token: str | None = None) -> int:
+        """
+        Revoke active sessions for the user.
+        If refresh_token is provided, only that session is revoked.
+        Returns the number of sessions revoked.
+        """
+        now = UTCDateTimeMixin._utc_now()
+
+        query = db.query(UserSession).filter(UserSession.user_id == user_id)
+
+        if refresh_token:
+            query = query.filter(UserSession.refresh_token == refresh_token)
+
+        sessions = query.all()
+
+        if not sessions:
+            return 0
+
+        for session in sessions:
+            session.revoked_at = now
+
+        db.commit()
+        return len(sessions)

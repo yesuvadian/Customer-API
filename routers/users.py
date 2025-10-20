@@ -58,33 +58,19 @@ def delete_user_endpoint(user_id: str, db: Session = Depends(get_db)):
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
     return db_user
-@router.post("/logout", status_code=status.HTTP_200_OK)
+
+@router.post("/logout", status_code=status.HTTP_200_OK, response_model=None)
 def logout_user(
-    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
-    refresh_token: str | None = None  # optional: could be passed from client
+    refresh_token: str | None = None
 ):
     """
-    Logout the current user by revoking the session.
-    If refresh_token is provided, only that session is revoked.
-    Otherwise, all sessions for the user are revoked.
+    Logout the current user by revoking sessions via UserService.
     """
-    now = UTCDateTimeMixin._utc_now()
+    revoked_count = user_service_instance.logout_user(db, current_user.id, refresh_token)
 
-    query = db.query(UserSession).filter(UserSession.user_id == current_user.id)
-
-    if refresh_token:
-        query = query.filter(UserSession.refresh_token == refresh_token)
-
-    sessions = query.all()
-
-    if not sessions:
+    if revoked_count == 0:
         raise HTTPException(status_code=404, detail="No active session found")
 
-    for session in sessions:
-        session.revoked_at = now
-
-    db.commit()
-
-    return {"detail": f"{len(sessions)} session(s) successfully logged out"}
+    return {"detail": f"{revoked_count} session(s) successfully logged out"}

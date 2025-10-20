@@ -1,7 +1,7 @@
-from typing import Text
+
 import uuid
 from sqlalchemy import (
-    Column, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func
+    Column, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
 )
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import relationship
@@ -119,35 +119,34 @@ class UserSecurity(Base):
 
     user = relationship("User", back_populates="security")
 
+
 class UserSession(Base):
     __tablename__ = "user_sessions"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = {"schema": "public"}  # ✅ must be dict
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
 
-    access_token = Column(Text, nullable=False)
-    refresh_token = Column(Text, nullable=False)
+    access_token = Column(Text, nullable=False)       # ✅ no quotes
+    refresh_token = Column(Text, nullable=False)      # ✅ no quotes
 
-    created_at = Column(DateTime(timezone=True), nullable=False, default=UTCDateTimeMixin._utc_now)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, default=UTCDateTimeMixin._utc_now)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    revoked_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
 
-    # relationship to User
     user = relationship("User", back_populates="sessions")
 
     @property
     def is_active(self) -> bool:
-        """
-        Returns True if session is active:
-        - Not revoked
-        - Not expired
-        """
         now = UTCDateTimeMixin._utc_now()
         return self.revoked_at is None and self.expires_at > now
+
+
+
+
 # ------------------------------
 # Module Model
 # ------------------------------
