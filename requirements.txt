@@ -1,0 +1,14 @@
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
+python-jose==3.3.0
+fastapi==0.115.0
+uvicorn[standard]==0.30.1
+SQLAlchemy==2.0.32
+alembic==1.13.2
+python-multipart==0.0.9
+pydantic==2.9.2
+pydantic-settings==2.4.0
+email-validator==2.2.0
+psycopg2-binary
+pyotp
+python-dotenv==1.0.1
