@@ -1,7 +1,7 @@
 
 import uuid
 from sqlalchemy import (
-    Column, LargeBinary, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
+    Column, Float, LargeBinary, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
 )
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import relationship
@@ -44,93 +44,10 @@ class User(Base):
         cascade="all, delete",
         foreign_keys="[UserRole.user_id]"  # ⚡ fix ambiguous foreign key
     )
-class CompanyTaxDocument(Base):
-    __tablename__ = "company_tax_documents"
-    __table_args__ = {"schema": "public"}
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    company_tax_info_id = Column(Integer, ForeignKey("company_tax_info.id", ondelete="CASCADE"), nullable=False)
-    file_name = Column(String(255), nullable=False)
-    file_data = Column(LargeBinary, nullable=False)
-    file_type = Column(String(50))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    #company_tax_info = relationship("CompanyTaxInfo", back_populates="documents")
 
-class State(Base):
-    __tablename__ = "states"
-    __table_args__ = {"schema": "public"}
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), nullable=False)
-    code = Column(String(10))
-    country_id = Column(Integer, ForeignKey("countries.id", ondelete="CASCADE"), nullable=False)
-   
-class UserAddress(Base):
-    __tablename__ = "user_addresses"
-    __table_args__ = (
-        UniqueConstraint("user_id", "address_type", "is_primary", name="user_addresses_user_id_address_type_is_primary_key"),
-        {"schema": "public"}
-    )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
-    address_type = Column(String(50), nullable=False)
-    is_primary = Column(Boolean, default=False)
-    address_line1 = Column(String(255), nullable=False)
-    address_line2 = Column(String(255))
-    state_id = Column(Integer, ForeignKey("public.states.id", ondelete="SET NULL"))
-    country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="SET NULL"))
-    postal_code = Column(String(20))
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    cts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
-    mts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
 
-    # Relationships
-    user = relationship("User", foreign_keys=[user_id])
-    creator = relationship("User", foreign_keys=[created_by])
-    modifier = relationship("User", foreign_keys=[modified_by])
-    state = relationship("State", foreign_keys=[state_id])
-    country = relationship("Country", foreign_keys=[country_id])
-
-    #country = relationship("Country", back_populates="states")
-    #company_tax_infos = relationship("CompanyTaxInfo", back_populates="state")
-class CompanyTaxInfo(Base):
-    __tablename__ = "company_tax_info"
-    __table_args__ = {"schema": "public"}
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
-    pan = Column(String(10), unique=True, nullable=False)
-    gstin = Column(String(15), unique=True)
-    tan = Column(String(10), unique=True)
-    state_id = Column(Integer, ForeignKey("states.id", ondelete="SET NULL"))
-    financial_year = Column(String(9))
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    cts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
-    mts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
-
-    #company = relationship("User", back_populates="company_tax_infos", foreign_keys=[company_id])
-    #creator = relationship("User", foreign_keys=[created_by])
-    #modifier = relationship("User", foreign_keys=[modified_by])
-    # CompanyTaxInfo
-    #state = relationship("State", back_populates="company_tax_infos", foreign_keys=[state_id])
-    #documents = relationship("CompanyTaxDocument", back_populates="company_tax_info", cascade="all, delete")
-
-# ------------------------------
-# Country & State Models
-# ------------------------------
-class Country(Base):
-    __tablename__ = "countries"
-    __table_args__ = {"schema": "public"}
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), unique=True, nullable=False)
-    code = Column(String(10), unique=True)
-
-    
-
-    #states = relationship("State", back_populates="country", cascade="all, delete")
 # ------------------------------
 # UserRole Model
 # ------------------------------
@@ -295,3 +212,210 @@ class RoleModulePrivilege(Base):
     modified_user = relationship("User", foreign_keys=[modified_by], lazy="joined")
     role = relationship("Role", back_populates="privileges")
     module = relationship("Module", back_populates="privileges")
+
+    
+
+# ------------------------------
+# ProductCategory Model
+# ------------------------------
+class ProductCategory(Base):
+    __tablename__ = "product_categories"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), unique=True, nullable=False)
+    description = Column(String(255))
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    created_user = relationship("User", foreign_keys=[created_by])
+    modified_user = relationship("User", foreign_keys=[modified_by])
+
+    subcategories = relationship("ProductSubCategory", back_populates="category", cascade="all, delete")
+    products = relationship("Product", back_populates="category_obj")
+
+
+# ------------------------------
+# ProductSubCategory Model
+# ------------------------------
+class ProductSubCategory(Base):
+    __tablename__ = "product_subcategories"
+    __table_args__ = (
+        UniqueConstraint("category_id", "name", name="uq_category_subcategory"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category_id = Column(Integer, ForeignKey("public.product_categories.id", ondelete="CASCADE"))
+    name = Column(String(100), nullable=False)
+    description = Column(String(255))
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    category = relationship("ProductCategory", back_populates="subcategories")
+    created_user = relationship("User", foreign_keys=[created_by])
+    modified_user = relationship("User", foreign_keys=[modified_by])
+    products = relationship("Product", back_populates="subcategory_obj")
+
+
+# ------------------------------
+# Product Model (Updated)
+# ------------------------------
+class Product(Base):
+    __tablename__ = "products"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    category_id = Column(Integer, ForeignKey("public.product_categories.id", ondelete="SET NULL"))
+    subcategory_id = Column(Integer, ForeignKey("public.product_subcategories.id", ondelete="SET NULL"))
+    sku = Column(String(50), unique=True, nullable=False)
+    description = Column(String(255))
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    created_user = relationship("User", foreign_keys=[created_by])
+    modified_user = relationship("User", foreign_keys=[modified_by])
+
+    category_obj = relationship("ProductCategory", back_populates="products")
+    subcategory_obj = relationship("ProductSubCategory", back_populates="products")
+    companies = relationship("CompanyProduct", back_populates="product", cascade="all, delete")
+
+
+# ------------------------------
+# CompanyProduct (Company ↔ Product)
+# ------------------------------
+class CompanyProduct(Base):
+    __tablename__ = "company_products"
+    __table_args__ = (
+        UniqueConstraint("company_id", "product_id", name="uq_company_product"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"))
+    product_id = Column(Integer, ForeignKey("public.products.id", ondelete="CASCADE"))
+    company_sku = Column(String(50))
+    price = Column(Float)
+    stock_quantity = Column(Integer, default=0)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    company = relationship("User", foreign_keys=[company_id])
+    product = relationship("Product", back_populates="companies")
+    created_user = relationship("User", foreign_keys=[created_by])
+    modified_user = relationship("User", foreign_keys=[modified_by])
+
+class Country(Base):
+    __tablename__ = "countries"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), unique=True, nullable=False)
+    code = Column(String(10), unique=True)
+
+    # Relationships
+    states = relationship("State", back_populates="country", cascade="all, delete")
+
+
+class State(Base):
+    __tablename__ = "states"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    code = Column(String(10))
+    country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="CASCADE"), nullable=False)
+
+    # Relationships
+    country = relationship("Country", back_populates="states")
+
+class UserAddress(Base):
+    __tablename__ = "user_addresses"
+    __table_args__ = (
+        UniqueConstraint("user_id", "address_type", "is_primary", name="user_addresses_user_id_address_type_is_primary_key"),
+        {"schema": "public"}
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
+    address_type = Column(String(50), nullable=False)
+    is_primary = Column(Boolean, default=False)
+    address_line1 = Column(String(255), nullable=False)
+    address_line2 = Column(String(255))
+    state_id = Column(Integer, ForeignKey("public.states.id", ondelete="SET NULL"))
+    country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="SET NULL"))
+    postal_code = Column(String(20))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
+    mts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+    state = relationship("State", foreign_keys=[state_id])
+    country = relationship("Country", foreign_keys=[country_id])
+
+    #country = relationship("Country", back_populates="states")
+    #company_tax_infos = relationship("CompanyTaxInfo", back_populates="state")
+    
+class CompanyTaxInfo(Base):
+    __tablename__ = "company_tax_info"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
+    pan = Column(String(10), unique=True, nullable=False)
+    gstin = Column(String(15), unique=True)
+    tan = Column(String(10), unique=True)
+    financial_year = Column(String(9))
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+
+    cts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
+    mts = Column(DateTime, default=UTCDateTimeMixin._utc_now, onupdate=UTCDateTimeMixin._utc_now, nullable=False)
+
+    # Relationships
+    company = relationship("User", foreign_keys=[company_id], lazy="joined")
+    creator = relationship("User", foreign_keys=[created_by], lazy="joined")
+    modifier = relationship("User", foreign_keys=[modified_by], lazy="joined")
+
+    documents = relationship(
+        "CompanyTaxDocument",
+        back_populates="company_tax_info",
+        cascade="all, delete-orphan"
+    )
+
+
+class CompanyTaxDocument(Base):
+    __tablename__ = "company_tax_documents"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_tax_info_id = Column(Integer, ForeignKey("public.company_tax_info.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    file_data = Column(LargeBinary, nullable=False)
+    file_type = Column(String(50))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    company_tax_info = relationship("CompanyTaxInfo", back_populates="documents")

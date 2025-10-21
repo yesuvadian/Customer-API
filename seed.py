@@ -72,16 +72,30 @@ def seed_roles(session):
 
 def seed_modules(session):
     modules_data = [
-        {"name": "totp", "description": "Manage users and roles", "path": "user-management", "group_name": "User & Access"},
-        {"name": "Dashboard", "description": "Visual overview of system activity", "path": "dashboard", "group_name": "Analytics & Reporting"},
-        {"name": "users", "description": "Assign roles to users", "path": "user", "group_name": "User & Access"},
+        {"name": "user_roles", "description": "Assign roles to users", "path": "user-roles", "group_name": "User & Access"},
+        {"name": "role_module_privileges", "description": "Configure role-based privileges", "path": "role-privileges", "group_name": "User & Access"},
+        {"name": "user_sessions", "description": "Track user login sessions", "path": "user-sessions", "group_name": "User & Access"},
+        {"name": "countries", "description": "Manage country list", "path": "countries", "group_name": "Geography"},
+        {"name": "states", "description": "Manage state list", "path": "states", "group_name": "Geography"},
+        {"name": "user_addresses", "description": "User address book", "path": "user-addresses", "group_name": "User & Access"},
+        {"name": "company_tax_info", "description": "Company tax registration details", "path": "company-tax-info", "group_name": "Company"},
+        {"name": "company_tax_documents", "description": "Upload tax documents", "path": "company-tax-documents", "group_name": "Company"},
+        {"name": "product_categories", "description": "Define product categories", "path": "product-categories", "group_name": "Inventory"},
+        {"name": "product_subcategories", "description": "Define product subcategories", "path": "product-subcategories", "group_name": "Inventory"},
+        {"name": "products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
+        {"name": "company_products", "description": "Company-specific product inventory", "path": "company-products", "group_name": "Inventory"},
     ]
 
     module_ids = {}
     for m in modules_data:
         existing_module = session.query(Module).filter_by(name=m["name"]).first()
         if not existing_module:
-            module = Module(name=m["name"], description=m["description"], path=m["path"])
+            module = Module(
+                name=m["name"],
+                description=m["description"],
+                path=m["path"],
+                group_name=m["group_name"]
+            )
             session.add(module)
             session.flush()
             module_ids[m["name"]] = module.id
@@ -95,24 +109,76 @@ def seed_modules(session):
 def seed_privileges(session, role_ids, module_ids):
     privileges_data = [
         # Admin full access
-        {"role": "Admin", "module": "totp", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True, "can_search": True, "can_import": True, "can_export": True},
-        {"role": "Admin", "module": "Dashboard", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True, "can_search": True, "can_import": True, "can_export": True},
-        {"role": "Admin", "module": "users", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True, "can_search": True, "can_import": True, "can_export": True},
+        *[
+            {
+                "role": "Admin",
+                "module": module,
+                "can_view": True,
+                "can_add": True,
+                "can_edit": True,
+                "can_delete": True,
+                "can_search": True,
+                "can_import": True,
+                "can_export": True
+            }
+            for module in [
+                "totp", "Dashboard", "users",
+                "user_roles", "role_module_privileges", "user_sessions",
+                "countries", "states", "user_addresses",
+                "company_tax_info", "company_tax_documents",
+                "product_categories", "product_subcategories",
+                "products", "company_products"
+            ]
+        ],
 
         # Viewer read-only access
-        {"role": "Viewer", "module": "totp", "can_view": True},
-        {"role": "Viewer", "module": "Dashboard", "can_view": True},
-        {"role": "Viewer", "module": "users", "can_view": True},
+        *[
+            {
+                "role": "Viewer",
+                "module": module,
+                "can_view": True
+            }
+            for module in [
+                "totp", "Dashboard", "users",
+                "user_roles", "role_module_privileges", "user_sessions",
+                "countries", "states", "user_addresses",
+                "company_tax_info", "company_tax_documents",
+                "product_categories", "product_subcategories",
+                "products", "company_products"
+            ]
+        ],
 
         # Operator limited access
-        {"role": "Operator", "module": "totp", "can_view": True},
-        {"role": "Operator", "module": "Dashboard", "can_view": True, "can_search": True},
-        {"role": "Operator", "module": "users", "can_view": True},
+        *[
+            {
+                "role": "Operator",
+                "module": module,
+                "can_view": True,
+                "can_search": module in ["Dashboard", "user_sessions", "products", "company_products"]
+            }
+            for module in [
+                "totp", "Dashboard", "users",
+                "user_sessions", "products", "company_products"
+            ]
+        ],
 
-        # Auditor
-        {"role": "Auditor", "module": "totp", "can_view": True},
-        {"role": "Auditor", "module": "Dashboard", "can_view": True, "can_search": True},
-        {"role": "Auditor", "module": "users", "can_view": True},
+        # Auditor view-only access
+        *[
+            {
+                "role": "Auditor",
+                "module": module,
+                "can_view": True,
+                "can_search": module in ["Dashboard", "user_sessions", "products", "company_products"]
+            }
+            for module in [
+                "totp", "Dashboard", "users",
+                "user_roles", "role_module_privileges", "user_sessions",
+                "countries", "states", "user_addresses",
+                "company_tax_info", "company_tax_documents",
+                "product_categories", "product_subcategories",
+                "products", "company_products"
+            ]
+        ]
     ]
 
     for p in privileges_data:

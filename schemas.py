@@ -1,4 +1,5 @@
-from pydantic import BaseModel, EmailStr, constr
+import uuid
+from pydantic import BaseModel, EmailStr, Field, constr
 from typing import Annotated, Optional
 from uuid import UUID
 from datetime import datetime
@@ -118,3 +119,123 @@ class CompanyTaxInfoOut(CompanyTaxInfoBase):
     model_config = {
         "from_attributes": True  # Pydantic v2 uses model_config instead of Config
     }
+
+
+class CountryOut(BaseModel):
+    id: int
+    name: str
+    code: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
+
+class StateOut(BaseModel):
+    id: int
+    name: str
+    code: Optional[str] = None
+    country_id: Optional[int] = None
+
+    class Config:
+        orm_mode = True
+
+
+class UserMinimalOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    firstname: Optional[str] = None
+    lastname: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+class UserAddressUpdate(BaseModel):
+    address_type: Optional[str] = Field(None, max_length=50)
+    is_primary: Optional[bool] = None
+    address_line1: Optional[str] = Field(None, max_length=255)
+    address_line2: Optional[str] = Field(None, max_length=255)
+    postal_code: Optional[str] = Field(None, max_length=20)
+    state_id: Optional[int] = None
+    country_id: Optional[int] = None
+    modified_by: Optional[uuid.UUID] = None
+
+    class Config:
+        orm_mode = True
+class UserAddressCreate(BaseModel):
+    user_id: uuid.UUID = Field(..., description="UUID of the user who owns this address")
+    address_type: str = Field(..., max_length=50, description="Type of address (e.g., billing, shipping)")
+    is_primary: bool = Field(default=False, description="Whether this is the primary address")
+    address_line1: str = Field(..., max_length=255)
+    address_line2: Optional[str] = Field(None, max_length=255)
+    state_id: Optional[int] = Field(None, description="Foreign key reference to states table")
+    country_id: Optional[int] = Field(None, description="Foreign key reference to countries table")
+    postal_code: Optional[str] = Field(None, max_length=20)
+
+    created_by: Optional[uuid.UUID] = None
+    modified_by: Optional[uuid.UUID] = None
+
+    class Config:
+        orm_mode = True
+
+class UserAddressOut(BaseModel):
+    id: int
+    user_id: uuid.UUID
+    address_type: str
+    is_primary: bool
+    address_line1: str
+    address_line2: Optional[str] = None
+    postal_code: Optional[str] = None
+    state_id: Optional[int] = None
+    country_id: Optional[int] = None
+    created_by: Optional[uuid.UUID] = None
+    modified_by: Optional[uuid.UUID] = None
+    cts: datetime
+    mts: datetime
+
+    # Related objects (optional)
+    state: Optional[StateOut] = None
+    country: Optional[CountryOut] = None
+    creator: Optional[UserMinimalOut] = None
+    modifier: Optional[UserMinimalOut] = None
+
+    class Config:
+        orm_mode = True
+
+class ProductCategorySchema(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+
+    class Config:
+        orm_mode = True  # allows SQLAlchemy models to be returned directly
+class ProductSubCategorySchema(BaseModel):
+    id: int
+    name: str
+    category_id: int
+    description: str | None = None
+
+    class Config:
+        orm_mode = True  # allows SQLAlchemy model instances to be returned
+
+
+
+
+class ProductSchema(BaseModel):
+    id: int
+    name: str
+    sku: str
+    category_id: int | None = None
+    subcategory_id: int | None = None
+    description: str | None = None
+    created_by: str | None = None
+
+    class Config:
+        orm_mode = True  # allows SQLAlchemy model instances to be returned
+class CompanyProductSchema(BaseModel):
+    id: int
+    company_id: str
+    product_id: int
+    price: float
+    stock: int | None = 0
+
+    class Config:
+        orm_mode = True  # allows SQLAlchemy model instances to be returned

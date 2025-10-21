@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from auth_utils import get_current_user
 from database import get_db
 #from schemas import CountryCreate, CountryUpdate, CountryOut
 from schemas import CountryCreate, CountryOut, CountryUpdate
 from services.country_service import CountryService
 
-router = APIRouter(prefix="/countries", tags=["countries"])
+router = APIRouter(prefix="/countries", tags=["countries"],dependencies=[Depends(get_current_user)])
 service = CountryService()
 
 @router.get("/", response_model=list[CountryOut])

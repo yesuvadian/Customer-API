@@ -25,7 +25,7 @@ class CompanyTaxService:
             pan=pan,
             gstin=gstin,
             tan=tan,
-            state_id=state_id,
+           # state_id=state_id,
             financial_year=financial_year
         )
         db.add(tax_info)

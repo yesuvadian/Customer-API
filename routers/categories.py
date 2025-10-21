@@ -1,0 +1,30 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from database import get_db
+from services.category_service import CategoryService
+from schemas import ProductCategorySchema  # <-- use the Pydantic model
+
+router = APIRouter(prefix="/categories", tags=["categories"])
+
+@router.get("/", response_model=list[ProductCategorySchema])
+def list_categories(skip: int = 0, limit: int = 100, search: str | None = None, db: Session = Depends(get_db)):
+    return CategoryService.get_categories(db, skip, limit, search)
+
+@router.get("/{category_id}", response_model=ProductCategorySchema)
+def get_category(category_id: int, db: Session = Depends(get_db)):
+    category = CategoryService.get_category(db, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return category
+
+@router.post("/", response_model=ProductCategorySchema)
+def create_category(name: str, description: str | None = None, db: Session = Depends(get_db)):
+    return CategoryService.create_category(db, name, description)
+
+@router.put("/{category_id}", response_model=ProductCategorySchema)
+def update_category(category_id: int, updates: dict, db: Session = Depends(get_db)):
+    return CategoryService.update_category(db, category_id, updates)
+
+@router.delete("/{category_id}", response_model=ProductCategorySchema)
+def delete_category(category_id: int, db: Session = Depends(get_db)):
+    return CategoryService.delete_category(db, category_id)
