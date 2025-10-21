@@ -1,15 +1,21 @@
 from fastapi import FastAPI
-from database import Base, engine
-from routers import register, token, totp, users
-from middleware.auth_privilege import auth_and_privilege_middleware
 from fastapi.middleware.cors import CORSMiddleware
-# Create all database tables
-#Base.metadata.create_all(bind=engine)
+from database import Base, engine
+from middleware.auth_privilege import auth_and_privilege_middleware
 
-# Initialize app
+# Routers
+from routers import register, token, totp, users
+from routers import countries, states, company_tax_infos, company_tax_documents
+
+# Create all database tables (optional, only if using auto-create)
+# Base.metadata.create_all(bind=engine)
+
+# Initialize FastAPI app
 app = FastAPI(title="Vendor API")
 
-
+# ----------------------------
+# CORS configuration
+# ----------------------------
 origins = [
     "http://localhost:3000",  # frontend dev server
     "http://127.0.0.1:3000",
@@ -24,12 +30,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add global middleware
+# ----------------------------
+# Global middleware
+# ----------------------------
 app.middleware("http")(auth_and_privilege_middleware)
 
+# ----------------------------
 # Register routers
+# ----------------------------
 app.include_router(token.router)
 app.include_router(users.router)
 app.include_router(register.router)
 app.include_router(totp.totp_router)
 
+# Additional CRUD routers
+app.include_router(countries.router)
+app.include_router(states.router)
+app.include_router(company_tax_infos.router)
+app.include_router(company_tax_documents.router)
