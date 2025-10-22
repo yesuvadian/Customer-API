@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User
 import auth_utils
-
+import traceback
 PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/","/auth/"]
 
 METHOD_ACTION_MAP = {
@@ -17,13 +17,17 @@ METHOD_ACTION_MAP = {
 async def auth_and_privilege_middleware(request: Request, call_next):
     # Allow public endpoints
     path = request.url.path
-    if any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
-        return await call_next(request) 
+    if  request.method == "OPTIONS" or any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
+        try:
+            return await call_next(request)
+        except Exception as e:
+            traceback.print_exc()
+            raise e
 
     db: Session = SessionLocal()
     try:
         # --- Extract Bearer token ---
-        auth_header = request.headers.get("Authorization")
+        auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

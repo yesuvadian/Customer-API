@@ -72,6 +72,7 @@ def seed_roles(session):
 
 def seed_modules(session):
     modules_data = [
+        {"name": "modules", "description": "Manage application modules", "path": "modules", "group_name": "User & Access"},  # 👈 ADD THIS
         {"name": "user_roles", "description": "Assign roles to users", "path": "user-roles", "group_name": "User & Access"},
         {"name": "role_module_privileges", "description": "Configure role-based privileges", "path": "role-privileges", "group_name": "User & Access"},
         {"name": "user_sessions", "description": "Track user login sessions", "path": "user-sessions", "group_name": "User & Access"},
@@ -94,16 +95,24 @@ def seed_modules(session):
                 name=m["name"],
                 description=m["description"],
                 path=m["path"],
-                group_name=m["group_name"]
+                group_name=m["group_name"],
+                is_active=True
             )
             session.add(module)
-            session.flush()
+            session.flush()  # get module.id before commit
             module_ids[m["name"]] = module.id
         else:
+            # Update existing module if description or group changed
+            existing_module.description = m["description"]
+            existing_module.path = m["path"]
+            existing_module.group_name = m["group_name"]
+            existing_module.is_active = True
             module_ids[m["name"]] = existing_module.id
+
     session.commit()
     print("✅ Modules seeded successfully.")
     return module_ids
+
 
 
 def seed_privileges(session, role_ids, module_ids):
@@ -122,7 +131,7 @@ def seed_privileges(session, role_ids, module_ids):
                 "can_export": True
             }
             for module in [
-                "totp", "Dashboard", "users",
+                "modules","totp", "Dashboard", "users",
                 "user_roles", "role_module_privileges", "user_sessions",
                 "countries", "states", "user_addresses",
                 "company_tax_info", "company_tax_documents",
@@ -139,7 +148,7 @@ def seed_privileges(session, role_ids, module_ids):
                 "can_view": True
             }
             for module in [
-                "totp", "Dashboard", "users",
+                "modules","totp", "Dashboard", "users",
                 "user_roles", "role_module_privileges", "user_sessions",
                 "countries", "states", "user_addresses",
                 "company_tax_info", "company_tax_documents",
@@ -171,7 +180,7 @@ def seed_privileges(session, role_ids, module_ids):
                 "can_search": module in ["Dashboard", "user_sessions", "products", "company_products"]
             }
             for module in [
-                "totp", "Dashboard", "users",
+                "modules","totp", "Dashboard", "users",
                 "user_roles", "role_module_privileges", "user_sessions",
                 "countries", "states", "user_addresses",
                 "company_tax_info", "company_tax_documents",

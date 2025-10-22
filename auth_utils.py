@@ -178,16 +178,22 @@ def login_user(db: Session, email: str, password: str):
 
         # Step 8: Generate access token
         return {
-            "access_token": create_access_token({"sub": str(user.id)}),  # Make sure `user.id` is a string here
-            "user": {
-                "id": str(user.id),  # Explicitly convert UUID to string
-                "email": user.email,
-                "first_name": user.firstname,
-                "last_name": user.lastname,
-                "roles": role_names,
-            },
-            "privileges": privileges,
-        }
+        "access_token": create_access_token({"sub": str(user.id)}),
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "first_name": user.firstname,
+            "last_name": user.lastname,
+            "phone_number": user.phone_number,
+            "is_active": user.isactive,
+            "email_confirmed": user.email_confirmed,
+            "phone_confirmed": user.phone_confirmed,
+            "cts": UTCDateTimeMixin._make_aware(user.cts),  # Convert datetime to string
+            "mts": UTCDateTimeMixin._make_aware(user.mts),
+            "roles": role_names,
+        },
+        "privileges": privileges,
+    }
 
     except HTTPException:
         raise  # Re-raise HTTP exceptions directly
@@ -290,7 +296,6 @@ def authenticate_user(db: Session, username: str, password: str, request=None):
 # Get Current User
 # ==============================
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """Extract user from JWT token."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -298,7 +303,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id_str: str = payload.get("sub")
+        user_id_str = payload.get("sub")
         if not user_id_str:
             raise credentials_exception
         user_id = uuid.UUID(user_id_str)
@@ -310,6 +315,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
 
     return user
+
+
+
 def requestpasswordreset( db: Session, email: str, request: Request) -> str:
         user = db.query(User).filter_by(email=email).first()
         if not user:

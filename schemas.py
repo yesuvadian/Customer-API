@@ -247,12 +247,41 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ModuleBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    path: Optional[str] = None
+    group_name: Optional[str] = None
+
+class ModuleCreate(ModuleBase):
+    pass
+
+class ModuleUpdate(ModuleBase):
+    is_active: Optional[bool] = None
+
+class ModuleResponse(ModuleBase):
+    id: int
+    is_active: bool
+
+    class Config:
+        orm_mode = True
+
+
 class UserResponse(BaseModel):
-    id: UUID  # <- UUID instead of int
+    id: UUID
     email: EmailStr
     first_name: str
     last_name: str
+    phone_number: str | None = None
+    is_active: bool
+    email_confirmed: bool
+    phone_confirmed: bool
+    cts: datetime  # created timestamp
+    mts: datetime  # modified timestamp
     roles: list[str]
+
+    class Config:
+        orm_mode = True  # allows Pydantic to read from SQLAlchemy models
 
 
     
@@ -260,7 +289,7 @@ class LoginResponse(BaseModel):
     access_token: str
     user: UserResponse
     privileges: Dict[str, Dict[str, bool]]
-    
+
 class PasswordResetRequest(BaseModel):
     email: EmailStr
 
