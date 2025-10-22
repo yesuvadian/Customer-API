@@ -302,3 +302,44 @@ class PasswordResetConfirm(BaseModel):
 class PasswordResetResponse(BaseModel):
     message: str
     reset_link: str
+
+# -------- Role Schemas --------
+class RoleBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class RoleCreate(RoleBase):
+    created_by: Optional[UUID]
+
+class RoleUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    modified_by: Optional[UUID] = None
+
+class RoleResponse(RoleBase):
+    id: int
+    created_by: Optional[UUID]
+    modified_by: Optional[UUID]
+    cts: datetime
+    mts: datetime
+
+    class Config:
+        orm_mode = True
+
+
+# -------- UserRole Schemas --------
+class UserRoleBase(BaseModel):
+    user_id: UUID
+    role_id: int
+
+class UserRoleCreate(UserRoleBase):
+    pass
+
+class UserRoleUpdate(BaseModel):
+    role_id: int
+
+class UserRoleResponse(UserRoleBase):
+    id: int
+
+    class Config:
+        orm_mode = True
