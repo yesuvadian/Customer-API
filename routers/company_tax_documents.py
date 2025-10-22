@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from auth_utils import get_current_user
 from database import get_db
 from services.company_tax_document_service import CompanyTaxDocumentService
 
-router = APIRouter(prefix="/company-tax-documents", tags=["company-tax-documents"])
+router = APIRouter(prefix="/company_tax_documents", tags=["company_tax_documents"],dependencies=[Depends(get_current_user)])
 service = CompanyTaxDocumentService()
 
 @router.get("/{doc_id}")

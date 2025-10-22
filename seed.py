@@ -79,11 +79,11 @@ def seed_modules(session):
     {"name": "user_sessions", "description": "Track user login sessions", "path": "user-sessions", "group_name": "User & Access"},
     {"name": "countries", "description": "Manage country list", "path": "countries", "group_name": "Geography"},
     {"name": "states", "description": "Manage state list", "path": "states", "group_name": "Geography"},
-    {"name": "user_addresses", "description": "User address book", "path": "user-addresses", "group_name": "User & Access"},
+    {"name": "addresses", "description": "User address book", "path": "user-addresses", "group_name": "User & Access"},
     {"name": "company_tax_info", "description": "Company tax registration details", "path": "company-tax-info", "group_name": "Company"},
     {"name": "company_tax_documents", "description": "Upload tax documents", "path": "company-tax-documents", "group_name": "Company"},
-    {"name": "product_categories", "description": "Define product categories", "path": "product-categories", "group_name": "Inventory"},
-    {"name": "product_subcategories", "description": "Define product subcategories", "path": "product-subcategories", "group_name": "Inventory"},
+    {"name": "categories", "description": "Define product categories", "path": "product-categories", "group_name": "Inventory"},
+    {"name": "subcategories", "description": "Define product subcategories", "path": "product-subcategories", "group_name": "Inventory"},
     {"name": "products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
     {"name": "company_products", "description": "Company-specific product inventory", "path": "company-products", "group_name": "Inventory"},
 ]
@@ -134,9 +134,9 @@ def seed_privileges(session, role_ids, module_ids):
             for module in [
                 "modules","totp", "Dashboard", "users","roles",
                 "user_roles", "role_module_privileges", "user_sessions",
-                "countries", "states", "user_addresses",
+                "countries", "states", "addresses",
                 "company_tax_info", "company_tax_documents",
-                "product_categories", "product_subcategories",
+                "categories", "subcategories",
                 "products", "company_products"
             ]
         ],
@@ -151,9 +151,9 @@ def seed_privileges(session, role_ids, module_ids):
             for module in [
                 "modules","totp", "Dashboard", "users","roles",
                 "user_roles", "role_module_privileges", "user_sessions",
-                "countries", "states", "user_addresses",
+                "countries", "states", "addresses",
                 "company_tax_info", "company_tax_documents",
-                "product_categories", "product_subcategories",
+                "categories", "subcategories",
                 "products", "company_products"
             ]
         ],
@@ -183,9 +183,9 @@ def seed_privileges(session, role_ids, module_ids):
             for module in [
                 "modules","totp", "Dashboard", "users","roles",
                 "user_roles", "role_module_privileges", "user_sessions",
-                "countries", "states", "user_addresses",
+                "countries", "states", "addresses",
                 "company_tax_info", "company_tax_documents",
-                "product_categories", "product_subcategories",
+                "categories", "subcategories",
                 "products", "company_products"
             ]
         ]

@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from auth_utils import get_current_user
 from database import get_db
 from services.subcategory_service import SubCategoryService
 from schemas import ProductSubCategorySchema  # <-- use Pydantic schema
 
-router = APIRouter(prefix="/subcategories", tags=["subcategories"])
+router = APIRouter(prefix="/subcategories", tags=["subcategories"],dependencies=[Depends(get_current_user)])
 
 @router.get("/", response_model=list[ProductSubCategorySchema])
 def list_subcategories(skip: int = 0, limit: int = 100, search: str | None = None, db: Session = Depends(get_db)):

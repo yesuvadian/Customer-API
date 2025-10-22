@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from auth_utils import get_current_user
 from database import get_db
 from schemas import CompanyTaxInfoCreate, CompanyTaxInfoUpdate, CompanyTaxInfoOut
 from services.company_tax_service import CompanyTaxService
 
-router = APIRouter(prefix="/company-tax-info", tags=["company-tax-info"])
+router = APIRouter(prefix="/company_tax_info", tags=["company_tax_info"],dependencies=[Depends(get_current_user)])
 service = CompanyTaxService()
 
 @router.get("/", response_model=list[CompanyTaxInfoOut])

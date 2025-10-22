@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 import uuid
 
+from auth_utils import get_current_user
 from database import get_db
 from schemas import UserAddressCreate, UserAddressOut, UserAddressUpdate
 from services.user_address_service import UserAddressService
 #import schemas
 
-router = APIRouter(prefix="/addresses", tags=["addresses"])
+router = APIRouter(prefix="/addresses", tags=["addresses"],dependencies=[Depends(get_current_user)])
 
 # Instantiate service
 address_service = UserAddressService()

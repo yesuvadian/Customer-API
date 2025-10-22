@@ -2,12 +2,15 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from pytest import Session
+from auth_utils import get_current_user
 from database import get_db
 from schemas import RoleCreate, RoleResponse, RoleUpdate, UserRoleCreate, UserRoleResponse, UserRoleUpdate
 from services.role_service import RoleService
 from services.userrole_service import UserRoleService
+from uuid import UUID
 
-router = APIRouter(prefix="/roles", tags=["modules"])
+
+router = APIRouter(prefix="/roles", tags=["modules"],dependencies=[Depends(get_current_user)])
 
 @router.post("/", response_model=RoleResponse)
 def create_role(role: RoleCreate, db: Session = Depends(get_db)):

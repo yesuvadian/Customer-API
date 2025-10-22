@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from auth_utils import get_current_user
 from database import get_db
 from schemas import StateCreate, StateUpdate, StateOut
 from services.state_service import StateService
 
-router = APIRouter(prefix="/states", tags=["states"])
+router = APIRouter(prefix="/states", tags=["states"],dependencies=[Depends(get_current_user)])
 service = StateService()
 
 @router.get("/", response_model=list[StateOut])

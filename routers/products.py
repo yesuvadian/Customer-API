@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from auth_utils import get_current_user
 from database import get_db
 from services.product_service import ProductService
 from schemas import ProductSchema  # <-- Pydantic schema
 
-router = APIRouter(prefix="/products", tags=["products"])
+router = APIRouter(prefix="/products", tags=["products"],dependencies=[Depends(get_current_user)])
 
 @router.get("/", response_model=list[ProductSchema])
 def list_products(skip: int = 0, limit: int = 100, search: str | None = None, db: Session = Depends(get_db)):
