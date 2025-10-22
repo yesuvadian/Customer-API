@@ -85,6 +85,7 @@ def seed_modules(session):
     {"name": "categories", "description": "Define product categories", "path": "product-categories", "group_name": "Inventory"},
     {"name": "subcategories", "description": "Define product subcategories", "path": "product-subcategories", "group_name": "Inventory"},
     {"name": "products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
+    {"name": "users", "description": "Manage product master", "path": "user", "group_name": "User & Access"},
     {"name": "company_products", "description": "Company-specific product inventory", "path": "company-products", "group_name": "Inventory"},
 ]
 
