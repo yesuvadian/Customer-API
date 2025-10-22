@@ -343,3 +343,46 @@ class UserRoleResponse(UserRoleBase):
 
     class Config:
         orm_mode = True
+
+from pydantic import BaseModel
+from typing import Optional
+from uuid import UUID
+from datetime import datetime
+
+
+class RoleModulePrivilegeBase(BaseModel):
+    role_id: int
+    module_id: int
+    can_add: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
+    can_search: bool = False
+    can_import: bool = False
+    can_export: bool = False
+    can_view: bool = False
+
+
+class RoleModulePrivilegeCreate(RoleModulePrivilegeBase):
+    created_by: Optional[UUID] = None
+
+
+class RoleModulePrivilegeUpdate(BaseModel):
+    can_add: Optional[bool] = None
+    can_edit: Optional[bool] = None
+    can_delete: Optional[bool] = None
+    can_search: Optional[bool] = None
+    can_import: Optional[bool] = None
+    can_export: Optional[bool] = None
+    can_view: Optional[bool] = None
+    modified_by: Optional[UUID] = None
+
+
+class RoleModulePrivilegeResponse(RoleModulePrivilegeBase):
+    id: int
+    created_by: Optional[UUID]
+    modified_by: Optional[UUID]
+    cts: datetime
+    mts: datetime
+
+    class Config:
+        orm_mode = True
