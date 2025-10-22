@@ -1,6 +1,6 @@
 import uuid
 from pydantic import BaseModel, EmailStr, Field, constr
-from typing import Annotated, Optional
+from typing import Annotated, Dict, List, Optional
 from uuid import UUID
 from datetime import datetime
 
@@ -239,3 +239,37 @@ class CompanyProductSchema(BaseModel):
 
     class Config:
         orm_mode = True  # allows SQLAlchemy model instances to be returned
+
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: UUID  # <- UUID instead of int
+    email: EmailStr
+    first_name: str
+    last_name: str
+    roles: list[str]
+
+
+    
+class LoginResponse(BaseModel):
+    access_token: str
+    user: UserResponse
+    privileges: Dict[str, Dict[str, bool]]
+    
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(..., example="eyJhbGciOiJIUzI1NiIs...")
+    new_password: str = Field(..., example="NewStrongPass@123")
+
+
+class PasswordResetResponse(BaseModel):
+    message: str
+    reset_link: str

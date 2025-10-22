@@ -29,6 +29,7 @@ class User(Base):
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
+
     sessions = relationship(
         "UserSession",
         back_populates="user",
@@ -42,11 +43,40 @@ class User(Base):
         "UserRole",
         back_populates="user",
         cascade="all, delete",
-        foreign_keys="[UserRole.user_id]"  # ⚡ fix ambiguous foreign key
+        foreign_keys="[UserRole.user_id]"
+    )
+
+    # Corrected relationship
+    password_history = relationship(
+        "PasswordHistory",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="[PasswordHistory.user_id]"
     )
 
 
+class PasswordHistory(Base):
+    __tablename__ = "password_history"
+    __table_args__ = {"schema": "public"}
 
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+    password_hash = Column(String, nullable=False)
+
+    # Audit fields
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+
+    # Relationships
+    user = relationship(
+        "User",
+        foreign_keys=[user_id],
+        back_populates="password_history"  # ✅ matches User.password_history
+    )
+
+    
 
 # ------------------------------
 # UserRole Model

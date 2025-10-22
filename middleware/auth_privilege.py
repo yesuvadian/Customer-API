@@ -4,7 +4,7 @@ from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User
 import auth_utils
 
-PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/"]
+PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/","/auth/"]
 
 METHOD_ACTION_MAP = {
     "GET": "can_view",
@@ -16,8 +16,9 @@ METHOD_ACTION_MAP = {
 
 async def auth_and_privilege_middleware(request: Request, call_next):
     # Allow public endpoints
-    if request.url.path in PUBLIC_ENDPOINTS or request.method == "OPTIONS":
-        return await call_next(request)
+    path = request.url.path
+    if any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
+        return await call_next(request) 
 
     db: Session = SessionLocal()
     try:
