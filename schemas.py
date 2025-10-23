@@ -217,6 +217,9 @@ class ProductSubCategorySchema(BaseModel):
         orm_mode = True  # allows SQLAlchemy model instances to be returned
 
 
+class CompanyProductBulkAssignRequest(BaseModel):
+    company_id: str
+    products: List[dict]  # each dict: {product_id, price, stock}
 
 
 class ProductSchema(BaseModel):
@@ -227,6 +230,10 @@ class ProductSchema(BaseModel):
     subcategory_id: int | None = None
     description: str | None = None
     created_by: str | None = None
+    modified_by: str | None = None
+    cts: datetime | None = None
+    mts: datetime | None = None
+    
 
     class Config:
         orm_mode = True  # allows SQLAlchemy model instances to be returned

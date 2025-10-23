@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from auth_utils import get_current_user
@@ -26,9 +27,12 @@ def create_product(
     subcategory_id: int | None = None,
     description: str | None = None,
     created_by: str | None = None,
+    modified_by:str | None = None,
+    cts: datetime | None = None,
+    mts: datetime | None = None,
     db: Session = Depends(get_db)
 ):
-    return ProductService.create_product(db, name, sku, category_id, subcategory_id, description, created_by)
+    return ProductService.create_product(db, name, sku, category_id, subcategory_id, description, created_by,modified_by,cts,mts)
 
 @router.put("/{product_id}", response_model=ProductSchema)
 def update_product(product_id: int, updates: dict, db: Session = Depends(get_db)):

@@ -70,7 +70,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             action = METHOD_ACTION_MAP.get(request.method)
 
         if module_name and action:
-            module = db.query(Module).filter_by(name=module_name).first()
+            module = db.query(Module).filter_by(path=module_name).first()
             if not module:
                 raise HTTPException(status_code=404, detail=f'Module "{module_name}" not registered')
 

@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from models import Product
@@ -19,7 +20,9 @@ class ProductService:
     @classmethod
     def create_product(cls, db: Session, name: str, sku: str, category_id: int | None = None,
                        subcategory_id: int | None = None, description: str | None = None,
-                       created_by: str | None = None):
+                       created_by: str | None = None, modified_by:str | None = None,
+    cts: datetime | None = None,
+    mts: datetime | None = None):
         existing_sku = db.query(Product).filter(Product.sku == sku).first()
         if existing_sku:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU already exists")
@@ -30,7 +33,10 @@ class ProductService:
             description=description,
             category_id=category_id,
             subcategory_id=subcategory_id,
-            created_by=created_by
+            created_by=created_by,
+            modified_by=modified_by,
+            cts=cts,
+            mts=mts,
         )
         db.add(product)
         db.commit()
