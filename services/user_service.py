@@ -34,7 +34,7 @@ class UserService(UTCDateTimeMixin):
             )
         return user
     @classmethod
-    def create_user(cls,db: Session, user: schemas.UserCreate):
+    def create_user(cls,db: Session, user: schemas.UserRegistor):
         # Check if email already exists
         existing_user_email = db.query(User).filter(User.email == user.email).first()
         if existing_user_email:
@@ -61,6 +61,7 @@ class UserService(UTCDateTimeMixin):
             firstname=user.firstname,
             lastname=user.lastname,
             phone_number=user.phone_number,
+            plan_id=user.plan_id,
             mts=cls._utc_now(),
             cts=cls._utc_now()
         )

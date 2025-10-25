@@ -7,6 +7,39 @@ from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import relationship
 from database import Base
 from utils.common_service import UTCDateTimeMixin
+import uuid
+from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, DateTime, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from sqlalchemy.ext.declarative import declarative_base
+
+#Base = declarative_base()
+
+class Plan(Base):
+    __tablename__ = "plans"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    planname = Column(String, nullable=False, unique=True)
+    plan_description = Column(String)
+    plan_limit = Column(Integer, nullable=False, default=0)
+    isactive = Column(Boolean, default=True)
+
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+
+    # ✅ Relationship: one plan can have many users
+    users = relationship(
+        "User",
+        back_populates="plan",
+        foreign_keys=lambda: [User.plan_id]
+    )
+
+
+
 
 # ------------------------------
 # User Model
@@ -30,6 +63,17 @@ class User(Base):
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
 
+    # ✅ Foreign key to Plan (note: column renamed to plan_id)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
+
+    # ✅ Relationship: each user belongs to one plan
+    plan = relationship(
+        "Plan",
+        back_populates="users",
+        foreign_keys=lambda: [User.plan_id]
+    )
+
+    # --- Existing relationships unchanged ---
     sessions = relationship(
         "UserSession",
         back_populates="user",
@@ -37,8 +81,8 @@ class User(Base):
         foreign_keys=lambda: [UserSession.user_id]
     )
 
-    # Relationships
     security = relationship("UserSecurity", uselist=False, back_populates="user", cascade="all, delete")
+
     user_roles = relationship(
         "UserRole",
         back_populates="user",
@@ -46,13 +90,13 @@ class User(Base):
         foreign_keys="[UserRole.user_id]"
     )
 
-    # Corrected relationship
     password_history = relationship(
         "PasswordHistory",
         back_populates="user",
         cascade="all, delete-orphan",
         foreign_keys="[PasswordHistory.user_id]"
     )
+
 
 
 class PasswordHistory(Base):

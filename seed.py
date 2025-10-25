@@ -1,8 +1,7 @@
-# seed.py
 from contextlib import contextmanager
 from datetime import datetime
 from database import SessionLocal
-from models import Role, RoleModulePrivilege, User, UserRole, Module
+from models import Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, User, UserRole, Module
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
@@ -13,6 +12,7 @@ def get_db_session():
         yield session
     finally:
         session.close()
+
 
 # ----------------- Seed Functions -----------------
 
@@ -70,6 +70,31 @@ def seed_roles(session):
     return role_ids
 
 
+def seed_plans(session):
+    plans_data = [
+        {"planname": "Basic", "plan_description": "Basic plan with limited access", "plan_limit": 10, "isactive": True},
+        {"planname": "Standard", "plan_description": "Standard plan with moderate access", "plan_limit": 50, "isactive": True},
+        {"planname": "Premium", "plan_description": "Premium plan with full access", "plan_limit": 100, "isactive": True},
+    ]
+
+    for p in plans_data:
+        existing_plan = session.query(Plan).filter_by(planname=p["planname"]).first()
+        if not existing_plan:
+            plan = Plan(
+                planname=p["planname"],
+                plan_description=p["plan_description"],
+                plan_limit=p["plan_limit"],
+                isactive=p["isactive"]
+            )
+            session.add(plan)
+        else:
+            existing_plan.plan_description = p["plan_description"]
+            existing_plan.plan_limit = p["plan_limit"]
+            existing_plan.isactive = p["isactive"]
+    session.commit()
+    print("✅ Plans seeded successfully.")
+
+
 def seed_modules(session):
     modules_data = [
         {"name": "Roles", "description": "Manage roles", "path": "roles", "group_name": "User & Access"},
@@ -87,6 +112,7 @@ def seed_modules(session):
         {"name": "Products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
         {"name": "Users", "description": "Manage users", "path": "user", "group_name": "User & Access"},
         {"name": "Company Products", "description": "Company-specific product inventory", "path": "company_products", "group_name": "Inventory"},
+        {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access"},
     ]
 
     module_ids = {}
@@ -101,10 +127,9 @@ def seed_modules(session):
                 is_active=True
             )
             session.add(module)
-            session.flush()  # get module.id before commit
+            session.flush()
             module_ids[m["name"]] = module.id
         else:
-            # Update existing module if description or group changed
             existing_module.description = m["description"]
             existing_module.path = m["path"]
             existing_module.group_name = m["group_name"]
@@ -120,7 +145,7 @@ def seed_privileges(session, role_ids, module_ids):
     module_names = [
         "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
         "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
-        "Product Categories", "Product Subcategories", "Products", "Users", "Company Products"
+        "Product Categories", "Product Subcategories", "Products", "Users", "Company Products","Plans"
     ]
 
     privileges_data = [
@@ -139,7 +164,6 @@ def seed_privileges(session, role_ids, module_ids):
             }
             for module in module_names
         ],
-
         # Viewer read-only access
         *[
             {
@@ -149,7 +173,6 @@ def seed_privileges(session, role_ids, module_ids):
             }
             for module in module_names
         ],
-
         # Operator limited access
         *[
             {
@@ -160,7 +183,6 @@ def seed_privileges(session, role_ids, module_ids):
             }
             for module in ["Products", "Company Products", "Login Sessions"]
         ],
-
         # Auditor view-only access
         *[
             {
@@ -221,6 +243,125 @@ def seed_user_roles(session, role_ids):
     print("✅ User-role assignments seeded successfully.")
 
 
+# ----------------- TNEB Product Seed -----------------
+
+def seed_product_categories(session):
+    categories_data = [
+        {"name": "Transformers", "description": "Distribution and power transformers"},
+        {"name": "Meters", "description": "Electricity meters – single phase, three phase"},
+        {"name": "Cables & Wires", "description": "Electrical cables, wires, and conductors"},
+        {"name": "Switchgear & Panels", "description": "Circuit breakers, panels, and switchgear"},
+        {"name": "Street Lighting", "description": "LED lamps, poles, and lighting equipment"},
+        {"name": "Tools & Accessories", "description": "Electrical tools, testers, and accessories"},
+    ]
+
+    category_ids = {}
+    for c in categories_data:
+        existing = session.query(ProductCategory).filter_by(name=c["name"]).first()
+        if not existing:
+            category = ProductCategory(
+                name=c["name"],
+                description=c["description"],
+               # path=f"category_{c['name'].lower().replace(' ', '_')}",
+                #group_name="Inventory",
+                is_active=True
+            )
+            session.add(category)
+            session.flush()
+            category_ids[c["name"]] = category.id
+        else:
+            existing.description = c["description"]
+            existing.is_active = True
+            category_ids[c["name"]] = existing.id
+    session.commit()
+    print("✅ Product categories seeded successfully.")
+    return category_ids
+
+
+def seed_product_subcategories(session, category_ids):
+    subcategories_data = [
+        {"name": "Distribution Transformers", "category": "Transformers"},
+        {"name": "Power Transformers", "category": "Transformers"},
+        {"name": "Single Phase Meters", "category": "Meters"},
+        {"name": "Three Phase Meters", "category": "Meters"},
+        {"name": "XLPE Cables", "category": "Cables & Wires"},
+        {"name": "PVC Wires", "category": "Cables & Wires"},
+        {"name": "Overhead Conductors", "category": "Cables & Wires"},
+        {"name": "Circuit Breakers", "category": "Switchgear & Panels"},
+        {"name": "Panels", "category": "Switchgear & Panels"},
+        {"name": "Relays", "category": "Switchgear & Panels"},
+        {"name": "LED Lamps", "category": "Street Lighting"},
+        {"name": "Poles", "category": "Street Lighting"},
+        {"name": "Solar Street Lights", "category": "Street Lighting"},
+        {"name": "Testers", "category": "Tools & Accessories"},
+        {"name": "Hand Tools", "category": "Tools & Accessories"},
+        {"name": "Safety Equipment", "category": "Tools & Accessories"},
+    ]
+
+    subcategory_ids = {}
+    for sc in subcategories_data:
+        category_id = category_ids.get(sc["category"])
+        if not category_id:
+            print(f"⚠️ Category not found for subcategory: {sc['name']}")
+            continue
+
+        existing = session.query(ProductSubCategory).filter_by(name=sc["name"]).first()
+        if not existing:
+            subcat = ProductSubCategory(
+                name=sc["name"],
+                description=f"{sc['name']} under {sc['category']}",
+                #path=f"subcategory_{sc['name'].lower().replace(' ', '_')}",
+                #group_name="Inventory",
+                is_active=True
+            )
+            session.add(subcat)
+            session.flush()
+            subcategory_ids[sc["name"]] = subcat.id
+        else:
+            existing.description = f"{sc['name']} under {sc['category']}"
+            existing.is_active = True
+            subcategory_ids[sc["name"]] = existing.id
+
+    session.commit()
+    print("✅ Product subcategories seeded successfully.")
+    return subcategory_ids
+
+
+def seed_products(session, category_ids, subcategory_ids):
+    products_data = [
+        {"name": "11kV Distribution Transformer 100 kVA", "category": "Transformers", "subcategory": "Distribution Transformers", "sku": "TNEB-TR100", "description": "Oil-immersed 11kV transformer for distribution"},
+        {"name": "3 Phase Energy Meter", "category": "Meters", "subcategory": "Three Phase Meters", "sku": "TNEB-MTR3P", "description": "3 phase digital energy meter"},
+        {"name": "XLPE Power Cable 1.1kV 50mm²", "category": "Cables & Wires", "subcategory": "XLPE Cables", "sku": "TNEB-CBL50", "description": "XLPE insulated 1.1kV power cable"},
+        {"name": "Air Circuit Breaker 400A", "category": "Switchgear & Panels", "subcategory": "Circuit Breakers", "sku": "TNEB-ACB400", "description": "400A air circuit breaker"},
+        {"name": "LED Street Light 50W", "category": "Street Lighting", "subcategory": "LED Lamps", "sku": "TNEB-LED50", "description": "Energy-efficient 50W LED street lamp"},
+        {"name": "Digital Clamp Meter", "category": "Tools & Accessories", "subcategory": "Testers", "sku": "TNEB-TLM01", "description": "Clamp meter for electrical measurements"},
+    ]
+
+    for p in products_data:
+        category_id = category_ids.get(p["category"])
+        subcategory_id = subcategory_ids.get(p["subcategory"])
+        existing = session.query(Product).filter_by(sku=p["sku"]).first()
+        if not existing:
+            product = Product(
+                name=p["name"],
+                category_id=category_id,
+                subcategory_id=subcategory_id,
+                sku=p["sku"],
+                description=p["description"],
+                is_active=True
+            )
+            session.add(product)
+        else:
+            existing.name = p["name"]
+            existing.category_id = category_id
+            existing.subcategory_id = subcategory_id
+            existing.description = p["description"]
+            existing.is_active = True
+
+    session.commit()
+    print("✅ Products seeded successfully.")
+
+
 # ----------------- Run Seed -----------------
 
 def run_seed():
@@ -230,6 +371,10 @@ def run_seed():
         module_ids = seed_modules(session)
         seed_privileges(session, role_ids, module_ids)
         seed_user_roles(session, role_ids)
+        seed_plans(session)
+        category_ids = seed_product_categories(session)
+        subcategory_ids = seed_product_subcategories(session, category_ids)
+        seed_products(session, category_ids, subcategory_ids)
         print("✅ All seed data inserted successfully.")
 
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 
 from database import get_db
-from models import Module, PasswordHistory, Role, RoleModulePrivilege, User, UserRole, UserSecurity, UserSession
+from models import Module, PasswordHistory, Plan, Role, RoleModulePrivilege, User, UserRole, UserSecurity, UserSession
 from security_utils import get_password_hash, verify_password
 from services import user_service
 from utils.common_service import UTCDateTimeMixin
@@ -118,16 +118,15 @@ def login_user(db: Session, email: str, password: str):
         # Step 3: Fetch UserSecurity record
         security = db.query(UserSecurity).filter_by(user_id=user.id).first()
         if not security:
-            # Optionally, create a default security record if missing
             security = UserSecurity(
                 user_id=user.id,
                 failed_login_attempts=0,
                 login_locked_until=None
             )
             db.add(security)
-            db.flush()  # Make sure security record is saved and has an ID
+            db.flush()
 
-        # Step 4: Check if the account is locked
+        # Step 4: Check account lock
         if security.login_locked_until and security.login_locked_until > UTCDateTimeMixin._utc_now():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -136,15 +135,13 @@ def login_user(db: Session, email: str, password: str):
 
         # Step 5: Verify password
         if verify_password(password, user.password_hash):
-            # Reset failed attempts and lockout time if password is correct
             security.failed_login_attempts = 0
             security.login_locked_until = None
         else:
-            # Increment failed login attempts and lockout if necessary
             security.failed_login_attempts += 1
             if security.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
                 security.login_locked_until = UTCDateTimeMixin._utc_now() + timedelta(minutes=LOGIN_LOCK_DURATION_MIN)
-            db.commit() # Ensure the changes are written to the DB
+            db.commit()
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
         # Step 6: Fetch roles
@@ -167,38 +164,49 @@ def login_user(db: Session, email: str, password: str):
             mod_name = module_map.get(priv.module_id)
             if not mod_name:
                 continue
-
             if mod_name not in privileges:
                 privileges[mod_name] = {key: False for key in ["can_add", "can_view", "can_edit",
-                                                           "can_delete", "can_search", "can_import",
-                                                           "can_export"]}
-
+                                                               "can_delete", "can_search", "can_import",
+                                                               "can_export"]}
             for key in privileges[mod_name]:
                 privileges[mod_name][key] |= getattr(priv, key)
 
-        # Step 8: Generate access token
+        # Step 8: Fetch user plan
+        plan = None
+        if user.plan_id:
+            plan_obj = db.query(Plan).filter_by(id=user.plan_id).first()
+            if plan_obj:
+                plan = {
+                    "id": str(plan_obj.id),
+                    "planname": plan_obj.planname,
+                    "plan_description": plan_obj.plan_description,
+                    "plan_limit": plan_obj.plan_limit,
+                    #"duration_days": plan_obj.duration_days
+                }
+
+        # Step 9: Generate access token and return
         return {
-        "access_token": create_access_token({"sub": str(user.id)}),
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "first_name": user.firstname,
-            "last_name": user.lastname,
-            "phone_number": user.phone_number,
-            "is_active": user.isactive,
-            "email_confirmed": user.email_confirmed,
-            "phone_confirmed": user.phone_confirmed,
-            "cts": UTCDateTimeMixin._make_aware(user.cts),  # Convert datetime to string
-            "mts": UTCDateTimeMixin._make_aware(user.mts),
-            "roles": role_names,
-        },
-        "privileges": privileges,
-    }
+            "access_token": create_access_token({"sub": str(user.id)}),
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "first_name": user.firstname,
+                "last_name": user.lastname,
+                "phone_number": user.phone_number,
+                "is_active": user.isactive,
+                "email_confirmed": user.email_confirmed,
+                "phone_confirmed": user.phone_confirmed,
+                "cts": UTCDateTimeMixin._make_aware(user.cts),
+                "mts": UTCDateTimeMixin._make_aware(user.mts),
+                "roles": role_names,
+                "plan": plan  # <-- included plan object
+            },
+            "privileges": privileges,
+        }
 
     except HTTPException:
-        raise  # Re-raise HTTP exceptions directly
+        raise
     except Exception as e:
-        # Log unexpected exceptions
         print(f"Login error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

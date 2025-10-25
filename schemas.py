@@ -221,6 +221,34 @@ class CompanyProductBulkAssignRequest(BaseModel):
     company_id: str
     products: List[dict]  # each dict: {product_id, price, stock}
 
+# ------------------------------
+# Pydantic Schemas
+# ------------------------------
+class PlanCreate(BaseModel):
+    planname: str
+    plan_description: str | None = None
+    plan_limit: int = 0
+    isactive: bool = True
+
+class PlanUpdate(BaseModel):
+    planname: str | None = None
+    plan_description: str | None = None
+    plan_limit: int | None = None
+    isactive: bool | None = None
+
+from pydantic import BaseModel, Field
+from uuid import UUID
+
+class PlanOut(BaseModel):
+    id: UUID
+    planname: str
+    description: str = Field(..., alias="plan_description")  # map SQLAlchemy field
+    plan_limit: int
+    isactive: bool
+
+    class Config:
+        orm_mode = True
+
 
 class ProductSchema(BaseModel):
     id: int
@@ -273,6 +301,13 @@ class ModuleResponse(ModuleBase):
     class Config:
         orm_mode = True
 
+class UserRegistor(BaseModel):
+    email: str
+    password: str
+    firstname: str
+    lastname: str
+    phone_number: str
+    plan_id: UUID | None = None  # Add this field
 
 class UserResponse(BaseModel):
     id: UUID

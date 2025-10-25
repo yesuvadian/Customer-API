@@ -8,7 +8,7 @@ from auth_utils import get_current_user
 from pydantic import BaseModel
 from typing import List, Optional
 
-router = APIRouter(prefix="/modules", tags=["modules"])
+router = APIRouter(prefix="/modules", tags=["modules"],dependencies=[Depends(get_current_user)])
 
 class ModuleCreateRequest(BaseModel):
     name: str
