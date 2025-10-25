@@ -5,7 +5,7 @@ from database import Base, engine
 from middleware.auth_privilege import auth_and_privilege_middleware
 
 # Routers
-from routers import auth, categories, company_products, module, plan, products, register, role, role_module_privileges, subcategories, token, totp, user_addresses, users
+from routers import auth, categories, company_products, dashboard, module, plan, products, register, role, role_module_privileges, subcategories, token, totp, user_addresses, users
 from routers import countries, states, company_tax_infos, company_tax_documents
 
 # Create all database tables (optional, only if using auto-create)
@@ -61,4 +61,4 @@ app.include_router(module.router)
 app.include_router(role.router)
 app.include_router(role_module_privileges.router)
 app.include_router(plan.router)
-
+app.include_router(dashboard.router)

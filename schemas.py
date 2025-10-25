@@ -220,7 +220,12 @@ class ProductSubCategorySchema(BaseModel):
 class CompanyProductBulkAssignRequest(BaseModel):
     company_id: str
     products: List[dict]  # each dict: {product_id, price, stock}
-
+class UserPlanResponse(BaseModel):
+    id: str
+    planname: str
+    plan_description: Optional[str] = None
+    plan_limit: Optional[int] = None
+    # duration_days: Optional[int] = None  # Uncomment if you include it later
 # ------------------------------
 # Pydantic Schemas
 # ------------------------------
@@ -271,9 +276,10 @@ class CompanyProductSchema(BaseModel):
     product_id: int
     price: float
     stock: int | None = 0
-
+    stock: int | None = 0
     class Config:
         orm_mode = True  # allows SQLAlchemy model instances to be returned
+        allow_population_by_field_name = True
 
 
 
@@ -321,6 +327,7 @@ class UserResponse(BaseModel):
     cts: datetime  # created timestamp
     mts: datetime  # modified timestamp
     roles: list[str]
+    plan: Optional[UserPlanResponse] = None  # ✅ added plan here
 
     class Config:
         orm_mode = True  # allows Pydantic to read from SQLAlchemy models

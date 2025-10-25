@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 from database import SessionLocal
-from models import Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, User, UserRole, Module
+from models import Country, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
@@ -94,7 +94,19 @@ def seed_plans(session):
     session.commit()
     print("✅ Plans seeded successfully.")
 
-
+def seed_country_india(session):
+    existing = session.query(Country).filter_by(name="India").first()
+    if not existing:
+        country = Country(
+            name="India",
+            code="IN"
+        )
+        session.add(country)
+        session.commit()
+        print("✅ India seeded successfully.")
+    else:
+        print("ℹ️ India already exists in countries table.")
+        
 def seed_modules(session):
     modules_data = [
         {"name": "Roles", "description": "Manage roles", "path": "roles", "group_name": "User & Access"},
@@ -113,6 +125,7 @@ def seed_modules(session):
         {"name": "Users", "description": "Manage users", "path": "users", "group_name": "User & Access"},
         {"name": "Company Products", "description": "Company-specific product inventory", "path": "company_products", "group_name": "Inventory"},
         {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access"},
+         {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory"},
     ]
 
     module_ids = {}
@@ -145,7 +158,7 @@ def seed_privileges(session, role_ids, module_ids):
     module_names = [
         "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
         "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
-        "Product Categories", "Product Subcategories", "Products", "Users", "Company Products","Plans"
+        "Product Categories", "Product Subcategories", "Products", "Users", "Company Products","Plans","Dashboard"
     ]
 
     privileges_data = [
@@ -325,7 +338,62 @@ def seed_product_subcategories(session, category_ids):
     session.commit()
     print("✅ Product subcategories seeded successfully.")
     return subcategory_ids
+def seed_indian_states(session, india):
+    states_data = [
+        {"name": "Andhra Pradesh", "code": "AP"},
+        {"name": "Arunachal Pradesh", "code": "AR"},
+        {"name": "Assam", "code": "AS"},
+        {"name": "Bihar", "code": "BR"},
+        {"name": "Chhattisgarh", "code": "CG"},
+        {"name": "Goa", "code": "GA"},
+        {"name": "Gujarat", "code": "GJ"},
+        {"name": "Haryana", "code": "HR"},
+        {"name": "Himachal Pradesh", "code": "HP"},
+        {"name": "Jharkhand", "code": "JH"},
+        {"name": "Karnataka", "code": "KA"},
+        {"name": "Kerala", "code": "KL"},
+        {"name": "Madhya Pradesh", "code": "MP"},
+        {"name": "Maharashtra", "code": "MH"},
+        {"name": "Manipur", "code": "MN"},
+        {"name": "Meghalaya", "code": "ML"},
+        {"name": "Mizoram", "code": "MZ"},
+        {"name": "Nagaland", "code": "NL"},
+        {"name": "Odisha", "code": "OR"},
+        {"name": "Punjab", "code": "PB"},
+        {"name": "Rajasthan", "code": "RJ"},
+        {"name": "Sikkim", "code": "SK"},
+        {"name": "Tamil Nadu", "code": "TN"},
+        {"name": "Telangana", "code": "TG"},
+        {"name": "Tripura", "code": "TR"},
+        {"name": "Uttar Pradesh", "code": "UP"},
+        {"name": "Uttarakhand", "code": "UK"},
+        {"name": "West Bengal", "code": "WB"},
+        {"name": "Andaman and Nicobar Islands", "code": "AN"},
+        {"name": "Chandigarh", "code": "CH"},
+        {"name": "Dadra and Nagar Haveli and Daman & Diu", "code": "DN"},
+        {"name": "Delhi", "code": "DL"},
+        {"name": "Jammu and Kashmir", "code": "JK"},
+        {"name": "Ladakh", "code": "LA"},
+        {"name": "Lakshadweep", "code": "LD"},
+        {"name": "Puducherry", "code": "PY"},
+    ]
 
+    for s in states_data:
+        existing = session.query(State).filter_by(name=s["name"], country_id=india.id).first()
+        if not existing:
+            state = State(name=s["name"], code=s["code"], country_id=india.id)
+            session.add(state)
+    session.commit()
+    print("✅ Indian states seeded successfully.")
+# ----------------- Country & States Seed -----------------
+def seed_india_country(session):
+    india = session.query(Country).filter_by(name="India").first()
+    if not india:
+        india = Country(name="India", code="IN")
+        session.add(india)
+        session.commit()
+        print("✅ India seeded successfully.")
+    return session.query(Country).filter_by(name="India").first()
 
 def seed_products(session, category_ids, subcategory_ids):
     products_data = [
@@ -375,6 +443,9 @@ def run_seed():
         category_ids = seed_product_categories(session)
         subcategory_ids = seed_product_subcategories(session, category_ids)
         seed_products(session, category_ids, subcategory_ids)
+            # Geography
+        india = seed_india_country(session)
+        seed_indian_states(session, india)
         print("✅ All seed data inserted successfully.")
 
 

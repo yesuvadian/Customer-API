@@ -34,16 +34,9 @@ def delete_company_product(company_product_id: int, db: Session = Depends(get_db
 @router.post("/bulk_assign")
 def bulk_assign(request: CompanyProductBulkAssignRequest, db: Session = Depends(get_db)):
     """
-    Assign multiple products to a company in bulk.
+    Bulk assign products to a company.
+    Deletes old mappings and assigns new ones.
     """
-    try:
-        results = []
-        for prod in request.products:
-            product_id = prod.get("product_id")
-            price = prod.get("price")
-            stock = prod.get("stock", 0)
-            assigned = CompanyProductService.assign_product(db, request.company_id, product_id, price, stock)
-            results.append(assigned)
-        return {"detail": "Products assigned successfully", "assigned": results}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    product_ids = [prod["product_id"] for prod in request.products]
+    assigned = CompanyProductService.bulk_assign(db, request.company_id, product_ids)
+    return {"detail": "Products assigned successfully", "assigned": assigned}
