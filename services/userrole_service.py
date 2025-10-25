@@ -1,3 +1,4 @@
+from collections import defaultdict
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List
@@ -55,3 +56,15 @@ class UserRoleService:
     # ----------------- LIST -----------------
     def list_user_roles(self, skip: int = 0, limit: int = 100) -> List[UserRole]:
         return self.db.query(UserRole).offset(skip).limit(limit).all()
+# Fetch user-role mappings for UI
+    def fetch_user_role_mappings(self):
+        rows = self.db.query(UserRole).join(UserRole.user).join(UserRole.role).all()
+        role_users_map = defaultdict(list)
+
+        for ur in rows:
+            email = ur.user.email
+            role_name = ur.role.name
+            if role_name not in role_users_map[email]:
+                role_users_map[email].append(role_name)
+
+        return [{"email": email, "roles": roles} for email, roles in role_users_map.items()]

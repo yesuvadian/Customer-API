@@ -387,16 +387,20 @@ class UserRoleCreate(UserRoleBase):
 class UserRoleUpdate(BaseModel):
     role_id: int
 
-class UserRoleResponse(UserRoleBase):
-    id: int
+class UserRoleResponse(BaseModel):
+    user_id: UUID
+    role_id: int
+    assigned_at: datetime
+    created_by: UUID | None = None
+    modified_by: UUID | None = None
+    cts: datetime
+    mts: datetime
 
     class Config:
         orm_mode = True
 
-from pydantic import BaseModel
-from typing import Optional
-from uuid import UUID
-from datetime import datetime
+
+
 
 
 class RoleModulePrivilegeBase(BaseModel):
