@@ -110,7 +110,7 @@ def seed_modules(session):
         {"name": "Product Categories", "description": "Define product categories", "path": "product_categories", "group_name": "Inventory"},
         {"name": "Product Subcategories", "description": "Define product subcategories", "path": "product_subcategories", "group_name": "Inventory"},
         {"name": "Products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
-        {"name": "Users", "description": "Manage users", "path": "user", "group_name": "User & Access"},
+        {"name": "Users", "description": "Manage users", "path": "users", "group_name": "User & Access"},
         {"name": "Company Products", "description": "Company-specific product inventory", "path": "company_products", "group_name": "Inventory"},
         {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access"},
     ]
