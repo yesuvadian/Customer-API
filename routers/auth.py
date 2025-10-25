@@ -1,10 +1,12 @@
 
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from database import get_db
-from schemas import LoginRequest, LoginResponse, PasswordResetConfirm, PasswordResetRequest, PasswordResetResponse
+from schemas import LoginRequest, LoginResponse, PasswordResetConfirm, PasswordResetRequest, PasswordResetResponse, PlanOut
 from auth_utils import login_user, requestpasswordreset, resetpassword
+from services.plan_service import PlanService
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
@@ -35,7 +37,10 @@ def request_password_reset(
         "reset_link": reset_link
     }
 
-
+@router.get("/plans", response_model=List[PlanOut])
+def get_plans(skip: int = 0, limit: int = 100, search: str | None = None, db: Session = Depends(get_db)):
+    """Get all active plans"""
+    return PlanService.get_plans(db, skip=skip, limit=limit, search=search, active_only=True)
 
 # --------------------------
 # RESET PASSWORD
