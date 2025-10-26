@@ -376,13 +376,22 @@ class RoleResponse(RoleBase):
         orm_mode = True
 
 
-# -------- UserRole Schemas --------
-class UserRoleBase(BaseModel):
+
+
+
+class UserRolesBulkCreate(BaseModel):
+    user_id: int
+    role_ids: List[int]  # List of role IDs to assign
+
+
+
+class UserRoleCreate(BaseModel):
     user_id: UUID
     role_id: int
 
-class UserRoleCreate(UserRoleBase):
-    pass
+# -------- UserRole Schemas --------
+class UserRolesBulkCreate(BaseModel):
+    assignments: List[UserRoleCreate]
 
 class UserRoleUpdate(BaseModel):
     role_id: int
@@ -390,15 +399,14 @@ class UserRoleUpdate(BaseModel):
 class UserRoleResponse(BaseModel):
     user_id: UUID
     role_id: int
-    assigned_at: datetime
-    created_by: UUID | None = None
-    modified_by: UUID | None = None
-    cts: datetime
-    mts: datetime
+    assigned_at: Optional[datetime] = None
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
 
     class Config:
         orm_mode = True
-
 
 
 

@@ -1,12 +1,14 @@
 # ----------------- UserRole Endpoints -----------------
-from typing import List
+from collections import defaultdict
+from typing import List, Set
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
 
 from auth_utils import get_current_user
 from database import get_db
-from schemas import UserRoleCreate, UserRoleResponse, UserRoleUpdate
+from models import UserRole
+from schemas import UserRoleCreate, UserRoleResponse, UserRoleUpdate, UserRolesBulkCreate
 from services.userrole_service import UserRoleService
 
 user_role_router = APIRouter(
@@ -14,6 +16,26 @@ user_role_router = APIRouter(
     tags=["user_roles"],
     dependencies=[Depends(get_current_user)]
 )
+
+@user_role_router.post("/bulk", response_model=List[UserRoleResponse])
+def assign_roles_bulk(
+    bulk_data: UserRolesBulkCreate,
+    db: Session = Depends(get_db),
+):
+    service = UserRoleService(db)
+    results: List[UserRoleResponse] = []
+
+    # Group users by role
+    role_users_map = defaultdict(list)
+    for assignment in bulk_data.assignments:
+        role_users_map[assignment.role_id].append(assignment.user_id)
+
+    # Update each role
+    for role_id, user_ids in role_users_map.items():
+        updated_roles = service.update_users_for_role(role_id, user_ids)
+        results.extend(updated_roles)
+
+    return results
 
 # Create / Assign Role to User
 @user_role_router.post("/", response_model=UserRoleResponse)
