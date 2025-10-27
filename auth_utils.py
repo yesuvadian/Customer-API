@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 
 from database import get_db
-from models import Module, PasswordHistory, Plan, Role, RoleModulePrivilege, User, UserRole, UserSecurity, UserSession
+from models import Module, PasswordHistory, PasswordResetToken, Plan, Role, RoleModulePrivilege, User, UserRole, UserSecurity, UserSession
 from security_utils import get_password_hash, verify_password
 from services import user_service
 from utils.common_service import UTCDateTimeMixin
+from utils.email_service import EmailService
 #from mixins.time_utils import UTCDateTimeMixin  # ✅ import mixin
 
 # ==============================
@@ -30,7 +31,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "your_super_secret_key_here")
 ALGORITHM = "HS256"
 RESET_TOKEN_EXPIRE_MINUTES=int(os.getenv("RESET_TOKEN_EXPIRE_MINUTES", 300))
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
+BASE_URL=os.getenv("BASE_URL", "http://localhost:59685")
 
 # ==============================
 # Token Utilities
@@ -326,15 +327,47 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 
 
-def requestpasswordreset( db: Session, email: str, request: Request) -> str:
-        user = db.query(User).filter_by(email=email).first()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        reset_token = generate_reset_token(user.id)
-        reset_link = f"{request.base_url}auth/reset-password?token={reset_token}"
-        # Normally, you'd email this link to the user
-        return reset_link
+
+def requestpasswordreset(db: Session, email: str, request: Request) -> str:
+    # 🔍 1. Find the user
+    user = db.query(User).filter_by(email=email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # 🔒 2. Invalidate any previous unused tokens
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used == False
+    ).update({"used": True})
+    db.commit()
+
+    # 🧩 3. Generate a new token
+    reset_token = generate_reset_token(user.id)
+
+    # 💾 4. Store the token in DB
+    token_entry = PasswordResetToken(
+        user_id=user.id,
+        token=reset_token,
+        created_at=UTCDateTimeMixin._utc_now(),
+        expires_at=UTCDateTimeMixin._utc_now() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES),
+        used=False
+    )
+    db.add(token_entry)
+    db.commit()
+
+    # 📧 5. Send email via your existing EmailService
+    email_service = EmailService()
+    email_service.send_password_reset(to_email=user.email, token=reset_token)
+
+    # 🔗 6. Return link for debugging or frontend testing
+    reset_link = f"{email_service.base_url}/reset-password?token={reset_token}&email={user.email}"
+
+    return reset_link
+
 
 def resetpassword(db: Session, token: str, new_password: str):
     if not token or not new_password:
@@ -343,6 +376,7 @@ def resetpassword(db: Session, token: str, new_password: str):
             detail="Token and new password are required"
         )
 
+    # 1️⃣ Verify JWT and extract user_id
     user_id = verify_reset_token(token)
     if not user_id:
         raise HTTPException(
@@ -350,6 +384,28 @@ def resetpassword(db: Session, token: str, new_password: str):
             detail="Invalid or expired reset token"
         )
 
+    # 2️⃣ Check if token is already used
+    from models import PasswordResetToken
+    token_entry = db.query(PasswordResetToken).filter_by(token=token).first()
+    if not token_entry:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token not found or already invalidated"
+        )
+
+    if token_entry.used:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset link has already been used"
+        )
+
+    if UTCDateTimeMixin._make_aware(token_entry.expires_at) < UTCDateTimeMixin._utc_now():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token has expired"
+        )
+
+    # 3️⃣ Fetch user
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
         raise HTTPException(
@@ -357,14 +413,13 @@ def resetpassword(db: Session, token: str, new_password: str):
             detail="User not found"
         )
 
-    # Step 1: Check against current password
+    # 4️⃣ Check if new password matches old ones
     if verify_password(new_password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="New password cannot be the same as the current password."
         )
 
-    # Step 2: Check against recent password history
     history = (
         db.query(PasswordHistory)
         .filter_by(user_id=user_id)
@@ -380,21 +435,21 @@ def resetpassword(db: Session, token: str, new_password: str):
                 detail=f"New password cannot be one of your last {PASSWORD_HISTORY_LIMIT} passwords."
             )
 
-    # Step 3: Update password
+    # 5️⃣ Update password
     new_hash = get_password_hash(new_password)
     user.password_hash = new_hash
 
-    # 🔐 Ensure UserSecurity record exists
+    # Ensure UserSecurity record exists
     security = db.query(UserSecurity).filter_by(user_id=user.id).first()
     if not security:
         security = UserSecurity(user_id=user.id)
         db.add(security)
-        db.flush()  # ensure security.id exists
+        db.flush()
 
     security.failed_login_attempts = 0
     security.login_locked_until = None
 
-    # Step 4: Save to PasswordHistory
+    # 6️⃣ Save to PasswordHistory
     pw_entry = PasswordHistory(
         user_id=user.id,
         password_hash=new_hash,
@@ -404,14 +459,16 @@ def resetpassword(db: Session, token: str, new_password: str):
     )
     db.add(pw_entry)
 
-    # Step 5: Prune old history entries
+    # 7️⃣ Mark token as used
+    token_entry.used = True
+
+    # 8️⃣ Prune old password history
     total_history = (
         db.query(PasswordHistory)
         .filter_by(user_id=user.id)
         .order_by(PasswordHistory.cts.desc())
         .all()
     )
-
     if len(total_history) > PASSWORD_HISTORY_LIMIT:
         for old_entry in total_history[PASSWORD_HISTORY_LIMIT:]:
             db.delete(old_entry)

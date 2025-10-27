@@ -477,6 +477,15 @@ class CompanyTaxInfo(Base):
         back_populates="company_tax_info",
         cascade="all, delete-orphan"
     )
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+    token = Column(String, unique=True, nullable=False)
+    created_at = Column(DateTime, default=UTCDateTimeMixin._utc_now)
+    expires_at = Column(DateTime, nullable=True)   # <-- new column
+    used = Column(Boolean, default=False)
 
 
 class CompanyTaxDocument(Base):
