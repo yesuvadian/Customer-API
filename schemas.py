@@ -93,7 +93,7 @@ class CompanyTaxInfoBase(BaseModel):
 # Schema for creating a new entry
 # -------------------------
 class CompanyTaxInfoCreate(CompanyTaxInfoBase):
-    company_id: UUID
+    pass
 
 # -------------------------
 # Schema for updating an entry

@@ -60,3 +60,5 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", EMAIL_USER or "noreply@example.com")
 # ==============================
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 
+MAX_FILE_SIZE_KB = os.getenv("MAX_FILE_SIZE_KB", "500")
+
