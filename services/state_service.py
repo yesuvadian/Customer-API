@@ -38,11 +38,52 @@ class StateService:
         db.commit()
         db.refresh(state)
         return state
-
+    
     @classmethod
     def delete_state(cls, db: Session, state_id: int):
         state = cls.get_state(db, state_id)
         if state:
             db.delete(state)
             db.commit()
+        return state
+    @classmethod
+    def get_states(
+        cls,
+        db: Session,
+        skip: int = 0,
+        limit: int = 100,
+        search: str | None = None,
+        country_id: int | None = None,
+    ):
+        """
+        Fetch all states, optionally filtered by country and search text.
+        """
+        query = db.query(State)
+        if search:
+            query = query.filter(State.name.ilike(f"%{search}%"))
+        if country_id:
+            query = query.filter(State.country_id == country_id)
+
+        return query.order_by(State.name).offset(skip).limit(limit).all()
+
+    @classmethod
+    def create_state(cls, db: Session, name: str, country_id: int, code: str | None = None):
+        """
+        Create a new state under a given country.
+        """
+        existing = (
+            db.query(State)
+            .filter(State.name == name, State.country_id == country_id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="State already exists in this country",
+            )
+
+        state = State(name=name, code=code, country_id=country_id)
+        db.add(state)
+        db.commit()
+        db.refresh(state)
         return state
