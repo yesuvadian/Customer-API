@@ -1,10 +1,11 @@
 from fastapi import HTTPException,status
 from sqlalchemy.orm import Session
 #from auth_utils import get_password_hash
-from models import User, UserSession
+from models import User, UserSession, CompanyProduct, Product # Assuming CompanyProduct and Product are in models
 from schemas import UserCreate
 from datetime import datetime, timezone
 import uuid
+from sqlalchemy import or_# <--- Import 'and_' for combined filtering
 
 import schemas
 from security_utils import get_password_hash
@@ -113,3 +114,47 @@ class UserService(UTCDateTimeMixin):
 
         db.commit()
         return len(sessions)
+    
+    @classmethod
+    def get_users_by_product_search(
+        cls,
+        db: Session,
+        search_term: str | None = None, # Single search term
+        skip: int = 0,
+        limit: int = 100
+    ):
+        """
+        Filters distinct users who are linked to a product where the search_term
+        matches the product name, SKU, OR description.
+        """
+        query = db.query(User).distinct()
+
+        # 1. Join User to CompanyProduct (User.id == CompanyProduct.company_id)
+        query = query.join(
+            CompanyProduct,
+            User.id == CompanyProduct.company_id
+        )
+
+        # 2. Join CompanyProduct to Product (CompanyProduct.product_id == Product.id)
+        query = query.join(
+            Product,
+            CompanyProduct.product_id == Product.id
+        )
+
+        # Build the filter conditions
+        if search_term:
+            # Use ilike for case-insensitive partial match
+            search_pattern = f"%{search_term}%"
+            
+            # Use OR to check the search_term against all three fields
+            filter_condition = or_(
+                Product.name.ilike(search_pattern),
+                Product.sku.ilike(search_pattern),
+                Product.description.ilike(search_pattern)
+            )
+            
+            # Apply the combined filter
+            query = query.filter(filter_condition)
+            
+        # Apply pagination and return results
+        return query.offset(skip).limit(limit).all()
