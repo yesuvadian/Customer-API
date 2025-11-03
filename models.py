@@ -1,7 +1,10 @@
 
+from enum import Enum as PyEnum
+from sqlalchemy import Enum
+
 import uuid
 from sqlalchemy import (
-    Column, Float, LargeBinary, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
+    Column, Float, LargeBinary, Numeric, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
 )
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import relationship
@@ -15,6 +18,34 @@ from sqlalchemy.ext.declarative import declarative_base
 
 #Base = declarative_base()
 
+class AddressTypeEnum(PyEnum):
+    registered = "registered"
+    corporate = "corporate"
+    billing = "billing"
+    shipping = "shipping"
+    factory = "factory"
+    warehouse = "warehouse"
+    other = "other"
+
+class TaxStatusEnum(PyEnum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    expired = "expired"
+
+class BankStatusEnum(PyEnum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+class DocumentTypeEnum(PyEnum):
+    PAN = "PAN"
+    GST_CERT = "GST_CERT"
+    TAN = "TAN"
+    CANCELLED_CHEQUE = "CANCELLED_CHEQUE"
+    BANK_STATEMENT = "BANK_STATEMENT"
+    PASSBOOK = "PASSBOOK"
+    ADDRESS_PROOF = "ADDRESS_PROOF"
 class Plan(Base):
     __tablename__ = "plans"
     __table_args__ = {"schema": "public"}
@@ -40,7 +71,40 @@ class Plan(Base):
 
 
 
+class UserAddress(Base):
+    __tablename__ = "user_addresses"
+    __table_args__ = (
+        UniqueConstraint("user_id", "address_type", "is_primary", name="user_addresses_user_id_address_type_is_primary_key"),
+        {"schema": "public"}
+    )
 
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
+    address_type = Column(Enum(AddressTypeEnum), nullable=False)
+    is_primary = Column(Boolean, default=False)
+    address_line1 = Column(String(255), nullable=False)
+    address_line2 = Column(String(255))
+    city = Column(String(100))
+    state_id = Column(Integer, ForeignKey("public.states.id", ondelete="SET NULL"))
+    country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="SET NULL"))
+    postal_code = Column(String(20))
+    latitude = Column(Numeric(10, 8))
+    longitude = Column(Numeric(11, 8))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
+    mts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
+
+    # Relationships
+    user = relationship(
+        "User",
+        back_populates="addresses",
+        foreign_keys=[user_id]
+    )
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+    state = relationship("State", foreign_keys=[state_id])
+    country = relationship("Country", foreign_keys=[country_id])
 # ------------------------------
 # User Model
 # ------------------------------
@@ -63,17 +127,17 @@ class User(Base):
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
 
-    # ✅ Foreign key to Plan (note: column renamed to plan_id)
+    # ✅ Plan FK
     plan_id = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
 
-    # ✅ Relationship: each user belongs to one plan
+    # ✅ Relationship: Plan → Users
     plan = relationship(
         "Plan",
         back_populates="users",
         foreign_keys=lambda: [User.plan_id]
     )
 
-    # --- Existing relationships unchanged ---
+    # === Existing Auth Relationships ===
     sessions = relationship(
         "UserSession",
         back_populates="user",
@@ -81,7 +145,12 @@ class User(Base):
         foreign_keys=lambda: [UserSession.user_id]
     )
 
-    security = relationship("UserSecurity", uselist=False, back_populates="user", cascade="all, delete")
+    security = relationship(
+        "UserSecurity",
+        uselist=False,
+        back_populates="user",
+        cascade="all, delete"
+    )
 
     user_roles = relationship(
         "UserRole",
@@ -96,6 +165,31 @@ class User(Base):
         cascade="all, delete-orphan",
         foreign_keys="[PasswordHistory.user_id]"
     )
+
+    # === ✅ Vendor Management Relationships Added ===
+    addresses = relationship(
+    "UserAddress",
+    back_populates="user",
+    cascade="all, delete-orphan",
+    foreign_keys="[UserAddress.user_id]"
+)
+
+
+    tax_info = relationship(
+        "CompanyTaxInfo",
+        back_populates="company",
+        cascade="all, delete-orphan",
+        foreign_keys="[CompanyTaxInfo.company_id]"
+    )
+
+    bank_info = relationship(
+        "CompanyBankInfo",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="[CompanyBankInfo.company_id]"
+    )
+
+
 
 
 
@@ -119,8 +213,77 @@ class PasswordHistory(Base):
         foreign_keys=[user_id],
         back_populates="password_history"  # ✅ matches User.password_history
     )
+class CompanyBankDocument(Base):
+    __tablename__ = "company_bank_documents"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    company_bank_info_id = Column(
+        Integer,
+        ForeignKey("public.company_bank_info.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    file_name = Column(String(255), nullable=False)
+    file_data = Column(LargeBinary, nullable=False)
+    file_type = Column(String(50))
+    document_type = Column(Enum(DocumentTypeEnum, name="bank_document_type_enum"))
+    is_verified = Column(Boolean, default=False)
+    verified_by = Column(String)
+    verified_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    company_bank_info = relationship(
+        "CompanyBankInfo",
+        back_populates="documents",
+        foreign_keys=[company_bank_info_id]
+    )
 
     
+class DocumentTypeEnum(PyEnum):
+    CANCELLED_CHEQUE = "CANCELLED_CHEQUE"
+    BANK_STATEMENT = "BANK_STATEMENT"
+    PASSBOOK = "PASSBOOK"
+
+class CompanyBankInfo(Base):
+    __tablename__ = "company_bank_info"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
+    account_holder_name = Column(String(255), nullable=False)
+    bank_name = Column(String(255), nullable=False)
+    account_number = Column(String(30), nullable=False)
+    ifsc = Column(String(11), nullable=False)
+    branch_name = Column(String(255), nullable=True)  # ✅ Added
+    account_type = Column(String(20))
+    is_primary = Column(Boolean, server_default="false", nullable=False)
+    status = Column(Enum(BankStatusEnum), server_default="pending")
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # ✅ Relationships
+    user = relationship(
+        "User",
+        back_populates="bank_info",
+        foreign_keys=[company_id]
+    )
+
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+
+    documents = relationship(
+        "CompanyBankDocument",
+        back_populates="company_bank_info",
+        cascade="all, delete-orphan",
+        foreign_keys=lambda: [CompanyBankDocument.company_bank_info_id]
+    )
+
+   
 
 # ------------------------------
 # UserRole Model
@@ -419,33 +582,7 @@ class State(Base):
     # Relationships
     country = relationship("Country", back_populates="states")
 
-class UserAddress(Base):
-    __tablename__ = "user_addresses"
-    __table_args__ = (
-        UniqueConstraint("user_id", "address_type", "is_primary", name="user_addresses_user_id_address_type_is_primary_key"),
-        {"schema": "public"}
-    )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
-    address_type = Column(String(50), nullable=False)
-    is_primary = Column(Boolean, default=False)
-    address_line1 = Column(String(255), nullable=False)
-    address_line2 = Column(String(255))
-    state_id = Column(Integer, ForeignKey("public.states.id", ondelete="SET NULL"))
-    country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="SET NULL"))
-    postal_code = Column(String(20))
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    cts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
-    mts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
-
-    # Relationships
-    user = relationship("User", foreign_keys=[user_id])
-    creator = relationship("User", foreign_keys=[created_by])
-    modifier = relationship("User", foreign_keys=[modified_by])
-    state = relationship("State", foreign_keys=[state_id])
-    country = relationship("Country", foreign_keys=[country_id])
 
     #country = relationship("Country", back_populates="states")
     #company_tax_infos = relationship("CompanyTaxInfo", back_populates="state")
@@ -467,16 +604,23 @@ class CompanyTaxInfo(Base):
     cts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
     mts = Column(DateTime, default=UTCDateTimeMixin._utc_now, onupdate=UTCDateTimeMixin._utc_now, nullable=False)
 
-    # Relationships
-    company = relationship("User", foreign_keys=[company_id], lazy="joined")
-    creator = relationship("User", foreign_keys=[created_by], lazy="joined")
-    modifier = relationship("User", foreign_keys=[modified_by], lazy="joined")
+    # ✅ Single correct primary relationship to User
+    company = relationship(
+        "User",
+        back_populates="tax_info",
+        foreign_keys=[company_id]
+    )
+
+    # ✅ Audit relationships
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
 
     documents = relationship(
         "CompanyTaxDocument",
         back_populates="company_tax_info",
         cascade="all, delete-orphan"
     )
+
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
 
