@@ -21,7 +21,7 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-service = StateService()
+
 
 
 @router.get("/", response_model=list[StateOut])
