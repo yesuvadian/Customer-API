@@ -74,3 +74,22 @@ def logout_user(
         raise HTTPException(status_code=404, detail="No active session found")
 
     return {"detail": f"{revoked_count} session(s) successfully logged out"}
+
+@router.get("/filter_by_product_search/", response_model=list[schemas.User])
+def filter_users_by_product_details(
+    search: str | None = None, # Only one search parameter
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    Filter users who are associated with a product where the search term 
+    matches the product name, SKU, OR description.
+    Example: GET /users/filter_by_product_search/?search=Laptop
+    """
+    return user_service_instance.get_users_by_product_search(
+        db,
+        search_term=search, # Pass the single search term
+        skip=skip,
+        limit=limit
+    )
