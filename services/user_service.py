@@ -62,6 +62,7 @@ class UserService(UTCDateTimeMixin):
             lastname=user.lastname,
             phone_number=user.phone_number,
             plan_id=user.plan_id,
+            isactive=user.isactive,
             mts=cls._utc_now(),
             cts=cls._utc_now()
         )
@@ -113,3 +114,16 @@ class UserService(UTCDateTimeMixin):
 
         db.commit()
         return len(sessions)
+    
+ 
+
+ 
+
+    @classmethod
+    def is_email_exists(cls, db: Session, email: str) -> bool:
+        return db.query(User).filter(User.email == email).first() is not None
+
+    @classmethod
+    def is_phone_exists(cls, db: Session, phone: str) -> bool:
+        return db.query(User).filter(User.phone_number == phone).first() is not None
+

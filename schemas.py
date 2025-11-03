@@ -166,15 +166,110 @@ class UserAddressCreate(BaseModel):
     is_primary: bool = Field(default=False, description="Whether this is the primary address")
     address_line1: str = Field(..., max_length=255)
     address_line2: Optional[str] = Field(None, max_length=255)
+    city: Optional[str] = Field(None, max_length=100)
     state_id: Optional[int] = Field(None, description="Foreign key reference to states table")
     country_id: Optional[int] = Field(None, description="Foreign key reference to countries table")
     postal_code: Optional[str] = Field(None, max_length=20)
+
+    latitude: Optional[float] = Field(None, description="Latitude for the address")
+    longitude: Optional[float] = Field(None, description="Longitude for the address")
 
     created_by: Optional[uuid.UUID] = None
     modified_by: Optional[uuid.UUID] = None
 
     class Config:
         orm_mode = True
+
+class CompanyBankDocumentCreateSchema(BaseModel):
+    """
+    Use this for create endpoints. File binary is uploaded via UploadFile in the endpoint,
+    so only metadata fields are here.
+    """
+    company_bank_info_id: int = Field(..., description="FK to CompanyBankInfo")
+    document_type: Optional[str] = Field(None, description="Document type e.g. CANCELLED_CHEQUE")
+    file_name: str = Field(..., max_length=255)
+    file_type: Optional[str] = Field(None, max_length=100)  # e.g. application/pdf
+class CompanyBankDocumentUpdateSchema(BaseModel):
+    """
+    Partial update. Exclude unset fields when passing to service (updates.dict(exclude_unset=True)).
+    """
+    document_type: Optional[str] = None
+    file_name: Optional[str] = None
+    file_type: Optional[str] = None
+    is_verified: Optional[bool] = None
+    verified_by: Optional[str] = None  # UUID as str
+    verified_at: Optional[datetime] = None
+
+class CompanyBankDocumentBase(BaseModel):
+    file_name: str
+    file_type: Optional[str] = None
+    document_type: Optional[str] = None
+
+
+class CompanyBankDocumentSchema(BaseModel):
+    """
+    Response model. Does not include raw binary file_data; include file_url/download_url instead.
+    """
+    id: int
+    company_bank_info_id: int
+    document_type: Optional[str] = None
+    file_name: str
+    file_type: Optional[str] = None
+    file_url: Optional[str] = None         # Public or S3 URL to the file (if applicable)
+    download_url: Optional[str] = None     # Signed URL for downloads (if applicable)
+    is_verified: Optional[bool] = None
+    verified_by: Optional[str] = None      # UUID as str
+    verified_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    modified_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+class CompanyBankInfoBase(BaseModel):
+    bank_name: str = Field(..., max_length=255)
+    account_number: str = Field(..., max_length=50)
+    ifsc: str = Field(..., max_length=20)
+    branch_name: Optional[str] = None
+    account_holder_name: Optional[str] = None
+
+
+
+
+
+
+
+class CompanyBankInfoUpdateSchema(BaseModel):
+    #company_id: UUID  # ✅ from client
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    ifsc: Optional[str] = None
+    branch_name: Optional[str] = None
+    account_holder_name: Optional[str] = None
+    is_primary: bool = True
+
+
+class CompanyBankInfoCreateSchema(BaseModel):
+    company_id: UUID  # ✅ from client
+    account_holder_name: str
+    account_number: str
+    ifsc: str
+    bank_name: str
+    branch_name: Optional[str] = None
+    is_primary: bool = True
+
+
+class CompanyBankInfoSchema(CompanyBankInfoBase):
+    id: int
+    company_id: UUID
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
 
 class UserAddressOut(BaseModel):
     id: int
@@ -183,15 +278,18 @@ class UserAddressOut(BaseModel):
     is_primary: bool
     address_line1: str
     address_line2: Optional[str] = None
-    postal_code: Optional[str] = None
+    city: Optional[str] = None                         # ✅ Added
     state_id: Optional[int] = None
     country_id: Optional[int] = None
+    postal_code: Optional[str] = None
+    latitude: Optional[float] = None                   # ✅ Added
+    longitude: Optional[float] = None                  # ✅ Added
     created_by: Optional[uuid.UUID] = None
     modified_by: Optional[uuid.UUID] = None
     cts: datetime
     mts: datetime
 
-    # Related objects (optional)
+    # Related objects
     state: Optional[StateOut] = None
     country: Optional[CountryOut] = None
     creator: Optional[UserMinimalOut] = None
@@ -199,6 +297,7 @@ class UserAddressOut(BaseModel):
 
     class Config:
         orm_mode = True
+
 
 class ProductCategorySchema(BaseModel):
     id: int
@@ -313,6 +412,7 @@ class UserRegistor(BaseModel):
     firstname: str
     lastname: str
     phone_number: str
+    isactive:bool
     plan_id: UUID | None = None  # Add this field
 
 class UserResponse(BaseModel):
