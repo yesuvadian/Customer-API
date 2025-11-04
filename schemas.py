@@ -82,18 +82,6 @@ class StateOut(StateBase):
 # -------------------------
 # Base schema for shared fields
 # -------------------------
-class CompanyTaxInfoBase(BaseModel):
-    pan: Annotated[str, "max_length=10"]
-    gstin: Optional[Annotated[str, "max_length=15"]] = None
-    tan: Optional[Annotated[str, "max_length=10"]] = None
-    state_id: Optional[int] = None
-    financial_year: Optional[str] = None
-
-# -------------------------
-# Schema for creating a new entry
-# -------------------------
-class CompanyTaxInfoCreate(CompanyTaxInfoBase):
-    pass
 
 # -------------------------
 # Schema for updating an entry
@@ -105,20 +93,31 @@ class CompanyTaxInfoUpdate(BaseModel):
     state_id: Optional[int] = None
     financial_year: Optional[str] = None
 
-# -------------------------
-# Schema for reading/output
-# -------------------------
-class CompanyTaxInfoOut(CompanyTaxInfoBase):
+class CompanyTaxInfoBase(BaseModel):
+    pan: Optional[str] = None
+    gstin: Optional[str] = None
+    tan: Optional[str] = None
+    financial_year: str
+
+class CompanyTaxInfoCreate(CompanyTaxInfoBase):
+    company_id: UUID   # ✅ FIXED (was int)
+
+class CompanyTaxInfoOut(BaseModel):
     id: int
-    company_id: UUID
+    company_id: UUID  # ✅ FIXED
+    pan: Optional[str] = None
+    gstin: Optional[str] = None
+    tan: Optional[str] = None
+    financial_year: str
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: datetime
     mts: datetime
 
     model_config = {
-        "from_attributes": True  # Pydantic v2 uses model_config instead of Config
+        "from_attributes": True
     }
+
 
 
 class CountryOut(BaseModel):
