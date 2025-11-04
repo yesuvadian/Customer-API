@@ -13,3 +13,4 @@ psycopg2-binary
 pyotp
 python-dotenv==1.0.1
 pytest
+httpx

@@ -12,6 +12,11 @@ DB_PORT = int(os.getenv("DB_PORT", 3306))
 DB_USER = os.getenv("DB_USER", "root")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_NAME = os.getenv("DB_NAME", "mydatabase")
+ERP_URL = os.getenv("ERP_URL", "https://erp.example.com/api/vendors")
+ERP_API_KEY = os.getenv("ERP_API_KEY", "")   # optional
+ERP_TIMEOUT = int(os.getenv("ERP_TIMEOUT", "30"))
+ERP_RETRY_COUNT = int(os.getenv("ERP_RETRY_COUNT", "3"))
+ERP_RETRY_DELAY = int(os.getenv("ERP_RETRY_DELAY", "2"))  # seconds
 
 # Construct SQLAlchemy database URL
 DATABASE_URL = (

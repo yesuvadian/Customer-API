@@ -2,7 +2,7 @@ from typing import Dict, Optional
 from urllib.request import Request
 import uuid
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from fastapi import HTTPException, status, Depends
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -101,7 +101,39 @@ def decode_access_token(token: str):
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
         return None
+def get_registration_user(token: str = Depends(oauth2_scheme)) -> str:
+    """
+    Validate registration token issued in Step 1.
+    - Ensures token exists
+    - Ensures token contains a "sub" and type "register"
+    """
 
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Registration token missing",
+        )
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_or_session_id = payload.get("sub")
+        token_type = payload.get("type")
+        exp = payload.get("exp")
+
+        if not user_or_session_id or token_type != "register":
+            raise HTTPException(status_code=401, detail="Invalid registration token")
+
+        # Optional: enforce expiration
+        if exp and UTCDateTimeMixin._utc_now().timestamp() > exp:
+            raise HTTPException(status_code=401, detail="Registration token expired")
+
+        return user_or_session_id  # This identifies the pending user/session
+
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired registration token",
+        )
 def login_user(db: Session, email: str, password: str):
     try:
         # Step 1: Fetch user
@@ -283,7 +315,7 @@ def authenticate_user(db: Session, username: str, password: str, request=None):
         user_id=user.id,
         access_token=access_token,
         refresh_token=refresh_token,
-        created_at=now,
+        cts=now,
         expires_at=now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         ip_address=request.client.host if request else None,
         user_agent=request.headers.get("User-Agent") if request else None
@@ -352,7 +384,7 @@ def requestpasswordreset(db: Session, email: str, request: Request) -> str:
     token_entry = PasswordResetToken(
         user_id=user.id,
         token=reset_token,
-        created_at=UTCDateTimeMixin._utc_now(),
+        cts=UTCDateTimeMixin._utc_now(),
         expires_at=UTCDateTimeMixin._utc_now() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES),
         used=False
     )

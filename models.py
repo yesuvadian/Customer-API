@@ -90,6 +90,12 @@ class UserAddress(Base):
     postal_code = Column(String(20))
     latitude = Column(Numeric(10, 8))
     longitude = Column(Numeric(11, 8))
+    
+    # inside UserAddress class (after mts)
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
     cts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
@@ -123,7 +129,11 @@ class User(Base):
     phone_confirmed = Column(Boolean, default=False)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
+    # inside User class
+    erp_sync_status = Column(String(10), default="pending")      # pending | success | failed
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
 
@@ -232,9 +242,8 @@ class CompanyBankDocument(Base):
     is_verified = Column(Boolean, default=False)
     verified_by = Column(String)
     verified_at = Column(DateTime(timezone=True))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     company_bank_info = relationship(
         "CompanyBankInfo",
         back_populates="documents",
@@ -265,7 +274,11 @@ class CompanyBankInfo(Base):
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
+    # inside CompanyBankInfo class (after mts)
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
     # ✅ Relationships
     user = relationship(
         "User",
@@ -375,7 +388,7 @@ class UserSession(Base):
     access_token = Column(Text, nullable=False)       # ✅ no quotes
     refresh_token = Column(Text, nullable=False)      # ✅ no quotes
 
-    created_at = Column(TIMESTAMP(timezone=True), nullable=False, default=UTCDateTimeMixin._utc_now)
+    cts = Column(TIMESTAMP(timezone=True), nullable=False, default=UTCDateTimeMixin._utc_now)
     expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
     revoked_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
@@ -603,6 +616,11 @@ class CompanyTaxInfo(Base):
 
     cts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
     mts = Column(DateTime, default=UTCDateTimeMixin._utc_now, onupdate=UTCDateTimeMixin._utc_now, nullable=False)
+        # inside CompanyTaxInfo class (after mts)
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
 
     # ✅ Single correct primary relationship to User
     company = relationship(
@@ -627,7 +645,7 @@ class PasswordResetToken(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
     token = Column(String, unique=True, nullable=False)
-    created_at = Column(DateTime, default=UTCDateTimeMixin._utc_now)
+    cts = Column(DateTime, default=UTCDateTimeMixin._utc_now)
     expires_at = Column(DateTime, nullable=True)   # <-- new column
     used = Column(Boolean, default=False)
 
@@ -641,8 +659,13 @@ class CompanyTaxDocument(Base):
     file_name = Column(String(255), nullable=False)
     file_data = Column(LargeBinary, nullable=False)
     file_type = Column(String(50))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # inside CompanyBankDocument class (after modified_at)
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
     # Relationships
     company_tax_info = relationship("CompanyTaxInfo", back_populates="documents")

@@ -220,8 +220,8 @@ class CompanyBankDocumentSchema(BaseModel):
     is_verified: Optional[bool] = None
     verified_by: Optional[str] = None      # UUID as str
     verified_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    modified_at: Optional[datetime] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
 
     class Config:
         orm_mode = True

@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile,status
+import json
+from typing import List
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile,status
 from sqlalchemy.orm import Session
 
+from auth_utils import get_registration_user
 from database import get_db
 import schemas
 from services.companybankdocument_service import CompanyBankDocumentService
@@ -81,3 +84,90 @@ async def upload_bank_document_reg(
         file_type=file.content_type,
         document_type=document_type,
     )
+@router.post("/complete", status_code=201)
+async def complete_registration(
+    payload: str = Form(...),  # JSON string with full registration data
+    files: List[UploadFile] = File([]),  # uploaded documents
+    db: Session = Depends(get_db),
+):
+    """
+    payload JSON structure (example):
+    {
+      "account": { "email": "...", "firstname": "...", "lastname": "...", "phone_number": "...", "password": "...", "plan_id": "..." },
+      "office_address": {...},   // address dict
+      "comm_address": {...},
+      "bank": {...},             // bank metadata (no file)
+      "documents": [
+         { "field_name": "file_0", "document_type": "bank_passbook" },
+         { "field_name": "file_1", "document_type": "pan_card" }
+      ]
+    }
+    The 'field_name' tells server which uploaded file maps to which metadata entry.
+    """
+
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid payload JSON")
+
+    # Server-side validation: basic required keys
+    for key in ("account", "office_address", "bank", "documents"):
+        if key not in data:
+            raise HTTPException(status_code=400, detail=f"Missing '{key}' in payload")
+
+    # Use a transaction: SQLAlchemy Session.begin() (autocommit off)
+    try:
+        with db.begin():  # on exception, this will rollback
+            # 1) create user (account)
+            account_payload = data["account"]
+            new_user = user_service_instance.create_user(db, account_payload)  # adapt to your service
+
+            # 2) create addresses (office + communication)
+            office = data["office_address"]
+            office["user_id"] = new_user.id
+            office["address_type"] = "corporate"
+            address_service.create_user_address(db, office)
+
+            comm = data.get("comm_address")
+            if comm:
+                comm["user_id"] = new_user.id
+                comm["address_type"] = "communication"
+                address_service.create_user_address(db, comm)
+
+            # 3) create bank info (link to user/company)
+            bank_payload = data["bank"]
+            bank_obj = CompanyBankInfoService.create_bank_info(db, company_id=new_user.id, data=bank_payload)
+
+            # 4) handle documents: match metadata to uploaded files
+            docs_meta = data["documents"]
+            # Build map from field_name -> UploadFile
+            file_map = {f"file_{i}": files[i] for i in range(len(files))} if files else {}
+            # Alternatively allow any file field names provided by client:
+            # file_map = {file.filename: file for file in files}
+
+            for meta in docs_meta:
+                field_name = meta.get("field_name")
+                document_type = meta.get("document_type")
+                if not field_name or not document_type:
+                    raise HTTPException(status_code=400, detail="Invalid document metadata")
+
+                upload_file = file_map.get(field_name)
+                if upload_file is None:
+                    raise HTTPException(status_code=400, detail=f"Missing uploaded file for {field_name}")
+
+                content = await upload_file.read()
+                # persist document
+                CompanyBankDocumentService.create_document(
+                    db=db,
+                    bank_info_id=bank_obj.id,
+                    file_name=upload_file.filename,
+                    file_data=content,
+                    file_type=upload_file.content_type,
+                    document_type=document_type,
+                )
+
+        # Transaction committed successfully
+        return {"id": new_user.id, "message": "Registration complete"}
+    except Exception as e:
+        # Logging recommended
+        raise HTTPException(status_code=500, detail=f"Registration failed: {e}")
