@@ -548,3 +548,40 @@ class RoleModulePrivilegeResponse(RoleModulePrivilegeBase):
 
     class Config:
         orm_mode = True
+
+
+# -----------------------------
+# Certificate Schemas
+# -----------------------------
+class CompanyProductCertificateOut(BaseModel):
+    id: int
+    company_product_id: int
+    file_name: str
+    file_type: Optional[str]
+    file_size: Optional[int]
+    issued_date: Optional[datetime]
+    expiry_date: Optional[datetime]
+    cts: datetime
+    mts: datetime
+
+    class Config:
+        orm_mode = True
+
+
+# -----------------------------
+# Supply Reference Schemas
+# -----------------------------
+class CompanyProductSupplyReferenceOut(BaseModel):
+    id: int
+    company_product_id: int
+    file_name: str
+    file_type: Optional[str]
+    file_size: Optional[int]
+    description: Optional[str]
+    customer_name: Optional[str]
+    reference_date: Optional[datetime]
+    cts: datetime
+    mts: datetime
+
+    class Config:
+        orm_mode = True

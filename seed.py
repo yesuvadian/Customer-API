@@ -131,6 +131,9 @@ def seed_modules(session):
          {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
         {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company"},
 
+        {"name": "Company Product Certificates", "description": "Upload product performance certificates", "path": "company_product_certificates", "group_name": "Company"},
+{"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company"},
+
     ]
 
     module_ids = {}
@@ -161,12 +164,14 @@ def seed_modules(session):
 
 def seed_privileges(session, role_ids, module_ids):
     module_names = [
-    "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
-    "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
-    "Product Categories", "Product Subcategories", "Products", "Users",
-    "Company Products","Plans","Dashboard","Assign User Roles",
-    "User Product Search", "Bank Information","Bank Documents"
-  ]
+        "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+        "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
+        "Product Categories", "Product Subcategories", "Products", "Users",
+        "Company Products", "Plans", "Dashboard", "Assign User Roles",
+        "User Product Search", "Bank Information", "Bank Documents",
+        "Company Product Certificates", "Company Product Supply References"
+    ]
+
 
 
     privileges_data = [

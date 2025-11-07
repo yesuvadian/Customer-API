@@ -570,6 +570,18 @@ class CompanyProduct(Base):
     product = relationship("Product", back_populates="companies")
     created_user = relationship("User", foreign_keys=[created_by])
     modified_user = relationship("User", foreign_keys=[modified_by])
+    certificates = relationship(
+    "CompanyProductCertificate",
+    back_populates="company_product",
+    cascade="all, delete-orphan"
+    )
+
+    supply_references = relationship(
+    "CompanyProductSupplyReference",
+    back_populates="company_product",
+    cascade="all, delete-orphan"
+   )
+
 
 class Country(Base):
     __tablename__ = "countries"
@@ -669,3 +681,67 @@ class CompanyTaxDocument(Base):
     erp_external_id = Column(String(255), nullable=True)
     # Relationships
     company_tax_info = relationship("CompanyTaxInfo", back_populates="documents")
+
+class CompanyProductCertificate(Base):
+    __tablename__ = "company_product_certificates"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    company_product_id = Column(
+        Integer,
+        ForeignKey("public.company_products.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    file_name = Column(String(255), nullable=False)
+    file_type = Column(String(100))   # MIME (e.g. application/pdf)
+    file_size = Column(Integer)       # bytes
+    file_data = Column(LargeBinary, nullable=False)
+
+    issued_date = Column(DateTime(timezone=True), nullable=True)
+    expiry_date = Column(DateTime(timezone=True), nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    company_product = relationship(
+        "CompanyProduct",
+        back_populates="certificates",
+        foreign_keys=[company_product_id]
+    )
+    creator = relationship("User", foreign_keys=[created_by])
+class CompanyProductSupplyReference(Base):
+    __tablename__ = "company_product_supply_references"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    company_product_id = Column(
+        Integer,
+        ForeignKey("public.company_products.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    file_name = Column(String(255), nullable=False)
+    file_type = Column(String(100))
+    file_size = Column(Integer)
+    file_data = Column(LargeBinary, nullable=False)
+
+    description = Column(Text)
+    customer_name = Column(String(255))
+    reference_date = Column(DateTime(timezone=True))
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    company_product = relationship(
+        "CompanyProduct",
+        back_populates="supply_references",
+        foreign_keys=[company_product_id]
+    )
+    creator = relationship("User", foreign_keys=[created_by])
