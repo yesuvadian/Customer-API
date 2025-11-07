@@ -9,6 +9,14 @@ class CompanyBankInfoService:
     @classmethod
     def get_bank_info(cls, db: Session, bank_info_id: int):
         return db.query(CompanyBankInfo).filter(CompanyBankInfo.id == bank_info_id).first()
+    @classmethod
+    
+    def get_bank_info_by_company_id(cls, db: Session, company_id: UUID):
+        return (
+            db.query(CompanyBankInfo)
+            .filter(CompanyBankInfo.company_id == company_id)
+            .all()
+        )
 
     @classmethod
     def get_vendor_bank_info(cls, db: Session, user_id: str):

@@ -229,6 +229,7 @@ class CompanyBankDocumentSchema(BaseModel):
 class CompanyBankInfoBase(BaseModel):
     bank_name: str = Field(..., max_length=255)
     account_number: str = Field(..., max_length=50)
+    account_type:Optional[str] = None
     ifsc: str = Field(..., max_length=20)
     branch_name: Optional[str] = None
     account_holder_name: Optional[str] = None
@@ -253,6 +254,7 @@ class CompanyBankInfoCreateSchema(BaseModel):
     company_id: UUID  # ✅ from client
     account_holder_name: str
     account_number: str
+    account_type:str
     ifsc: str
     bank_name: str
     branch_name: Optional[str] = None

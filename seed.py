@@ -128,6 +128,8 @@ def seed_modules(session):
          {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory"},
          {"name": "Assign User Roles", "description": "Assign roles to users", "path": "user_roles", "group_name": "User & Access"},
          {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access"},
+         {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
+        {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company"},
 
     ]
 
@@ -159,10 +161,13 @@ def seed_modules(session):
 
 def seed_privileges(session, role_ids, module_ids):
     module_names = [
-        "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
-        "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
-        "Product Categories", "Product Subcategories", "Products", "Users", "Company Products","Plans","Dashboard","Assign User Roles", "User Product Search"
-    ]
+    "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+    "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
+    "Product Categories", "Product Subcategories", "Products", "Users",
+    "Company Products","Plans","Dashboard","Assign User Roles",
+    "User Product Search", "Bank Information","Bank Documents"
+  ]
+
 
     privileges_data = [
         # Admin full access

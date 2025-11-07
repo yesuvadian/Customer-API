@@ -1,3 +1,4 @@
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -7,7 +8,7 @@ from schemas import CompanyBankInfoCreateSchema, CompanyBankInfoSchema, CompanyB
 from services.companybankinfo_service import CompanyBankInfoService
 
 router = APIRouter(
-    prefix="/bank_info",
+    prefix="/company_bank_info",
     tags=["vendor-bank-info"],
     dependencies=[Depends(get_current_user)]
 )
@@ -15,6 +16,16 @@ router = APIRouter(
 @router.get("/", response_model=list[CompanyBankInfoSchema])
 def list_bank_info(db: Session = Depends(get_db)):
     return CompanyBankInfoService.get_vendor_bank_info(db, get_current_user().id)
+
+@router.get("/company/{company_id}", response_model=list[CompanyBankInfoSchema])
+def get_bank_info_by_company_id(company_id: UUID, db: Session = Depends(get_db)):
+    bank_info = CompanyBankInfoService.get_bank_info_by_company_id(db, company_id)
+    if not bank_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No bank info found for this company"
+        )
+    return bank_info
 
 @router.get("/{bank_info_id}", response_model=CompanyBankInfoSchema)
 def get_bank_info(bank_info_id: int, db: Session = Depends(get_db)):
