@@ -1,6 +1,6 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from models import CompanyProductCertificate
+from models import CompanyProductCertificate, CompanyProductSupplyReference
 
 
 class CompanyProductCertificateService:
@@ -81,3 +81,23 @@ class CompanyProductCertificateService:
         db.delete(certificate)
         db.commit()
         return {"message": "Certificate deleted successfully"}
+    @classmethod
+    def check_documents(cls, db: Session, company_product_id: int) -> dict:
+            has_certificate = (
+                db.query(CompanyProductCertificate)
+                .filter(CompanyProductCertificate.company_product_id == company_product_id)
+                .first()
+                is not None
+            )
+
+            has_reference = (
+                db.query(CompanyProductSupplyReference)
+                .filter(CompanyProductSupplyReference.company_product_id == company_product_id)
+                .first()
+                is not None
+            )
+
+            return {
+                "has_certificate": has_certificate,
+                "has_reference": has_reference,
+            }

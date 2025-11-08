@@ -3,7 +3,7 @@ from sqlalchemy import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List
-from models import CompanyProduct
+from models import CompanyProduct, Product
 
 
 class CompanyProductService:
@@ -12,8 +12,18 @@ class CompanyProductService:
     def get_company_product(cls, db: Session, company_product_id: int):
         return db.query(CompanyProduct).filter(CompanyProduct.id == company_product_id).first()
 
-    from uuid import UUID
-
+    
+    @classmethod
+    def get_company_product_list(cls, db: Session, company_id: str):
+        """
+        Returns only the PRODUCT list for assigned company products.
+        """
+        return (
+            db.query(Product)
+            .join(CompanyProduct, CompanyProduct.product_id == Product.id)
+            .filter(CompanyProduct.company_id == company_id)
+            .all()
+        )
     @classmethod
     def get_company_products(cls, db: Session, company_id: str, skip: int = 0, limit: int = 100):
         products = (

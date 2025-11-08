@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 
-from services.company_product_supply_reference_service import CompanyProductSupplyReferenceService
 from schemas import CompanyProductSupplyReferenceOut
+from services.companyproductsupplyReference_service import CompanyProductSupplyReferenceService
 
 
 router = APIRouter(

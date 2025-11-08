@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 
-from services.company_product_certificate_service import CompanyProductCertificateService
+
 from schemas import CompanyProductCertificateOut
+from services.companyproductcertificate_service import CompanyProductCertificateService
 
 
 router = APIRouter(
@@ -61,3 +62,10 @@ def get_certificate(cert_id: int, db: Session = Depends(get_db)):
 @router.delete("/{cert_id}")
 def delete_certificate(cert_id: int, db: Session = Depends(get_db)):
     return service.delete_certificate(db, cert_id)
+
+@router.get("/check/{company_product_id}")
+def check_certificates(
+    company_product_id: int,
+    db: Session = Depends(get_db)
+):
+    return service.check_documents(db, company_product_id)
