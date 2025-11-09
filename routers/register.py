@@ -1,10 +1,11 @@
 import json
 from typing import List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile,status
+import httpx
 from sqlalchemy.orm import Session
 
 from auth_utils import get_registration_user
-from config import MAX_FILE_SIZE_KB
+from config import MAX_FILE_SIZE_KB, NOMINATIM_URL
 from database import get_db
 from routers.company_tax_documents import MAX_FILE_SIZE_BYTES
 import schemas
@@ -145,6 +146,27 @@ async def upload_tax_document_reg(
             detail=f"Upload failed: {str(e)}",
         )
 
+
+@router.get("/reverse-geocode")
+async def reverse_geocode(
+    lat: float = Query(...),
+    lon: float = Query(...)
+):
+    params = {
+        "lat": lat,
+        "lon": lon,
+        "format": "json",
+        "addressdetails": 1,
+    }
+
+    headers = {
+        "User-Agent": "dine_eaze_app"   # REQUIRED by Nominatim
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(NOMINATIM_URL, params=params, headers=headers)
+    
+    return response.json()
 @router.post("/tax-info", response_model=schemas.CompanyTaxInfoOut, status_code=status.HTTP_201_CREATED)
 def create_company_tax_info_reg(tax_info: schemas.CompanyTaxInfoCreate, db: Session = Depends(get_db)):
     """Create a new tax info record (generic)"""

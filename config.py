@@ -17,6 +17,7 @@ ERP_API_KEY = os.getenv("ERP_API_KEY", "")   # optional
 ERP_TIMEOUT = int(os.getenv("ERP_TIMEOUT", "30"))
 ERP_RETRY_COUNT = int(os.getenv("ERP_RETRY_COUNT", "3"))
 ERP_RETRY_DELAY = int(os.getenv("ERP_RETRY_DELAY", "2"))  # seconds
+NOMINATIM_URL = os.getenv("NOMINATIM_URL", "https://nominatim.openstreetmap.org/reverse")
 
 # Construct SQLAlchemy database URL
 DATABASE_URL = (
