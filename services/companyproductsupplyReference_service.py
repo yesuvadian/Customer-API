@@ -59,22 +59,35 @@ class CompanyProductSupplyReferenceService:
         db.commit()
         db.refresh(reference)
         return reference
-
     @classmethod
-    def update_reference(cls, db: Session, ref_id: int, updates: dict):
-        reference = cls.get_reference(db, ref_id)
-        if not reference:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Supply reference not found",
-            )
+    def update_reference(
+    self,
+    db: Session,
+    ref_id: int,
+    description: str | None = None,
+    customer_name: str | None = None,
+    reference_date: str | None = None,
+    modified_by: str | None = None,
+):
+        ref = db.query(CompanyProductSupplyReference).filter_by(id=ref_id).first()
+        if not ref:
+            raise HTTPException(status_code=404, detail="Reference not found")
 
-        for key, value in updates.items():
-            setattr(reference, key, value)
+        if description is not None:
+            ref.description = description
+
+        if customer_name is not None:
+            ref.customer_name = customer_name
+
+        if reference_date is not None:
+            ref.reference_date = reference_date
+
+        ref.modified_by = modified_by
 
         db.commit()
-        db.refresh(reference)
-        return reference
+        db.refresh(ref)
+        return ref
+
 
     @classmethod
     def delete_reference(cls, db: Session, ref_id: int):

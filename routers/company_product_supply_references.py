@@ -14,7 +14,23 @@ router = APIRouter(
 )
 
 service = CompanyProductSupplyReferenceService()
-
+@router.patch("/update/{ref_id}", response_model=CompanyProductSupplyReferenceOut)
+async def update_reference(
+    ref_id: int,
+    description: str | None = Form(None),
+    customer_name: str | None = Form(None),
+    reference_date: str | None = Form(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    return service.update_reference(
+        db=db,
+        ref_id=ref_id,
+        description=description,
+        customer_name=customer_name,
+        reference_date=reference_date,
+        modified_by=str(current_user.id)
+    )
 
 @router.get("/", response_model=list[CompanyProductSupplyReferenceOut])
 def list_references(
@@ -64,23 +80,7 @@ def get_reference(ref_id: int, db: Session = Depends(get_db)):
 
 from fastapi import Form
 
-@router.patch("/{ref_id}", response_model=CompanyProductSupplyReferenceOut)
-async def update_reference(
-    ref_id: int,
-    description: str | None = Form(None),
-    customer_name: str | None = Form(None),
-    reference_date: str | None = Form(None),
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    return service.update_reference(
-        db=db,
-        ref_id=ref_id,
-        description=description,
-        customer_name=customer_name,
-        reference_date=reference_date,
-        modified_by=str(current_user.id)
-    )
+
 
 @router.delete("/{ref_id}")
 def delete_reference(ref_id: int, db: Session = Depends(get_db)):
