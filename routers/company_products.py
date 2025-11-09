@@ -3,17 +3,15 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 #from services.company_product_service import CompanyProductService
-from schemas import CompanyProductBulkAssignRequest, CompanyProductSchema, ProductSchema
+from schemas import CompanyAssignedProductSchema, CompanyProductBulkAssignRequest, CompanyProductSchema
 from services.companyproduct_service import CompanyProductService  # <-- Pydantic schema
 
 router = APIRouter(prefix="/company_products", tags=["company_products"],dependencies=[Depends(get_current_user)])
 
-@router.get("/products/{company_id}", response_model=list[ProductSchema])
+@router.get("/products/{company_id}", response_model=list[CompanyAssignedProductSchema])
 def list_company_assigned_products(company_id: str, db: Session = Depends(get_db)):
-    """
-    Returns product list assigned to a company.
-    """
     return CompanyProductService.get_company_product_list(db, company_id)
+
 
 @router.get("/{company_id}", response_model=list[CompanyProductSchema])
 def list_company_products(company_id: str, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):

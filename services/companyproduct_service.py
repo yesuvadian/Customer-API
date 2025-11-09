@@ -15,15 +15,28 @@ class CompanyProductService:
     
     @classmethod
     def get_company_product_list(cls, db: Session, company_id: str):
-        """
-        Returns only the PRODUCT list for assigned company products.
-        """
-        return (
-            db.query(Product)
-            .join(CompanyProduct, CompanyProduct.product_id == Product.id)
+        records = (
+            db.query(CompanyProduct)
             .filter(CompanyProduct.company_id == company_id)
             .all()
         )
+
+        result = []
+        for cp in records:
+            product = cp.product  # relationship
+
+            result.append({
+                "company_product_id": cp.id,
+                "product_id": product.id,
+                "name": product.name,
+                "sku": product.sku,
+                "category_id": product.category_id,
+                "subcategory_id": product.subcategory_id,
+                "description": product.description,
+            })
+
+        return result
+
     @classmethod
     def get_company_products(cls, db: Session, company_id: str, skip: int = 0, limit: int = 100):
         products = (

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Query
+from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
@@ -8,7 +8,7 @@ from services.companyproductsupplyReference_service import CompanyProductSupplyR
 
 
 router = APIRouter(
-    prefix="/company-product-supply-references",
+    prefix="/company_product_supply_references",
     tags=["company product supply references"],
     dependencies=[Depends(get_current_user)],
 )
@@ -29,9 +29,11 @@ def list_references(
 @router.post("/", response_model=CompanyProductSupplyReferenceOut, status_code=status.HTTP_201_CREATED)
 async def upload_reference(
     company_product_id: int = Query(...),
-    description: str | None = None,
-    customer_name: str | None = None,
-    reference_date: str | None = None,
+
+    description: str | None = Form(None),
+    customer_name: str | None = Form(None),
+    reference_date: str | None = Form(None),
+
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
@@ -52,6 +54,7 @@ async def upload_reference(
     )
 
 
+
 @router.get("/{ref_id}", response_model=CompanyProductSupplyReferenceOut)
 def get_reference(ref_id: int, db: Session = Depends(get_db)):
     ref = service.get_reference(db, ref_id)
@@ -59,6 +62,25 @@ def get_reference(ref_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Reference not found")
     return ref
 
+from fastapi import Form
+
+@router.patch("/{ref_id}", response_model=CompanyProductSupplyReferenceOut)
+async def update_reference(
+    ref_id: int,
+    description: str | None = Form(None),
+    customer_name: str | None = Form(None),
+    reference_date: str | None = Form(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    return service.update_reference(
+        db=db,
+        ref_id=ref_id,
+        description=description,
+        customer_name=customer_name,
+        reference_date=reference_date,
+        modified_by=str(current_user.id)
+    )
 
 @router.delete("/{ref_id}")
 def delete_reference(ref_id: int, db: Session = Depends(get_db)):

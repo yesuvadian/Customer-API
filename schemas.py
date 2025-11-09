@@ -354,6 +354,18 @@ class PlanOut(BaseModel):
     class Config:
         orm_mode = True
 
+class CompanyAssignedProductSchema(BaseModel):
+    company_product_id: int
+    product_id: int
+    name: str
+    sku: str
+    category_id: int | None = None
+    subcategory_id: int | None = None
+    description: str | None = None
+
+    class Config:
+        orm_mode = True
+
 
 class ProductSchema(BaseModel):
     id: int

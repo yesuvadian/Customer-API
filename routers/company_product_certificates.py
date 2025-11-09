@@ -9,14 +9,19 @@ from services.companyproductcertificate_service import CompanyProductCertificate
 
 
 router = APIRouter(
-    prefix="/company-product-certificates",
+    prefix="/company_product_certificates",
     tags=["company product certificates"],
     dependencies=[Depends(get_current_user)],
 )
 
 service = CompanyProductCertificateService()
 
-
+@router.get("/check/{company_product_id}")
+def check_certificates(
+    company_product_id: int,
+    db: Session = Depends(get_db)
+):
+    return service.check_documents(db, company_product_id)
 @router.get("/", response_model=list[CompanyProductCertificateOut])
 def list_certificates(
     company_product_id: int = Query(...),
@@ -63,9 +68,4 @@ def get_certificate(cert_id: int, db: Session = Depends(get_db)):
 def delete_certificate(cert_id: int, db: Session = Depends(get_db)):
     return service.delete_certificate(db, cert_id)
 
-@router.get("/check/{company_product_id}")
-def check_certificates(
-    company_product_id: int,
-    db: Session = Depends(get_db)
-):
-    return service.check_documents(db, company_product_id)
+
