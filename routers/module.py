@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -17,9 +18,18 @@ class ModuleCreateRequest(BaseModel):
     group_name: Optional[str]
 
 class ModuleUpdateRequest(BaseModel):
+    name: Optional[str]
     description: Optional[str]
     path: Optional[str]
     group_name: Optional[str]
+    is_active: Optional[bool]
+    created_by: Optional[int]
+    modified_by: Optional[int]
+    cts: Optional[datetime]
+    mts: Optional[datetime]
+
+    class Config:
+        orm_mode = True
 
 @router.get("/", response_model=List[dict])
 async def list_modules(
