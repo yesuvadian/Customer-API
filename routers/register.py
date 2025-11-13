@@ -17,6 +17,7 @@ from services.user_service import UserService  # import the class
 from services.user_address_service import UserAddressService
 from services.company_tax_service import CompanyTaxService
 from services.company_tax_document_service import CompanyTaxDocumentService
+from utils.email_service import EmailService
 
 router = APIRouter(prefix="/register", tags=["register"])
 address_service = UserAddressService()
@@ -34,6 +35,86 @@ def create_user(user: schemas.UserRegistor, db: Session = Depends(get_db)):
 @router.get("/countries", response_model=list[schemas.CountryOut])
 def list_allcountries(skip: int = 0, limit: int = 100, search: str = None, db: Session = Depends(get_db)):
     return countryservice.get_countries(db, skip=skip, limit=limit, search=search)
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+import pyotp
+from datetime import datetime, timedelta
+
+
+
+# Simple in-memory storage for demo (replace with Redis or DB)
+otp_store = {}
+
+TOTP_INTERVAL = 120  # seconds (2 minutes)
+
+class OTPRequest(BaseModel):
+    email: str | None = None
+    phone: str | None = None
+
+
+@router.post("/generate-otp")
+def generate_otp(payload: OTPRequest):
+    """Generate and send OTP (email preferred, fallback to phone)"""
+    if not payload.email and not payload.phone:
+        raise HTTPException(status_code=400, detail="Email or phone required")
+
+    # Create or reuse a TOTP secret for this user (could be stored in DB)
+    totp_secret = pyotp.random_base32()
+
+    # Generate OTP
+    otp = pyotp.TOTP(totp_secret, interval=TOTP_INTERVAL).now()
+
+    # Send via your helper
+    if payload.email:
+            # ✅ Instantiate EmailService and send the OTP
+        email_service = EmailService()
+        email_service.send_totp(payload.email, otp)
+    #elif payload.phone:
+        #SMSService.send_totp(payload.phone, otp)
+
+    # Store for verification
+    otp_store[payload.email or payload.phone] = {
+        "otp": otp,
+        "secret": totp_secret,
+        "expires_at": datetime.utcnow() + timedelta(seconds=TOTP_INTERVAL),
+    }
+
+    return {"message": "OTP sent successfully"}
+class VerifyOTPRequest(BaseModel):
+    email: str | None = None
+    phone: str | None = None
+    otp: str
+
+
+
+
+@router.post("/verify-otp")
+def verify_otp(payload: VerifyOTPRequest):
+    """Verify OTP for email or phone"""
+    key = payload.email or payload.phone
+    if not key:
+        raise HTTPException(status_code=400, detail="Email or phone required")
+
+    record = otp_store.get(key)
+    if not record:
+        raise HTTPException(status_code=404, detail="No OTP found or expired")
+
+    # Check expiry
+    if datetime.utcnow() > record["expires_at"]:
+        del otp_store[key]
+        raise HTTPException(status_code=400, detail="OTP expired")
+
+    # Verify
+    totp = pyotp.TOTP(record["secret"], interval=TOTP_INTERVAL)
+    is_valid = totp.verify(payload.otp, valid_window=1)
+
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    # Clear OTP after verification
+    del otp_store[key]
+
+    return {"verified": True}
 
 @router.get("/states", response_model=list[schemas.StateOut])
 def list_allstates(
