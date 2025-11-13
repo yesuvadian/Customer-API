@@ -272,6 +272,7 @@ def seed_user_roles(session, role_ids):
 # ----------------- TNEB Product Seed -----------------
 
 def seed_product_categories(session):
+ 
     categories_data = [
         {"name": "Transformers", "description": "Distribution and power transformers"},
         {"name": "Meters", "description": "Electricity meters – single phase, three phase"},
@@ -279,7 +280,16 @@ def seed_product_categories(session):
         {"name": "Switchgear & Panels", "description": "Circuit breakers, panels, and switchgear"},
         {"name": "Street Lighting", "description": "LED lamps, poles, and lighting equipment"},
         {"name": "Tools & Accessories", "description": "Electrical tools, testers, and accessories"},
+        {"name": "Solar Combiner Boxes", "description": "Polycarbonate and FRP/GRP enclosures for solar combiner systems"},
+        {"name": "Cable Glands", "description": "Brass and polyamide cable glands for secure cable terminations"},
+        {"name": "Sockets", "description": "Panel-mounted sockets for industrial power connections"},
+        {"name": "Plug", "description": "Industrial power plugs for electrical connections"},
+        {"name": "Fuse Holder", "description": "Fuse holders for electrical and photovoltaic protection"},
+        {"name": "Fuse", "description": "Fuses for circuit protection and electrical safety"},
+        {"name": "EV Changer", "description": "AC, DC, and EV charging connectors"},
+        {"name": "Surge Protection", "description": "Devices for surge and overvoltage protection"},
     ]
+
 
     category_ids = {}
     for c in categories_data:
@@ -307,22 +317,24 @@ def seed_product_categories(session):
 def seed_product_subcategories(session, category_ids):
     subcategories_data = [
         {"name": "Distribution Transformers", "category": "Transformers"},
-        {"name": "Power Transformers", "category": "Transformers"},
-        {"name": "Single Phase Meters", "category": "Meters"},
         {"name": "Three Phase Meters", "category": "Meters"},
         {"name": "XLPE Cables", "category": "Cables & Wires"},
-        {"name": "PVC Wires", "category": "Cables & Wires"},
-        {"name": "Overhead Conductors", "category": "Cables & Wires"},
         {"name": "Circuit Breakers", "category": "Switchgear & Panels"},
-        {"name": "Panels", "category": "Switchgear & Panels"},
-        {"name": "Relays", "category": "Switchgear & Panels"},
         {"name": "LED Lamps", "category": "Street Lighting"},
-        {"name": "Poles", "category": "Street Lighting"},
-        {"name": "Solar Street Lights", "category": "Street Lighting"},
         {"name": "Testers", "category": "Tools & Accessories"},
-        {"name": "Hand Tools", "category": "Tools & Accessories"},
-        {"name": "Safety Equipment", "category": "Tools & Accessories"},
+        {"name": "Polycarbonate Enclosures", "category": "Solar Combiner Boxes"},
+        {"name": "FRP/GRP Enclosures", "category": "Solar Combiner Boxes"},
+        {"name": "Brass", "category": "Cable Glands"},
+        {"name": "Polyamide", "category": "Cable Glands"},
+        {"name": "Panel Mounted Sockets", "category": "Sockets"},
+        {"name": "Industrial Plug", "category": "Plug"},
+        {"name": "Fuse Accessories", "category": "Fuse Holder"},
+        {"name": "Fuse Links", "category": "Fuse"},
+        {"name": "EV Connectors", "category": "EV Changer"},
+        {"name": "SPD", "category": "Surge Protection"},
     ]
+
+
 
     subcategory_ids = {}
     for sc in subcategories_data:
@@ -416,7 +428,30 @@ def seed_products(session, category_ids, subcategory_ids):
         {"name": "Air Circuit Breaker 400A", "category": "Switchgear & Panels", "subcategory": "Circuit Breakers", "sku": "TNEB-ACB400", "description": "400A air circuit breaker"},
         {"name": "LED Street Light 50W", "category": "Street Lighting", "subcategory": "LED Lamps", "sku": "TNEB-LED50", "description": "Energy-efficient 50W LED street lamp"},
         {"name": "Digital Clamp Meter", "category": "Tools & Accessories", "subcategory": "Testers", "sku": "TNEB-TLM01", "description": "Clamp meter for electrical measurements"},
+        {"name": "Polycarbonate Encloser 600X600X227", "category": "Solar Combiner Boxes", "subcategory": "Polycarbonate Enclosures", "sku": "01 17 07831-HE-PC 6060 22/180 T X P", "description": "Solar Combiner boxes"},
+        {"name": "Polycarbonate Encloser 600X600X227", "category": "Solar Combiner Boxes", "subcategory": "Polycarbonate Enclosures", "sku": "01 17 00606-HE-PC 5638 18/150 T X P", "description": "Solar Combiner boxes"},
+        {"name": "FRP/GRP Encloser 650X550X250", "category": "Solar Combiner Boxes", "subcategory": "FRP/GRP Enclosures", "sku": "01 17 06378-FRP/GRP ENCL 650X550X250 H", "description": "Solar Combiner boxes"},
+        {"name": "FRP/GRP Encloser 850X700X300", "category": "Solar Combiner Boxes", "subcategory": "FRP/GRP Enclosures", "sku": "01 17 07827-FRP/GRP ENCL 850X700X300 VERTI", "description": "Solar Combiner boxes"},
+        {"name": "Cable Gland M40-IP68", "category": "Cable Glands", "subcategory": "Brass", "sku": "01 17 11006-TTMMUL-40", "description": "Cable Glands - Nickel Plated Brass"},
+        {"name": "Cable Gland M50-IP68", "category": "Cable Glands", "subcategory": "Brass", "sku": "01 17 11007-TTMMUL-50", "description": "Cable Glands - Nickel Plated Brass"},
+        {"name": "Cable Gland M63-IP68", "category": "Cable Glands", "subcategory": "Brass", "sku": "01 17 11008-TTMMUL-63", "description": "Cable Glands - Nickel Plated Brass"},
+        {"name": "Cable Gland M40-IP68", "category": "Cable Glands", "subcategory": "Polyamide", "sku": "01 17 11046-TTMWUL-40", "description": "Cable Glands - Polyamide"},
+        {"name": "Cable Gland M50-IP68", "category": "Cable Glands", "subcategory": "Polyamide", "sku": "01 17 11047--TTMWUL-50", "description": "Cable Glands - Polyamide"},
+        {"name": "Cable Gland M63-IP68", "category": "Cable Glands", "subcategory": "Polyamide", "sku": "01 17 11048--TTMWUL-63", "description": "Cable Glands - Polyamide"},
+        {"name": "Panel Mounted Socket 16A,3P TTS-B1361-6 IP67", "category": "Sockets", "subcategory": "Panel Mounted Sockets", "sku": "014300037-Socket 16A,3P TTS-B1361-6 IP67", "description": "Panel Mounted Sockets"},
+        {"name": "Plug 16A,3P TTS-A136-6 IP67", "category": "Plug", "subcategory": "Industrial Plug", "sku": "014300010-Plug 16A,3P TTS-A136-6 IP67", "description": "Plug"},
+        {"name": "Panel Mounted Socket 32A,3P TTS-B2361-6 IP67", "category": "Sockets", "subcategory": "Panel Mounted Sockets", "sku": "014300048-Socket 32A,3P TTS-B2361-6 IP67", "description": "Panel Mounted Sockets"},
+        {"name": "Plug 32A,3P TTS-A236-6 IP67", "category": "Plug", "subcategory": "Industrial Plug", "sku": "014300050-Plug 32A,3P TTS-A236-6 IP67", "description": "Plug"},
+        {"name": "Panel Mounted Socket 63A,3P TTS-B3361-6 IP67", "category": "Sockets", "subcategory": "Panel Mounted Sockets", "sku": "014300068-Socket 63A,3P TTS-B3361-6 IP67", "description": "Panel Mounted Sockets"},
+        {"name": "Plug 63A,3P TTS-A336-6 IP67", "category": "Plug", "subcategory": "Industrial Plug", "sku": "014-300069-Plug 63A,3P TTS-A336-6 IP67", "description": "Plug"},
+        {"name": "Fuse Holder 32A 1000V", "category": "Fuse Holder", "subcategory": "Fuse Accessories", "sku": "011709980 - TT PV FUSE HOLDER 32A 1000V", "description": "Fuse Holder"},
+        {"name": "Fuse PV10-32A-38", "category": "Fuse", "subcategory": "Fuse Links", "sku": "039926800-PV10-32A-38", "description": "Fuse"},
+        {"name": "LEV DC 2W/3W CONNECTOR", "category": "EV Changer", "subcategory": "EV Connectors", "sku": "011716389-TTEV50A-60VDC-T6-7C2", "description": "EV Changer"},
+        {"name": "AC TYPE 2 CONNECTOR", "category": "EV Changer", "subcategory": "EV Connectors", "sku": "011710084-TTEV32A-3P5T2", "description": "EV Changer"},
+        {"name": "DC CCS-2 CHARGING CONNECTOR", "category": "EV Changer", "subcategory": "EV Connectors", "sku": "011710077-TTEV-200ADC-CCS", "description": "EV Changer"},
+        {"name": "Surge Protection Device", "category": "Surge Protection", "subcategory": "SPD", "sku": "", "description": "Surge protection device"},
     ]
+
 
     for p in products_data:
         category_id = category_ids.get(p["category"])
