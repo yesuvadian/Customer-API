@@ -597,3 +597,55 @@ class CompanyProductSupplyReferenceOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+# ---------- Division ----------
+class DivisionBase(BaseModel):
+    division_name: str
+    description: Optional[str] = None
+
+class DivisionCreate(DivisionBase):
+    pass
+
+class DivisionUpdate(DivisionBase):
+    pass
+
+class DivisionResponse(DivisionBase):
+    id: UUID
+    cts: datetime
+    mts: datetime
+    class Config:
+        orm_mode = True
+
+
+# ---------- UserDocument ----------
+class UserDocumentBase(BaseModel):
+    division_name: str
+    document_name: str
+    document_type: Optional[str] = None
+    document_url: Optional[str] = None
+    file_size: Optional[int] = None
+    content_type: Optional[str] = None
+    om_number: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    is_active: Optional[bool] = True
+
+class UserDocumentCreate(UserDocumentBase):
+    user_id: UUID
+    uploaded_by: Optional[UUID] = None
+    file_data: Optional[bytes] = None
+
+class UserDocumentUpdate(BaseModel):
+    om_number: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    is_active: Optional[bool] = None
+    document_url: Optional[str] = None
+    modified_by: Optional[UUID] = None
+
+class UserDocumentResponse(UserDocumentBase):
+    id: UUID
+    user_id: UUID
+    uploaded_by: Optional[UUID]
+    uploaded_at: datetime
+    class Config:
+        orm_mode = True

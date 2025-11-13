@@ -198,7 +198,7 @@ class User(Base):
         cascade="all, delete-orphan",
         foreign_keys="[CompanyBankInfo.company_id]"
     )
-
+    documents = relationship("UserDocument", back_populates="user", cascade="all, delete-orphan")
 
 
 
@@ -713,6 +713,57 @@ class CompanyProductCertificate(Base):
         foreign_keys=[company_product_id]
     )
     creator = relationship("User", foreign_keys=[created_by])
+class UserDocument(Base):
+    __tablename__ = "user_documents"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
+
+    # Division stored as string instead of FK
+    division_name = Column(String(255), nullable=False)
+
+    document_name = Column(String(255), nullable=False)
+    document_type = Column(String(100))
+    document_url = Column(Text)
+    file_data = Column(LargeBinary)
+    file_size = Column(Integer)
+    content_type = Column(String(100))
+
+    om_number = Column(String(100))
+    expiry_date = Column(DateTime(timezone=True))
+    is_active = Column(Boolean, default=True)
+
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # ERP integration fields
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True))
+    erp_error_message = Column(Text)
+    erp_external_id = Column(String(255))
+
+    # Relationships
+    user = relationship("User", back_populates="documents", foreign_keys=[user_id])
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+
+class Division(Base):
+    __tablename__ = "divisions"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    division_name = Column(String(255), unique=True, nullable=False)
+    description = Column(String(500))
+
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationship
+    documents = relationship("UserDocument", back_populates="division")
+
 class CompanyProductSupplyReference(Base):
     __tablename__ = "company_product_supply_references"
     __table_args__ = {"schema": "public"}
