@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 from database import SessionLocal
-from models import Country, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module
+from models import Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
@@ -133,6 +133,8 @@ def seed_modules(session):
 
         {"name": "Company Product Certificates", "description": "Upload product performance certificates", "path": "company_product_certificates", "group_name": "Company"},
 {"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company"},
+{"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
+{"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company"},
 
     ]
 
@@ -164,13 +166,15 @@ def seed_modules(session):
 
 def seed_privileges(session, role_ids, module_ids):
     module_names = [
-        "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
-        "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
-        "Product Categories", "Product Subcategories", "Products", "Users",
-        "Company Products", "Plans", "Dashboard", "Assign User Roles",
-        "User Product Search", "Bank Information", "Bank Documents",
-        "Company Product Certificates", "Company Product Supply References"
+    "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+    "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
+    "Product Categories", "Product Subcategories", "Products", "Users",
+    "Company Products", "Plans", "Dashboard", "Assign User Roles",
+    "User Product Search", "Bank Information", "Bank Documents",
+    "Divisions", "User Documents",
+    "Company Product Certificates", "Company Product Supply References"
     ]
+
 
 
 
@@ -313,6 +317,33 @@ def seed_product_categories(session):
     print("✅ Product categories seeded successfully.")
     return category_ids
 
+def seed_divisions(session):
+    """
+    Seeds default divisions that can be used for approval and user document uploads.
+    """
+    divisions_data = [
+        {"name": "Electrical Division", "code": "ELEC", "description": "Handles all electrical-related approvals"},
+        {"name": "Mechanical Division", "code": "MECH", "description": "Handles mechanical and fabrication approvals"},
+        {"name": "Civil Division", "code": "CIVIL", "description": "Handles civil and infrastructure approvals"},
+        {"name": "IT Division", "code": "IT", "description": "Handles IT, software, and digital infrastructure"},
+    ]
+
+    for d in divisions_data:
+        existing = session.query(Division).filter_by(name=d["name"]).first()
+        if not existing:
+            division = Division(
+                name=d["name"],
+                code=d["code"],
+                description=d["description"],
+                is_active=True
+            )
+            session.add(division)
+        else:
+            existing.description = d["description"]
+            existing.is_active = True
+
+    session.commit()
+    print("✅ Divisions seeded successfully.")
 
 def seed_product_subcategories(session, category_ids):
     subcategories_data = [

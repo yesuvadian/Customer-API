@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
@@ -15,27 +15,32 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)]
 )
 
-
-# ----------------- CREATE -----------------
 @router.post("/", response_model=UserDocumentResponse)
-def create_user_document(document: UserDocumentCreate, db: Session = Depends(get_db)):
+async def create_user_document(
+    user_id: UUID = Form(...),
+    division_id: UUID = Form(...),
+    document_name: str = Form(...),
+    om_number: Optional[str] = Form(None),
+    expiry_date: Optional[datetime] = Form(None),
+    file_data: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
     service = UserDocumentService(db)
-    try:
-        return service.create_document(
-            user_id=document.user_id,
-            division_name=document.division_name,
-            document_name=document.document_name,
-            document_type=document.document_type,
-            document_url=document.document_url,
-            file_data=document.file_data,
-            file_size=document.file_size,
-            content_type=document.content_type,
-            om_number=document.om_number,
-            expiry_date=document.expiry_date,
-            uploaded_by=document.uploaded_by
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    contents = await file_data.read()
+
+    document = service.create_document(
+        user_id=user_id,
+        division_id=division_id,
+        document_name=document_name,
+        document_type=file_data.content_type,
+        file_data=contents,
+        file_size=len(contents),
+        content_type=file_data.content_type,
+        om_number=om_number,
+        expiry_date=expiry_date
+    )
+    return document
+
 
 
 # ----------------- READ -----------------
