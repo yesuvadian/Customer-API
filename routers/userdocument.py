@@ -18,7 +18,8 @@ router = APIRouter(
 @router.post("/", response_model=UserDocumentResponse)
 async def create_user_document(
     user_id: UUID = Form(...),
-    division_id: UUID = Form(...),
+    division = relationship("Division", back_populates="documents", foreign_keys=[division_id]),
+    division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id")),
     document_name: str = Form(...),
     om_number: Optional[str] = Form(None),
     expiry_date: Optional[datetime] = Form(None),
@@ -30,7 +31,8 @@ async def create_user_document(
 
     document = service.create_document(
         user_id=user_id,
-        division_id=division_id,
+        division = relationship("Division", back_populates="documents", foreign_keys=[division_id]),
+        division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id")),
         document_name=document_name,
         document_type=file_data.content_type,
         file_data=contents,

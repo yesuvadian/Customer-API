@@ -198,7 +198,13 @@ class User(Base):
         cascade="all, delete-orphan",
         foreign_keys="[CompanyBankInfo.company_id]"
     )
-    documents = relationship("UserDocument", back_populates="user", cascade="all, delete-orphan")
+    documents = relationship(
+    "UserDocument",
+    back_populates="user",
+    cascade="all, delete-orphan",
+    foreign_keys="[UserDocument.user_id]"
+)
+
 
 
 
@@ -723,7 +729,7 @@ class UserDocument(Base):
 
     # Division stored as string instead of FK
     division_name = Column(String(255), nullable=False)
-
+    division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id"), nullable=False)
     document_name = Column(String(255), nullable=False)
     document_type = Column(String(100))
     document_url = Column(Text)
@@ -748,7 +754,13 @@ class UserDocument(Base):
 
     # Relationships
     user = relationship("User", back_populates="documents", foreign_keys=[user_id])
-    uploader = relationship("User", foreign_keys=[uploaded_by])
+    uploader = relationship("User", foreign_keys=[uploaded_by], backref="uploaded_documents")
+    division = relationship(
+    "Division",
+    back_populates="documents",
+    foreign_keys=[division_id]
+)
+
 
 class Division(Base):
     __tablename__ = "divisions"
@@ -762,7 +774,7 @@ class Division(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationship
-    documents = relationship("UserDocument", back_populates="division")
+    documents = relationship("UserDocument", back_populates="division",foreign_keys="[UserDocument.division_id]")
 
 class CompanyProductSupplyReference(Base):
     __tablename__ = "company_product_supply_references"
