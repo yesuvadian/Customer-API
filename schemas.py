@@ -310,7 +310,7 @@ class ProductCategorySchema(BaseModel):
 class ProductSubCategorySchema(BaseModel):
     id: int
     name: str
-    category_id: int
+    category_id: int | None = None
     description: str | None = None
 
     class Config:
