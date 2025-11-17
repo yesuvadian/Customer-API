@@ -292,6 +292,8 @@ def seed_product_categories(session):
         {"name": "Fuse", "description": "Fuses for circuit protection and electrical safety"},
         {"name": "EV Changer", "description": "AC, DC, and EV charging connectors"},
         {"name": "Surge Protection", "description": "Devices for surge and overvoltage protection"},
+        {"name": "Filteration", "description": "Transformer oil filtration systems"},
+        {"name": "Transformer Safety", "description": "Transformer safety and fire protection systems"},
     ]
 
 
@@ -363,7 +365,10 @@ def seed_product_subcategories(session, category_ids):
         {"name": "Fuse Links", "category": "Fuse"},
         {"name": "EV Connectors", "category": "EV Changer"},
         {"name": "SPD", "category": "Surge Protection"},
+        {"name": "Filteration", "category": "Filteration"},
+        {"name": "Transformer Safety", "category": "Transformer Safety"},
     ]
+    
 
 
 
@@ -490,6 +495,9 @@ def seed_products(session, category_ids, subcategory_ids):
         {"name": "AC TYPE 2 CONNECTOR", "category": "EV Changer", "subcategory": "EV Connectors", "sku": "011710084-TTEV32A-3P5T2", "description": "EV Changer"},
         {"name": "DC CCS-2 CHARGING CONNECTOR", "category": "EV Changer", "subcategory": "EV Connectors", "sku": "011710077-TTEV-200ADC-CCS", "description": "EV Changer"},
         {"name": "Surge Protection Device", "category": "Surge Protection", "subcategory": "SPD", "sku": "", "description": "Surge protection device"},
+        {"name": "Transformer Online dryout System", "category": "Filteration", "subcategory": "Filteration", "sku": "TODOS", "description": "Online dryout boosts transformer lifespan"},
+        {"name": "Transformer Offline Filteration Machine", "category": "Filteration", "subcategory": "Filteration", "sku": "TOFT", "description": "Offline filtration restores transformer oil"},
+        {"name": "Nitrogen Injection Fire Protection System", "category": "Transformer Safety", "subcategory": "Transformer Safety", "sku": "NIFPS", "description": "Nitrogen system protects transformers from fires"}
     ]
 
 
