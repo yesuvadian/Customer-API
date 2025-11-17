@@ -369,27 +369,36 @@ def seed_product_subcategories(session, category_ids):
 
     subcategory_ids = {}
     for sc in subcategories_data:
-        category_id = category_ids.get(sc["category"])
+        category_name = sc["category"]
+        subcategory_name = sc["name"]
+        category_id = category_ids.get(category_name)
         if not category_id:
-            print(f"⚠️ Category not found for subcategory: {sc['name']}")
+            print(f"⚠️ Category not found for subcategory: {subcategory_name}")
             continue
 
-        existing = session.query(ProductSubCategory).filter_by(name=sc["name"]).first()
+        existing = session.query(ProductSubCategory).filter_by(
+            name=subcategory_name,
+            category_id=category_id 
+        ).first()
+        description = f"{subcategory_name} under {category_name}"
         if not existing:
             subcat = ProductSubCategory(
-                name=sc["name"],
-                description=f"{sc['name']} under {sc['category']}",
+                name=subcategory_name,
+                description=description,
+                category_id=category_id,  # ✅ FIX 2: Assign category_id during creation
                 #path=f"subcategory_{sc['name'].lower().replace(' ', '_')}",
                 #group_name="Inventory",
                 is_active=True
             )
             session.add(subcat)
             session.flush()
-            subcategory_ids[sc["name"]] = subcat.id
+            # Store the subcategory ID using its name (or its unique name+category combo)
+            subcategory_ids[subcategory_name] = subcat.id 
         else:
-            existing.description = f"{sc['name']} under {sc['category']}"
+            existing.description = description
             existing.is_active = True
-            subcategory_ids[sc["name"]] = existing.id
+            existing.category_id = category_id # Update category_id on existing for consistency
+            subcategory_ids[subcategory_name] = existing.id
 
     session.commit()
     print("✅ Product subcategories seeded successfully.")
