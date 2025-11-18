@@ -612,6 +612,7 @@ class DivisionUpdate(DivisionBase):
 
 class DivisionResponse(DivisionBase):
     id: UUID
+    division_name: str
     cts: datetime
     mts: datetime
     class Config:
@@ -620,7 +621,6 @@ class DivisionResponse(DivisionBase):
 
 # ---------- UserDocument ----------
 class UserDocumentBase(BaseModel):
-    division_name: str
     document_name: str
     document_type: Optional[str] = None
     document_url: Optional[str] = None
@@ -647,5 +647,6 @@ class UserDocumentResponse(UserDocumentBase):
     user_id: UUID
     uploaded_by: Optional[UUID]
     uploaded_at: datetime
+    division: DivisionResponse
     class Config:
         orm_mode = True

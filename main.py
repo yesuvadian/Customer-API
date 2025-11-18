@@ -5,7 +5,7 @@ from database import Base, engine
 from middleware.auth_privilege import auth_and_privilege_middleware
 
 # Routers
-from routers import auth, bank_document, bank_info, categories, company_product_certificates, company_product_supply_references, company_products, dashboard, module, plan, products, register, role, role_module_privileges, subcategories, sync_full_erp, token, totp, user_addresses, userrole, users
+from routers import auth, bank_document, bank_info, categories, company_product_certificates, company_product_supply_references, company_products, dashboard, divisions, module, plan, products, register, role, role_module_privileges, subcategories, sync_full_erp, token, totp, user_addresses, userdocument, userrole, users
 from routers import countries, states, company_tax_infos, company_tax_documents
 
 # Create all database tables (optional, only if using auto-create)
@@ -70,3 +70,6 @@ app.include_router(sync_full_erp.router)
 # ✅ NEW: Company Product Documents
 app.include_router(company_product_certificates.router)
 app.include_router(company_product_supply_references.router)
+
+app.include_router(divisions.router)
+app.include_router(userdocument.router)
