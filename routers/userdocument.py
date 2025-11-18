@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
@@ -8,9 +8,10 @@ from datetime import datetime
 
 from schemas import UserDocumentCreate, UserDocumentResponse, UserDocumentUpdate
 from services.userdocumentservice import UserDocumentService
+from utils.common_service import UTCDateTimeMixin
 
 router = APIRouter(
-    prefix="/user-documents",
+    prefix="/user_documents",
     tags=["user-documents"],
     dependencies=[Depends(get_current_user)]
 )
@@ -18,31 +19,39 @@ router = APIRouter(
 @router.post("/", response_model=UserDocumentResponse)
 async def create_user_document(
     user_id: UUID = Form(...),
-    division = relationship("Division", back_populates="documents", foreign_keys=[division_id]),
-    division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id")),
+    division_id: UUID = Form(...),
     document_name: str = Form(...),
     om_number: Optional[str] = Form(None),
-    expiry_date: Optional[datetime] = Form(None),
-    file_data: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    expiry_date_str: Optional[str] = Form(None, alias="expiry_date"), 
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
     service = UserDocumentService(db)
-    contents = await file_data.read()
+    contents = await file.read()
 
+    # Convert expiry_date string to datetime object
+    expiry_date_dt = None
+    if expiry_date_str:
+        try:
+            expiry_date_dt = UTCDateTimeMixin._make_aware(expiry_date_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid expiry_date format. Must be ISO 8601 string.")
+        
+        file_content_type = file.content_type if file.content_type else 'application/octet-stream'
+            
     document = service.create_document(
         user_id=user_id,
-        division = relationship("Division", back_populates="documents", foreign_keys=[division_id]),
-        division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id")),
+        division_id=division_id,
         document_name=document_name,
-        document_type=file_data.content_type,
+        document_type=file.content_type,
+        document_url=None,
         file_data=contents,
         file_size=len(contents),
-        content_type=file_data.content_type,
+        content_type=file.content_type,
         om_number=om_number,
-        expiry_date=expiry_date
+        expiry_date=expiry_date_dt # Pass the converted datetime object
     )
     return document
-
 
 
 # ----------------- READ -----------------
@@ -59,13 +68,19 @@ def get_user_document(document_id: UUID, db: Session = Depends(get_db)):
 @router.get("/", response_model=List[UserDocumentResponse])
 def list_user_documents(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     service = UserDocumentService(db)
+    # Assuming service.db_model is available or you replace it with the correct model class
     return service.db.query(service.db_model).offset(skip).limit(limit).all()
 
 
 @router.get("/user/{user_id}", response_model=List[UserDocumentResponse])
-def list_documents_by_user(user_id: UUID, db: Session = Depends(get_db)):
+def list_documents_by_user(
+    user_id: UUID,
+    division_id: UUID = Query(...), # FIXED: Required for filtering by division
+    db: Session = Depends(get_db)
+):
     service = UserDocumentService(db)
-    return service.list_documents_by_user(user_id)
+    # This must call the new service method below
+    return service.list_documents_by_user_and_division(user_id, division_id)
 
 
 @router.get("/expired", response_model=List[UserDocumentResponse])

@@ -719,6 +719,7 @@ class CompanyProductCertificate(Base):
         foreign_keys=[company_product_id]
     )
     creator = relationship("User", foreign_keys=[created_by])
+
 class UserDocument(Base):
     __tablename__ = "user_documents"
     __table_args__ = {"schema": "public"}
@@ -727,9 +728,9 @@ class UserDocument(Base):
 
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
 
-    # Division stored as string instead of FK
-    division_name = Column(String(255), nullable=False)
+    #division_name = Column(String(255), nullable=False)
     division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id"), nullable=False)
+
     document_name = Column(String(255), nullable=False)
     document_type = Column(String(100))
     document_url = Column(Text)
@@ -746,7 +747,6 @@ class UserDocument(Base):
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    # ERP integration fields
     erp_sync_status = Column(String(10), default="pending")
     erp_last_sync_at = Column(DateTime(timezone=True))
     erp_error_message = Column(Text)
@@ -755,11 +755,12 @@ class UserDocument(Base):
     # Relationships
     user = relationship("User", back_populates="documents", foreign_keys=[user_id])
     uploader = relationship("User", foreign_keys=[uploaded_by], backref="uploaded_documents")
+
     division = relationship(
-    "Division",
-    back_populates="documents",
-    foreign_keys=[division_id]
-)
+        "Division",
+        back_populates="documents",
+        foreign_keys=[division_id]
+    )
 
 
 class Division(Base):
@@ -769,12 +770,18 @@ class Division(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     division_name = Column(String(255), unique=True, nullable=False)
     description = Column(String(500))
+    code = Column(String(100), unique=True)
+    is_active = Column(Boolean, default=True)
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationship
-    documents = relationship("UserDocument", back_populates="division",foreign_keys="[UserDocument.division_id]")
+    documents = relationship(
+    "UserDocument",
+    back_populates="division",
+    foreign_keys="UserDocument.division_id"
+)
 
 class CompanyProductSupplyReference(Base):
     __tablename__ = "company_product_supply_references"
