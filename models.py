@@ -769,6 +769,8 @@ class Division(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     division_name = Column(String(255), unique=True, nullable=False)
     description = Column(String(500))
+    code = Column(String(100), unique=True)
+    is_active = Column(Boolean, default=True)
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

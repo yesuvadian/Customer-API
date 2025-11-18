@@ -324,17 +324,17 @@ def seed_divisions(session):
     Seeds default divisions that can be used for approval and user document uploads.
     """
     divisions_data = [
-        {"name": "Electrical Division", "code": "ELEC", "description": "Handles all electrical-related approvals"},
-        {"name": "Mechanical Division", "code": "MECH", "description": "Handles mechanical and fabrication approvals"},
-        {"name": "Civil Division", "code": "CIVIL", "description": "Handles civil and infrastructure approvals"},
-        {"name": "IT Division", "code": "IT", "description": "Handles IT, software, and digital infrastructure"},
+        {"division_name": "Electrical Division", "code": "ELEC", "is_active": True, "description": "Handles all electrical-related approvals"},
+        {"division_name": "Mechanical Division", "code": "MECH","is_active": True, "description": "Handles mechanical and fabrication approvals"},
+        {"division_name": "Civil Division", "code": "CIVIL","is_active": True, "description": "Handles civil and infrastructure approvals"},
+        {"division_name": "IT Division", "code": "IT","is_active": True, "description": "Handles IT, software, and digital infrastructure"},
     ]
 
     for d in divisions_data:
-        existing = session.query(Division).filter_by(name=d["name"]).first()
+        existing = session.query(Division).filter_by(division_name=d["division_name"]).first()
         if not existing:
             division = Division(
-                name=d["name"],
+                division_name=d["division_name"],
                 code=d["code"],
                 description=d["description"],
                 is_active=True
@@ -542,6 +542,7 @@ def run_seed():
             # Geography
         india = seed_india_country(session)
         seed_indian_states(session, india)
+        seed_divisions(session)
         print("✅ All seed data inserted successfully.")
 
 
