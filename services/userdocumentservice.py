@@ -1,20 +1,21 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload # <-- IMPORT ADDED
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
-from models import UserDocument
+from models import UserDocument # Assumed model name
 
 
 class UserDocumentService:
     def __init__(self, db: Session):
         self.db = db
+        self.db_model = UserDocument
 
     # ----------------- CREATE -----------------
     def create_document(
         self,
         user_id: UUID,
-        division_name: str,
+        division_id: UUID,
         document_name: str,
         document_type: Optional[str] = None,
         document_url: Optional[str] = None,
@@ -25,14 +26,16 @@ class UserDocumentService:
         expiry_date: Optional[datetime] = None,
         uploaded_by: Optional[UUID] = None
     ) -> UserDocument:
+        
+        uploaded_by = uploaded_by or user_id
         document = UserDocument(
             user_id=user_id,
-            division_name=division_name,
+            division_id=division_id,
             document_name=document_name,
             document_type=document_type,
             document_url=document_url,
             file_data=file_data,
-            file_size=file_size,
+            file_size=len(file_data) if file_data else None,
             content_type=content_type,
             om_number=om_number,
             expiry_date=expiry_date,
@@ -49,30 +52,54 @@ class UserDocumentService:
 
     # ----------------- READ -----------------
     def get_document(self, document_id: UUID) -> UserDocument:
-        doc = self.db.get(UserDocument, document_id)
+        # Eager load division
+        doc = self.db.query(UserDocument).options(joinedload(UserDocument.division)).filter(UserDocument.id == document_id).first()
         if not doc:
             raise ValueError(f"Document with id '{document_id}' not found.")
         return doc
 
+    # ✅ INDENTATION FIXED & EAGER LOADING ADDED
     def list_documents_by_user(self, user_id: UUID) -> List[UserDocument]:
         return (
             self.db.query(UserDocument)
+            .options(joinedload(UserDocument.division)) # Eager load division
             .filter(UserDocument.user_id == user_id)
             .order_by(UserDocument.cts.desc())
             .all()
         )
 
+    # ✅ INDENTATION FIXED & EAGER LOADING ADDED
+    def list_documents_by_user_and_division(self, user_id: UUID, division_id: UUID) -> List[UserDocument]:
+        # Defensive UUID check
+        if not isinstance(division_id, UUID):
+            try:
+                division_id = UUID(str(division_id))
+            except ValueError:
+                pass 
+
+        return (
+            self.db.query(UserDocument)
+            .options(joinedload(UserDocument.division)) # Eager load division
+            .filter(UserDocument.user_id == user_id)
+            .filter(UserDocument.division_id == division_id)
+            .order_by(UserDocument.cts.desc())
+            .all()
+        )
+
+    # ✅ INDENTATION FIXED & EAGER LOADING ADDED
     def list_expired_documents(self, as_of: Optional[datetime] = None) -> List[UserDocument]:
         if not as_of:
             as_of = datetime.utcnow()
         return (
             self.db.query(UserDocument)
+            .options(joinedload(UserDocument.division)) # Eager load division
             .filter(UserDocument.expiry_date != None)
             .filter(UserDocument.expiry_date < as_of)
             .all()
         )
 
     # ----------------- UPDATE -----------------
+    # ✅ INDENTATION FIXED
     def update_document(
         self,
         document_id: UUID,
@@ -100,6 +127,7 @@ class UserDocumentService:
         return doc
 
     # ----------------- DELETE -----------------
+    # ✅ INDENTATION FIXED
     def delete_document(self, document_id: UUID) -> bool:
         doc = self.get_document(document_id)
         self.db.delete(doc)
