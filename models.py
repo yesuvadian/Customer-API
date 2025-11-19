@@ -46,6 +46,20 @@ class DocumentTypeEnum(PyEnum):
     BANK_STATEMENT = "BANK_STATEMENT"
     PASSBOOK = "PASSBOOK"
     ADDRESS_PROOF = "ADDRESS_PROOF"
+
+class CategoryDetailsTypeEnum(PyEnum):
+    quality_manual = "Quality Manual"
+    manufacturing_capability = "Manufacturing Capability"
+    technical_specifications = "Technical Specifications"
+    type_test_reports = "Type Test Reports"
+    list_of_machineries = "List of Machineries"
+    list_of_testing_equipments = "List of Testing Equipment's"
+    employee_count = "Employee Count"
+    lists_of_clients = "Lists of Clients"
+    iso_certificates = "ISO 9001:2015 & ISO 14001:2015 certificate"
+    financial_documents = "Bank Financial capability & Audit Report & Profit and Loss & 3 years cash flow statement."
+    OTHER = "Other"
+
 class Plan(Base):
     __tablename__ = "plans"
     __table_args__ = {"schema": "public"}
@@ -720,23 +734,96 @@ class CompanyProductCertificate(Base):
     )
     creator = relationship("User", foreign_keys=[created_by])
 
+# Add this import at the top if not present
+from sqlalchemy import Enum
+
+# ... existing code ...
+
+# 1. Define the Enum with your Frontend values
+class UserDocumentTypeEnum(PyEnum):
+    CERTIFICATE_OF_INCORPORATION = "Certificate of Incorporation"
+    QUALITY_MANUAL = "Quality Manual"
+    MANUFACTURING_CAPABILITY = "Manufacturing Capability"
+    PURCHASE_ORDER_COPY = "Purchase Order Copy"
+    PERFORMANCE_CERTIFICATE = "Performance Certificate"
+    TECHNICAL_SPECIFICATION = "Technical Specification"
+    TYPE_TEST_REPORTS = "Type Test Reports"
+    LIST_OF_TESTING_EQUIPMENTS = "List of Testing Equipments"
+    BANK_FINANCIAL_CAPABILITY = "Bank Financial Capability"
+    AUDIT_REPORTS = "Audit Reports"
+    PROFIT_AND_LOSS_STATEMENTS = "Profit and Loss Statements"
+    CASH_FLOW_STATEMENTS_3_YEARS = "3 years Cash Flow Statements"
+    OTHER = "Other"
+
+class CategoryMaster(Base):
+    __tablename__ = "CategoryMaster"  # Matching the SQL table name
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    # Audit Columns
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # ✅ Relationship: One-to-Many (One Master has many Details)
+    details = relationship(
+        "CategoryDetails",
+        back_populates="master",
+        cascade="all, delete-orphan",  # Deletes details if Master is deleted
+        foreign_keys="[CategoryDetails.category_master_id]"
+    )
+
+
+class CategoryDetails(Base):
+    __tablename__ = "CategoryDetails"  # Matching the SQL table name
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # ✅ Foreign Key to Master
+    category_master_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
+    
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    # Audit Columns
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # ✅ Relationship: Many-to-One (Many Details belong to one Master)
+    master = relationship(
+        "CategoryMaster",
+        back_populates="details",
+        foreign_keys=[category_master_id]
+    )
+
 class UserDocument(Base):
     __tablename__ = "user_documents"
     __table_args__ = {"schema": "public"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
-
-    #division_name = Column(String(255), nullable=False)
     division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id"), nullable=False)
 
     document_name = Column(String(255), nullable=False)
-    document_type = Column(String(100))
+    
+    # 2. CHANGE THIS COLUMN: Use the Enum instead of plain String
+    document_type = Column(Enum(UserDocumentTypeEnum, name="user_document_type_enum"), nullable=True)
+    
     document_url = Column(Text)
     file_data = Column(LargeBinary)
     file_size = Column(Integer)
-    content_type = Column(String(100))
+    
+    # This stores 'application/pdf', 'image/png' etc.
+    content_type = Column(String(100)) 
 
     om_number = Column(String(100))
     expiry_date = Column(DateTime(timezone=True))
@@ -755,6 +842,7 @@ class UserDocument(Base):
     # Relationships
     user = relationship("User", back_populates="documents", foreign_keys=[user_id])
     uploader = relationship("User", foreign_keys=[uploaded_by], backref="uploaded_documents")
+    division = relationship("Division", back_populates="documents", foreign_keys=[division_id])
 
     division = relationship(
         "Division",
