@@ -215,6 +215,7 @@ def seed_modules(session):
 {"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company"},
 {"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
 {"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company"},
+{"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP"},
 {"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "company"},
 {"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "company"},
     ]
@@ -253,7 +254,8 @@ def seed_privileges(session, role_ids, module_ids):
     "Company Products", "Plans", "Dashboard", "Assign User Roles",
     "User Product Search", "Bank Information", "Bank Documents",
     "Divisions", "User Documents",
-    "Company Product Certificates", "Company Product Supply References"
+    "Company Product Certificates", "Company Product Supply References",
+    "Sync ERP Vendor",    
     ]
 
 
@@ -310,7 +312,7 @@ def seed_privileges(session, role_ids, module_ids):
         role_id = role_ids.get(p["role"])
         module_id = module_ids.get(p["module"])
         if not role_id or not module_id:
-            print(f"⚠️ Skipping privilege for missing role or module: {p['role']} - {p['module']}")
+            print(f"⚠️ Skipping privilege for missing role or module: {p['role']} - {p['module']}" )
             continue
 
         exists = session.query(RoleModulePrivilege).filter_by(
