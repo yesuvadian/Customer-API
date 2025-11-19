@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from models import (
-    User, UserAddress, UserRole, CompanyBankInfo,
+    Product, User, UserAddress, UserRole, CompanyBankInfo,
     CompanyTaxInfo, CompanyBankDocument, CompanyTaxDocument
 )
 
@@ -86,14 +86,14 @@ class ERPService:
                 "mobile": user.phone_number,
                 "email": user.email,
                 "phoneno": user.phone_number,
-                "joindate": user_role.assigned_at if user_role else None,
+                "joindate": user_role.assigned_at.date() if user_role and user_role.assigned_at else None,
                 "trialfor": None,
                 "plrelation": None,
                 "dedtype": None,
                 "evaldate": None,
                 "natureofbusiness": None,
                 "status": None,
-                "activeyn": user.isactive,
+                "activeyn": "YES" if user.isactive else "NO",  # <-- UPDATED
                 "tdspartyyn": None,
                 "typeofded": None,
                 "add1": primary_address.address_line1 if primary_address else None,
@@ -138,3 +138,31 @@ class ERPService:
             })
 
         return final_result
+
+    
+    @classmethod
+    def build_itemmaster_json(cls, db: Session):
+        """
+        Fetch all products and return each under its own 'Itemmaster' key.
+        """
+        products = db.query(Product).all()  # You can filter for unsynced if needed
+
+        if not products:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No products found"
+            )
+
+        result = []
+        for p in products:
+            result.append({
+                "itemmaster": {
+                    "subgroup": p.category_obj.name if p.category_obj else None,
+                    "subgroup2": p.subcategory_obj.name if p.subcategory_obj else None,
+                    "itemid": p.sku,
+                    "itemdesc": p.description
+                }
+                
+            })
+
+        return result

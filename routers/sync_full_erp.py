@@ -34,3 +34,17 @@ def sync_erp_vendor(db: Session = Depends(get_db)):
         db.commit()
 
     return data
+@router.get(
+    "/sync_products",                # <-- changed here
+    summary="Sync products to ERP",
+    description="Fetch all products in ERP Itemmaster format."
+)
+def sync_erp_products(db: Session = Depends(get_db)):
+    try:
+        data = ERPService.build_itemmaster_json(db)
+    except HTTPException as e:
+        if e.status_code == status.HTTP_404_NOT_FOUND:
+            return []
+        raise e
+
+    return data
