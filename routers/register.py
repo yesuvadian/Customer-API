@@ -263,42 +263,53 @@ def create_company_tax_info_reg(tax_info: schemas.CompanyTaxInfoCreate, db: Sess
 
 @router.post("/complete", status_code=201)
 async def complete_registration(
-    payload: str = Form(...),  # JSON string
-    files: List[UploadFile] = File(None),
+    payload: str = Form(...),         # JSON part
+    files: List[UploadFile] = File([]),  # Uploaded docs
     db: Session = Depends(get_db),
 ):
     """
-    Bulk onboarding:
-    Creates user, both addresses, bank info, tax info
-    Uploads bank + tax documents in one submission.
+    Single API for full registration:
+    - Create user
+    - Address (office + comm)
+    - Bank info + documents
+    - Tax info + documents
     """
     try:
         data = json.loads(payload)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    # ✅ Required sections
-    required_keys = ["account", "office_address", "bank", "tax_info"]
-    for key in required_keys:
-        if key not in data:
-            raise HTTPException(status_code=400, detail=f"Missing `{key}` in payload")
+    required = ["account", "office_address", "bank", "tax_info"]
+    for k in required:
+        if k not in data:
+            raise HTTPException(status_code=400, detail=f"Missing `{k}`")
 
     documents_meta = data.get("documents", [])
     tax_docs_meta = data.get("tax_documents", [])
 
+    # Map index → file
+    uploaded_files = list(files or [])
+
     try:
-        with db.begin():  # ✅ ensures rollback on failure
-            # ✅ 1️⃣ Create User / Company
+        with db.begin():
+
+            # ------------------------------------------------------
+            # 1. USER CREATION
+            # ------------------------------------------------------
             new_user = user_service_instance.create_user(db, data["account"])
 
-            # ✅ 2️⃣ Office Address
+            # ------------------------------------------------------
+            # 2. OFFICE ADDRESS
+            # ------------------------------------------------------
             office = data["office_address"]
             office["user_id"] = new_user.id
             office["is_primary"] = True
             office["address_type"] = "corporate"
             address_service.create_user_address(db, office)
 
-            # ✅ 3️⃣ Communication Address (Optional)
+            # ------------------------------------------------------
+            # 3. COMMUNICATION ADDRESS (optional)
+            # ------------------------------------------------------
             comm = data.get("comm_address")
             if comm:
                 comm["user_id"] = new_user.id
@@ -306,67 +317,80 @@ async def complete_registration(
                 comm["address_type"] = "other"
                 address_service.create_user_address(db, comm)
 
-            # ✅ 4️⃣ Bank Info
+            # ------------------------------------------------------
+            # 4. BANK INFO
+            # ------------------------------------------------------
             bank_payload = data["bank"]
             bank_obj = CompanyBankInfoService.create_bank_info(
                 db, company_id=new_user.id, data=bank_payload
             )
 
-            # 🔄 Attach files to metadata through field_name match
-            file_map = {f"file_{i}": files[i] for i in range(len(files or []))}
+            # ------------------------------------------------------
+            # 5. BANK DOCUMENTS
+            # ------------------------------------------------------
+            for i, meta in enumerate(documents_meta):
+                if i >= len(uploaded_files):
+                    raise HTTPException(400, f"Missing bank file index {i}")
 
-            # ✅ 5️⃣ Bank Documents
-            for meta in documents_meta:
-                field_name = meta.get("field_name")
-                upload = file_map.get(field_name)
+                up = uploaded_files[i]
+                data_bytes = await up.read()
 
-                if not upload:
-                    raise HTTPException(status_code=400, detail=f"Missing bank doc for {field_name}")
-
-                data_bytes = await upload.read()
-                if upload.content_type not in ALLOWED_MIME_TYPES:
-                    raise HTTPException(status_code=400, detail="Invalid bank document format")
                 if len(data_bytes) > MAX_FILE_SIZE_BYTES:
-                    raise HTTPException(status_code=400, detail="Bank document too large")
+                    raise HTTPException(400, "Bank document too large")
+                if up.content_type not in ALLOWED_MIME_TYPES:
+                    raise HTTPException(400, "Invalid bank document type")
 
                 CompanyBankDocumentService.create_document(
                     db=db,
                     bank_info_id=bank_obj.id,
-                    file_name=upload.filename,
+                    file_name=up.filename,
                     file_data=data_bytes,
-                    file_type=upload.content_type,
+                    file_type=up.content_type,
                     document_type=meta.get("document_type"),
                 )
 
-            # ✅ 6️⃣ Tax Info
-            tax_info = data["tax_info"]
-            tax_obj = taxservice.create_tax_info(db, tax_info)
+            # ------------------------------------------------------
+            # 6. TAX INFO
+            # ------------------------------------------------------
+            tax = data["tax_info"]
+            tax_obj = taxservice.create_tax_info(
+                db=db,
+                company_id=new_user.id,
+                pan=tax.get("pan"),
+                gstin=tax.get("gstin"),
+                tan=tax.get("tan"),
+                financial_year=tax.get("financial_year")
+            )
 
-            # ✅ 7️⃣ Tax Documents
-            for meta in tax_docs_meta:
-                field_name = meta.get("field_name")
-                upload = file_map.get(field_name)
+            # ------------------------------------------------------
+            # 7. TAX DOCUMENTS
+            # ------------------------------------------------------
+            for i, meta in enumerate(tax_docs_meta, start=len(documents_meta)):
+                if i >= len(uploaded_files):
+                    raise HTTPException(400, f"Missing tax file index {i}")
 
-                if not upload:
-                    raise HTTPException(status_code=400, detail=f"Missing tax doc for {field_name}")
+                up = uploaded_files[i]
+                data_bytes = await up.read()
 
-                data_bytes = await upload.read()
-                if upload.content_type not in ALLOWED_MIME_TYPES:
-                    raise HTTPException(status_code=400, detail="Invalid tax document format")
                 if len(data_bytes) > MAX_FILE_SIZE_BYTES:
-                    raise HTTPException(status_code=400, detail="Tax document too large")
+                    raise HTTPException(400, "Tax document too large")
+                if up.content_type not in ALLOWED_MIME_TYPES:
+                    raise HTTPException(400, "Invalid tax document type")
 
                 taxdocumentservice.create_document_for_company(
                     db=db,
                     company_id=new_user.id,
-                    file_name=upload.filename,
+                    file_name=up.filename,
                     file_data=data_bytes,
-                    file_type=upload.content_type,
+                    file_type=up.content_type,
                 )
 
-        return {"id": new_user.id, "message": "Registration completed successfully"}
+        return {
+            "id": new_user.id,
+            "message": "Registration completed successfully"
+        }
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        raise HTTPException(500, f"Registration failed: {str(e)}")
