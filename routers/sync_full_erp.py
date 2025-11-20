@@ -26,7 +26,7 @@ def sync_erp_vendor(db: Session = Depends(get_db)):
         raise e
 
     # Update ERP sync status for processed users
-    user_ids = [item["partymast"]["partyid"] for item in data]
+    user_ids = [item["partymast"]["versionid"] for item in data]
     if user_ids:
         db.query(User).filter(User.id.in_(user_ids)).update(
             {User.erp_sync_status: "completed"}, synchronize_session=False
