@@ -136,19 +136,25 @@ def get_registration_user(token: str = Depends(oauth2_scheme)) -> str:
         )
 def login_user(db: Session, email: str, password: str):
     try:
+        # Always use UTC-aware time
+        now = UTCDateTimeMixin._utc_now()
+ 
         # Step 1: Fetch user
         user = db.query(User).filter_by(email=email).first()
         if not user:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials"
+            )
+ 
         # Step 2: Check if user is active
         if not user.isactive:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is inactive. Please contact administrator."
             )
-
-        # Step 3: Fetch UserSecurity record
+ 
+        # Step 3: Security record
         security = db.query(UserSecurity).filter_by(user_id=user.id).first()
         if not security:
             security = UserSecurity(
@@ -158,53 +164,88 @@ def login_user(db: Session, email: str, password: str):
             )
             db.add(security)
             db.flush()
-
-        # Step 4: Check account lock
-        if security.login_locked_until and security.login_locked_until > UTCDateTimeMixin._utc_now():
+ 
+        # Step 4: Account locked? Show remaining time
+        if security.login_locked_until and security.login_locked_until > now:
+            remaining = security.login_locked_until - now
+            remaining_minutes = int(remaining.total_seconds() // 60)
+ 
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account locked. Try again later."
+                detail=f"Account locked. Try again in {remaining_minutes} minute(s)."
             )
-
-        # Step 5: Verify password
+ 
+        # Step 5: Password verification
         if verify_password(password, user.password_hash):
+ 
+            # Reset attempts
             security.failed_login_attempts = 0
-            security.login_locked_until = None
-        else:
-            security.failed_login_attempts += 1
-            if security.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
-                security.login_locked_until = UTCDateTimeMixin._utc_now() + timedelta(minutes=LOGIN_LOCK_DURATION_MIN)
+ 
+            # Clear lock ONLY if expired
+            if security.login_locked_until and security.login_locked_until <= now:
+                security.login_locked_until = None
+ 
             db.commit()
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-        # Step 6: Fetch roles
+ 
+        else:
+            # FAILED LOGIN
+            security.failed_login_attempts += 1
+ 
+            # Lock account
+            if security.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
+                security.login_locked_until = now + timedelta(minutes=LOGIN_LOCK_DURATION_MIN)
+                db.commit()
+ 
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Too many failed attempts. Account locked for {LOGIN_LOCK_DURATION_MIN} minute(s)."
+                )
+ 
+            # Not locked yet → generic error
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials"
+            )
+ 
+        # Step 6: Load roles
         role_ids = [r.role_id for r in db.query(UserRole).filter_by(user_id=user.id).all()]
         if not role_ids:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User has no roles assigned. Contact administrator."
             )
-
+ 
         roles = db.query(Role).filter(Role.id.in_(role_ids)).all()
         role_names = [r.name for r in roles]
-
-        # Step 7: Fetch privileges
+ 
+        # Step 7: Privileges
         privileges: Dict[str, Dict[str, bool]] = {}
         module_map = {m.id: m.name for m in db.query(Module).all()}
-        raw_privs = db.query(RoleModulePrivilege).filter(RoleModulePrivilege.role_id.in_(role_ids)).all()
-
+        raw_privs = db.query(RoleModulePrivilege).filter(
+            RoleModulePrivilege.role_id.in_(role_ids)
+        ).all()
+ 
         for priv in raw_privs:
             mod_name = module_map.get(priv.module_id)
             if not mod_name:
                 continue
+ 
             if mod_name not in privileges:
-                privileges[mod_name] = {key: False for key in ["can_add", "can_view", "can_edit",
-                                                               "can_delete", "can_search", "can_import",
-                                                               "can_export"]}
+                privileges[mod_name] = {
+                    "can_add": False,
+                    "can_view": False,
+                    "can_edit": False,
+                    "can_delete": False,
+                    "can_search": False,
+                    "can_import": False,
+                    "can_export": False
+                }
+ 
             for key in privileges[mod_name]:
                 privileges[mod_name][key] |= getattr(priv, key)
-
-        # Step 8: Fetch user plan
+ 
+        # Step 8: Plan info
         plan = None
         if user.plan_id:
             plan_obj = db.query(Plan).filter_by(id=user.plan_id).first()
@@ -214,10 +255,9 @@ def login_user(db: Session, email: str, password: str):
                     "planname": plan_obj.planname,
                     "plan_description": plan_obj.plan_description,
                     "plan_limit": plan_obj.plan_limit,
-                    #"duration_days": plan_obj.duration_days
                 }
-
-        # Step 9: Generate access token and return
+ 
+        # Step 9: Login success
         return {
             "access_token": create_access_token({"sub": str(user.id)}),
             "user": {
@@ -232,20 +272,20 @@ def login_user(db: Session, email: str, password: str):
                 "cts": UTCDateTimeMixin._make_aware(user.cts),
                 "mts": UTCDateTimeMixin._make_aware(user.mts),
                 "roles": role_names,
-                "plan": plan  # <-- included plan object
+                "plan": plan
             },
-            "privileges": privileges,
+            "privileges": privileges
         }
-
+ 
     except HTTPException:
         raise
+ 
     except Exception as e:
         print(f"Login error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred during login."
         )
-
 # ==============================
 # Authentication Logic
 # ==============================
