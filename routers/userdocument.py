@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime,timezone
 
 from schemas import UserDocumentCreate, UserDocumentResponse, UserDocumentUpdate
 from services.userdocumentservice import UserDocumentService
@@ -21,6 +21,8 @@ async def create_user_document(
     user_id: UUID = Form(...),
     division_id: UUID = Form(...),
     document_name: str = Form(...),
+    document_type: str = Form(...),
+    category_detail_id: Optional[int] = Form(None),
     om_number: Optional[str] = Form(None),
     expiry_date_str: Optional[str] = Form(None, alias="expiry_date"), 
     file: UploadFile = File(...),
@@ -33,21 +35,28 @@ async def create_user_document(
     expiry_date_dt = None
     if expiry_date_str:
         try:
-            expiry_date_dt = UTCDateTimeMixin._make_aware(expiry_date_str)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid expiry_date format. Must be ISO 8601 string.")
-        
-        file_content_type = file.content_type if file.content_type else 'application/octet-stream'
+            # 1. Strip any time or timezone data to get just the date part (YYYY-MM-DD)
+            date_part = expiry_date_str.split('T')[0] 
+            # 2. Parse the date string into a naive datetime object
+            naive_dt = datetime.strptime(date_part, '%Y-%m-%d')
+            # 3. Now make the naive datetime object UTC aware
+            expiry_date_dt = UTCDateTimeMixin._make_aware(naive_dt)
+        except Exception: # Catch any parsing or attribute error from the string/date conversion
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid expiry_date format. Must be in YYYY-MM-DD format."
+            )
             
     document = service.create_document(
         user_id=user_id,
         division_id=division_id,
         document_name=document_name,
-        document_type=file.content_type,
+        document_type=document_type,
         document_url=None,
         file_data=contents,
         file_size=len(contents),
         content_type=file.content_type,
+        category_detail_id=category_detail_id,
         om_number=om_number,
         expiry_date=expiry_date_dt # Pass the converted datetime object
     )

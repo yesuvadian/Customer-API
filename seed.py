@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 from database import SessionLocal
-from models import Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module
+from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
@@ -93,7 +93,87 @@ def seed_plans(session):
             existing_plan.isactive = p["isactive"]
     session.commit()
     print("✅ Plans seeded successfully.")
+def seed_category_master(session):
+    """Seeds the CategoryMaster table with ONLY the 'Company Documents' category."""
+    
+    category_master_data = [
+        {"name": "Company Documents", "description": "Mandatory compliance, technical, and financial documentation."},
+    ]
 
+    master_ids = {}
+    for c in category_master_data:
+        # Check if it already exists
+        existing = session.query(CategoryMaster).filter_by(name=c["name"]).first()
+        if not existing:
+            master = CategoryMaster(
+                name=c["name"],
+                description=c["description"],
+                is_active=True
+            )
+            session.add(master)
+            session.flush()
+            master_ids[c["name"]] = master.id
+        else:
+            # Update existing if needed
+            existing.description = c["description"]
+            existing.is_active = True
+            master_ids[c["name"]] = existing.id
+            
+    session.commit()
+    print("✅ Category Master 'Company Documents' seeded successfully.")
+    return master_ids
+def seed_category_details(session, master_ids):
+    """Seeds the CategoryDetails table ONLY for the 'Company Documents' master."""
+    
+    category_details_data = [
+        # Company Documents Details
+        {"master_name": "Company Documents", "name": "Quality Manual", "description": "Document outlining the organization's quality management system."},
+        {"master_name": "Company Documents", "name": "Manufacturing Capability", "description": "Documentation detailing production capacity and infrastructure."},
+        {"master_name": "Company Documents", "name": "Technical Specifications", "description": "Detailed engineering and product specifications."},
+        {"master_name": "Company Documents", "name": "Type Test Reports", "description": "Reports from accredited labs confirming product type compliance."},
+        {"master_name": "Company Documents", "name": "List of Machineries", "description": "Inventory of primary manufacturing and support machinery."},
+        {"master_name": "Company Documents", "name": "List of Testing Equipment's", "description": "Inventory of quality control and measurement equipment."},
+        {"master_name": "Company Documents", "name": "Employee Count", "description": "Official report on the total number of employees."},
+        {"master_name": "Company Documents", "name": "Lists of Clients", "description": "Reference list of major and relevant clients."},
+        {"master_name": "Company Documents", "name": "ISO 9001:2015 & ISO 14001:2015 certificate", "description": "Current ISO quality and environmental management certificates."},
+        {"master_name": "Company Documents", "name": "Bank Financial Capability", "description": "Bank statement or certificate proving financial stability/capability."},
+        {"master_name": "Company Documents", "name": "Audit Report", "description": "Latest external financial audit report."},
+        {"master_name": "Company Documents", "name": "Profit and Loss", "description": "Most recent Profit and Loss (Income) Statement."},
+        {"master_name": "Company Documents", "name": "3 years cash flow statement", "description": "Cash flow statements for the last three financial years."},
+    ]
+
+    for d in category_details_data:
+        master_name = d["master_name"]
+        detail_name = d["name"]
+        master_id = master_ids.get(master_name)
+        
+        if not master_id:
+            # This should not happen if master_ids comes from the updated seed_category_master
+            print(f"⚠️ Master category not found for detail: {detail_name} (Master: {master_name})")
+            continue
+
+        existing = session.query(CategoryDetails).filter_by(
+            name=detail_name,
+            category_master_id=master_id 
+        ).first()
+        
+        description = d["description"]
+        
+        if not existing:
+            detail = CategoryDetails(
+                name=detail_name,
+                description=description,
+                category_master_id=master_id,
+                is_active=True
+            )
+            session.add(detail)
+        else:
+            existing.description = description
+            existing.is_active = True
+            existing.category_master_id = master_id 
+            
+    session.commit()
+    print("✅ Category Details for 'Company Documents' seeded successfully.")
 def seed_country_india(session):
     existing = session.query(Country).filter_by(name="India").first()
     if not existing:
@@ -136,6 +216,8 @@ def seed_modules(session):
 {"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
 {"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company"},
 {"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP"},
+{"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
+{"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
 
 
 
@@ -176,6 +258,7 @@ def seed_privileges(session, role_ids, module_ids):
     "User Product Search", "Bank Information", "Bank Documents",
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
+    "Category Master", "Category Details", 
     "Sync ERP Vendor", "Sync ERP Products"              
     ]
 
@@ -547,6 +630,8 @@ def run_seed():
         india = seed_india_country(session)
         seed_indian_states(session, india)
         seed_divisions(session)
+        master_ids=seed_category_master(session)
+        seed_category_details(session, master_ids)
         print("✅ All seed data inserted successfully.")
 
 
