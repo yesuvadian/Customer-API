@@ -79,7 +79,7 @@ class ERPService:
                 "partyid": f"{user.firstname or ''} {user.lastname or ''}".strip(),
                 "partyname": f"{user.firstname or ''} {user.lastname or ''}".strip(),
                 "vtype": "SUPPLIER [GOODS]",
-                "agroupname": "1591714846604",  # Fixed value as per ERP requirement
+                "agroupname": 1591714846604,  # Fixed value as per ERP requirement
                 "typename": "REGISTERED",
                 "gstpartytype": "DOMESTIC",
                 "grade": "A",
