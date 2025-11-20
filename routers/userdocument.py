@@ -21,6 +21,8 @@ async def create_user_document(
     user_id: UUID = Form(...),
     division_id: UUID = Form(...),
     document_name: str = Form(...),
+    document_type: str = Form(...),
+    category_detail_id: Optional[int] = Form(None),
     om_number: Optional[str] = Form(None),
     expiry_date_str: Optional[str] = Form(None, alias="expiry_date"), 
     file: UploadFile = File(...),
@@ -49,11 +51,12 @@ async def create_user_document(
         user_id=user_id,
         division_id=division_id,
         document_name=document_name,
-        document_type=file.content_type,
+        document_type=document_type,
         document_url=None,
         file_data=contents,
         file_size=len(contents),
         content_type=file.content_type,
+        category_detail_id=category_detail_id,
         om_number=om_number,
         expiry_date=expiry_date_dt # Pass the converted datetime object
     )

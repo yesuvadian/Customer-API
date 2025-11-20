@@ -14,4 +14,5 @@ pyotp
 python-dotenv==1.0.1
 pytest
 httpx
-dotenv
+dotenv==0.21.0
+requests==2.34.0

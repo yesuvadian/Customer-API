@@ -46,6 +46,7 @@ class DocumentTypeEnum(PyEnum):
     BANK_STATEMENT = "BANK_STATEMENT"
     PASSBOOK = "PASSBOOK"
     ADDRESS_PROOF = "ADDRESS_PROOF"
+
 class Plan(Base):
     __tablename__ = "plans"
     __table_args__ = {"schema": "public"}
@@ -544,7 +545,11 @@ class Product(Base):
 
     created_user = relationship("User", foreign_keys=[created_by])
     modified_user = relationship("User", foreign_keys=[modified_by])
-
+    
+    erp_sync_status = Column(String(10), default="pending")     # pending | success | failed
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
     category_obj = relationship("ProductCategory", back_populates="products")
     subcategory_obj = relationship("ProductSubCategory", back_populates="products")
     companies = relationship("CompanyProduct", back_populates="product", cascade="all, delete")
@@ -571,6 +576,8 @@ class CompanyProduct(Base):
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+   
 
     company = relationship("User", foreign_keys=[company_id])
     product = relationship("Product", back_populates="companies")
@@ -720,6 +727,64 @@ class CompanyProductCertificate(Base):
     )
     creator = relationship("User", foreign_keys=[created_by])
 
+
+class CategoryMaster(Base):
+    __tablename__ = "CategoryMaster"  # Matching the SQL table name
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    # Audit Columns
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # ✅ Relationship: One-to-Many (One Master has many Details)
+    details = relationship(
+        "CategoryDetails",
+        back_populates="master",
+        cascade="all, delete-orphan",  # Deletes details if Master is deleted
+        foreign_keys="[CategoryDetails.category_master_id]"
+    )
+
+
+class CategoryDetails(Base):
+    __tablename__ = "CategoryDetails"  # Matching the SQL table name
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # ✅ Foreign Key to Master
+    category_master_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
+    
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    # Audit Columns
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # ✅ Relationship: Many-to-One (Many Details belong to one Master)
+    master = relationship(
+        "CategoryMaster",
+        back_populates="details",
+        foreign_keys=[category_master_id]
+    )
+
+    user_documents = relationship(
+        "UserDocument",
+        back_populates="categorydetails", 
+        cascade="all, delete-orphan",
+        foreign_keys="[UserDocument.category_detail_id]"
+    )
+
 class UserDocument(Base):
     __tablename__ = "user_documents"
     __table_args__ = {"schema": "public"}
@@ -730,6 +795,12 @@ class UserDocument(Base):
 
     #division_name = Column(String(255), nullable=False)
     division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id"), nullable=False)
+    category_detail_id = Column(
+       Integer,
+        # Changed 'categorydetail' to 'CategoryDetails' to match the model's __tablename__
+        ForeignKey("public.CategoryDetails.id"), 
+        nullable=False
+    ) 
 
     document_name = Column(String(255), nullable=False)
     document_type = Column(String(100))
@@ -762,6 +833,11 @@ class UserDocument(Base):
         foreign_keys=[division_id]
     )
 
+    categorydetails = relationship(
+        "CategoryDetails",
+        back_populates="user_documents",
+        foreign_keys=[category_detail_id]
+    )
 
 class Division(Base):
     __tablename__ = "divisions"
@@ -772,6 +848,11 @@ class Division(Base):
     description = Column(String(500))
     code = Column(String(100), unique=True)
     is_active = Column(Boolean, default=True)
+    
+    erp_sync_status = Column(String(10), default="pending")     # pending | success | failed
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
