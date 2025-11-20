@@ -6,7 +6,7 @@ from middleware.auth_privilege import auth_and_privilege_middleware
 
 # Routers
 from routers import auth, bank_document, bank_info, categories, company_product_certificates, company_product_supply_references, company_products, dashboard, divisions, module, plan, products, register, role, role_module_privileges, subcategories, sync_full_erp, token, totp, user_addresses, userdocument, userrole, users
-from routers import countries, states, company_tax_infos, company_tax_documents
+from routers import countries, states, company_tax_infos, company_tax_documents, category_master, category_details
 
 # Create all database tables (optional, only if using auto-create)
 # Base.metadata.create_all(bind=engine)
@@ -66,6 +66,8 @@ app.include_router(userrole.user_role_router)
 app.include_router(bank_document.router)
 app.include_router(bank_info.router)
 app.include_router(sync_full_erp.router)
+app.include_router(category_master.router)
+app.include_router(category_details.router)
 
 # ✅ NEW: Company Product Documents
 app.include_router(company_product_certificates.router)

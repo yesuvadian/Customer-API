@@ -619,7 +619,6 @@ class DivisionResponse(DivisionBase):
         orm_mode = True
 
 
-# ---------- UserDocument ----------
 class UserDocumentBase(BaseModel):
     document_name: str
     document_type: Optional[str] = None
@@ -648,5 +647,63 @@ class UserDocumentResponse(UserDocumentBase):
     uploaded_by: Optional[UUID]
     uploaded_at: datetime
     division: DivisionResponse
+    category_details: Optional['CategoryDetailsResponse'] = None
+    class Config:
+        orm_mode = True
+
+class CategoryMasterBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_active: Optional[bool] = True
+
+class CategoryMasterCreate(CategoryMasterBase):
+    created_by: Optional[UUID] = None
+
+class CategoryMasterUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    modified_by: Optional[UUID] = None
+
+class CategoryMasterResponse(CategoryMasterBase):
+    id: int
+    created_by: Optional[UUID]
+    modified_by: Optional[UUID]
+    cts: datetime
+    mts: datetime
+
+    class Config:
+        orm_mode = True  # Use 'from_attributes = True' if using Pydantic v2
+
+# ==========================================
+# 2. Category Details Schemas
+# ==========================================
+
+class CategoryDetailsBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_active: Optional[bool] = True
+    category_master_id: int
+
+class CategoryDetailsCreate(CategoryDetailsBase):
+    created_by: Optional[UUID] = None
+
+class CategoryDetailsUpdate(BaseModel):
+    category_master_id: Optional[int] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    modified_by: Optional[UUID] = None
+
+class CategoryDetailsResponse(CategoryDetailsBase):
+    id: int
+    created_by: Optional[UUID]
+    modified_by: Optional[UUID]
+    cts: datetime
+    mts: datetime
+    
+    # Nested Relationship (Like 'division' in your reference)
+    master: Optional[CategoryMasterResponse] = None 
+
     class Config:
         orm_mode = True
