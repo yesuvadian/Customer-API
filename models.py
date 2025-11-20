@@ -544,7 +544,11 @@ class Product(Base):
 
     created_user = relationship("User", foreign_keys=[created_by])
     modified_user = relationship("User", foreign_keys=[modified_by])
-
+    
+    erp_sync_status = Column(String(10), default="pending")     # pending | success | failed
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
     category_obj = relationship("ProductCategory", back_populates="products")
     subcategory_obj = relationship("ProductSubCategory", back_populates="products")
     companies = relationship("CompanyProduct", back_populates="product", cascade="all, delete")
@@ -572,10 +576,7 @@ class CompanyProduct(Base):
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
-    erp_sync_status = Column(String(10), default="pending")     # pending | success | failed
-    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
-    erp_error_message = Column(Text, nullable=True)
-    erp_external_id = Column(String(255), nullable=True)
+   
 
     company = relationship("User", foreign_keys=[company_id])
     product = relationship("Product", back_populates="companies")
