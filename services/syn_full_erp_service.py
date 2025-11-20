@@ -73,61 +73,66 @@ class ERPService:
 
             # -------- Step 3: Partymast JSON --------
             partymast = {
-                "partymastid": user.erp_external_id if user.erp_external_id else "",
-                "docdate": "",
+                "partymastid": user.erp_external_id if user.erp_external_id else None,
+                "docdate": None,
                 "title": "Mr.",
-                "partyid": str(user.id),
+                "partyid": f"{user.firstname or ''} {user.lastname or ''}".strip(),
                 "partyname": f"{user.firstname or ''} {user.lastname or ''}".strip(),
                 "vtype": "SUPPLIER [GOODS]",
-                "agroupname": "",
-                "typename": "",
-                "gstpartytype": "",
-                "grade": "",
+                "agroupname": "1591714846604",  # Fixed value as per ERP requirement
+                "typename": "REGISTERED",
+                "gstpartytype": "DOMESTIC",
+                "grade": "A",
                 "mobile": user.phone_number,
                 "email": user.email,
                 "phoneno": user.phone_number,
-                "joindate": user_role.assigned_at.date() if user_role and user_role.assigned_at else "",
-                "trialfor": "",
-                "plrelation": "",
-                "dedtype": "",
-                "evaldate": "",
-                "natureofbusiness": "",
-                "status": "",
-                "activeyn": "YES" if user.isactive else "NO",  # <-- UPDATED
-                "tdspartyyn": "",
-                "typeofded": "",
-                "add1": primary_address.address_line1 if primary_address else "",
-                "add2": primary_address.address_line2 if primary_address else "",
-                "add3": "",
-                "city": primary_address.city if primary_address else "",
-                "bcs_state": primary_address.state.name if primary_address and primary_address.state else "",
-                "country": primary_address.country.name if primary_address and primary_address.country else "",
-                "panno": tax_info.pan if tax_info else "",
-                "gstnumsuf": "",
-                "gstno": tax_info.gstin if tax_info else "",
-                "gstdate": "",
-                "acno": bank_info.account_number if bank_info else "",
-                "bname": bank_info.bank_name if bank_info else "",
-                "bankbranch": bank_info.branch_name if bank_info else "",
-                "branchcode": "",
-                "baccountname": bank_info.account_holder_name if bank_info else "",
-                "ifsccode": bank_info.ifsc if bank_info else ""
+                "joindate": user_role.assigned_at.date() if user_role and user_role.assigned_at else None,
+                "trialfor": None,
+                "plrelation": None,
+                "dedtype": None,
+                "evaldate": None,
+                "natureofbusiness": None,
+                "status": None,
+                "activeyn": "YES" if user.isactive else "NO",  
+                "tdspartyyn": "NO",
+                "typeofded": None,
+                "add1": primary_address.address_line1 if primary_address else None,
+                "add2": primary_address.address_line2 if primary_address else None,
+                "add3": None,
+                "city": primary_address.city if primary_address else None,
+                "bcs_state": primary_address.state.name if primary_address and primary_address.state else None,
+                "country": primary_address.country.name if primary_address and primary_address.country else None,
+                "panno": tax_info.pan if tax_info else None,
+                "gstnumsuf": None,
+                "gstno": tax_info.gstin if tax_info else None,
+                "gstdate": None,
+                "acno": bank_info.account_number if bank_info else None,
+                "bname": bank_info.bank_name if bank_info else None,
+                "bankbranch": bank_info.branch_name if bank_info else None,
+                "branchcode": None,
+                "baccountname": bank_info.account_holder_name if bank_info else None,
+                "ifsccode": bank_info.ifsc if bank_info else None ,
+                "versionid": user.id if user.id else None,
+                "projectid": "AVPPC_HESCOM",
+                "rolename": "LICENSE_ROLE" 
+                
+                
             }
 
             # -------- Step 4: Documents JSON --------
             partymastdoc = {
-                "partymastid": user.erp_external_id if user.erp_external_id else "",
-                "empdocuid": bank_document.id if bank_document else "",
-                "doctype": bank_document.document_type.value if bank_document else "",
-                "attachfilename": bank_document.file_name if bank_document else ""
+                "partymastid": user.erp_external_id if user.erp_external_id else None,
+                "empdocuid": bank_document.id if bank_document else None,
+                "doctype": bank_document.document_type.value if bank_document else None,
+                "attachfilename": bank_document.file_name if bank_document else None
             }
 
             # -------- Step 5: TDS JSON --------
             tdssection = {
-                "partymastid": user.erp_external_id if user.erp_external_id else "",
-                "tdssectionid": tax_document.id if tax_document else "",
-                "taxtype": tax_document.file_type if tax_document else "",
-                "tdsper": ""
+                "partymastid": user.erp_external_id if user.erp_external_id else None,
+                "tdssectionid": tax_document.id if tax_document else None,
+                "taxtype": tax_document.file_type if tax_document else None,
+                "tdsper": None
             }
 
             # -------- Append to Final Result --------
@@ -157,13 +162,12 @@ class ERPService:
         for p in products:
             result.append({
                 "itemmaster": {
-                    "itemmasterid": products.erp_external_id if p.erp_external_id else "",
-                    "subgroup": p.category_obj.name if p.category_obj else "",
-                    "subgroup2": p.subcategory_obj.name if p.subcategory_obj else "",
+                    "itemmasterid": products.erp_external_id if p.erp_external_id else None,
+                    "subgroup": p.category_obj.name if p.category_obj else None,
+                    "subgroup2": p.subcategory_obj.name if p.subcategory_obj else None,
                     "itemid": p.sku,
                     "itemdesc": p.description
                 }
-                
             })
 
         return result
