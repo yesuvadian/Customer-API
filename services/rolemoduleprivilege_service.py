@@ -107,3 +107,27 @@ class RoleModulePrivilegeService:
         self.db.delete(privilege)
         self.db.commit()
         return True
+    def delete_privileges_by_role(self, role_id: int):
+        self.db.query(RoleModulePrivilege).filter(
+            RoleModulePrivilege.role_id == role_id
+        ).delete()
+        self.db.commit()
+    def create_or_update_privilege(self, data: dict):
+        existing = (
+            self.db.query(RoleModulePrivilege)
+            .filter_by(role_id=data["role_id"], module_id=data["module_id"])
+            .first()
+        )
+
+        if existing:
+            for key, value in data.items():
+                setattr(existing, key, value)
+            self.db.commit()
+            self.db.refresh(existing)
+            return existing
+
+        privilege = RoleModulePrivilege(**data)
+        self.db.add(privilege)
+        self.db.commit()
+        self.db.refresh(privilege)
+        return privilege

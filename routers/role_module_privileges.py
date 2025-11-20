@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import Dict, List
 
 from auth_utils import get_current_user
 from database import get_db
@@ -64,3 +64,21 @@ def delete_privilege(privilege_id: int, db: Session = Depends(get_db)):
     service = RoleModulePrivilegeService(db)
     service.delete_privilege(privilege_id)
     return {"message": "Privilege deleted successfully"}
+
+@router.post("/{role_id}/privileges")
+def assign_role_privileges(
+    role_id: int,
+    payload: List[Dict],
+    db: Session = Depends(get_db)
+):
+    service = RoleModulePrivilegeService(db)
+
+    # Remove all privileges for the role
+    service.delete_privileges_by_role(role_id)
+
+    # Insert / update each privilege
+    for item in payload:
+        item["role_id"] = role_id
+        service.create_or_update_privilege(item)
+
+    return {"message": "Privileges updated successfully"}
