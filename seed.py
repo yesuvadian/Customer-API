@@ -216,8 +216,8 @@ def seed_modules(session):
 {"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
 {"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company"},
 {"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP"},
-{"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "company"},
-{"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "company"},
+{"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
+{"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
     ]
 
     module_ids = {}
@@ -255,7 +255,7 @@ def seed_privileges(session, role_ids, module_ids):
     "User Product Search", "Bank Information", "Bank Documents",
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
-    "Sync ERP Vendor",    
+    "Sync ERP Vendor", "Category Master", "Category Details", 
     ]
 
 

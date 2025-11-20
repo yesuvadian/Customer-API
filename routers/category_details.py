@@ -3,23 +3,23 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from uuid import UUID
 
+
 # Adjust imports based on your project structure
 from database import get_db
 from auth_utils import get_current_user 
 # Assuming your User model has an .id attribute. Adjust if it's a dict.
 
 from schemas import (
-    CategoryMasterCreate, CategoryMasterUpdate, CategoryMasterResponse,
     CategoryDetailsCreate, CategoryDetailsUpdate, CategoryDetailsResponse
 )
-from services.category_service import CategoryMasterService, CategoryDetailsService
+
+from services.category_details_service import CategoryDetailsService
 
 router = APIRouter(
-    prefix="/categories",
-    tags=["categories"],
+    prefix="/category_details",
+    tags=["category_details"],
     dependencies=[Depends(get_current_user)]
 )
-
 
 @router.post("/details", response_model=CategoryDetailsResponse, status_code=status.HTTP_201_CREATED)
 def create_category_detail(

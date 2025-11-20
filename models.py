@@ -47,19 +47,6 @@ class DocumentTypeEnum(PyEnum):
     PASSBOOK = "PASSBOOK"
     ADDRESS_PROOF = "ADDRESS_PROOF"
 
-class CategoryDetailsTypeEnum(PyEnum):
-    quality_manual = "Quality Manual"
-    manufacturing_capability = "Manufacturing Capability"
-    technical_specifications = "Technical Specifications"
-    type_test_reports = "Type Test Reports"
-    list_of_machineries = "List of Machineries"
-    list_of_testing_equipments = "List of Testing Equipment's"
-    employee_count = "Employee Count"
-    lists_of_clients = "Lists of Clients"
-    iso_certificates = "ISO 9001:2015 & ISO 14001:2015 certificate"
-    financial_documents = "Bank Financial capability & Audit Report & Profit and Loss & 3 years cash flow statement."
-    OTHER = "Other"
-
 class Plan(Base):
     __tablename__ = "plans"
     __table_args__ = {"schema": "public"}
@@ -734,26 +721,6 @@ class CompanyProductCertificate(Base):
     )
     creator = relationship("User", foreign_keys=[created_by])
 
-# Add this import at the top if not present
-from sqlalchemy import Enum
-
-# ... existing code ...
-
-# 1. Define the Enum with your Frontend values
-class UserDocumentTypeEnum(PyEnum):
-    CERTIFICATE_OF_INCORPORATION = "Certificate of Incorporation"
-    QUALITY_MANUAL = "Quality Manual"
-    MANUFACTURING_CAPABILITY = "Manufacturing Capability"
-    PURCHASE_ORDER_COPY = "Purchase Order Copy"
-    PERFORMANCE_CERTIFICATE = "Performance Certificate"
-    TECHNICAL_SPECIFICATION = "Technical Specification"
-    TYPE_TEST_REPORTS = "Type Test Reports"
-    LIST_OF_TESTING_EQUIPMENTS = "List of Testing Equipments"
-    BANK_FINANCIAL_CAPABILITY = "Bank Financial Capability"
-    AUDIT_REPORTS = "Audit Reports"
-    PROFIT_AND_LOSS_STATEMENTS = "Profit and Loss Statements"
-    CASH_FLOW_STATEMENTS_3_YEARS = "3 years Cash Flow Statements"
-    OTHER = "Other"
 
 class CategoryMaster(Base):
     __tablename__ = "CategoryMaster"  # Matching the SQL table name
@@ -805,25 +772,36 @@ class CategoryDetails(Base):
         foreign_keys=[category_master_id]
     )
 
+    user_documents = relationship(
+        "UserDocument",
+        back_populates="categorydetails", 
+        cascade="all, delete-orphan",
+        foreign_keys="[UserDocument.category_detail_id]"
+    )
+
 class UserDocument(Base):
     __tablename__ = "user_documents"
     __table_args__ = {"schema": "public"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
+
+    #division_name = Column(String(255), nullable=False)
     division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id"), nullable=False)
+    category_detail_id = Column(
+       Integer,
+        # Changed 'categorydetail' to 'CategoryDetails' to match the model's __tablename__
+        ForeignKey("public.CategoryDetails.id"), 
+        nullable=False
+    ) 
 
     document_name = Column(String(255), nullable=False)
-    
-    # 2. CHANGE THIS COLUMN: Use the Enum instead of plain String
-    document_type = Column(Enum(UserDocumentTypeEnum, name="user_document_type_enum"), nullable=True)
-    
+    document_type = Column(String(100))
     document_url = Column(Text)
     file_data = Column(LargeBinary)
     file_size = Column(Integer)
-    
-    # This stores 'application/pdf', 'image/png' etc.
-    content_type = Column(String(100)) 
+    content_type = Column(String(100))
 
     om_number = Column(String(100))
     expiry_date = Column(DateTime(timezone=True))
@@ -842,7 +820,6 @@ class UserDocument(Base):
     # Relationships
     user = relationship("User", back_populates="documents", foreign_keys=[user_id])
     uploader = relationship("User", foreign_keys=[uploaded_by], backref="uploaded_documents")
-    division = relationship("Division", back_populates="documents", foreign_keys=[division_id])
 
     division = relationship(
         "Division",
@@ -850,6 +827,11 @@ class UserDocument(Base):
         foreign_keys=[division_id]
     )
 
+    categorydetails = relationship(
+        "CategoryDetails",
+        back_populates="user_documents",
+        foreign_keys=[category_detail_id]
+    )
 
 class Division(Base):
     __tablename__ = "divisions"

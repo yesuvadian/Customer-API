@@ -619,7 +619,6 @@ class DivisionResponse(DivisionBase):
         orm_mode = True
 
 
-# ---------- UserDocument ----------
 class UserDocumentBase(BaseModel):
     document_name: str
     document_type: Optional[str] = None
@@ -648,6 +647,7 @@ class UserDocumentResponse(UserDocumentBase):
     uploaded_by: Optional[UUID]
     uploaded_at: datetime
     division: DivisionResponse
+    category_details: Optional['CategoryDetailsResponse'] = None
     class Config:
         orm_mode = True
 

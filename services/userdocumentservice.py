@@ -17,6 +17,7 @@ class UserDocumentService:
         user_id: UUID,
         division_id: UUID,
         document_name: str,
+        category_detail_id: UUID,
         document_type: Optional[str] = None,
         document_url: Optional[str] = None,
         file_data: Optional[bytes] = None,
@@ -37,6 +38,7 @@ class UserDocumentService:
             file_data=file_data,
             file_size=len(file_data) if file_data else None,
             content_type=content_type,
+            category_detail_id=category_detail_id,
             om_number=om_number,
             expiry_date=expiry_date,
             uploaded_by=uploaded_by

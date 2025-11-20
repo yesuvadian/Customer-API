@@ -3,9 +3,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-
+# Assuming your models are in a file named 'models.py'
 from models import CategoryMaster, CategoryDetails
-
 
 class CategoryDetailsService:
 
@@ -34,7 +33,10 @@ class CategoryDetailsService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category Master ID not found")
 
         # 2. Check for duplicate name (Optional: remove if duplicates are allowed across different masters)
-        existing = db.query(CategoryDetails).filter(CategoryDetails.name == name).first()
+        existing = db.query(CategoryDetails).filter(
+         CategoryDetails.name == name,
+         CategoryDetails.category_master_id == master_id # <--- Added filter
+    ).first()
         if existing:
              raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category Detail with this name already exists")
 

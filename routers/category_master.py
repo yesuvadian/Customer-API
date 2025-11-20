@@ -10,13 +10,12 @@ from auth_utils import get_current_user
 
 from schemas import (
     CategoryMasterCreate, CategoryMasterUpdate, CategoryMasterResponse,
-    CategoryDetailsCreate, CategoryDetailsUpdate, CategoryDetailsResponse
 )
-from services.category_service import CategoryMasterService, CategoryDetailsService
+from services.category_master_service import CategoryMasterService
 
 router = APIRouter(
-    prefix="/categories",
-    tags=["categories"],
+    prefix="/category_master",
+    tags=["category_master"],
     dependencies=[Depends(get_current_user)]
 )
 
@@ -24,7 +23,7 @@ router = APIRouter(
 #  CATEGORY MASTER ENDPOINTS
 # ==========================================
 
-@router.post("/", response_model=CategoryMasterResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/masters", response_model=CategoryMasterResponse, status_code=status.HTTP_201_CREATED)
 def create_category_master(
     category: CategoryMasterCreate,
     db: Session = Depends(get_db),
@@ -38,7 +37,7 @@ def create_category_master(
         created_by=current_user.id  # Auto-assign logged-in user
     )
 
-@router.get("/", response_model=List[CategoryMasterResponse])
+@router.get("/masters", response_model=List[CategoryMasterResponse])
 def list_category_masters(
     skip: int = 0, 
     limit: int = 100, 
@@ -53,7 +52,7 @@ def list_category_masters(
         search=search
     )
 
-@router.get("/{master_id}", response_model=CategoryMasterResponse)
+@router.get("/masters/{master_id}", response_model=CategoryMasterResponse)
 def get_category_master(master_id: int, db: Session = Depends(get_db)):
     """Get a specific Master Category by ID"""
     master = CategoryMasterService.get_master_category(db, master_id)
@@ -61,7 +60,7 @@ def get_category_master(master_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Category Master not found")
     return master
 
-@router.patch("/{master_id}", response_model=CategoryMasterResponse)
+@router.patch("/masters/{master_id}", response_model=CategoryMasterResponse)
 def update_category_master(
     master_id: int, 
     category_update: CategoryMasterUpdate, 
@@ -80,34 +79,10 @@ def update_category_master(
         category_id=master_id, 
         updates=updates
     )
-@router.get("/{master_name}/details", response_model=List[CategoryDetailsResponse])
-def get_details_by_master_name(
-    master_name: str = Query(..., description="The name of the Category Master (e.g., 'Company Documents')"),
-    db: Session = Depends(get_db)
-):
-    """
-    Retrieves all Category Details associated with a specific Category Master name.
-    """
-    details = CategoryMasterService.get_details_by_master_name(db, master_name)
-    
-    if details is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Category Master '{master_name}' not found."
-        )
-    
-    # Check if the master was found but had no details
-    if not details:
-         return [] # Return an empty list if no details found but master exists
 
-    return details
-
-# --- Existing endpoints follow ---
-# @router.post("/details", ...)
-# @router.get("/details", ...)
-# ...
-@router.delete("/{master_id}", status_code=status.HTTP_200_OK)
+@router.delete("/masters/{master_id}", status_code=status.HTTP_200_OK)
 def delete_category_master(master_id: int, db: Session = Depends(get_db)):
     """Delete a Master Category"""
     CategoryMasterService.delete_master_category(db, master_id)
     return {"message": "Category Master deleted successfully"}
+

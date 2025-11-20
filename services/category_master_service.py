@@ -1,45 +1,14 @@
-from ast import List
 from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc
 
-
+# Assuming your models are in a file named 'models.py'
 from models import CategoryMaster, CategoryDetails
-from schemas import CategoryDetailsResponse
 
 
 class CategoryMasterService:
-    # Assuming imports for Session, CategoryMaster, CategoryDetails, and CategoryDetailsResponse are present.
 
-
-    # ... (existing methods like create, get_by_id, etc.)
-
-    @staticmethod
-    def get_details_by_master_name(db: Session, master_name: str) -> List[CategoryDetailsResponse]:
-        """
-        Finds a CategoryMaster by name and returns all its associated details.
-        """
-        # 1. Find the CategoryMaster by name (case-insensitive search is safer)
-        master = db.query(CategoryMaster).filter(
-            func.lower(CategoryMaster.name) == func.lower(master_name)
-        ).first()
-
-        if not master:
-            # Raise a specific exception or return None/empty list, 
-            # the router will handle the HTTP 404
-            return None 
-
-        # 2. Query all CategoryDetails linked to that master_id
-        details = db.query(CategoryDetails).filter(
-            CategoryDetails.category_master_id == master.id
-        ).all()
-        
-        # 3. Use the Response Schema to serialize (assuming CategoryDetailsResponse is correctly imported)
-        # Note: In a real app, you might map the SQLAlchemy models to Pydantic responses here.
-        return details 
-
-# Note: You need to import func from sqlalchemy for the lower() function, e.g., from sqlalchemy import func
     @classmethod
     def get_master_category(cls, db: Session, category_id: int):
         return db.query(CategoryMaster).filter(CategoryMaster.id == category_id).first()
@@ -85,6 +54,7 @@ class CategoryMasterService:
         db.commit()
         db.refresh(category)
         return category
+    
 
     @classmethod
     def delete_master_category(cls, db: Session, category_id: int):
@@ -95,3 +65,5 @@ class CategoryMasterService:
         db.delete(category)
         db.commit()
         return category
+
+
