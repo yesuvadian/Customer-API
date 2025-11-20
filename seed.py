@@ -218,7 +218,7 @@ def seed_modules(session):
 {"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP"},
 {"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
 {"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
-{"name": "Sync ERP Products", "description": "Sync all products to ERP", "path": "erp/products/sync", "group_name": "ERP"},
+
 
 
     ]
@@ -258,7 +258,7 @@ def seed_privileges(session, role_ids, module_ids):
     "User Product Search", "Bank Information", "Bank Documents",
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
-    "Sync ERP Vendor", "Category Master", "Category Details", 
+    "Category Master", "Category Details", 
     "Sync ERP Vendor", "Sync ERP Products"              
     ]
 
