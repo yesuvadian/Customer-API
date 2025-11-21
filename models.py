@@ -245,6 +245,8 @@ class CompanyBankDocument(Base):
     file_name = Column(String(255), nullable=False)
     file_data = Column(LargeBinary, nullable=False)
     file_type = Column(String(50))
+    file_data = Column(LargeBinary, nullable=False) # BYTEA
+    pending_kyc = Column(Boolean, default=True)
     document_type = Column(Enum(DocumentTypeEnum, name="bank_document_type_enum"))
     is_verified = Column(Boolean, default=False)
     verified_by = Column(String)
@@ -576,7 +578,7 @@ class CompanyProduct(Base):
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+    pending_kyc = Column(Boolean, default=True)
    
 
     company = relationship("User", foreign_keys=[company_id])
@@ -683,6 +685,7 @@ class CompanyTaxDocument(Base):
     company_tax_info_id = Column(Integer, ForeignKey("public.company_tax_info.id", ondelete="CASCADE"), nullable=False)
     file_name = Column(String(255), nullable=False)
     file_data = Column(LargeBinary, nullable=False)
+    pending_kyc = Column(Boolean, default=True)
     file_type = Column(String(50))
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
@@ -711,6 +714,7 @@ class CompanyProductCertificate(Base):
     file_type = Column(String(100))   # MIME (e.g. application/pdf)
     file_size = Column(Integer)       # bytes
     file_data = Column(LargeBinary, nullable=False)
+    pending_kyc = Column(Boolean, default=True)
 
     issued_date = Column(DateTime(timezone=True), nullable=True)
     expiry_date = Column(DateTime(timezone=True), nullable=True)
@@ -805,7 +809,8 @@ class UserDocument(Base):
     document_name = Column(String(255), nullable=False)
     document_type = Column(String(100))
     document_url = Column(Text)
-    file_data = Column(LargeBinary)
+    file_data = Column(LargeBinary, nullable=False)
+    pending_kyc = Column(Boolean, default=True)
     file_size = Column(Integer)
     content_type = Column(String(100))
 
@@ -880,6 +885,7 @@ class CompanyProductSupplyReference(Base):
     file_type = Column(String(100))
     file_size = Column(Integer)
     file_data = Column(LargeBinary, nullable=False)
+    pending_kyc = Column(Boolean, default=True)
 
     description = Column(Text)
     customer_name = Column(String(255))
