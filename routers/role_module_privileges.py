@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Dict, List
 
@@ -65,20 +65,26 @@ def delete_privilege(privilege_id: int, db: Session = Depends(get_db)):
     service.delete_privilege(privilege_id)
     return {"message": "Privilege deleted successfully"}
 
-@router.post("/{role_id}/privileges")
+@router.post("/{role_id}/privileges", response_model=None)
 def assign_role_privileges(
     role_id: int,
-    payload: List[Dict],
+    payload: List[Dict] = Body(...),
     db: Session = Depends(get_db)
 ):
     service = RoleModulePrivilegeService(db)
 
-    # Remove all privileges for the role
-    service.delete_privileges_by_role(role_id)
+    try:
+        #db.begin()
 
-    # Insert / update each privilege
-    for item in payload:
-        item["role_id"] = role_id
-        service.create_or_update_privilege(item)
+        service.delete_privileges_by_role(role_id)
 
-    return {"message": "Privileges updated successfully"}
+        for item in payload:
+            item["role_id"] = role_id
+            service.create_or_update_privilege(item)
+
+        #db.commit()
+        return {"message": "Privileges updated successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to update privileges: {e}")
