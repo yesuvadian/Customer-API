@@ -45,6 +45,26 @@ def list_privileges(skip: int = 0, limit: int = 100, db: Session = Depends(get_d
     service = RoleModulePrivilegeService(db)
     return service.list_privileges(skip=skip, limit=limit)
 
+@router.get("/role/{role_id}", response_model=List[RoleModulePrivilegeResponse])
+def get_privileges_for_role(
+    role_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch privileges that belong ONLY to the selected role.
+    This prevents privilege mixing in the UI.
+    """
+    service = RoleModulePrivilegeService(db)
+
+    privileges = service.get_privileges_by_role(role_id)
+    if privileges is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No privileges found for role_id {role_id}"
+        )
+
+    return privileges
+
 
 @router.put("/{privilege_id}", response_model=RoleModulePrivilegeResponse)
 def update_privilege(
