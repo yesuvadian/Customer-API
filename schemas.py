@@ -560,6 +560,8 @@ class RoleModulePrivilegeResponse(RoleModulePrivilegeBase):
 
     class Config:
         orm_mode = True
+        arbitrary_types_allowed = True
+        exclude = {"created_user", "modified_user", "role", "module"}
 
 
 # -----------------------------
