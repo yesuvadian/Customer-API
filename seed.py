@@ -381,6 +381,33 @@ def seed_product_categories(session):
         {"name": "Surge Protection", "description": "Devices for surge and overvoltage protection"},
         {"name": "Filteration", "description": "Transformer oil filtration systems"},
         {"name": "Transformer Safety", "description": "Transformer safety and fire protection systems"},
+        
+  {"name": "Poles", "description": "Poles"},
+  {"name": "Cross Arms", "description": "Cross Arms"},
+  {"name": "Supports", "description": "Supports"},
+  {"name": "Accessories", "description": "Accessories"},
+  {"name": "Earthing", "description": "Earthing"},
+  {"name": "Clamps", "description": "Clamps"},
+  {"name": "Anchors", "description": "Anchors"},
+  {"name": "Plates", "description": "Plates"},
+  {"name": "Insulators", "description": "Insulators"},
+  {"name": "Conductors", "description": "Conductors"},
+  {"name": "Wires", "description": "Wires"},
+  {"name": "Connectors", "description": "Connectors"},
+  {"name": "Transformers", "description": "Various types of electrical transformers"},
+  {"name": "Transformer Oils", "description": "Transformer oils"},
+  {"name": "Protection", "description": "Protection equipment"},
+  {"name": "Distribution Boxes", "description": "Distribution boxes"},
+  {"name": "Lightning Arresters", "description": "Lightning arresters"},
+  {"name": "Fuses", "description": "Fuse units"},
+  {"name": "Mounting Structures", "description": "Mounting structures"},
+  {"name": "H Frames", "description": "H frame structures"},
+  {"name": "Platforms", "description": "Platforms and FRP components"},
+  {"name": "GOS", "description": "Gang operated switches"},
+  {"name": "GOS Components", "description": "Components for GOS"},
+  {"name": "DOLO", "description": "Drop out fuse (DOLO)"}
+
+
     ]
 
 
@@ -454,7 +481,90 @@ def seed_product_subcategories(session, category_ids):
         {"name": "SPD", "category": "Surge Protection"},
         {"name": "Filteration", "category": "Filteration"},
         {"name": "Transformer Safety", "category": "Transformer Safety"},
-    ]
+    
+  {"name": "RCC Poles", "category": "Poles"},
+  {"name": "PSCC Poles", "category": "Poles"},
+  {"name": "Tubular Spun Poles", "category": "Poles"},
+  
+  {"name": "Mild Steel Cross Arms", "category": "Cross Arms"},
+  {"name": "Galvanized Iron Cross Arms", "category": "Cross Arms"},
+  {"name": "SMC Cross Arms", "category": "Cross Arms"},
+  
+  {"name": "Mild Steel Supports", "category": "Supports"},
+  {"name": "Galvanized Iron Supports", "category": "Supports"},
+  
+  {"name": "Stirrups", "category": "Accessories"},
+  {"name": "Spikes", "category": "Accessories"},
+  
+  {"name": "Electrodes", "category": "Earthing"},
+  
+  {"name": "Mild Steel Clamps", "category": "Clamps"},
+  {"name": "Galvanized Iron Clamps", "category": "Clamps"},
+  {"name": "Strain Clamps", "category": "Clamps"},
+  {"name": "T-Clamps", "category": "Clamps"},
+  {"name": "Pad Clamps", "category": "Clamps"},
+  
+  {"name": "Mild Steel Anchor Rods", "category": "Anchors"},
+  {"name": "Galvanized Iron Anchor Rods", "category": "Anchors"},
+  
+  {"name": "Mild Steel Plates", "category": "Plates"},
+  {"name": "Galvanized Iron Plates", "category": "Plates"},
+  
+  {"name": "Ceramic Pin Insulators", "category": "Insulators"},
+  {"name": "GI Pins", "category": "Insulators"},
+  {"name": "Polymeric Pin Insulators", "category": "Insulators"},
+  {"name": "Strain Insulators", "category": "Insulators"},
+  {"name": "Disc Insulators", "category": "Insulators"},
+  {"name": "Polymeric Insulators", "category": "Insulators"},
+  
+  {"name": "ACSR Conductors", "category": "Conductors"},
+  {"name": "Aluminium Conductors", "category": "Conductors"},
+  
+  {"name": "Guy Wires", "category": "Wires"},
+  {"name": "GI Wires", "category": "Wires"},
+  {"name": "Barbed Wire", "category": "Wires"},
+  
+  {"name": "ACSR Connectors", "category": "Connectors"},
+  {"name": "Wedge Connectors", "category": "Connectors"},
+  
+  {"name": "Distribution Transformers", "category": "Transformers"},
+  {"name": "Conventional Transformers", "category": "Transformers"},
+  {"name": "Star Rated Transformers", "category": "Transformers"},
+  
+  {"name": "EHV Grade Oil", "category": "Transformer Oils"},
+  {"name": "Reclaimed Oil", "category": "Transformer Oils"},
+  {"name": "Contaminated Oil", "category": "Transformer Oils"},
+  
+  {"name": "LT Kits", "category": "Protection"},
+  
+  {"name": "Sheet Metal Boxes", "category": "Distribution Boxes"},
+  {"name": "SMC Boxes", "category": "Distribution Boxes"},
+  
+  {"name": "Ceramic Arresters", "category": "Lightning Arresters"},
+  {"name": "Polymeric Arresters", "category": "Lightning Arresters"},
+  
+  {"name": "HG Fuse Units", "category": "Fuses"},
+  
+  {"name": "MS Structures", "category": "Mounting Structures"},
+  {"name": "GI Structures", "category": "Mounting Structures"},
+  
+  {"name": "MS Structures", "category": "H Frames"},
+  {"name": "GI Structures", "category": "H Frames"},
+  
+  {"name": "MS Structures", "category": "Platforms"},
+  {"name": "FRP Components", "category": "Platforms"},
+  
+  {"name": "Conventional", "category": "GOS"},
+  {"name": "Polymer", "category": "GOS"},
+  {"name": "Special Roaster", "category": "GOS"},
+  
+  {"name": "Contacts", "category": "GOS Components"},
+  {"name": "Operating Rods", "category": "GOS Components"},
+  
+  {"name": "Conventional", "category": "DOLO"},
+  {"name": "REC Specification", "category": "DOLO"}
+]
+
     
 
 
@@ -552,8 +662,14 @@ def seed_india_country(session):
         print("✅ India seeded successfully.")
     return session.query(Country).filter_by(name="India").first()
 
-def seed_products(session, category_ids, subcategory_ids):
-    products_data = [
+import json
+
+def seed_products(session, category_ids, subcategory_ids, filepath="product.json"):
+
+    # -----------------------------
+    # 1. Your existing products_data
+    # -----------------------------
+    existing_data = [
         {"name": "11kV Distribution Transformer 100 kVA", "category": "Transformers", "subcategory": "Distribution Transformers", "sku": "TNEB-TR100", "description": "Oil-immersed 11kV transformer for distribution"},
         {"name": "3 Phase Energy Meter", "category": "Meters", "subcategory": "Three Phase Meters", "sku": "TNEB-MTR3P", "description": "3 phase digital energy meter"},
         {"name": "XLPE Power Cable 1.1kV 50mm²", "category": "Cables & Wires", "subcategory": "XLPE Cables", "sku": "TNEB-CBL50", "description": "XLPE insulated 1.1kV power cable"},
@@ -587,30 +703,47 @@ def seed_products(session, category_ids, subcategory_ids):
         {"name": "Nitrogen Injection Fire Protection System", "category": "Transformer Safety", "subcategory": "Transformer Safety", "sku": "NIFPS", "description": "Nitrogen system protects transformers from fires"}
     ]
 
+    # -----------------------------
+    # 2. Load products from file
+    # -----------------------------
+    with open(filepath, "r", encoding="utf-8") as f:
+        file_data = json.load(f)
 
+    # -----------------------------
+    # 3. Merge BOTH lists
+    # -----------------------------
+    products_data = existing_data + file_data
+
+    # -----------------------------
+    # 4. Insert/Update in DB
+    # -----------------------------
     for p in products_data:
         category_id = category_ids.get(p["category"])
         subcategory_id = subcategory_ids.get(p["subcategory"])
+
         existing = session.query(Product).filter_by(sku=p["sku"]).first()
+
         if not existing:
             product = Product(
                 name=p["name"],
                 category_id=category_id,
                 subcategory_id=subcategory_id,
                 sku=p["sku"],
-                description=p["description"],
+                description=p.get("description", ""),
                 is_active=True
             )
             session.add(product)
+
         else:
             existing.name = p["name"]
             existing.category_id = category_id
             existing.subcategory_id = subcategory_id
-            existing.description = p["description"]
+            existing.description = p.get("description", "")
             existing.is_active = True
 
     session.commit()
-    print("✅ Products seeded successfully.")
+    print("✅ Existing data + file data seeded successfully.")
+
 
 
 # ----------------- Run Seed -----------------

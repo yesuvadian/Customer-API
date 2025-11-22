@@ -1,0 +1,4405 @@
+[
+  {
+    "name": "RCC Pole - 9 Mtr Long, 145 Kg WL",
+    "category": "Poles",
+    "subcategory": "RCC Poles",
+    "sku": "200105-1.01",
+    "description": "RCC pole 9m, 145 Kg WL, IS-785. CSR 2021-22: Rs 6062, CSR 2023-24: Rs 7076"
+  },
+  {
+    "name": "RCC Pole - 9 Mtr Long, 150 Kg WL Sq Section",
+    "category": "Poles",
+    "subcategory": "RCC Poles",
+    "sku": "200106-1.02",
+    "description": "RCC pole 9m, 150 Kg WL square section, IS-785. CSR 2021-22: Rs 6971, CSR 2023-24: Rs 8316"
+  },
+  {
+    "name": "RCC Pole - 8 Mtr Long, 115 Kg WL",
+    "category": "Poles",
+    "subcategory": "RCC Poles",
+    "sku": "200103-1.03",
+    "description": "RCC pole 8m, 115 Kg WL, IS-785. CSR 2021-22: Rs 4497, CSR 2023-24: Rs 5129"
+  },
+  {
+    "name": "PSCC Pole - 8 Mtr Long, 140 Kg WL",
+    "category": "Poles",
+    "subcategory": "PSCC Poles",
+    "sku": "200003-1.04",
+    "description": "PSCC pole 8m, 140 Kg WL, REC Standards. CSR 2021-22: Rs 2115, CSR 2023-24: Rs 2674"
+  },
+  {
+    "name": "PSCC Pole - 8 Mtr Long, 200 Kg WL",
+    "category": "Poles",
+    "subcategory": "PSCC Poles",
+    "sku": "200004-1.05",
+    "description": "PSCC pole 8m, 200 Kg WL, REC Standards. CSR 2021-22: Rs 3032, CSR 2023-24: Rs 3699"
+  },
+  {
+    "name": "PSCC Pole - 9 Mtr Long, 200 Kg WL",
+    "category": "Poles",
+    "subcategory": "PSCC Poles",
+    "sku": "200006-1.06",
+    "description": "PSCC pole 9m, 200 Kg WL, REC Standards. CSR 2021-22: Rs 3624, CSR 2023-24: Rs 4199"
+  },
+  {
+    "name": "Pre-Stressed Tubular Spun Pole - 11 Mtr Long, 500 Kg WL",
+    "category": "Poles",
+    "subcategory": "Tubular Spun Poles",
+    "sku": "200120-1.07",
+    "description": "Pre-stressed tubular spun pole 11m, 500 Kg WL, IS-13185:1991. CSR 2021-22: Rs 15373, CSR 2023-24: Rs 17702"
+  },
+  {
+    "name": "RCC Pole - 9.5 Mtr Long, 350 Kg WL for 33kV Line",
+    "category": "Poles",
+    "subcategory": "RCC Poles",
+    "sku": "200107-1.08",
+    "description": "RCC pole 9.5m, 350 Kg WL, REC Standards. CSR 2021-22: Rs 6464, CSR 2023-24: Rs 7509"
+  },
+  {
+    "name": "PSCC Pole - 11 Mtr Long, 365 Kg WL for Intermediate Poles",
+    "category": "Poles",
+    "subcategory": "PSCC Poles",
+    "sku": "200010-1.09",
+    "description": "PSCC pole 11m, 365 Kg WL, REC Standards. CSR 2021-22: Rs 6673, CSR 2023-24: Rs 7913"
+  },
+  {
+    "name": "PSCC Pole - 9 Mtr Long, 300 Kg WL",
+    "category": "Poles",
+    "subcategory": "PSCC Poles",
+    "sku": "200005-1.10",
+    "description": "PSCC pole 9m, 300 Kg WL, REC Standards. CSR 2021-22: Rs 4280, CSR 2023-24: Rs 5052"
+  },
+  {
+    "name": "11 kV Horizontal Cross Arm - MS",
+    "category": "Cross Arms",
+    "subcategory": "Mild Steel Cross Arms",
+    "sku": "279020-2.01",
+    "description": "11kV horizontal cross arm, mild steel. CSR 2021-22: Rs 331, CSR 2023-24: Rs 372"
+  },
+  {
+    "name": "11 kV Horizontal Cross Arm - GI",
+    "category": "Cross Arms",
+    "subcategory": "Galvanized Iron Cross Arms",
+    "sku": "280020-2.02",
+    "description": "11kV horizontal cross arm, galvanized iron. CSR 2021-22: Rs 428, CSR 2023-24: Rs 487"
+  },
+  {
+    "name": "11 kV V Cross Arm - MS",
+    "category": "Cross Arms",
+    "subcategory": "Mild Steel Cross Arms",
+    "sku": "279013-2.03",
+    "description": "11kV V cross arm, mild steel. CSR 2021-22: Rs 781, CSR 2023-24: Rs 879"
+  },
+  {
+    "name": "11 kV V Cross Arm - GI",
+    "category": "Cross Arms",
+    "subcategory": "Galvanized Iron Cross Arms",
+    "sku": "280013-2.04",
+    "description": "11kV V cross arm, galvanized iron. CSR 2021-22: Rs 1012, CSR 2023-24: Rs 1151"
+  },
+  {
+    "name": "LT 4 Pin Cross Arm - MS",
+    "category": "Cross Arms",
+    "subcategory": "Mild Steel Cross Arms",
+    "sku": "279014-2.05",
+    "description": "LT 4 pin cross arm, mild steel. CSR 2021-22: Rs 257, CSR 2023-24: Rs 289"
+  },
+  {
+    "name": "LT 4 Pin Cross Arm - GI",
+    "category": "Cross Arms",
+    "subcategory": "Galvanized Iron Cross Arms",
+    "sku": "280014-2.06",
+    "description": "LT 4 pin cross arm, galvanized iron. CSR 2021-22: Rs 333, CSR 2023-24: Rs 379"
+  },
+  {
+    "name": "LT 2 Pin Cross Arm - MS",
+    "category": "Cross Arms",
+    "subcategory": "Mild Steel Cross Arms",
+    "sku": "279012-2.07",
+    "description": "LT 2 pin cross arm, mild steel. CSR 2021-22: Rs 117, CSR 2023-24: Rs 132"
+  },
+  {
+    "name": "LT 2 Pin Cross Arm - GI",
+    "category": "Cross Arms",
+    "subcategory": "Galvanized Iron Cross Arms",
+    "sku": "280012-2.08",
+    "description": "LT 2 pin cross arm, galvanized iron. CSR 2021-22: Rs 152, CSR 2023-24: Rs 173"
+  },
+  {
+    "name": "LT ST Support 50x6 mm Flat - MS",
+    "category": "Supports",
+    "subcategory": "Mild Steel Supports",
+    "sku": "279091-2.09",
+    "description": "LT ST support 50x6 mm flat, mild steel. CSR 2021-22: Rs 56, CSR 2023-24: Rs 63"
+  },
+  {
+    "name": "LT ST Support 50x6 mm Flat - GI",
+    "category": "Supports",
+    "subcategory": "Galvanized Iron Supports",
+    "sku": "280091-2.10",
+    "description": "LT ST support 50x6 mm flat, galvanized iron. CSR 2021-22: Rs 72, CSR 2023-24: Rs 82"
+  }
+    ,
+  {
+    "name": "HT ST Support 50x8 mm Flat - MS",
+    "category": "Supports",
+    "subcategory": "Mild Steel Supports",
+    "sku": "279092-2.11",
+    "description": "HT ST support 50x8 mm flat, mild steel. CSR 2021-22: Rs 81, CSR 2023-24: Rs 91"
+  },
+  {
+    "name": "HT ST Support 50x8 mm Flat - GI",
+    "category": "Supports",
+    "subcategory": "Galvanized Iron Supports",
+    "sku": "280092-2.12",
+    "description": "HT ST support 50x8 mm flat, galvanized iron. CSR 2021-22: Rs 106, CSR 2023-24: Rs 120"
+  },
+  {
+    "name": "LT Cross Arm for vertical Configuration - MS",
+    "category": "Cross Arms",
+    "subcategory": "Mild Steel Cross Arms",
+    "sku": "279017-2.13",
+    "description": "LT cross arm for vertical configuration, mild steel. CSR 2021-22: Rs 820, CSR 2023-24: Rs 923"
+  },
+  {
+    "name": "LT Cross Arm for vertical Configuration - GI",
+    "category": "Cross Arms",
+    "subcategory": "Galvanized Iron Cross Arms",
+    "sku": "280017-2.14",
+    "description": "LT cross arm for vertical configuration, galvanized iron. CSR 2021-22: Rs 1027, CSR 2023-24: Rs 1176"
+  },
+  {
+    "name": "EG Stirrup (MS) with GI wire lacing",
+    "category": "Accessories",
+    "subcategory": "Stirrups",
+    "sku": "279130-2.15",
+    "description": "EG stirrup (MS) with GI wire lacing. CSR 2021-22: Rs 243, CSR 2023-24: Rs 276"
+  },
+  {
+    "name": "Spiral Earth Electrode",
+    "category": "Earthing",
+    "subcategory": "Electrodes",
+    "sku": "281683-2.16",
+    "description": "Spiral earth electrode for grounding. CSR 2021-22: Rs 210, CSR 2023-24: Rs 239"
+  },
+  {
+    "name": "11 kV Cross Arm with HT Top Support (SMC compound)",
+    "category": "Cross Arms",
+    "subcategory": "SMC Cross Arms",
+    "sku": "279090-3.01",
+    "description": "11kV cross arm with HT top support, glass reinforced SMC compound. CSR 2021-22: Rs 632, CSR 2023-24: Rs 719"
+  },
+  {
+    "name": "Spike type GI ~3 Kg",
+    "category": "Accessories",
+    "subcategory": "Spikes",
+    "sku": "278910-4.01",
+    "description": "Spike type GI, approx 3 Kg weight. CSR 2021-22: Rs 162, CSR 2023-24: Rs 182"
+  },
+  {
+    "name": "GI Barbed Wire (12 Mtr/Kg)",
+    "category": "Wires",
+    "subcategory": "Barbed Wire",
+    "sku": "278911-4.02",
+    "description": "GI barbed wire, 12 meters per Kg. CSR 2021-22: Rs 79, CSR 2023-24: Rs 89"
+  },
+  {
+    "name": "Guarding for Road/Telephone/HT-LT Line Crossing",
+    "category": "Guarding",
+    "subcategory": "Line Guarding",
+    "sku": "278916-4.03",
+    "description": "Guarding for road, telephone, HT & LT line crossings. CSR 2021-22: Rs 83, CSR 2023-24: Rs 93"
+  },
+  {
+    "name": "RCC Pole Clamp - MS",
+    "category": "Clamps",
+    "subcategory": "Mild Steel Clamps",
+    "sku": "279523-5.01",
+    "description": "RCC pole clamp, mild steel. CSR 2021-22: Rs 75, CSR 2023-24: Rs 85"
+  },
+  {
+    "name": "RCC Pole Clamp - GI",
+    "category": "Clamps",
+    "subcategory": "Galvanized Iron Clamps",
+    "sku": "280523-5.02",
+    "description": "RCC pole clamp, galvanized iron. CSR 2021-22: Rs 97, CSR 2023-24: Rs 109"
+  },
+  {
+    "name": "PSCC Pole (140 Kg WL) Clamp - MS",
+    "category": "Clamps",
+    "subcategory": "Mild Steel Clamps",
+    "sku": "279503-5.03",
+    "description": "PSCC pole clamp for 140 Kg WL, mild steel. CSR 2021-22: Rs 64, CSR 2023-24: Rs 73"
+  },
+  {
+    "name": "PSCC Pole (140 Kg WL) Clamp - GI",
+    "category": "Clamps",
+    "subcategory": "Galvanized Iron Clamps",
+    "sku": "280503-5.04",
+    "description": "PSCC pole clamp for 140 Kg WL, galvanized iron. CSR 2021-22: Rs 84, CSR 2023-24: Rs 95"
+  },
+  {
+    "name": "PSCC Pole (200 Kg WL) Clamp - MS",
+    "category": "Clamps",
+    "subcategory": "Mild Steel Clamps",
+    "sku": "279510-5.05",
+    "description": "PSCC pole clamp for 200 Kg WL, mild steel. CSR 2021-22: Rs 93, CSR 2023-24: Rs 105"
+  },
+  {
+    "name": "PSCC Pole (200 Kg WL) Clamp - GI",
+    "category": "Clamps",
+    "subcategory": "Galvanized Iron Clamps",
+    "sku": "280510-5.06",
+    "description": "PSCC pole clamp for 200 Kg WL, galvanized iron. CSR 2021-22: Rs 93, CSR 2023-24: Rs 105"
+  },
+  {
+    "name": "PSCC Pole (300 Kg WL) Clamp - MS",
+    "category": "Clamps",
+    "subcategory": "Mild Steel Clamps",
+    "sku": "279511-5.07",
+    "description": "PSCC pole clamp for 300 Kg WL, mild steel. CSR 2021-22: Rs 78, CSR 2023-24: Rs 89"
+  },
+  {
+    "name": "PSCC Pole (300 Kg WL) Clamp - GI",
+    "category": "Clamps",
+    "subcategory": "Galvanized Iron Clamps",
+    "sku": "280511-5.08",
+    "description": "PSCC pole clamp for 300 Kg WL, galvanized iron. CSR 2021-22: Rs 102, CSR 2023-24: Rs 115"
+  },
+  {
+    "name": "Clamp – MS",
+    "category": "Clamps",
+    "subcategory": "Mild Steel Clamps",
+    "sku": "279512-5.09",
+    "description": "Clamp, mild steel. CSR 2021-22: Rs 110, CSR 2023-24: Rs 127"
+  },
+  {
+    "name": "Clamp – GI",
+    "category": "Clamps",
+    "subcategory": "Galvanized Iron Clamps",
+    "sku": "280512-5.10",
+    "description": "Clamp, galvanized iron. CSR 2021-22: Rs 145, CSR 2023-24: Rs 167"
+  }
+,
+
+  {
+    "name": "Anchor Rod used in 12 mm rounds/Guy Rod – MS",
+    "category": "Anchors",
+    "subcategory": "Mild Steel Anchor Rods",
+    "sku": "279140-5.11",
+    "description": "Anchor rod for 12 mm rounds/Guy rod, mild steel. CSR 2021-22: Rs 225, CSR 2023-24: Rs 259"
+  },
+  {
+    "name": "Anchor Rod used in 12 mm rounds/Guy Rod – GI",
+    "category": "Anchors",
+    "subcategory": "Galvanized Iron Anchor Rods",
+    "sku": "280140-5.12",
+    "description": "Anchor rod for 12 mm rounds/Guy rod, galvanized iron. CSR 2021-22: Rs 325, CSR 2023-24: Rs 373"
+  },
+  {
+    "name": "Anchor Rod using 12 mm rounds/Guy Rod – GI",
+    "category": "Anchors",
+    "subcategory": "Galvanized Iron Anchor Rods",
+    "sku": "280141-5.13",
+    "description": "Anchor rod using 12 mm rounds/Guy rod, galvanized iron. CSR 2021-22: Rs 325, CSR 2023-24: Rs 373"
+  },
+  {
+    "name": "MS Fish Plate",
+    "category": "Plates",
+    "subcategory": "Mild Steel Plates",
+    "sku": "279150-5.14",
+    "description": "Fish plate, mild steel. CSR 2021-22: Rs 110, CSR 2023-24: Rs 127"
+  },
+  {
+    "name": "GI Fish Plate",
+    "category": "Plates",
+    "subcategory": "Galvanized Iron Plates",
+    "sku": "280150-5.15",
+    "description": "Fish plate, galvanized iron. CSR 2021-22: Rs 145, CSR 2023-24: Rs 167"
+  },
+  {
+    "name": "Strain Clamp, 3 Bolt type for 70/90 kN Disc Insulator",
+    "category": "Clamps",
+    "subcategory": "Strain Clamps",
+    "sku": "258076-5.16",
+    "description": "Strain clamp, 3 bolt type for 70/90 kN disc insulator. CSR 2021-22: Rs 628, CSR 2023-24: Rs 707"
+  },
+  {
+    "name": "11 kV Ceramic Pin Insulator (Shell only)",
+    "category": "Insulators",
+    "subcategory": "Ceramic Pin Insulators",
+    "sku": "283005-6.01",
+    "description": "11kV ceramic pin insulator shell only. CSR 2021-22: Rs 65, CSR 2023-24: Rs 83"
+  },
+  {
+    "name": "11 kV GI Pin for 11 kV Ceramic Shell Insulator",
+    "category": "Insulators",
+    "subcategory": "GI Pins",
+    "sku": "283055-6.02",
+    "description": "11kV GI pin for ceramic shell insulator. CSR 2021-22: Rs 58, CSR 2023-24: Rs 66"
+  },
+  {
+    "name": "1.1 kV Ceramic Pin Insulator (Shell only)",
+    "category": "Insulators",
+    "subcategory": "Ceramic Pin Insulators",
+    "sku": "283003-6.03",
+    "description": "1.1kV ceramic pin insulator shell only. CSR 2021-22: Rs 24, CSR 2023-24: Rs 31"
+  },
+  {
+    "name": "1.1 kV GI Pin for 1.1 kV Ceramic Shell Insulator",
+    "category": "Insulators",
+    "subcategory": "GI Pins",
+    "sku": "283053-6.04",
+    "description": "1.1kV GI pin for ceramic shell insulator. CSR 2021-22: Rs 31, CSR 2023-24: Rs 35"
+  },
+  {
+    "name": "1.1 kV Polymeric Pin Insulator",
+    "category": "Insulators",
+    "subcategory": "Polymeric Pin Insulators",
+    "sku": "-6.05",
+    "description": "1.1kV polymeric pin insulator. CSR 2023-24: Rs 87 (New Item)"
+  },
+  {
+    "name": "11 kV, 5 kN Composite/Polymeric Pin Insulator (24 mm dia FRP Rod)",
+    "category": "Insulators",
+    "subcategory": "Polymeric Pin Insulators",
+    "sku": "283008-6.06",
+    "description": "11kV, 5kN composite/polymeric pin insulator with 24 mm FRP rod. CSR 2021-22: Rs 188, CSR 2023-24: Rs 206"
+  },
+  {
+    "name": "No. 8 Strain Insulator",
+    "category": "Insulators",
+    "subcategory": "Strain Insulators",
+    "sku": "283158-6.07",
+    "description": "No. 8 strain insulator. CSR 2021-22: Rs 21, CSR 2023-24: Rs 27"
+  },
+  {
+    "name": "No. 15 Strain Insulator",
+    "category": "Insulators",
+    "subcategory": "Strain Insulators",
+    "sku": "283166-6.08",
+    "description": "No. 15 strain insulator. CSR 2021-22: Rs 46, CSR 2023-24: Rs 59"
+  },
+  {
+    "name": "DISC Insulator 45 kN Porcelain",
+    "category": "Insulators",
+    "subcategory": "Disc Insulators",
+    "sku": "283040-6.09",
+    "description": "Porcelain disc insulator, 45 kN. CSR 2021-22: Rs 398, CSR 2023-24: Rs 510"
+  },
+  {
+    "name": "11 kV, 45 kN Polymeric Insulator",
+    "category": "Insulators",
+    "subcategory": "Polymeric Insulators",
+    "sku": "283320-6.10",
+    "description": "11kV polymeric insulator, 45 kN. CSR 2021-22: Rs 171, CSR 2023-24: Rs 186"
+  },
+  {
+    "name": "11 kV, 70 kN Composite/Polymeric Insulator",
+    "category": "Insulators",
+    "subcategory": "Polymeric Insulators",
+    "sku": "283045-6.11",
+    "description": "11kV composite/polymeric insulator, 70 kN. CSR 2021-22: Rs 275, CSR 2023-24: Rs 299"
+  },
+  {
+    "name": "Weasel ACSR (6/2.59 mm Al + 1/2.59 mm St)",
+    "category": "Conductors",
+    "subcategory": "ACSR Conductors",
+    "sku": "284105-7.01",
+    "description": "Weasel ACSR, std wt 128 Kg/KM. CSR 2021-22: Rs 31371, CSR 2023-24: Rs 27899"
+  },
+  {
+    "name": "Rabbit ACSR (6/3.35 mm Al + 1/3.35 mm St)",
+    "category": "Conductors",
+    "subcategory": "ACSR Conductors",
+    "sku": "284108-7.02",
+    "description": "Rabbit ACSR, std wt 214 Kg/KM. CSR 2021-22: Rs 52131, CSR 2023-24: Rs 46234"
+  },
+  {
+    "name": "7/10 SWG Guy Wire (7/3.251 mm Dia)",
+    "category": "Wires",
+    "subcategory": "Guy Wires",
+    "sku": "281110-8.01",
+    "description": "7/10 SWG guy wire, std wt 680 Kg/KM. CSR 2021-22: Rs 67897, CSR 2023-24: Rs 77226"
+  }
+,
+
+  {
+    "name": "8 SWG GI Wire (4.064 mm Dia)",
+    "category": "Wires",
+    "subcategory": "GI Wires",
+    "sku": "281008-8.02",
+    "description": "8 SWG GI wire, 4.064 mm dia, std wt 131 Kg/KM. CSR 2021-22: Rs 65975, CSR 2023-24: Rs 75036"
+  },
+  {
+    "name": "10 SWG GI Wire (3.251 mm Dia)",
+    "category": "Wires",
+    "subcategory": "GI Wires",
+    "sku": "281010-8.03",
+    "description": "10 SWG GI wire, 3.251 mm dia, std wt 82 Kg/KM. CSR 2021-22: Rs 69607, CSR 2023-24: Rs 79171"
+  },
+  {
+    "name": "GI Barbed Wire 12 SWG",
+    "category": "Wires",
+    "subcategory": "Barbed Wire",
+    "sku": "281205-8.04",
+    "description": "GI barbed wire, 12 SWG. CSR 2021-22: Rs 81914, CSR 2023-24: Rs 93169"
+  },
+  {
+    "name": "Coyote to Coyote",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285515-9.01",
+    "description": "Coyote to Coyote connector. CSR 2021-22: Rs 343, CSR 2023-24: Rs 357"
+  },
+  {
+    "name": "Rabbit to Rabbit",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285508-9.02",
+    "description": "Rabbit to Rabbit connector. CSR 2021-22: Rs 98, CSR 2023-24: Rs 102"
+  },
+  {
+    "name": "Weasel to Rabbit",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285549-9.03",
+    "description": "Weasel to Rabbit connector. CSR 2021-22: Rs 83, CSR 2023-24: Rs 86"
+  },
+  {
+    "name": "Weasel to Weasel",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285509-9.04",
+    "description": "Weasel to Weasel connector. CSR 2021-22: Rs 67, CSR 2023-24: Rs 70"
+  },
+  {
+    "name": "Squirrel to Weasel",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285548-9.05",
+    "description": "Squirrel to Weasel connector. CSR 2021-22: Rs 61, CSR 2023-24: Rs 63"
+  },
+  {
+    "name": "95 Sqmm Conductor",
+    "category": "Conductors",
+    "subcategory": "Aluminium Conductors",
+    "sku": "285555-10.01",
+    "description": "95 Sqmm aluminium conductor. CSR 2021-22: Rs 135, CSR 2023-24: Rs 140"
+  },
+  {
+    "name": "120 Sqmm Conductor",
+    "category": "Conductors",
+    "subcategory": "Aluminium Conductors",
+    "sku": "285557-10.02",
+    "description": "120 Sqmm aluminium conductor. CSR 2021-22: Rs 262, CSR 2023-24: Rs 273"
+  },
+  {
+    "name": "150 Sqmm Conductor",
+    "category": "Conductors",
+    "subcategory": "Aluminium Conductors",
+    "sku": "285559-10.03",
+    "description": "150 Sqmm aluminium conductor. CSR 2021-22: Rs 309, CSR 2023-24: Rs 322"
+  },
+  {
+    "name": "185 Sqmm Conductor",
+    "category": "Conductors",
+    "subcategory": "Aluminium Conductors",
+    "sku": "285562-10.04",
+    "description": "185 Sqmm aluminium conductor. CSR 2021-22: Rs 339, CSR 2023-24: Rs 353"
+  },
+  {
+    "name": "240 Sqmm Conductor",
+    "category": "Conductors",
+    "subcategory": "Aluminium Conductors",
+    "sku": "285565-10.05",
+    "description": "240 Sqmm aluminium conductor. CSR 2021-22: Rs 394, CSR 2023-24: Rs 410"
+  },
+  {
+    "name": "T-Clamp for Rabbit Conductor",
+    "category": "Clamps",
+    "subcategory": "T-Clamps",
+    "sku": "285600-10.06",
+    "description": "T-clamp for Rabbit conductor with galvanized bolts/nuts/washers. CSR 2021-22: Rs 304, CSR 2023-24: Rs 316"
+  },
+  {
+    "name": "T-Clamp for Coyote Conductor",
+    "category": "Clamps",
+    "subcategory": "T-Clamps",
+    "sku": "285605-10.07",
+    "description": "T-clamp for Coyote conductor with galvanized bolts/nuts/washers. CSR 2021-22: Rs 404, CSR 2023-24: Rs 420"
+  },
+  {
+    "name": "Pad Clamp for Rabbit ACSR",
+    "category": "Clamps",
+    "subcategory": "Pad Clamps",
+    "sku": "285723-10.08",
+    "description": "Pad clamp for Rabbit ACSR. CSR 2021-22: Rs 482, CSR 2023-24: Rs 583"
+  },
+  {
+    "name": "Pad Clamp for Coyote ACSR",
+    "category": "Clamps",
+    "subcategory": "Pad Clamps",
+    "sku": "285724-10.09",
+    "description": "Pad clamp for Coyote ACSR. CSR 2021-22: Rs 599, CSR 2023-24: Rs 725"
+  },
+  {
+    "name": "Rabbit to Rabbit ACSR",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285670-11.01",
+    "description": "Rabbit to Rabbit ACSR connector. CSR 2021-22: Rs 157, CSR 2023-24: Rs 163"
+  },
+  {
+    "name": "Rabbit to Coyote ACSR",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285671-11.02",
+    "description": "Rabbit to Coyote ACSR connector. CSR 2021-22: Rs 815, CSR 2023-24: Rs 848"
+  },
+  {
+    "name": "Coyote to Coyote ACSR",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285676-11.03",
+    "description": "Coyote to Coyote ACSR connector. CSR 2021-22: Rs 815, CSR 2023-24: Rs 848"
+  },
+  {
+    "name": "Rabbit to 240 Sqmm Lead Wire",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285694-11.04",
+    "description": "Rabbit to 240 Sqmm lead wire connector. CSR 2021-22: Rs 815, CSR 2023-24: Rs 848"
+  }
+,
+
+  {
+    "name": "Coyote to 240 Sqmm Lead Wire",
+    "category": "Connectors",
+    "subcategory": "ACSR Connectors",
+    "sku": "285695-11.05",
+    "description": "Coyote to 240 Sqmm lead wire connector. CSR 2021-22: Rs 815, CSR 2023-24: Rs 848"
+  },
+  {
+    "name": "C wedge connector for 2.5/4/6/10 Sqmm from OH Squirrel/Weasel line to AFB/Cutout",
+    "category": "Connectors",
+    "subcategory": "Wedge Connectors",
+    "sku": "285691-11.06",
+    "description": "C wedge connector for 2.5/4/6/10 Sqmm OH line to AFB/Cutout. CSR 2021-22: Rs 86, CSR 2023-24: Rs 89"
+  },
+  {
+    "name": "C wedge connector for 16/25 Sqmm from OH Rabbit line to AFB/Cutouts",
+    "category": "Connectors",
+    "subcategory": "Wedge Connectors",
+    "sku": "285692-11.07",
+    "description": "C wedge connector for 16/25 Sqmm OH Rabbit line to AFB/Cutouts. CSR 2021-22: Rs 111, CSR 2023-24: Rs 114"
+  },
+  {
+    "name": "25 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321437-12.01",
+    "description": "25 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 74534, CSR 2023-24: Rs 91088"
+  },
+  {
+    "name": "25 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321465-12.02",
+    "description": "25 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 86731, CSR 2023-24: Rs 105994"
+  },
+  {
+    "name": "63 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321438-12.03",
+    "description": "63 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 135593, CSR 2023-24: Rs 165708"
+  },
+  {
+    "name": "63 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321466-12.04",
+    "description": "63 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 149370, CSR 2023-24: Rs 182545"
+  },
+  {
+    "name": "100 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321439-12.05",
+    "description": "100 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 173153, CSR 2023-24: Rs 211865"
+  },
+  {
+    "name": "100 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321467-12.06",
+    "description": "100 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 181615, CSR 2023-24: Rs 221925"
+  },
+  {
+    "name": "250 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321440-12.07",
+    "description": "250 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 361441, CSR 2023-24: Rs 441717"
+  },
+  {
+    "name": "250 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321468-12.08",
+    "description": "250 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 441102, CSR 2023-24: Rs 539071"
+  },
+  {
+    "name": "500 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321439-12.09",
+    "description": "500 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 616525, CSR 2023-24: Rs 753041"
+  },
+  {
+    "name": "500 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321469-12.10",
+    "description": "500 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 744746, CSR 2023-24: Rs 910154"
+  },
+  {
+    "name": "25 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321446-12.11",
+    "description": "25 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 77500, CSR 2023-24: Rs 94713"
+  },
+  {
+    "name": "25 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321470-12.12",
+    "description": "25 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 89697, CSR 2023-24: Rs 109619"
+  },
+  {
+    "name": "63 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321447-12.13",
+    "description": "63 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 138559, CSR 2023-24: Rs 169335"
+  },
+  {
+    "name": "63 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321471-12.14",
+    "description": "63 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 152336, CSR 2023-24: Rs 186107"
+  },
+  {
+    "name": "100 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321448-12.15",
+    "description": "100 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 176119, CSR 2023-24: Rs 215235"
+  }
+,
+
+  {
+    "name": "100 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321472-12.16",
+    "description": "100 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 184581, CSR 2023-24: Rs 225207"
+  },
+  {
+    "name": "250 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321451-12.17",
+    "description": "250 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 364407, CSR 2023-24: Rs 445342"
+  },
+  {
+    "name": "250 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321473-12.18",
+    "description": "250 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 444068, CSR 2023-24: Rs 542966"
+  },
+  {
+    "name": "500 kVA, Aluminum Wdg, Star 1 (4 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321452-12.19",
+    "description": "500 kVA aluminum winding transformer, Star 1 (4 Star). CSR 2021-22: Rs 619492, CSR 2023-24: Rs 757081"
+  },
+  {
+    "name": "500 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321474-12.20",
+    "description": "500 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 747712, CSR 2023-24: Rs 913779"
+  },
+  {
+    "name": "25 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321383-13.01",
+    "description": "25 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 87373, CSR 2023-24: Rs 106779"
+  },
+  {
+    "name": "63 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321384-13.02",
+    "description": "63 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 136356, CSR 2023-24: Rs 166641"
+  },
+  {
+    "name": "100 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321385-13.03",
+    "description": "100 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 180169, CSR 2023-24: Rs 220185"
+  },
+  {
+    "name": "250 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321386-13.04",
+    "description": "250 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 415424, CSR 2023-24: Rs 507960"
+  },
+  {
+    "name": "500 kVA, Aluminum Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321387-13.05",
+    "description": "500 kVA aluminum winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 797288, CSR 2023-24: Rs 975886"
+  },
+  {
+    "name": "25 kVA, Aluminium Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321460-13.06",
+    "description": "25 kVA aluminium winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 90339, CSR 2023-24: Rs 110403"
+  },
+  {
+    "name": "63 kVA, Aluminium Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321461-13.07",
+    "description": "63 kVA aluminium winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 139322, CSR 2023-24: Rs 170265"
+  },
+  {
+    "name": "100 kVA, Aluminium Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321462-13.08",
+    "description": "100 kVA aluminium winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 183136, CSR 2023-24: Rs 223811"
+  },
+  {
+    "name": "250 kVA, Aluminium Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321463-13.09",
+    "description": "250 kVA aluminium winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 418390, CSR 2023-24: Rs 513114"
+  },
+  {
+    "name": "500 kVA, Aluminium Wdg, Star 2 (5 Star)",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321464-13.10",
+    "description": "500 kVA aluminium winding transformer, Star 2 (5 Star). CSR 2021-22: Rs 800254, CSR 2023-24: Rs 977990"
+  },
+  {
+    "name": "25 kVA Transformer",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321483-14.01",
+    "description": "25 kVA transformer. CSR 2021-22: Rs 253045, CSR 2023-24: Rs 318432"
+  },
+  {
+    "name": "63 kVA Transformer",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321484-14.02",
+    "description": "63 kVA transformer. CSR 2021-22: Rs 313650, CSR 2023-24: Rs 394697"
+  },
+  {
+    "name": "100 kVA Transformer",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321485-14.03",
+    "description": "100 kVA transformer. CSR 2021-22: Rs 411617, CSR 2023-24: Rs 519779"
+  },
+  {
+    "name": "250 kVA Transformer",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321486-14.04",
+    "description": "250 kVA transformer. CSR 2021-22: Rs 701999, CSR 2023-24: Rs 883396"
+  },
+  {
+    "name": "500 kVA Transformer",
+    "category": "Transformers",
+    "subcategory": "Distribution Transformers",
+    "sku": "321487-14.05",
+    "description": "500 kVA transformer. CSR 2021-22: Rs 1018956, CSR 2023-24: Rs 1282254"
+  },
+  {
+    "name": "EHV Grade Transformer Oil - New",
+    "category": "Transformer Oils",
+    "subcategory": "EHV Grade Oil",
+    "sku": "601400-15.01",
+    "description": "EHV grade transformer oil, new. CSR 2021-22: Rs 74026, CSR 2023-24: Rs 105545"
+  }
+,
+
+  {
+    "name": "Reclaimed Oil",
+    "category": "Transformer Oils",
+    "subcategory": "Reclaimed Oil",
+    "sku": "601410-15.02",
+    "description": "Reclaimed transformer oil. CSR 2021-22: Rs 44416, CSR 2023-24: Rs 63327"
+  },
+  {
+    "name": "Contaminated Oil",
+    "category": "Transformer Oils",
+    "subcategory": "Contaminated Oil",
+    "sku": "601420-15.03",
+    "description": "Contaminated transformer oil. CSR 2021-22: Rs 22208, CSR 2023-24: Rs 31663"
+  },
+  {
+    "name": "25 kVA, Aluminium Wdg, Conventional",
+    "category": "Transformers",
+    "subcategory": "Conventional Transformers",
+    "sku": "321501-16.01",
+    "description": "25 kVA aluminium winding conventional transformer. CSR 2021-22: Rs 15986, CSR 2023-24: Rs 19343"
+  },
+  {
+    "name": "63 kVA, Aluminium Wdg, Conventional",
+    "category": "Transformers",
+    "subcategory": "Conventional Transformers",
+    "sku": "321502-16.02",
+    "description": "63 kVA aluminium winding conventional transformer. CSR 2021-22: Rs 20723, CSR 2023-24: Rs 25075"
+  },
+  {
+    "name": "100 kVA, Aluminium Wdg, Conventional",
+    "category": "Transformers",
+    "subcategory": "Conventional Transformers",
+    "sku": "321503-16.03",
+    "description": "100 kVA aluminium winding conventional transformer. CSR 2021-22: Rs 25287, CSR 2023-24: Rs 30657"
+  },
+  {
+    "name": "200/250 kVA, Aluminium Wdg, Conventional",
+    "category": "Transformers",
+    "subcategory": "Conventional Transformers",
+    "sku": "321504-16.04",
+    "description": "200/250 kVA aluminium winding conventional transformer. CSR 2021-22: Rs 45266, CSR 2023-24: Rs 54772"
+  },
+  {
+    "name": "500 kVA, Aluminium Wdg, Conventional",
+    "category": "Transformers",
+    "subcategory": "Conventional Transformers",
+    "sku": "321505-16.05",
+    "description": "500 kVA aluminium winding conventional transformer. CSR 2021-22: Rs 57891, CSR 2023-24: Rs 70048"
+  },
+  {
+    "name": "25 kVA, Aluminium Wdg, 3/4/5 Star",
+    "category": "Transformers",
+    "subcategory": "Star Rated Transformers",
+    "sku": "321506-16.06",
+    "description": "25 kVA aluminium winding transformer, 3/4/5 Star. CSR 2021-22: Rs 23158, CSR 2023-24: Rs 28021"
+  },
+  {
+    "name": "63 kVA, Aluminium Wdg, 3/4/5 Star",
+    "category": "Transformers",
+    "subcategory": "Star Rated Transformers",
+    "sku": "321507-16.07",
+    "description": "63 kVA aluminium winding transformer, 3/4/5 Star. CSR 2021-22: Rs 25445, CSR 2023-24: Rs 30788"
+  },
+  {
+    "name": "100 kVA, Aluminium Wdg, 3/4/5 Star",
+    "category": "Transformers",
+    "subcategory": "Star Rated Transformers",
+    "sku": "321508-16.08",
+    "description": "100 kVA aluminium winding transformer, 3/4/5 Star. CSR 2021-22: Rs 28565, CSR 2023-24: Rs 34564"
+  },
+  {
+    "name": "250 kVA, Aluminium Wdg, 3/4/5 Star",
+    "category": "Transformers",
+    "subcategory": "Star Rated Transformers",
+    "sku": "321509-16.09",
+    "description": "250 kVA aluminium winding transformer, 3/4/5 Star. CSR 2021-22: Rs 58512, CSR 2023-24: Rs 70800"
+  },
+  {
+    "name": "500 kVA, Aluminium Wdg, 3/4/5 Star",
+    "category": "Transformers",
+    "subcategory": "Star Rated Transformers",
+    "sku": "321510-16.10",
+    "description": "500 kVA aluminium winding transformer, 3/4/5 Star. CSR 2021-22: Rs 77586, CSR 2023-24: Rs 93879"
+  },
+  {
+    "name": "LT Protection Kit",
+    "category": "Protection",
+    "subcategory": "LT Kits",
+    "sku": "301107-17.01",
+    "description": "LT protection kit (BESCOM/GM/QS&S/10). CSR 2021-22: Rs 1623, CSR 2023-24: Rs 2023"
+  },
+  {
+    "name": "LT Distribution Box for 100 kVA DTC with MCCB's (Sheet Metal)",
+    "category": "Distribution Boxes",
+    "subcategory": "Sheet Metal Boxes",
+    "sku": "301055-18.01",
+    "description": "LT distribution box for 100 kVA DTC with MCCBs, sheet metal. CSR 2021-22: Rs 19329, CSR 2023-24: Rs 22686"
+  },
+  {
+    "name": "LT Distribution Box for 250 kVA DTC with MCCB's (Sheet Metal)",
+    "category": "Distribution Boxes",
+    "subcategory": "Sheet Metal Boxes",
+    "sku": "301056-18.02",
+    "description": "LT distribution box for 250 kVA DTC with MCCBs, sheet metal. CSR 2021-22: Rs 19438, CSR 2023-24: Rs 22814"
+  },
+  {
+    "name": "LT Distribution Box for 100/250 kVA DTC with MCCB's (SMC)",
+    "category": "Distribution Boxes",
+    "subcategory": "SMC Boxes",
+    "sku": "301060-18.03",
+    "description": "LT distribution box for 100/250 kVA DTC with MCCBs, SMC. CSR 2021-22: Rs 20813, CSR 2023-24: Rs 24428"
+  },
+  {
+    "name": "9 kV, 5 kA Lightning Arrester Ceramic type with Ground Disconnector",
+    "category": "Lightning Arresters",
+    "subcategory": "Ceramic Arresters",
+    "sku": "303201-19.01",
+    "description": "9kV, 5kA lightning arrester, ceramic type with ground disconnector. CSR 2021-22: Rs 826, CSR 2023-24: Rs 920"
+  },
+  {
+    "name": "10 kV, 5 kA Lightning Arrester Polymeric type with Ground Disconnector",
+    "category": "Lightning Arresters",
+    "subcategory": "Polymeric Arresters",
+    "sku": "303202-19.02",
+    "description": "10kV, 5kA lightning arrester, polymeric type with ground disconnector. CSR 2021-22: Rs 1471, CSR 2023-24: Rs 1584"
+  },
+  {
+    "name": "11 kV HG Fuse Unit with Solid Core Insulator",
+    "category": "Fuses",
+    "subcategory": "HG Fuse Units",
+    "sku": "302122-20.01",
+    "description": "11kV HG fuse unit with solid core insulator (set of 3). CSR 2021-22: Rs 875, CSR 2023-24: Rs 1069"
+  },
+
+
+  {
+    "name": "For 25/63/100 kVA 4/5 Star Rated Transformer on PSCC Pole - 9 Mtr Long, 300 Kg WL - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279111-21.01",
+    "description": "CSR 2021-22: Rs 15608, CSR 2023-24: Rs 17564"
+  },
+  {
+    "name": "For 25/63/100 kVA 4/5 Star Rated Transformer on PSCC Pole - 9 Mtr Long, 300 Kg WL - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280111-21.02",
+    "description": "CSR 2021-22: Rs 21344, CSR 2023-24: Rs 24277"
+  },
+  {
+    "name": "For 25/63/100 kVA 4/5 Star Rated Transformer on RCC Pole - 9 Mtr Long, 145 Kg WL - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279112-21.03",
+    "description": "CSR 2021-22: Rs 15464, CSR 2023-24: Rs 17402"
+  },
+  {
+    "name": "For 25/63/100 kVA 4/5 Star Rated Transformer on RCC Pole - 9 Mtr Long, 145 Kg WL - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280112-21.04",
+    "description": "CSR 2021-22: Rs 21157, CSR 2023-24: Rs 24064"
+  },
+  {
+    "name": "For 100/300 kVA 4/5 Star Rated Transformer on RCC Pole - 9 Mtr Long, 300 Kg WL - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279120-21.05",
+    "description": "CSR 2021-22: Rs 20019, CSR 2023-24: Rs 22552"
+  },
+  {
+    "name": "For 100/300 kVA 4/5 Star Rated Transformer on RCC Pole - 9 Mtr Long, 300 Kg WL - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280120-21.06",
+    "description": "CSR 2021-22: Rs 26725, CSR 2023-24: Rs 30035"
+  },
+  {
+    "name": "For 250/500 kVA 4/5 Star Rated Transformer on PSCC Pole - 9 Mtr Long, 300 Kg WL - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279121-21.07",
+    "description": "CSR 2021-22: Rs 20019, CSR 2023-24: Rs 22552"
+  },
+  {
+    "name": "For 250/500 kVA 4/5 Star Rated Transformer on PSCC Pole - 9 Mtr Long, 300 Kg WL - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280121-21.08",
+    "description": "CSR 2021-22: Rs 26725, CSR 2023-24: Rs 30035"
+  },
+  {
+    "name": "For 250/500 kVA 4/5 Star Rated Transformer on PSCC Pole - 9 Mtr Long, 300 Kg WL - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "279122-21.09",
+    "description": "CSR 2021-22: Rs 20019, CSR 2023-24: Rs 22552"
+  },
+  {
+    "name": "For 250/500 kVA 4/5 Star Rated Transformer on RCC Pole - 9 Mtr Long, 300 Kg WL - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280122-21.1",
+    "description": "CSR 2021-22: Rs 26725, CSR 2023-24: Rs 30035"
+  },
+  {
+    "name": "For 250/500 kVA 4/5 Star Rated Transformer on Tubular Pole - 11 Mtr Long, 500 Kg WL - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279123-21.11",
+    "description": "CSR 2021-22: Rs 20019, CSR 2023-24: Rs 22552"
+  },
+  {
+    "name": "For 250/500 kVA 4/5 Star Rated Transformer on Tubular Pole - 11 Mtr Long, 500 Kg WL - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280123-21.12",
+    "description": "CSR 2021-22: Rs 26725, CSR 2023-24: Rs 30035"
+  },
+  {
+    "name": "Single H Frame without Transformer Seating and Seating angle support cross arm for 11 Mtr Spun Pole for 63/100/250/500 kVA (OH Line) - MS",
+    "category": "H Frames",
+    "subcategory": "MS Structures",
+    "sku": "279129-22.05",
+    "description": "CSR 2021-22: Rs 11559, CSR 2023-24: Rs 13007"
+  },
+  {
+    "name": "Single H Frame without Transformer Seating and Seating angle support cross arm for 11 Mtr Spun Pole for 63/100/250/500kVA (OH Line) - GI",
+    "category": "H Frames",
+    "subcategory": "GI Structures",
+    "sku": "280129-22.06",
+    "description": "CSR 2021-22: Rs 15814, CSR 2023-24: Rs 17987"
+  },
+  {
+    "name": "Three H Frame without Transformer Seating and Seating angle support cross arm for 11 Mtr Spun Pole for 63/100/250/500 kVA (UG Cable) - MS",
+    "category": "H Frames",
+    "subcategory": "MS Structures",
+    "sku": "279131-22.07",
+    "description": "CSR 2021-22: Rs 18727, CSR 2023-24: Rs 21073"
+  },
+  {
+    "name": "Three H Frame without Transformer Seating and Seating angle support cross arm for 11 Mtr Spun Pole for 63/100/250/500 kVA (UG Cable) - GI",
+    "category": "H Frames",
+    "subcategory": "GI Structures",
+    "sku": "280131-22.08",
+    "description": "CSR 2021-22: Rs 25110, CSR 2023-24: Rs 28560"
+  },
+  {
+    "name": "Prefabricated Platform for erection of 250 kVA Transformer on 11 Mtr Spun Pole Structure",
+    "category": "Platforms",
+    "subcategory": "MS Structures",
+    "sku": "280132-22.09",
+    "description": "CSR 2021-22: Rs 47203, CSR 2023-24: Rs 53118"
+  },
+  {
+    "name": "FRP grating sheet (30 mm thickness, 1.8 Mtr x 1.5) for Prefabricated structure",
+    "category": "Platforms",
+    "subcategory": "FRP Components",
+    "sku": "280133-22.1",
+    "description": "CSR 2021-22: Rs 7873, CSR 2023-24: Rs 8859"
+  },
+  {
+    "name": "For 25/63 kVA 4/5 Star Rated Transformer on RCC Pole - 9 Mtr Long, 150 Kg WL Sq Section without H Frame - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279115-23.01",
+    "description": "CSR 2021-22: Rs 6107, CSR 2023-24: Rs 6872"
+  }
+,
+
+  {
+    "name": "For 25/63 kVA 4/5 Star Rated Transformer on RCC Pole - 9 Mtr Long, 150 Kg WL Sq Section without H Frame - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280115-23.02",
+    "description": "CSR 2021-22: Rs 8497, CSR 2023-24: Rs 9664"
+  },
+  {
+    "name": "For 25/63 kVA 4/5 Star Rated Transformer on RCC Pole - 9 Mtr Long, 150 Kg WL Sq Section with H Frame - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279116-23.03",
+    "description": "CSR 2021-22: Rs 10409, CSR 2023-24: Rs 11713"
+  },
+  {
+    "name": "For 25/63 kVA 4/5 Star Rated Transformer on RCC Pole - 9 Mtr Long, 150 Kg WL Sq Section with H Frame - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280116-23.04",
+    "description": "CSR 2021-22: Rs 14324, CSR 2023-24: Rs 16292"
+  },
+  {
+    "name": "For 25 kVA 4/5 Star Rated Transformer on PSCC Pole - 9 Mtr Long, 300 Kg WL without H Frame - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279118-23.05",
+    "description": "CSR 2021-22: Rs 6310, CSR 2023-24: Rs 7101"
+  },
+  {
+    "name": "For 25 kVA 4/5 Star Rated Transformer on PSCC Pole - 9 Mtr Long, 300 Kg WL without H Frame - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280118-23.06",
+    "description": "CSR 2021-22: Rs 8761, CSR 2023-24: Rs 9965"
+  },
+  {
+    "name": "For 25 kVA 4/5 Star Rated Transformer on PSCC Pole - 9 Mtr Long, 300 Kg WL with H Frame - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279119-23.07",
+    "description": "CSR 2021-22: Rs 10781, CSR 2023-24: Rs 12132"
+  },
+  {
+    "name": "For 25 kVA 4/5 Star Rated Transformer on PSCC Pole - 9 Mtr Long, 300 Kg WL with H Frame - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280119-23.08",
+    "description": "CSR 2021-22: Rs 14806, CSR 2023-24: Rs 16840"
+  },
+  {
+    "name": "11 kV, 200 Amps Single Break GOS",
+    "category": "GOS",
+    "subcategory": "Conventional",
+    "sku": "304212-24.01",
+    "description": "CSR 2021-22: Rs 7733, CSR 2023-24: Rs 9450"
+  },
+  {
+    "name": "11 kV, 200 Amps Single Break Polymer Type Post Insulators GOS",
+    "category": "GOS",
+    "subcategory": "Polymer",
+    "sku": "New Item-24.02",
+    "description": "CSR 2021-22: —, CSR 2023-24: Rs 9404"
+  },
+  {
+    "name": "11 kV, 200 Amps Single Break GOS, Vertically Operated",
+    "category": "GOS",
+    "subcategory": "Conventional",
+    "sku": "304213-24.03",
+    "description": "CSR 2021-22: Rs 11232, CSR 2023-24: Rs 13727"
+  },
+  {
+    "name": "11 kV, 400 Amps Double Break GOS",
+    "category": "GOS",
+    "subcategory": "Conventional",
+    "sku": "304224-24.04",
+    "description": "CSR 2021-22: Rs 17396, CSR 2023-24: Rs 21260"
+  },
+  {
+    "name": "11 kV, 400 Amps Single Break Polymer Type Post Insulators GOS",
+    "category": "GOS",
+    "subcategory": "Polymer",
+    "sku": "New Item-24.05",
+    "description": "CSR 2021-22: —, CSR 2023-24: Rs 18634"
+  },
+  {
+    "name": "H - Frame Set for fixing 11 kV, 200 Amps Single Break GOS - MS",
+    "category": "H Frames",
+    "subcategory": "MS Structures",
+    "sku": "279149-24.06",
+    "description": "CSR 2021-22: Rs 3850, CSR 2023-24: Rs 4332"
+  },
+  {
+    "name": "H - Frame Set for fixing 11 kV, 200 Amps Single Break GOS - GI",
+    "category": "H Frames",
+    "subcategory": "GI Structures",
+    "sku": "280149-24.07",
+    "description": "CSR 2021-22: Rs 5338, CSR 2023-24: Rs 6007"
+  },
+  {
+    "name": "Fixed and Moving contacts with B&N for 11 kV, 200 Amps GOS (1 Fixed & 1 Moving contacts each)",
+    "category": "GOS Components",
+    "subcategory": "Contacts",
+    "sku": "503000-24.08",
+    "description": "CSR 2021-22: Rs 902, CSR 2023-24: Rs 1102"
+  },
+  {
+    "name": "11 kV, 400 Amps Special Roaster GOS",
+    "category": "GOS",
+    "subcategory": "Special Roaster",
+    "sku": "304204-24.09",
+    "description": "CSR 2021-22: Rs 12238, CSR 2023-24: Rs 14956"
+  },
+  {
+    "name": "Insulated GOS Operating Rods",
+    "category": "GOS Components",
+    "subcategory": "Operating Rods",
+    "sku": "503211-24.1",
+    "description": "CSR 2021-22: Rs 367, CSR 2023-24: Rs 413"
+  },
+  {
+    "name": "11 kV, DOLO Cutout Conventional to Erstwhile KEB Specification",
+    "category": "DOLO",
+    "subcategory": "Conventional",
+    "sku": "302011-25.01",
+    "description": "CSR 2021-22: Rs 4807, CSR 2023-24: Rs 5875"
+  },
+  {
+    "name": "11 kV, DOLO Cutout REC Specification",
+    "category": "DOLO",
+    "subcategory": "REC Specification",
+    "sku": "302021-25.02",
+    "description": "CSR 2021-22: Rs 3470, CSR 2023-24: Rs 4241"
+  },
+  {
+    "name": "For RCC Pole - 9 Mtr Long, 145KG WL/PSCC Pole - 9 Mtr Long, 300KG WL - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279100-26.01",
+    "description": "CSR 2021-22: Rs 5688, CSR 2023-24: Rs 6401"
+  },
+  {
+    "name": "For RCC Pole - 9 Mtr Long, 145KG WL/PSCC Pole - 9 Mtr Long, 300KG WL - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280100-26.02",
+    "description": "CSR 2021-22: Rs 7792, CSR 2023-24: Rs 8863"
+  },
+  {
+    "name": "For RCC Pole - 9 Mtr Long, 145KG WL/PSCC Pole - 9 Mtr Long, 300KG WL - MS",
+    "category": "Mounting Structures",
+    "subcategory": "MS Structures",
+    "sku": "279015-27.01",
+    "description": "CSR 2021-22: Rs 12257, CSR 2023-24: Rs 13793"
+  },
+  {
+    "name": "For RCC Pole - 9 Mtr Long, 145KG WL/PSCC Pole - 9 Mtr Long, 300KG WL - GI",
+    "category": "Mounting Structures",
+    "subcategory": "GI Structures",
+    "sku": "280015-27.02",
+    "description": "CSR 2021-22: Rs 16885, CSR 2023-24: Rs 19205"
+  },
+  {
+    "name": "Rabbit to Rabbit ACSR",
+    "category": "Connectors",
+    "subcategory": "ACSR",
+    "sku": "285570-28.01",
+    "description": "CSR 2021-22: Rs 435, CSR 2023-24: Rs 453"
+  },
+  {
+    "name": "Coyote to Coyote ACSR",
+    "category": "Connectors",
+    "subcategory": "ACSR",
+    "sku": "285575-28.02",
+    "description": "CSR 2021-22: Rs 1073, CSR 2023-24: Rs 1117"
+  },
+  {
+    "name": "Rabbit to Coyote ACSR",
+    "category": "Connectors",
+    "subcategory": "ACSR",
+    "sku": "285571-28.03",
+    "description": "CSR 2021-22: Rs 1080, CSR 2023-24: Rs 1124"
+  },
+  {
+    "name": "Rabbit to Rabbit ACSR",
+    "category": "Connectors",
+    "subcategory": "ACSR",
+    "sku": "285585-29.01",
+    "description": "CSR 2021-22: Rs 88, CSR 2023-24: Rs 92"
+  },
+  {
+    "name": "Coyote to Coyote ACSR",
+    "category": "Connectors",
+    "subcategory": "ACSR",
+    "sku": "285587-29.02",
+    "description": "CSR 2021-22: Rs 441, CSR 2023-24: Rs 459"
+  },
+  {
+    "name": "Rabbit to Coyote ACSR",
+    "category": "Connectors",
+    "subcategory": "ACSR",
+    "sku": "285586-29.03",
+    "description": "CSR 2021-22: Rs 417, CSR 2023-24: Rs 434"
+  },
+  {
+    "name": "Two Hole Paddle (Rabbit ACSR)",
+    "category": "Connectors",
+    "subcategory": "Paddles",
+    "sku": "285590-29.04",
+    "description": "CSR 2021-22: Rs 345, CSR 2023-24: Rs 359"
+  }
+,
+
+
+  {
+    "name": "Microwedge Connector",
+    "category": "Connectors",
+    "subcategory": "ACSR Accessories",
+    "sku": "285594-29.05",
+    "description": "CSR 2021-22: Rs 113, CSR 2023-24: Rs 118"
+  },
+  {
+    "name": "8 Way with Porcelain Rewireable Cutout and & 1 No of 630 Amps Load Break Switch with Copper Busbar as per IS-13947 Part-1&2",
+    "category": "LT Feeder Pillar",
+    "subcategory": "Porcelain Type",
+    "sku": "300308-30.01",
+    "description": "CSR 2021-22: Rs 44406, CSR 2023-24: Rs 52119"
+  },
+  {
+    "name": "12 Way with Porcelain Rewireable Cutout and & 1 No of 630 Amps Load Break Switch with Copper Busbar as per IS-13947 Part-1&2",
+    "category": "LT Feeder Pillar",
+    "subcategory": "Porcelain Type",
+    "sku": "300312-30.02",
+    "description": "CSR 2021-22: Rs 53287, CSR 2023-24: Rs 62543"
+  },
+  {
+    "name": "8 Way HRC Fuse Based Thermoset Plastic LT Feeder Pillar Box",
+    "category": "LT Feeder Pillar",
+    "subcategory": "Thermoset Plastic",
+    "sku": "300308-30.03",
+    "description": "CSR 2021-22: New Item, CSR 2023-24: Rs 80268"
+  },
+  {
+    "name": "12 Way HRC Fuse Based Thermoset Plastic LT Feeder Pillar Box",
+    "category": "LT Feeder Pillar",
+    "subcategory": "Thermoset Plastic",
+    "sku": "300312-30.04",
+    "description": "CSR 2021-22: New Item, CSR 2023-24: Rs 88876"
+  },
+  {
+    "name": "For 4 Wire",
+    "category": "TC Wiring",
+    "subcategory": "Accessories",
+    "sku": "284502-31.01",
+    "description": "CSR 2021-22: Rs 59, CSR 2023-24: Rs 71"
+  },
+  {
+    "name": "For 2 Wire",
+    "category": "TC Wiring",
+    "subcategory": "Accessories",
+    "sku": "281504-31.02",
+    "description": "CSR 2021-22: Rs 36, CSR 2023-24: Rs 44"
+  },
+  {
+    "name": "For TC Wiring",
+    "category": "TC Wiring",
+    "subcategory": "Accessories",
+    "sku": "284503-30.03",
+    "description": "CSR 2021-22: Rs 35, CSR 2023-24: Rs 42"
+  },
+  {
+    "name": "6 Sqmm, 2 Core, (24 GI Wire - 1.4 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287054-32.01",
+    "description": "CSR 2021-22: Rs 68731, CSR 2023-24: Rs 63406"
+  },
+  {
+    "name": "10 Sqmm, 2 Core, (9 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287055-32.02",
+    "description": "CSR 2021-22: Rs 85689, CSR 2023-24: Rs 79232"
+  },
+  {
+    "name": "10 Sqmm, 4 Core, (10 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287056-32.03",
+    "description": "CSR 2021-22: Rs 125942, CSR 2023-24: Rs 118004"
+  },
+  {
+    "name": "16 Sqmm, 2 Core, (9 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287056-32.04",
+    "description": "CSR 2021-22: Rs 97189, CSR 2023-24: Rs 88418"
+  },
+  {
+    "name": "16 Sqmm, 4 Core, (11 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287206-32.05",
+    "description": "CSR 2021-22: Rs 155459, CSR 2023-24: Rs 141842"
+  },
+  {
+    "name": "25 Sqmm, 2 Core, (12 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287057-32.06",
+    "description": "CSR 2021-22: Rs 136811, CSR 2023-24: Rs 124117"
+  },
+  {
+    "name": "25 Sqmm, 3.5 Core, (12 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287206-32.07",
+    "description": "CSR 2021-22: Rs 153773, CSR 2023-24: Rs 139861"
+  },
+  {
+    "name": "25 Sqmm, 4 Core, (13 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287207-32.08",
+    "description": "CSR 2021-22: Rs 204078, CSR 2023-24: Rs 179844"
+  },
+  {
+    "name": "35 Sqmm, 2 Core, (14 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287059-32.09",
+    "description": "CSR 2021-22: Rs 176839, CSR 2023-24: Rs 154062"
+  },
+  {
+    "name": "35 Sqmm, 4 Core, (15 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287060-32.1",
+    "description": "CSR 2021-22: Rs 202101, CSR 2023-24: Rs 176070"
+  },
+  {
+    "name": "50 Sqmm, 3.5 Core, (16 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287208-32.11",
+    "description": "CSR 2021-22: Rs 205343, CSR 2023-24: Rs 178973"
+  },
+  {
+    "name": "50 Sqmm, 4 Core, (17 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287209-32.12",
+    "description": "CSR 2021-22: Rs 215453, CSR 2023-24: Rs 201791"
+  },
+  {
+    "name": "70 Sqmm, 5 Core, (18 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287210-32.13",
+    "description": "CSR 2021-22: Rs 359404, CSR 2023-24: Rs 317912"
+  },
+  {
+    "name": "95 Sqmm, 5 Core, (21 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287211-32.14",
+    "description": "CSR 2021-22: Rs 435627, CSR 2023-24: Rs 373215"
+  },
+  {
+    "name": "120 Sqmm, 5 Core, (23 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287212-32.15",
+    "description": "CSR 2021-22: Rs 536281, CSR 2023-24: Rs 458134"
+  },
+  {
+    "name": "150 Sqmm, 3.5 Core, (25 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287213-32.16",
+    "description": "CSR 2021-22: Rs 648052, CSR 2023-24: Rs 554555"
+  },
+  {
+    "name": "185 Sqmm, 3.5 Core, (28 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287214-32.17",
+    "description": "CSR 2021-22: Rs 805758, CSR 2023-24: Rs 691218"
+  },
+  {
+    "name": "240 Sqmm, 3.5 Core, (30 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287216-32.18",
+    "description": "CSR 2021-22: Rs 1005145, CSR 2023-24: Rs 862266"
+  },
+  {
+    "name": "300 Sqmm, 3.5 Core, (32 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287217-32.19",
+    "description": "CSR 2021-22: Rs 1258576, CSR 2023-24: Rs 1066014"
+  },
+  {
+    "name": "400 Sqmm, 3.5 Core, (39 GI Strips - 4 x 0.8 mm)",
+    "category": "Cables",
+    "subcategory": "LT AB Cable",
+    "sku": "287218-32.2",
+    "description": "CSR 2021-22: Rs 1662974, CSR 2023-24: Rs 1453469"
+  },
+  {
+    "name": "10 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288605-33.01",
+    "description": "CSR 2021-22: Rs 3, CSR 2023-24: Rs 3"
+  },
+  {
+    "name": "16 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288606-33.02",
+    "description": "CSR 2021-22: Rs 3, CSR 2023-24: Rs 3"
+  },
+  {
+    "name": "25 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288607-33.03",
+    "description": "CSR 2021-22: Rs 4, CSR 2023-24: Rs 4"
+  },
+  {
+    "name": "35 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288608-33.04",
+    "description": "CSR 2021-22: Rs 4, CSR 2023-24: Rs 4"
+  },
+  {
+    "name": "50 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288609-33.05",
+    "description": "CSR 2021-22: Rs 7, CSR 2023-24: Rs 7"
+  },
+  {
+    "name": "70 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288610-33.06",
+    "description": "CSR 2021-22: Rs 11, CSR 2023-24: Rs 11"
+  },
+  {
+    "name": "95 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288611-33.07",
+    "description": "CSR 2021-22: Rs 12, CSR 2023-24: Rs 12"
+  },
+  {
+    "name": "120 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288612-33.08",
+    "description": "CSR 2021-22: Rs 17, CSR 2023-24: Rs 17"
+  },
+  {
+    "name": "150 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288613-33.09",
+    "description": "CSR 2021-22: Rs 26, CSR 2023-24: Rs 26"
+  },
+  {
+    "name": "185 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288614-33.1",
+    "description": "CSR 2021-22: Rs 31, CSR 2023-24: Rs 32"
+  },
+  {
+    "name": "240 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288616-33.11",
+    "description": "CSR 2021-22: Rs 52, CSR 2023-24: Rs 53"
+  },
+  {
+    "name": "400 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Cable Lugs",
+    "sku": "288617-33.12",
+    "description": "CSR 2021-22: Rs 108, CSR 2023-24: Rs 110"
+  },
+  {
+    "name": "10 Sqmm, 2 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288170-34.01",
+    "description": "CSR 2021-22: Rs 577, CSR 2023-24: Rs 698"
+  },
+  {
+    "name": "10 Sqmm, 4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288174-34.02",
+    "description": "CSR 2021-22: Rs 577, CSR 2023-24: Rs 698"
+  },
+  {
+    "name": "16 Sqmm, 2 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288171-34.03",
+    "description": "CSR 2021-22: Rs 577, CSR 2023-24: Rs 698"
+  },
+  {
+    "name": "16 Sqmm, 4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288175-34.04",
+    "description": "CSR 2021-22: Rs 577, CSR 2023-24: Rs 698"
+  },
+  {
+    "name": "25 Sqmm, 2 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288172-34.05",
+    "description": "CSR 2021-22: Rs 577, CSR 2023-24: Rs 698"
+  },
+  {
+    "name": "25 Sqmm, 4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288176-34.06",
+    "description": "CSR 2021-22: Rs 620, CSR 2023-24: Rs 750"
+  },
+  {
+    "name": "50 Sqmm, 4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288178-34.07",
+    "description": "CSR 2021-22: Rs 707, CSR 2023-24: Rs 855"
+  },
+  {
+    "name": "70 Sqmm, 3.5/4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288179-34.08",
+    "description": "CSR 2021-22: Rs 872, CSR 2023-24: Rs 1055"
+  },
+  {
+    "name": "95 Sqmm, 3.5/4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288180-34.09",
+    "description": "CSR 2021-22: Rs 872, CSR 2023-24: Rs 1055"
+  },
+  {
+    "name": "120 Sqmm, 3.5/4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288181-34.1",
+    "description": "CSR 2021-22: Rs 1375, CSR 2023-24: Rs 1664"
+  }
+,
+
+  {
+    "name": "185 Sqmm, 3.5/4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288183-34.11",
+    "description": "CSR 2021-22: Rs 1419, CSR 2023-24: Rs 1717"
+  },
+  {
+    "name": "240 Sqmm, 3.5/4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288185-34.12",
+    "description": "CSR 2021-22: Rs 1810, CSR 2023-24: Rs 2190"
+  },
+  {
+    "name": "400 Sqmm, 3.5/4 Core",
+    "category": "Cable Jointing Kits",
+    "subcategory": "LT Kits",
+    "sku": "288187-34.13",
+    "description": "CSR 2021-22: Rs 2682, CSR 2023-24: Rs 3245"
+  },
+  {
+    "name": "up to 6 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Termination Kits",
+    "sku": "288190-34.14",
+    "description": "CSR 2021-22: Rs 521, CSR 2023-24: Rs 630"
+  },
+  {
+    "name": "10 to 16 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Termination Kits",
+    "sku": "288191-34.15",
+    "description": "CSR 2021-22: Rs 521, CSR 2023-24: Rs 630"
+  },
+  {
+    "name": "25 to 35 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Termination Kits",
+    "sku": "288192-34.16",
+    "description": "CSR 2021-22: Rs 678, CSR 2023-24: Rs 820"
+  },
+  {
+    "name": "50 to 95 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Termination Kits",
+    "sku": "288193-34.17",
+    "description": "CSR 2021-22: Rs 1042, CSR 2023-24: Rs 1261"
+  },
+  {
+    "name": "120 to 225 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Termination Kits",
+    "sku": "288194-34.18",
+    "description": "CSR 2021-22: Rs 1250, CSR 2023-24: Rs 1513"
+  },
+  {
+    "name": "240 to 300 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Termination Kits",
+    "sku": "288195-34.19",
+    "description": "CSR 2021-22: Rs 1459, CSR 2023-24: Rs 1765"
+  },
+  {
+    "name": "400 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Termination Kits",
+    "sku": "288196-34.2",
+    "description": "CSR 2021-22: Rs 2084, CSR 2023-24: Rs 2522"
+  },
+  {
+    "name": "Up to 4C x 50 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "HT Kits",
+    "sku": "288150-35.01",
+    "description": "CSR 2021-22: Rs 268, CSR 2023-24: Rs 324"
+  },
+  {
+    "name": "3.5 x 70/95/120 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "HT Kits",
+    "sku": "288159-35.02",
+    "description": "CSR 2021-22: Rs 316, CSR 2023-24: Rs 382"
+  },
+  {
+    "name": "3.5 x 150/185 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "HT Kits",
+    "sku": "288163-35.03",
+    "description": "CSR 2021-22: Rs 397, CSR 2023-24: Rs 480"
+  },
+  {
+    "name": "3.5 x 225/240/300 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "HT Kits",
+    "sku": "288165-35.04",
+    "description": "CSR 2021-22: Rs 486, CSR 2023-24: Rs 588"
+  },
+  {
+    "name": "3.5 x 400/500 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "HT Kits",
+    "sku": "288166-35.05",
+    "description": "CSR 2021-22: Rs 592, CSR 2023-24: Rs 716"
+  },
+  {
+    "name": "95 Sqmm, (54 GI Wires - 2.5 mm Dia)",
+    "category": "Conductors",
+    "subcategory": "HT AB Cable",
+    "sku": "287400-36.01",
+    "description": "CSR 2021-22: Rs 945436, CSR 2023-24: Rs 889666"
+  },
+  {
+    "name": "120 Sqmm, (57 GI Wires - 2.5 mm Dia)",
+    "category": "Conductors",
+    "subcategory": "HT AB Cable",
+    "sku": "287402-36.02",
+    "description": "CSR 2021-22: Rs 1169705, CSR 2023-24: Rs 1124004"
+  },
+  {
+    "name": "150 Sqmm, (59 GI Wires - 2.5 mm Dia)",
+    "category": "Conductors",
+    "subcategory": "HT AB Cable",
+    "sku": "287403-36.03",
+    "description": "CSR 2021-22: Rs 1344359, CSR 2023-24: Rs 1285073"
+  },
+  {
+    "name": "185 Sqmm, (51 GI Wires - 3.15 mm Dia)",
+    "category": "Conductors",
+    "subcategory": "HT AB Cable",
+    "sku": "287404-36.04",
+    "description": "CSR 2021-22: Rs 1405495, CSR 2023-24: Rs 1343513"
+  },
+  {
+    "name": "240 Sqmm, (55 GI Wires - 3.15 mm Dia)",
+    "category": "Conductors",
+    "subcategory": "HT AB Cable",
+    "sku": "287405-36.05",
+    "description": "CSR 2021-22: Rs 1753646, CSR 2023-24: Rs 1656048"
+  },
+  {
+    "name": "300 Sqmm, (58 GI Wires - 3.15 mm Dia)",
+    "category": "Conductors",
+    "subcategory": "HT AB Cable",
+    "sku": "287406-36.06",
+    "description": "CSR 2021-22: Rs 1978869, CSR 2023-24: Rs 1891601"
+  },
+  {
+    "name": "400 Sqmm, (51 GI Wires - 4 mm Dia)",
+    "category": "Conductors",
+    "subcategory": "HT AB Cable",
+    "sku": "287410-36.07",
+    "description": "CSR 2021-22: Rs 2623841, CSR 2023-24: Rs 2496468"
+  },
+  {
+    "name": "11 kV, Cables Fault Locating Equipment",
+    "category": "Testing Equipment",
+    "subcategory": "Fault Locator",
+    "sku": "440300-36.08",
+    "description": "CSR 2021-22: Rs 3859433, CSR 2023-24: Rs 4669914"
+  },
+  {
+    "name": "11 kV, 630 Amps, 12.5 KA Auto reclosures with control panel including necessary hardware structure protection system etc., as per specification",
+    "category": "Switchgear",
+    "subcategory": "Auto Recloser",
+    "sku": "302510-37.01",
+    "description": "CSR 2021-22: Rs 493220, CSR 2023-24: Rs 578892"
+  },
+  {
+    "name": "11 kV, 12.5 KA Sectionalizer with control box having control logic with necessary hardware etc., as per specification",
+    "category": "Switchgear",
+    "subcategory": "Sectionalizer",
+    "sku": "312550-37.02",
+    "description": "CSR 2021-22: Rs 320339, CSR 2023-24: Rs 375982"
+  },
+  {
+    "name": "11 kV, 230 V, 2 Phase, 300 VA control transformer for providing auxiliary power",
+    "category": "Transformers",
+    "subcategory": "Control Transformer",
+    "sku": "312551-37.01",
+    "description": "CSR 2021-22: Rs 10920, CSR 2023-24: Rs 13345"
+  },
+  {
+    "name": "11kV/√3/110V/√3, 1 Phase metering PT class - 1, 100 VA per Phase for measurement of voltage",
+    "category": "Instrument Transformers",
+    "subcategory": "PT",
+    "sku": "312552-37.04",
+    "description": "CSR 2021-22: Rs 30010, CSR 2023-24: Rs 36675"
+  },
+  {
+    "name": "GSM modem with connecting cable for remote communicating capabilities",
+    "category": "Communication Equipment",
+    "subcategory": "GSM Modem",
+    "sku": "312553-37.05",
+    "description": "CSR 2021-22: Rs 11913, CSR 2023-24: Rs 14415"
+  },
+  {
+    "name": "Fabrication & supply of structural steel including painting etc.",
+    "category": "Fabrication",
+    "subcategory": "Structural Steel",
+    "sku": "312554-37.06",
+    "description": "CSR 2021-22: Rs 6601, CSR 2023-24: Rs 7428"
+  },
+  {
+    "name": "9.6 kV, 200 Amps long duration porcelain housed Surge arrestors",
+    "category": "Surge Arrestors",
+    "subcategory": "Porcelain Type",
+    "sku": "312555-37.07",
+    "description": "CSR 2021-22: Rs 1324, CSR 2023-24: Rs 1506"
+  },
+  {
+    "name": "3 Way RMU, 2OD + 1VL (One Incomer + One Breakers + One Outgoing)",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302480-38.01",
+    "description": "CSR 2021-22: Rs 1202116, CSR 2023-24: Rs 1410924"
+  },
+  {
+    "name": "4 Way RMU, 2OD + 2VL (One Incomer + Two Breakers + One Outgoing)",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302481-38.02",
+    "description": "CSR 2021-22: Rs 1599119, CSR 2023-24: Rs 1878686"
+  },
+  {
+    "name": "5 Way RMU, 2OD + 3VL (One Incomer + Three Breakers + One Outgoing)",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302482-38.03",
+    "description": "CSR 2021-22: Rs 1996121, CSR 2023-24: Rs 2348247"
+  },
+  {
+    "name": "6 Way RMU, 2OD + 4VL (One Incomer + Four Breakers + One Outgoing)",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302483-38.04",
+    "description": "CSR 2021-22: Rs 2393125, CSR 2023-24: Rs 2808811"
+  },
+  {
+    "name": "One Breaker (VL) Panel with Copper Busbar",
+    "category": "RMU Components",
+    "subcategory": "Breaker Panels",
+    "sku": "302315-38.05",
+    "description": "CSR 2021-22: Rs 397003, CSR 2023-24: Rs 465962"
+  },
+  {
+    "name": "One Breaker (OD) Panel with Copper Busbar",
+    "category": "RMU Components",
+    "subcategory": "Breaker Panels",
+    "sku": "302316-38.06",
+    "description": "CSR 2021-22: Rs 601058, CSR 2023-24: Rs 705462"
+  },
+  {
+    "name": "11 kV, Fault Passage Indicator for Overhead Line",
+    "category": "Protection Devices",
+    "subcategory": "Fault Passage Indicator",
+    "sku": "302580-38.07",
+    "description": "CSR 2021-22: Rs 12551, CSR 2023-24: Rs 15187"
+  },
+  {
+    "name": "3 Way RMU, 2 OD + 1 VL (One Incomer + One Breaker + One Outgoing)",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302340-39.01",
+    "description": "CSR 2021-22: Rs 468220, CSR 2023-24: Rs 549550"
+  },
+  {
+    "name": "4 Way RMU, 2 OD + 2 VL (One Incomer + Two Breakers + One Outgoing)",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302345-39.02",
+    "description": "CSR 2021-22: Rs 661017, CSR 2023-24: Rs 775836"
+  },
+  {
+    "name": "5 Way RMU, 2 OD + 3 VL (One Incomer + Three Breakers + One Outgoing)",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302350-39.03",
+    "description": "CSR 2021-22: Rs 826271, CSR 2023-24: Rs 969794"
+  },
+  {
+    "name": "6 Way RMU, 2 OD + 4 VL (One Incomer + Four Breakers + One Outgoing)",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302355-39.04",
+    "description": "CSR 2021-22: Rs 991525, CSR 2023-24: Rs 1163753"
+  },
+  {
+    "name": "1 OD for RMU 630 Amps",
+    "category": "RMU Components",
+    "subcategory": "OD Panel",
+    "sku": "302358-39.05",
+    "description": "CSR 2021-22: Rs 165254, CSR 2023-24: Rs 193995"
+  },
+  {
+    "name": "1 VL for RMU, 630 Amps",
+    "category": "RMU Components",
+    "subcategory": "VL Panel",
+    "sku": "302358-39.06",
+    "description": "CSR 2021-22: Rs 165254, CSR 2023-24: Rs 193995"
+  },
+  {
+    "name": "3 Way RMU, 2OD + 1VL (One Incomer + One Breakers + One Outgoing) 630 Amps with Copper Busbar",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302490-40.01",
+    "description": "CSR 2021-22: Rs 671593, CSR 2023-24: Rs 788249"
+  },
+  {
+    "name": "4 Way RMU, 2OD + 2VL (One Incomer + Two Breakers + One Outgoing) 630 Amps with Copper Busbar",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302491-40.02",
+    "description": "CSR 2021-22: Rs 919475, CSR 2023-24: Rs 1079188"
+  },
+  {
+    "name": "5 Way RMU, 2OD + 3VL (One Incomer + Three Breakers + One Outgoing) 630 Amps with Copper Busbar",
+    "category": "RMU",
+    "subcategory": "OD/VL Type",
+    "sku": "302492-40.03",
+    "description": "CSR 2021-22: Rs 1045068, CSR 2023-24: Rs 1226596"
+  },
+  {
+    "name": "1 VL for RMU, 630 Amps Copper Busbar",
+    "category": "RMU Components",
+    "subcategory": "VL Panel",
+    "sku": "302493-40.04",
+    "description": "CSR 2021-22: Rs 247881, CSR 2023-24: Rs 290938"
+  },
+  {
+    "name": "RTU (Remote Terminal Unit)",
+    "category": "Communication Equipment",
+    "subcategory": "RTU",
+    "sku": "302494-40.05",
+    "description": "CSR 2021-22: Rs 282902, CSR 2023-24: Rs 237920"
+  },
+  {
+    "name": "24-Pin Male RMU-RTU Connector",
+    "category": "Communication Equipment",
+    "subcategory": "Connectors",
+    "sku": "302495-40.05",
+    "description": "CSR 2021-22: Rs 5618, CSR 2023-24: Rs 6798"
+  },
+  {
+    "name": "Control Cable 24 Core (1.5 Mtr) suitable for RTU",
+    "category": "Communication Equipment",
+    "subcategory": "Control Cable",
+    "sku": "302496-40.06",
+    "description": "CSR 2021-22: Rs 1214, CSR 2023-24: Rs 1469"
+  },
+  {
+    "name": "Load Break Switch with Panel",
+    "category": "Switchgear",
+    "subcategory": "Load Break Switch",
+    "sku": "506492-41.01",
+    "description": "CSR 2021-22: Rs 62400, CSR 2023-24: Rs 73293"
+  }
+,
+  {
+    "name": "3x95 + 1x70 Sqmm (Insulated Messenger Wire)",
+    "category": "AB Cable",
+    "subcategory": "Messenger Wire",
+    "sku": "284791-42.01",
+    "description": "CSR 2021-22: Rs 907223, CSR 2023-24: Rs 959730"
+  },
+  {
+    "name": "3x120 + 1x95 Sqmm (Insulated Messenger Wire)",
+    "category": "AB Cable",
+    "subcategory": "Messenger Wire",
+    "sku": "284792-42.02",
+    "description": "CSR 2021-22: Rs 1084277, CSR 2023-24: Rs 1147714"
+  },
+  {
+    "name": "3x95 + 1x70 + 1x16 Sqmm Street light (Insulated Messenger cum Neutral)",
+    "category": "AB Cable",
+    "subcategory": "Street Light Cable",
+    "sku": "284819-42.03",
+    "description": "CSR 2021-22: Rs 507121, CSR 2023-24: Rs 494091"
+  },
+  {
+    "name": "3x95 + 1x70 + 1x25 Sqmm Street light (Insulated Messenger cum Neutral)",
+    "category": "AB Cable",
+    "subcategory": "Street Light Cable",
+    "sku": "284811-42.04",
+    "description": "CSR 2021-22: Rs 519748, CSR 2023-24: Rs 506358"
+  },
+  {
+    "name": "3x95 + 1x70 + 1x35 Sqmm Street light (Insulated Messenger cum Neutral)",
+    "category": "AB Cable",
+    "subcategory": "Street Light Cable",
+    "sku": "284812-42.05",
+    "description": "CSR 2021-22: Rs 540731, CSR 2023-24: Rs 528639"
+  },
+  {
+    "name": "3x70 + 1x50 + 1x16 Sqmm Street light (Insulated Messenger cum Neutral)",
+    "category": "AB Cable",
+    "subcategory": "Street Light Cable",
+    "sku": "284813-42.06",
+    "description": "CSR 2021-22: Rs 383835, CSR 2023-24: Rs 376197"
+  },
+  {
+    "name": "3x25 + 1x25 + 1x16 Sqmm Street light (Insulated Messenger cum Neutral)",
+    "category": "AB Cable",
+    "subcategory": "Street Light Cable",
+    "sku": "284814-42.07",
+    "description": "CSR 2021-22: Rs 168178, CSR 2023-24: Rs 164831"
+  },
+  {
+    "name": "3x16 + 1x25 + 1x16 Sqmm Street light (Insulated Messenger cum Neutral)",
+    "category": "AB Cable",
+    "subcategory": "Street Light Cable",
+    "sku": "284816-42.08",
+    "description": "CSR 2021-22: Rs 110975, CSR 2023-24: Rs 108767"
+  },
+  {
+    "name": "2x16 + 1x25 Sqmm (Insulated Messenger cum Neutral)",
+    "category": "AB Cable",
+    "subcategory": "Messenger Wire",
+    "sku": "284817-42.09",
+    "description": "CSR 2021-22: Rs 86949, CSR 2023-24: Rs 85219"
+  },
+  {
+    "name": "Suspension Clamp suitable for insulated Messenger wire of size 25 to 95 Sqmm",
+    "category": "AB Cable Accessories",
+    "subcategory": "Clamps",
+    "sku": "284847-43.01",
+    "description": "CSR 2021-22: Rs 312, CSR 2023-24: Rs 355"
+  },
+  {
+    "name": "11 kV, AB Cable Straight thru’ joint kit suitable for 95 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "HT AB Cable",
+    "sku": "284848-43.02",
+    "description": "CSR 2021-22: Rs 6351, CSR 2023-24: Rs 7685"
+  },
+  {
+    "name": "11 kV, AB Cable Straight thru’ joint kit suitable for 120 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "HT AB Cable",
+    "sku": "284849-43.03",
+    "description": "CSR 2021-22: Rs 6744, CSR 2023-24: Rs 8160"
+  },
+  {
+    "name": "11 kV, ABC Termination kit 95 - 120 Sqmm",
+    "category": "Cable Jointing Kits",
+    "subcategory": "HT AB Cable",
+    "sku": "284873-43.04",
+    "description": "CSR 2021-22: Rs 2360, CSR 2023-24: Rs 2856"
+  },
+  {
+    "name": "Surge Arrester (for AB Cable)",
+    "category": "Protection Devices",
+    "subcategory": "Surge Arrester",
+    "sku": "303100-43.05",
+    "description": "CSR 2021-22: Rs 570, CSR 2023-24: Rs 690"
+  },
+  {
+    "name": "Ground Connection for Messenger Wire",
+    "category": "AB Cable Accessories",
+    "subcategory": "Earthing",
+    "sku": "284880-43.06",
+    "description": "CSR 2021-22: Rs 11, CSR 2023-24: Rs 13"
+  },
+  {
+    "name": "Single Phase Distribution Box for 20 Connection",
+    "category": "Distribution Boxes",
+    "subcategory": "Single Phase",
+    "sku": "284820-43.07",
+    "description": "CSR 2021-22: Rs 1984, CSR 2023-24: Rs 2401"
+  },
+  {
+    "name": "Single Phase Distribution Box for 10 Connection",
+    "category": "Distribution Boxes",
+    "subcategory": "Single Phase",
+    "sku": "284818-43.08",
+    "description": "CSR 2021-22: Rs 1874, CSR 2023-24: Rs 2268"
+  },
+  {
+    "name": "Three Phase Distribution Box for 5 Connection",
+    "category": "Distribution Boxes",
+    "subcategory": "Three Phase",
+    "sku": "284815-43.09",
+    "description": "CSR 2021-22: Rs 1984, CSR 2023-24: Rs 2401"
+  },
+  {
+    "name": "Three Phase Distribution Box for 10 Connection",
+    "category": "Distribution Boxes",
+    "subcategory": "Three Phase",
+    "sku": "284821-43.1",
+    "description": "CSR 2021-22: Rs 1984, CSR 2023-24: Rs 2401"
+  },
+  {
+    "name": "Piercing Connector Suitable for 16 Sqmm - 95 Sqmm AB Cable - Service Connection",
+    "category": "AB Cable Accessories",
+    "subcategory": "Piercing Connector",
+    "sku": "284822-43.11",
+    "description": "CSR 2021-22: Rs 219, CSR 2023-24: Rs 265"
+  },
+  {
+    "name": "Piercing Connector Suitable for 16 Sqmm - 95 Sqmm AB Cable - Street Light Connection",
+    "category": "AB Cable Accessories",
+    "subcategory": "Piercing Connector",
+    "sku": "284223-43.12",
+    "description": "CSR 2021-22: Rs 154, CSR 2023-24: Rs 186"
+  },
+  {
+    "name": "Piercing Connector Suitable for 25 Sqmm - 95 Sqmm AB Cable - Main to Main Connection",
+    "category": "AB Cable Accessories",
+    "subcategory": "Piercing Connector",
+    "sku": "284855-43.13",
+    "description": "CSR 2021-22: Rs 256, CSR 2023-24: Rs 310"
+  },
+  {
+    "name": "Piercing Connector Suitable for 50 Sqmm - 150 Sqmm AB Cable - Main to Main Connection",
+    "category": "AB Cable Accessories",
+    "subcategory": "Piercing Connector",
+    "sku": "284865-43.14",
+    "description": "CSR 2021-22: Rs 288, CSR 2023-24: Rs 348"
+  },
+  {
+    "name": "Universal Hook and Bolt & Nut",
+    "category": "AB Cable Accessories",
+    "subcategory": "Hardware",
+    "sku": "284824-43.15",
+    "description": "CSR 2021-22: Rs 293, CSR 2023-24: Rs 333"
+  },
+  {
+    "name": "Dead End Clamp/Anchor Clamp Assembly 25 to 95 Sqmm Bare Messenger (Exclusive of Pole Clamp and Eye Hook)",
+    "category": "AB Cable Accessories",
+    "subcategory": "Clamps",
+    "sku": "284825-43.16",
+    "description": "CSR 2021-22: Rs 126, CSR 2023-24: Rs 152"
+  },
+  {
+    "name": "Dead End Clamp/Anchor Clamp Assembly 16 to 70 Sqmm Bare Messenger (Exclusive of Pole Clamp and Eye Hook)",
+    "category": "AB Cable Accessories",
+    "subcategory": "Clamps",
+    "sku": "284843-43.17",
+    "description": "CSR 2021-22: Rs 192, CSR 2023-24: Rs 232"
+  },
+  {
+    "name": "Dead End Clamp/Anchor Clamp Assembly 70 to 210 Sqmm Bare Messenger (Exclusive of Pole Clamp and Eye Hook)",
+    "category": "AB Cable Accessories",
+    "subcategory": "Clamps",
+    "sku": "284844-43.18",
+    "description": "CSR 2021-22: Rs 288, CSR 2023-24: Rs 348"
+  },
+  {
+    "name": "Suspension Clamp Assembly 16 to 70 Sqmm Bare Messenger (Exclusive of Pole Clamp and Eye Hook)",
+    "category": "AB Cable Accessories",
+    "subcategory": "Clamps",
+    "sku": "284845-43.19",
+    "description": "CSR 2021-22: Rs 183, CSR 2023-24: Rs 221"
+  },
+  {
+    "name": "Suspension Clamp Assembly 70 to 210 Sqmm Bare Messenger (Exclusive of Pole Clamp and Eye Hook)",
+    "category": "AB Cable Accessories",
+    "subcategory": "Clamps",
+    "sku": "284846-43.2",
+    "description": "CSR 2021-22: Rs 293, CSR 2023-24: Rs 355"
+  },
+  {
+    "name": "Pre - Insulated Lug - CPTAU for 120 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Pre-Insulated Lugs",
+    "sku": "284836-43.21",
+    "description": "CSR 2021-22: Rs 370, CSR 2023-24: Rs 448"
+  },
+  {
+    "name": "Pre - Insulated Lug - CPTAU for 95 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Pre-Insulated Lugs",
+    "sku": "284837-43.22",
+    "description": "CSR 2021-22: Rs 324, CSR 2023-24: Rs 392"
+  },
+  {
+    "name": "Pre - Insulated Lug - CPTAU for 70 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Pre-Insulated Lugs",
+    "sku": "284827-43.23",
+    "description": "CSR 2021-22: Rs 283, CSR 2023-24: Rs 342"
+  },
+  {
+    "name": "Pre - Insulated Lug - CPTAU for 50 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Pre-Insulated Lugs",
+    "sku": "284828-43.24",
+    "description": "CSR 2021-22: Rs 252, CSR 2023-24: Rs 305"
+  },
+  {
+    "name": "Pre - Insulated Lug - CPTAU for 25 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Pre-Insulated Lugs",
+    "sku": "284834-43.25",
+    "description": "CSR 2021-22: Rs 237, CSR 2023-24: Rs 287"
+  },
+  {
+    "name": "Pre - Insulated Lug - CPTAU for 16 Sqmm",
+    "category": "Lugs & Cable Accessories",
+    "subcategory": "Pre-Insulated Lugs",
+    "sku": "284835-43.26",
+    "description": "CSR 2021-22: Rs 117, CSR 2023-24: Rs 142"
+  },
+  {
+    "name": "Tee - Connector - KZ3 95",
+    "category": "Connectors",
+    "subcategory": "Tee Connectors",
+    "sku": "284829-43.27",
+    "description": "CSR 2021-22: Rs 324, CSR 2023-24: Rs 392"
+  },
+  {
+    "name": "Straight Joint Suitable for 95 Sqmm, LT ABC - MJPT Type",
+    "category": "Cable Jointing Kits",
+    "subcategory": "MJPT",
+    "sku": "284832-43.28",
+    "description": "CSR 2021-22: Rs 348, CSR 2023-24: Rs 421"
+  },
+  {
+    "name": "Straight Joint Suitable for 70 Sqmm, LT ABC - MJPT Type",
+    "category": "Cable Jointing Kits",
+    "subcategory": "MJPT",
+    "sku": "284830-43.29",
+    "description": "CSR 2021-22: Rs 325, CSR 2023-24: Rs 393"
+  },
+  {
+    "name": "Straight Joint Suitable for 50 Sqmm, LT ABC - MJPT Type",
+    "category": "Cable Jointing Kits",
+    "subcategory": "MJPT",
+    "sku": "284831-43.3",
+    "description": "CSR 2021-22: Rs 304, CSR 2023-24: Rs 368"
+  },
+  {
+    "name": "Straight Joint Suitable for 25 Sqmm, LT ABC - MJPT Type",
+    "category": "Cable Jointing Kits",
+    "subcategory": "MJPT",
+    "sku": "284838-43.31",
+    "description": "CSR 2021-22: Rs 282, CSR 2023-24: Rs 341"
+  },
+  {
+    "name": "Straight Joint Suitable for 16 Sqmm, LT ABC - MJPT Type",
+    "category": "Cable Jointing Kits",
+    "subcategory": "MJPT",
+    "sku": "284840-43.32",
+    "description": "CSR 2021-22: Rs 204, CSR 2023-24: Rs 247"
+  },
+  {
+    "name": "End Cap for 50/70 Sqmm",
+    "category": "Cable Accessories",
+    "subcategory": "End Caps",
+    "sku": "284833-43.33",
+    "description": "CSR 2021-22: Rs 19, CSR 2023-24: Rs 23"
+  },
+  {
+    "name": "Nylon Cable Tie (100 Nos)",
+    "category": "Cable Accessories",
+    "subcategory": "Ties",
+    "sku": "284839-43.34",
+    "description": "CSR 2021-22: Rs 384, CSR 2023-24: Rs 465"
+  },
+  {
+    "name": "Pole Clamp for HT/LT AB cable",
+    "category": "AB Cable Accessories",
+    "subcategory": "Clamps",
+    "sku": "284841-43.35",
+    "description": "CSR 2021-22: Rs 96, CSR 2023-24: Rs 116"
+  },
+  {
+    "name": "Eye Hook (Flat Type) for fixing Clamp",
+    "category": "AB Cable Accessories",
+    "subcategory": "Hooks",
+    "sku": "284842-44.36",
+    "description": "CSR 2021-22: Rs 84, CSR 2023-24: Rs 102"
+  },
+  {
+    "name": "70 Sq.mm AAAC (AL-7), 11 KV Covered Conductor",
+    "category": "Conductors",
+    "subcategory": "Covered Conductor",
+    "sku": "284901-44.01",
+    "description": "CSR 2021-22: Rs 462712, CSR 2023-24: Rs 453504"
+  },
+  {
+    "name": "Alignment Tie",
+    "category": "Covered Conductor Accessories",
+    "subcategory": "Alignment",
+    "sku": "284902-44.02",
+    "description": "CSR 2021-22: Rs 592, CSR 2023-24: Rs 716"
+  },
+  {
+    "name": "Dead End (Anchoring Clamp)",
+    "category": "Covered Conductor Accessories",
+    "subcategory": "Clamps",
+    "sku": "284903-44.03",
+    "description": "CSR 2021-22: Rs 2705, CSR 2023-24: Rs 3273"
+  },
+  {
+    "name": "Insulation Piercing Connector Covered to Covered – IPC – TTDC 284014 FA",
+    "category": "Covered Conductor Accessories",
+    "subcategory": "IPC",
+    "sku": "284904-44.04",
+    "description": "CSR 2021-22: Rs 4750, CSR 2023-24: Rs 5748"
+  },
+  {
+    "name": "Insulation Piercing Connector Bare to Covered – IPC – NTDC 284014 FA",
+    "category": "Covered Conductor Accessories",
+    "subcategory": "IPC",
+    "sku": "284905-44.05",
+    "description": "CSR 2021-22: Rs 4750, CSR 2023-24: Rs 5748"
+  },
+  {
+    "name": "Mid Span Joint MJPT 75 G 28",
+    "category": "Covered Conductor Accessories",
+    "subcategory": "Joints",
+    "sku": "284906-44.06",
+    "description": "CSR 2021-22: Rs 2500, CSR 2023-24: Rs 3028"
+  },
+  {
+    "name": "Outdoor Termination Kit",
+    "category": "Covered Conductor Accessories",
+    "subcategory": "Termination",
+    "sku": "284907-44.07",
+    "description": "CSR 2021-22: Rs 1403, CSR 2023-24: Rs 1698"
+  },
+  {
+    "name": "End Cap",
+    "category": "Covered Conductor Accessories",
+    "subcategory": "End Cap",
+    "sku": "284908-44.08",
+    "description": "CSR 2021-22: Rs 60, CSR 2023-24: Rs 73"
+  },
+  {
+    "name": "3x95 Sqmm Heat Shrinkable Transition Jointing Kit for XLPE Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Heat Shrinkable",
+    "sku": "288312-45.01",
+    "description": "CSR 2021-22: Rs 8468, CSR 2023-24: Rs 10246"
+  },
+  {
+    "name": "3x240 Sqmm Heat Shrinkable Transition Jointing Kit for XLPE Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Heat Shrinkable",
+    "sku": "288314-45.02",
+    "description": "CSR 2021-22: Rs 10466, CSR 2023-24: Rs 12664"
+  },
+  {
+    "name": "3x400 Sqmm Heat Shrinkable Transition Jointing Kit for XLPE Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Heat Shrinkable",
+    "sku": "288315-45.03",
+    "description": "CSR 2021-22: Rs 10659, CSR 2023-24: Rs 12897"
+  }
+,
+  {
+    "name": "3x95 Sqmm Heat Shrinkable Indoor Termination Kit for XLPE Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Indoor Termination (XLPE)",
+    "sku": "288332-45.04",
+    "description": "CSR 2021-22: Rs 3094, CSR 2023-24: Rs 3744"
+  },
+  {
+    "name": "3x240 Sqmm Heat Shrinkable Indoor Termination Kit for XLPE Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Indoor Termination (XLPE)",
+    "sku": "288334-45.05",
+    "description": "CSR 2021-22: Rs 3877, CSR 2023-24: Rs 4691"
+  },
+  {
+    "name": "3x400 Sqmm Heat Shrinkable Indoor Termination Kit for XLPE Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Indoor Termination (XLPE)",
+    "sku": "288336-45.06",
+    "description": "CSR 2021-22: Rs 3979, CSR 2023-24: Rs 4815"
+  },
+  {
+    "name": "3x95 Sqmm Heat Shrinkable Outdoor Termination Kit for XLPE Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Outdoor Termination (XLPE)",
+    "sku": "288302-45.07",
+    "description": "CSR 2021-22: Rs 3361, CSR 2023-24: Rs 4067"
+  },
+  {
+    "name": "3x240 Sqmm Heat Shrinkable Outdoor Termination Kit for XLPE Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Outdoor Termination (XLPE)",
+    "sku": "288304-45.08",
+    "description": "CSR 2021-22: Rs 4395, CSR 2023-24: Rs 5318"
+  },
+  {
+    "name": "3x400 Sqmm Heat Shrinkable Outdoor Termination Kit for XLPE Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Outdoor Termination (XLPE)",
+    "sku": "288305-45.09",
+    "description": "CSR 2021-22: Rs 4428, CSR 2023-24: Rs 5358"
+  },
+  {
+    "name": "3x95 Sqmm Heat Shrinkable Indoor Termination Kit for PILC Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Indoor Termination (PILC)",
+    "sku": "288462-45.1",
+    "description": "CSR 2021-22: Rs 2593, CSR 2023-24: Rs 3138"
+  },
+  {
+    "name": "3x240 Sqmm Heat Shrinkable Indoor Termination Kit for PILC Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Indoor Termination (PILC)",
+    "sku": "288464-45.11",
+    "description": "CSR 2021-22: Rs 2785, CSR 2023-24: Rs 3370"
+  },
+  {
+    "name": "3x400 Sqmm Heat Shrinkable Indoor Termination Kit for PILC Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Indoor Termination (PILC)",
+    "sku": "288465-45.12",
+    "description": "CSR 2021-22: Rs 2843, CSR 2023-24: Rs 3440"
+  },
+  {
+    "name": "3x95 Sqmm Heat Shrinkable Outdoor Termination Kit for PILC Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Outdoor Termination (PILC)",
+    "sku": "288456-45.13",
+    "description": "CSR 2021-22: Rs 3286, CSR 2023-24: Rs 3976"
+  },
+  {
+    "name": "3x240 Sqmm Heat Shrinkable Outdoor Termination Kit for PILC Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Outdoor Termination (PILC)",
+    "sku": "288458-45.14",
+    "description": "CSR 2021-22: Rs 4124, CSR 2023-24: Rs 4990"
+  },
+  {
+    "name": "3x400 Sqmm Heat Shrinkable Outdoor Termination Kit for PILC Cable",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Outdoor Termination (PILC)",
+    "sku": "288460-45.15",
+    "description": "CSR 2021-22: Rs 4143, CSR 2023-24: Rs 5013"
+  },
+  {
+    "name": "3x95 Sqmm Heat Shrinkable Straight Through Jointing Kit for XLPE Cable with Copper Lug & Al Ferrule",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Straight Through (XLPE)",
+    "sku": "288322-45.16",
+    "description": "CSR 2021-22: Rs 6042, CSR 2023-24: Rs 7311"
+  },
+  {
+    "name": "3x240 Sqmm Heat Shrinkable Straight Through Jointing Kit for XLPE Cable with Copper Lug & Al Ferrule",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Straight Through (XLPE)",
+    "sku": "288324-45.17",
+    "description": "CSR 2021-22: Rs 7367, CSR 2023-24: Rs 8914"
+  },
+  {
+    "name": "3x400 Sqmm Heat Shrinkable Straight Through Jointing Kit for XLPE Cable with Copper Lug & Al Ferrule",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Straight Through (XLPE)",
+    "sku": "288329-45.18",
+    "description": "CSR 2021-22: Rs 9048, CSR 2023-24: Rs 10948"
+  },
+  {
+    "name": "3x95 Sqmm Heat Shrinkable Straight Through Jointing Kit for PILC Cable with Copper Lug & Al Ferrule",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Straight Through (PILC)",
+    "sku": "288450-45.19",
+    "description": "CSR 2021-22: Rs 6445, CSR 2023-24: Rs 7798"
+  },
+  {
+    "name": "3x240 Sqmm Heat Shrinkable Straight Through Jointing Kit for PILC Cable with Copper Lug & Al Ferrule",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Straight Through (PILC)",
+    "sku": "288452-45.2",
+    "description": "CSR 2021-22: Rs 7282, CSR 2023-24: Rs 8811"
+  },
+  {
+    "name": "3x400 Sqmm Heat Shrinkable Straight Through Jointing Kit for PILC Cable with Copper Lug & Al Ferrule",
+    "category": "Cable Jointing Kits",
+    "subcategory": "Straight Through (PILC)",
+    "sku": "288453-45.21",
+    "description": "CSR 2021-22: Rs 8798, CSR 2023-24: Rs 10646"
+  },
+  {
+    "name": "Pole Mounted Fibre Glass Reinforced Aerial Fuse Board 60 Amps - 3 Way",
+    "category": "Fuse Boards",
+    "subcategory": "FGRP Aerial Fuse Board",
+    "sku": "612614-46.01",
+    "description": "CSR 2021-22: Rs 793, CSR 2023-24: Rs 960"
+  },
+  {
+    "name": "Pole Mounted Fibre Glass Reinforced Aerial Fuse Board 30 Amps - 3 Way",
+    "category": "Fuse Boards",
+    "subcategory": "FGRP Aerial Fuse Board",
+    "sku": "612615-46.02",
+    "description": "CSR 2021-22: Rs 567, CSR 2023-24: Rs 686"
+  },
+  {
+    "name": "FGRP Aerial Fuse Board 30 Amps - 4 Way",
+    "category": "Fuse Boards",
+    "subcategory": "FGRP Aerial Fuse Board",
+    "sku": "612617-46.03",
+    "description": "CSR 2021-22: Rs 739, CSR 2023-24: Rs 894"
+  },
+  {
+    "name": "FGRP Aerial Fuse Board 30 Amps - 5 Way",
+    "category": "Fuse Boards",
+    "subcategory": "FGRP Aerial Fuse Board",
+    "sku": "612618-46.04",
+    "description": "CSR 2021-22: Rs 836, CSR 2023-24: Rs 1012"
+  },
+  {
+    "name": "FGRP Aerial Fuse Board 30 Amps - 6 Way",
+    "category": "Fuse Boards",
+    "subcategory": "FGRP Aerial Fuse Board",
+    "sku": "612616-46.05",
+    "description": "CSR 2021-22: Rs 916, CSR 2023-24: Rs 1108"
+  },
+  {
+    "name": "LT Service Connector for Weasel",
+    "category": "Connectors",
+    "subcategory": "Service Connectors",
+    "sku": "285502-47.01",
+    "description": "CSR 2021-22: Rs 24, CSR 2023-24: Rs 29"
+  },
+  {
+    "name": "LT Service Connector for Rabbit",
+    "category": "Connectors",
+    "subcategory": "Service Connectors",
+    "sku": "285503-47.02",
+    "description": "CSR 2021-22: Rs 24, CSR 2023-24: Rs 29"
+  },
+  {
+    "name": "PVC Wire - 2.5 Sqmm, Weight per 100 Mtr Coil: 1.8 Kg",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289022-48.01",
+    "description": "CSR 2021-22: Rs 1361, CSR 2023-24: Rs 1484"
+  },
+  {
+    "name": "PVC Wire - 4 Sqmm, Weight per 100 Mtr Coil: 2.4 Kg",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289023-48.02",
+    "description": "CSR 2021-22: Rs 1664, CSR 2023-24: Rs 1791"
+  },
+  {
+    "name": "PVC Wire - 6 Sqmm, Weight per 100 Mtr Coil: 3.5 Kg",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289024-48.03",
+    "description": "CSR 2021-22: Rs 1968, CSR 2023-24: Rs 2095"
+  },
+  {
+    "name": "PVC Wire - 10 Sqmm, Weight per 100 Mtr Coil: 5.3 Kg",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289025-48.04",
+    "description": "CSR 2021-22: Rs 2578, CSR 2023-24: Rs 2678"
+  },
+  {
+    "name": "PVC Wire - 16 Sqmm, Al Wt: 4.2 Kg, Total Wt: 7.5 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289026-49.01",
+    "description": "CSR 2021-22: Rs 3471, CSR 2023-24: Rs 3542"
+  },
+  {
+    "name": "PVC Wire - 25 Sqmm, Al Wt: 6.7 Kg, Total Wt: 11.5 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289027-49.02",
+    "description": "CSR 2021-22: Rs 4726, CSR 2023-24: Rs 4733"
+  },
+  {
+    "name": "PVC Wire - 35 Sqmm, Al Wt: 9.3 Kg, Total Wt: 14.5 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289028-49.03",
+    "description": "CSR 2021-22: Rs 5482, CSR 2023-24: Rs 5322"
+  },
+  {
+    "name": "PVC Wire - 50 Sqmm, Al Wt: 13.8 Kg, Total Wt: 22 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289029-49.04",
+    "description": "CSR 2021-22: Rs 6734, CSR 2023-24: Rs 6419"
+  },
+  {
+    "name": "PVC Wire - 70 Sqmm, Al Wt: 18.7 Kg, Total Wt: 28.5 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289030-49.05",
+    "description": "CSR 2021-22: Rs 9492, CSR 2023-24: Rs 9066"
+  },
+  {
+    "name": "PVC Wire - 95 Sqmm, Al Wt: 25 Kg, Total Wt: 36 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289031-49.06",
+    "description": "CSR 2021-22: Rs 11932, CSR 2023-24: Rs 11129"
+  },
+  {
+    "name": "PVC Wire - 120 Sqmm, Al Wt: 32 Kg, Total Wt: 45.5 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289032-49.07",
+    "description": "CSR 2021-22: Rs 15269, CSR 2023-24: Rs 14319"
+  },
+  {
+    "name": "PVC Wire - 150 Sqmm, Al Wt: 41.4 Kg, Total Wt: 57 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289033-49.08",
+    "description": "CSR 2021-22: Rs 18588, CSR 2023-24: Rs 17416"
+  },
+  {
+    "name": "PVC Wire - 185 Sqmm, Al Wt: 49 Kg, Total Wt: 68 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289034-49.09",
+    "description": "CSR 2021-22: Rs 21941, CSR 2023-24: Rs 20224"
+  },
+  {
+    "name": "PVC Wire - 240 Sqmm, Al Wt: 63.5 Kg, Total Wt: 87 Kg/100 Mtr Coil",
+    "category": "PVC Wires",
+    "subcategory": "LT Wire",
+    "sku": "289036-49.1",
+    "description": "CSR 2021-22: Rs 28359, CSR 2023-24: Rs 26037"
+  },
+  {
+    "name": "Tinned Copper Fuse Wire, 5 Amps",
+    "category": "Fuse Wire",
+    "subcategory": "Tinned Copper",
+    "sku": "625020-50.01",
+    "description": "CSR 2021-22: Rs 992, CSR 2023-24: Rs 1128"
+  },
+  {
+    "name": "Tinned Copper Fuse Wire, 10 Amps",
+    "category": "Fuse Wire",
+    "subcategory": "Tinned Copper",
+    "sku": "625230-50.02",
+    "description": "CSR 2021-22: Rs 992, CSR 2023-24: Rs 1128"
+  },
+  {
+    "name": "Tinned Copper Fuse Wire, 20 Amps",
+    "category": "Fuse Wire",
+    "subcategory": "Tinned Copper",
+    "sku": "625250-50.03",
+    "description": "CSR 2021-22: Rs 992, CSR 2023-24: Rs 1128"
+  },
+  {
+    "name": "Tinned Copper Fuse Wire, 100 Amps",
+    "category": "Fuse Wire",
+    "subcategory": "Tinned Copper",
+    "sku": "625075-50.04",
+    "description": "CSR 2021-22: Rs 992, CSR 2023-24: Rs 1128"
+  },
+  {
+    "name": "GI Grounding pipe, B - Class, 42 mm dia, 2.5 Mtr long, 3.2 mm thick with bolt, nut, GI Strips and washer complete. Minimum Weight of GI Pipe: 7.3 Kg",
+    "category": "Earthing Materials",
+    "subcategory": "GI Pipe Earthing",
+    "sku": "281674-51.01",
+    "description": "CSR 2021-22: Rs 653, CSR 2023-24: Rs 743"
+  },
+  {
+    "name": "Good Quality well burnt Charcoal for grounding purposes packed in non returnable gunny bag of 30 Kg each",
+    "category": "Earthing Materials",
+    "subcategory": "Charcoal",
+    "sku": "600095-51.02",
+    "description": "CSR 2021-22: Rs 559, CSR 2023-24: Rs 676"
+  },
+  {
+    "name": "Good Quality Salt for grounding purposes packed in 50 Kg gunny bag",
+    "category": "Earthing Materials",
+    "subcategory": "Salt",
+    "sku": "607054-51.03",
+    "description": "CSR 2021-22: Rs 256, CSR 2023-24: Rs 320"
+  },
+  {
+    "name": "Rod type of earthing using 40 mm Dia, 3 Mtr long MS rod as ground rod, in earth pit of 300 mm width and 3300 mm depth and using 50x6 mm flat welded to ground rod as terminal & connected to equipment ground terminal using PVC all wire as specified",
+    "category": "Earthing Materials",
+    "subcategory": "Rod Earthing",
+    "sku": "281685-51.04",
+    "description": "CSR 2021-22: Rs 1910, CSR 2023-24: Rs 2172"
+  },
+  {
+    "name": "Bentonite clay slurry for earthing in 50 Kg Bag",
+    "category": "Earthing Materials",
+    "subcategory": "Bentonite",
+    "sku": "607220-51.05",
+    "description": "CSR 2021-22: Rs 304, CSR 2023-24: Rs 368"
+  },
+  {
+    "name": "Transparent Alkathine tube 19 mm dia, 2 mm thick in coils of 30 Mtr",
+    "category": "Miscellaneous",
+    "subcategory": "Alkathine Tube",
+    "sku": "821900-52.01",
+    "description": "CSR 2021-22: Rs 427, CSR 2023-24: Rs 517"
+  },
+  {
+    "name": "CT Operated ETV Meter 0.2s Accuracy Class with ABT feature and DLMS protocol with ToD with RS 232 Port UNIDIRECTIONAL (Used for HT Installation, LT Metering Cubicle (50-150 KW))",
+    "category": "Energy Meters",
+    "subcategory": "CT Operated",
+    "sku": "357325-53.01",
+    "description": "CSR 2021-22: Rs 16211, CSR 2023-24: Rs 19615"
+  },
+  {
+    "name": "CT Operated ETV Meter 0.2s Accuracy Class with ABT feature and DLMS protocol with ToD with RS 232 Port BIDIRECTIONAL (Used for Boundary Metering)",
+    "category": "Energy Meters",
+    "subcategory": "CT Operated",
+    "sku": "357326-53.02",
+    "description": "CSR 2021-22: Rs 16500, CSR 2023-24: Rs 19965"
+  },
+  {
+    "name": "LT Single Phase 5-30 Amps, DLMS Compliant Static Energy Meter, 1.0 Accuracy Class (Used for LT-2, LT-3 & LT-5 Installations)",
+    "category": "Energy Meters",
+    "subcategory": "Single Phase",
+    "sku": "357006-53.03",
+    "description": "CSR 2021-22: Rs 792, CSR 2023-24: Rs 958"
+  },
+  {
+    "name": "LT AC 3 Phase 4 Wire, 5-30 Amps DLMS Compliant Energy Meter, 1.0 Accuracy Class (Used for LT-2, LT-3 & LT-5 Installations up to 25HP/18KW)",
+    "category": "Energy Meters",
+    "subcategory": "Three Phase",
+    "sku": "357531-53.04",
+    "description": "CSR 2021-22: Rs 1967, CSR 2023-24: Rs 2380"
+  },
+  {
+    "name": "LT 3 Phase, 4 Wire, CT Operated DLMS Compliant ETV Meter, Class 0.5s Accuracy (Used for 25 HP/18KW & Above Installations, DTC Metering)",
+    "category": "Energy Meters",
+    "subcategory": "CT Operated",
+    "sku": "357519-53.05",
+    "description": "CSR 2021-22: Rs 2807, CSR 2023-24: Rs 3396"
+  },
+  {
+    "name": "Pre-Paid Energy Meter Single Phase, 5-30 Amps, 1.0 Accuracy Class with Key Pad Technology consumer interface unit along with pilfer proof box",
+    "category": "Energy Meters",
+    "subcategory": "Pre-Paid Meter",
+    "sku": "357580-53.06",
+    "description": "CSR 2021-22: Rs 5926, CSR 2023-24: Rs 7170"
+  }
+,
+  {
+    "name": "Pre-Paid Energy Meter Single Phase, 5-30 Amps, 1.0 Accuracy Class with Card Technology",
+    "category": "Energy Meters",
+    "subcategory": "Pre-Paid Meter",
+    "sku": "357581-53.07",
+    "description": "CSR 2021-22: Rs 9095, CSR 2023-24: Rs 11005"
+  },
+  {
+    "name": "Pre-Paid Energy Meter 3 Phase, 5-30 Amps, 1.0 Accuracy Class with Key Pad Technology consumer interface unit along with pilfer proof box",
+    "category": "Energy Meters",
+    "subcategory": "Pre-Paid Meter",
+    "sku": "357585-53.08",
+    "description": "CSR 2021-22: Rs 8541, CSR 2023-24: Rs 10335"
+  },
+  {
+    "name": "Pre-Paid Energy Meter 3 Phase, 5-30 Amps, 1.0 Accuracy Class with Card Technology",
+    "category": "Energy Meters",
+    "subcategory": "Pre-Paid Meter",
+    "sku": "357586-53.09",
+    "description": "CSR 2021-22: Rs 10171, CSR 2023-24: Rs 12307"
+  },
+  {
+    "name": "LT 3 Phase 4 Wire Static Meter (CT, PT Operated) 3 x 63.5 V, 1 Amps 0.2s Accuracy Class with RS-485 & ABT features",
+    "category": "Energy Meters",
+    "subcategory": "CT/PT Operated",
+    "sku": "357514-53.1",
+    "description": "CSR 2021-22: Rs 11447, CSR 2023-24: Rs 13851"
+  },
+  {
+    "name": "LT 3 Phase 4 Wire 5-30 Amps Thread Through Type composite Meter Housing Box consisting of ETV Meter with AMR capability and LICT with built in GSM/GPRS Modem (as per technical specification) upto 100 kVA Distribution Transformer",
+    "category": "Energy Meters",
+    "subcategory": "Smart Meter Assemblies",
+    "sku": "357515-53.11",
+    "description": "CSR 2021-22: Rs 14855, CSR 2023-24: Rs 17975"
+  },
+  {
+    "name": "Numerical Over Current & Earth Fault Protection Relay with Accessories for NJY Works",
+    "category": "Protection Devices",
+    "subcategory": "Relays",
+    "sku": "357517-53.12",
+    "description": "CSR 2021-22: Rs 9000, CSR 2023-24: Rs 10890"
+  },
+  {
+    "name": "GPRS Modem with Accessories",
+    "category": "Communication Devices",
+    "subcategory": "Modems",
+    "sku": "357521-53.13",
+    "description": "CSR 2021-22: Rs 3800, CSR 2023-24: Rs 4598"
+  },
+  {
+    "name": "LT AC Single Phase 2 Wire, 5-30 Amps Smart Energy Meter, Class 1.0 Accuracy with GPRS Communication Module",
+    "category": "Energy Meters",
+    "subcategory": "Smart Meters",
+    "sku": "357525-53.14",
+    "description": "CSR 2021-22: Rs 2034, CSR 2023-24: Rs 2461"
+  },
+  {
+    "name": "LT AC Single Phase 2 Wire, 5-30 Amps Smart Energy Meter, Class 1.0 Accuracy with RF Communication Module",
+    "category": "Energy Meters",
+    "subcategory": "Smart Meters",
+    "sku": "357526-53.15",
+    "description": "CSR 2021-22: Rs 2034, CSR 2023-24: Rs 2461"
+  },
+  {
+    "name": "LT AC 3 Phase 4 Wire, 10-60 Amps Smart Energy Meter, Class 1.0 Accuracy with GPRS Communication Module",
+    "category": "Energy Meters",
+    "subcategory": "Smart Meters",
+    "sku": "357527-53.16",
+    "description": "CSR 2021-22: Rs 2712, CSR 2023-24: Rs 3282"
+  },
+  {
+    "name": "LT AC 3 Phase 4 Wire, 10-60 Amps Smart Energy Meter, Class 1.0 Accuracy with RF Communication Module",
+    "category": "Energy Meters",
+    "subcategory": "Smart Meters",
+    "sku": "357528-53.17",
+    "description": "CSR 2021-22: Rs 2712, CSR 2023-24: Rs 3282"
+  },
+  {
+    "name": "LT AC 3 Phase 4 Wire CT Operated, 5 Amps Smart Energy Meter, Class 0.5s Accuracy with GPRS Communication Module",
+    "category": "Energy Meters",
+    "subcategory": "Smart CT Operated",
+    "sku": "357529-53.18",
+    "description": "CSR 2021-22: Rs 3390, CSR 2023-24: Rs 4102"
+  },
+  {
+    "name": "LT AC 3 Phase 4 Wire CT Operated, 5 Amps Smart Energy Meter, Class 0.5s Accuracy with RF Communication Module",
+    "category": "Energy Meters",
+    "subcategory": "Smart CT Operated",
+    "sku": "357530-53.19",
+    "description": "CSR 2021-22: Rs 3390, CSR 2023-24: Rs 4102"
+  },
+  {
+    "name": "3 Phase CT/PT operated alternating current Smart Meter of Accuracy Class 0.2s DLMS with GPRS Communication Module",
+    "category": "Energy Meters",
+    "subcategory": "Smart CT/PT Operated",
+    "sku": "357531-53.2",
+    "description": "CSR 2021-22: Rs 24788, CSR 2023-24: Rs 29993"
+  },
+  {
+    "name": "3 Phase CT/PT operated alternating current Smart Meter of Accuracy Class 0.2s DLMS with RF Communication Module",
+    "category": "Energy Meters",
+    "subcategory": "Smart CT/PT Operated",
+    "sku": "357532-53.21",
+    "description": "CSR 2021-22: Rs 24788, CSR 2023-24: Rs 29993"
+  },
+  {
+    "name": "EVSE - Bharath DC-001, 15 kW - One Connector",
+    "category": "EV Charging Equipment",
+    "subcategory": "DC Chargers",
+    "sku": "357533-54.01",
+    "description": "CSR 2021-22: Rs 169492, CSR 2023-24: Rs 205085"
+  },
+  {
+    "name": "EVSE - Bharath DC-001, 15 kW - Two Connectors",
+    "category": "EV Charging Equipment",
+    "subcategory": "DC Chargers",
+    "sku": "357534-54.02",
+    "description": "CSR 2021-22: Rs 245763, CSR 2023-24: Rs 297735"
+  },
+  {
+    "name": "EVSE - Bharath DC-001, 30 kW - Two Connectors",
+    "category": "EV Charging Equipment",
+    "subcategory": "DC Chargers",
+    "sku": "357535-54.03",
+    "description": "CSR 2021-22: Rs 272698, CSR 2023-24: Rs 329965"
+  },
+  {
+    "name": "EVSE - Bharath AC-001, 3.3 kW - One Connector",
+    "category": "EV Charging Equipment",
+    "subcategory": "AC Chargers",
+    "sku": "357536-54.04",
+    "description": "CSR 2021-22: Rs 15254, CSR 2023-24: Rs 18457"
+  },
+  {
+    "name": "EVSE - Bharath AC-001, 10 kW - Three Connectors (3.3 kW each)",
+    "category": "EV Charging Equipment",
+    "subcategory": "AC Chargers",
+    "sku": "357537-54.05",
+    "description": "CSR 2021-22: Rs 38811, CSR 2023-24: Rs 46961"
+  },
+  {
+    "name": "EVSE - IS17017/IEC61851 Pedestal/Ground Mounted, 25/30 kW - One/Two Connector",
+    "category": "EV Charging Equipment",
+    "subcategory": "AC/DC Chargers",
+    "sku": "357538-54.06",
+    "description": "CSR 2021-22: Rs 550847, CSR 2023-24: Rs 666525"
+  },
+  {
+    "name": "EVSE - IS17017/IEC61851 Pedestal/Ground Mounted, 50/60 kW - Two Connectors",
+    "category": "EV Charging Equipment",
+    "subcategory": "Fast Chargers",
+    "sku": "357539-54.07",
+    "description": "CSR 2021-22: Rs 776217, CSR 2023-24: Rs 939223"
+  },
+  {
+    "name": "EVSE - IS17017/IEC61851 Pedestal/Ground Mounted, 100/120 kW - Two Connectors",
+    "category": "EV Charging Equipment",
+    "subcategory": "Fast Chargers",
+    "sku": "357540-54.08",
+    "description": "CSR 2021-22: Rs 1059322, CSR 2023-24: Rs 1281780"
+  },
+  {
+    "name": "EVSE - IS17017/IEC61851 Pedestal/Ground Mounted, 240 kW - Two Connectors",
+    "category": "EV Charging Equipment",
+    "subcategory": "Ultra Fast Chargers",
+    "sku": "357541-54.09",
+    "description": "CSR 2021-22: Rs 1694915, CSR 2023-24: Rs 2050847"
+  },
+  {
+    "name": "Meter Protection/Tamper Proof box with busbar for LT 3 Ph with CT Ratio 50/5A, 1.0 Accuracy Class",
+    "category": "Metering Accessories",
+    "subcategory": "Protection Boxes",
+    "sku": "358040-55.01",
+    "description": "CSR 2021-22: Rs 5217, CSR 2023-24: Rs 6123"
+  },
+  {
+    "name": "Meter Protection/Tamper Proof box with busbar for LT 3 Ph with CT Ratio 75/5A, 1.0 Accuracy Class",
+    "category": "Metering Accessories",
+    "subcategory": "Protection Boxes",
+    "sku": "358023-55.02",
+    "description": "CSR 2021-22: Rs 4844, CSR 2023-24: Rs 5685"
+  },
+  {
+    "name": "Meter Protection/Tamper Proof box with busbar for LT 3 Ph with CT Ratio 100/5A, 1.0 Accuracy Class",
+    "category": "Metering Accessories",
+    "subcategory": "Protection Boxes",
+    "sku": "358030-55.03",
+    "description": "CSR 2021-22: Rs 4621, CSR 2023-24: Rs 5424"
+  },
+  {
+    "name": "LT Metering Box for housing the ETV Meter without CT's busbar wiring etc",
+    "category": "Metering Accessories",
+    "subcategory": "Metering Boxes",
+    "sku": "358050-55.04",
+    "description": "CSR 2021-22: Rs 3105, CSR 2023-24: Rs 3644"
+  },
+  {
+    "name": "Pillfer proof box for below 25 HP Installation",
+    "category": "Metering Accessories",
+    "subcategory": "Protection Boxes",
+    "sku": "612655-55.05",
+    "description": "CSR 2021-22: Rs 250, CSR 2023-24: Rs 293"
+  },
+  {
+    "name": "SMC Single Phase Meter protection box",
+    "category": "Metering Accessories",
+    "subcategory": "Protection Boxes",
+    "sku": "358005-55.06",
+    "description": "CSR 2021-22: Rs 407, CSR 2023-24: Rs 478"
+  },
+  {
+    "name": "Single Phase Deep Drawn Meter Protection box",
+    "category": "Metering Accessories",
+    "subcategory": "Protection Boxes",
+    "sku": "-55.07",
+    "description": "CSR 2021-22: New Item, CSR 2023-24: Rs 770"
+  },
+  {
+    "name": "Sheet Metal/Deep Drawn LT Metering box with wiring arrangement for Modem and DLMS meter without CTs",
+    "category": "Metering Accessories",
+    "subcategory": "Metering Boxes",
+    "sku": "358076-55.08",
+    "description": "CSR 2021-22: Rs 3105, CSR 2023-24: Rs 3644"
+  },
+  {
+    "name": "Sheet Metal/Deep Drawn Street Lighting Metering Box with Automatic Control Switch, Contactors with Single Phase 5-30 Amps meter & 50/5A CT",
+    "category": "Street Lighting",
+    "subcategory": "Metering Boxes",
+    "sku": "358078-55.09",
+    "description": "CSR 2021-22: Rs 5046, CSR 2023-24: Rs 5984"
+  },
+  {
+    "name": "Numerical Poly Carbonate Seal",
+    "category": "Metering Accessories",
+    "subcategory": "Seals",
+    "sku": "626234-55.11",
+    "description": "CSR 2021-22: Rs 8, CSR 2023-24: Rs 10"
+  },
+  {
+    "name": "Meter Sealing Wire",
+    "category": "Metering Accessories",
+    "subcategory": "Sealing Wire",
+    "sku": "626500-55.11",
+    "description": "CSR 2021-22: Rs 153, CSR 2023-24: Rs 185"
+  },
+  {
+    "name": "High Security Label Seal",
+    "category": "Metering Accessories",
+    "subcategory": "Seals",
+    "sku": "357590-55.12",
+    "description": "CSR 2021-22: Rs 4, CSR 2023-24: Rs 5"
+  },
+  {
+    "name": "Poly Carbonate sealing bits without number",
+    "category": "Metering Accessories",
+    "subcategory": "Seals",
+    "sku": "626233-55.13",
+    "description": "CSR 2021-22: Rs 5, CSR 2023-24: Rs 6"
+  },
+  {
+    "name": "LT CT, 3.75 VA, Ring type, CT Ratio - 25/5A, 1.0 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336005-56.01",
+    "description": "CSR 2021-22: Rs 738, CSR 2023-24: Rs 902"
+  },
+  {
+    "name": "LT CT, 3.75 VA, Ring type, CT Ratio - 30/5A, 1.0 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336006-56.02",
+    "description": "CSR 2021-22: Rs 738, CSR 2023-24: Rs 902"
+  },
+  {
+    "name": "LT CT, 3.75 VA, Ring type, CT Ratio - 50/5A, 1.0 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336010-56.03",
+    "description": "CSR 2021-22: Rs 738, CSR 2023-24: Rs 902"
+  },
+  {
+    "name": "LT CT, 3.75 VA, Ring type, CT Ratio - 75/5A, 1.0 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336015-56.04",
+    "description": "CSR 2021-22: Rs 610, CSR 2023-24: Rs 745"
+  },
+  {
+    "name": "LT CT, 3.75 VA, Ring type, CT Ratio - 50/5A, 0.5 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336016-56.05",
+    "description": "CSR 2021-22: Rs 729, CSR 2023-24: Rs 892"
+  },
+  {
+    "name": "CT Ratio - 75/5A, 0.5 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336017-56.06",
+    "description": "CSR 2021-22: Rs 464, CSR 2023-24: Rs 567"
+  },
+  {
+    "name": "CT Ratio - 100/5A, 0.5 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336020-56.07",
+    "description": "CSR 2021-22: Rs 540, CSR 2023-24: Rs 660"
+  },
+  {
+    "name": "CT Ratio - 150/5A, 0.5 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336025-56.08",
+    "description": "CSR 2021-22: Rs 404, CSR 2023-24: Rs 494"
+  },
+  {
+    "name": "CT Ratio - 200/5A, 0.5 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336030-56.09",
+    "description": "CSR 2021-22: Rs 477, CSR 2023-24: Rs 583"
+  },
+  {
+    "name": "CT Ratio - 300/5A, 0.5 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336035-56.1",
+    "description": "CSR 2021-22: Rs 477, CSR 2023-24: Rs 583"
+  },
+  {
+    "name": "CT Ratio - 400/5A, 0.5 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336040-56.11",
+    "description": "CSR 2021-22: Rs 477, CSR 2023-24: Rs 583"
+  },
+  {
+    "name": "CT Ratio - 600/5A, 0.5 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336046-56.12",
+    "description": "CSR 2021-22: Rs 536, CSR 2023-24: Rs 655"
+  },
+  {
+    "name": "CT Ratio - 800/5A, 0.5 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "LT CT",
+    "sku": "336050-56.13",
+    "description": "CSR 2021-22: Rs 536, CSR 2023-24: Rs 655"
+  },
+  {
+    "name": "11KV CT (Secondary - 1A), Ratio: 1.25/1A to 2.5/1A, Burden: 2.5 VA, 0.2 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "11kV CT",
+    "sku": "336336-57.01",
+    "description": "CSR 2021-22: Rs 10821, CSR 2023-24: Rs 13224"
+  },
+  {
+    "name": "11KV CT (Secondary - 1A), Ratio: 5/1A to 100/1A, Burden: 2.5 VA, 0.2 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "11kV CT",
+    "sku": "336337-57.02",
+    "description": "CSR 2021-22: Rs 9275, CSR 2023-24: Rs 11335"
+  },
+  {
+    "name": "11KV CT (Secondary - 1A), Ratio: 125/1A to 200/1A, Burden: 2.5 VA, 0.2 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "11kV CT",
+    "sku": "336338-57.03",
+    "description": "CSR 2021-22: Rs 9928, CSR 2023-24: Rs 12133"
+  },
+  {
+    "name": "11KV CT (Secondary - 1A), Ratio: 225/1A to 400/1A, Burden: 2.5 VA, 0.2 Accuracy Class",
+    "category": "CTs",
+    "subcategory": "11kV CT",
+    "sku": "336339-57.04",
+    "description": "CSR 2021-22: Rs 10821, CSR 2023-24: Rs 13224"
+  },
+  {
+    "name": "11 kV HT Metering cubicle with 3 CT & 3 PT, Transparent Cover TTB, 30x8 mm Copper Busbar, Modem & 2 Meters, without Load Break Switch",
+    "category": "Metering Cubicles",
+    "subcategory": "HT Cubicles",
+    "sku": "358351-58.01",
+    "description": "CSR 2021-22: Rs 207440, CSR 2023-24: Rs 243472"
+  },
+  {
+    "name": "LT Metering Cubicle for 50 KW to 150 KW (Excluding Meter & Modem Cost)",
+    "category": "Metering Cubicles",
+    "subcategory": "LT Cubicles",
+    "sku": "358352-58.02",
+    "description": "CSR 2021-22: Rs 68060, CSR 2023-24: Rs 79882"
+  },
+  {
+    "name": "25 Sqmm Copper Terminal, Approx Wt: 11 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288527-59.01",
+    "description": "CSR 2021-22: Rs 24, CSR 2023-24: Rs 27"
+  },
+  {
+    "name": "35 Sqmm Copper Terminal, Approx Wt: 17 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288528-59.02",
+    "description": "CSR 2021-22: Rs 35, CSR 2023-24: Rs 40"
+  },
+  {
+    "name": "50 Sqmm Copper Terminal, Approx Wt: 26 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288529-59.03",
+    "description": "CSR 2021-22: Rs 51, CSR 2023-24: Rs 58"
+  },
+  {
+    "name": "70 Sqmm Copper Terminal, Approx Wt: 38 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288530-59.04",
+    "description": "CSR 2021-22: Rs 78, CSR 2023-24: Rs 89"
+  },
+  {
+    "name": "95 Sqmm Copper Terminal, Approx Wt: 58 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288531-59.05",
+    "description": "CSR 2021-22: Rs 123, CSR 2023-24: Rs 140"
+  },
+  {
+    "name": "120 Sqmm Copper Terminal, Approx Wt: 64 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288532-59.06",
+    "description": "CSR 2021-22: Rs 123, CSR 2023-24: Rs 140"
+  },
+  {
+    "name": "150 Sqmm Copper Terminal, Approx Wt: 98 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288533-59.07",
+    "description": "CSR 2021-22: Rs 161, CSR 2023-24: Rs 183"
+  },
+  {
+    "name": "185 Sqmm Copper Terminal, Approx Wt: 158 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288534-59.08",
+    "description": "CSR 2021-22: Rs 241, CSR 2023-24: Rs 274"
+  },
+  {
+    "name": "225 Sqmm Copper Terminal",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288535-59.09",
+    "description": "CSR 2021-22: Rs 307, CSR 2023-24: Rs 349"
+  },
+  {
+    "name": "240 Sqmm Copper Terminal, Approx Wt: 218 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288536-59.1",
+    "description": "CSR 2021-22: Rs 312, CSR 2023-24: Rs 355"
+  },
+  {
+    "name": "300 Sqmm Copper Terminal",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288537-59.11",
+    "description": "CSR 2021-22: Rs 453, CSR 2023-24: Rs 515"
+  },
+  {
+    "name": "400 Sqmm Copper Terminal, Approx Wt: 395 gm",
+    "category": "Terminals",
+    "subcategory": "Copper Terminals",
+    "sku": "288538-59.12",
+    "description": "CSR 2021-22: Rs 759, CSR 2023-24: Rs 863"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 10 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288630-60.01",
+    "description": "CSR 2021-22: Rs 2, CSR 2023-24: Rs 2"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 16 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288631-60.02",
+    "description": "CSR 2021-22: Rs 2, CSR 2023-24: Rs 2"
+  }
+,
+
+
+  {
+    "name": "Aluminium End Terminal (Lug) - 25 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288632-60.03",
+    "description": "CSR 2021-22: Rs 3, CSR 2023-24: Rs 3"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 32 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288633-60.04",
+    "description": "CSR 2021-22: Rs 4, CSR 2023-24: Rs 4"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 50 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288634-60.05",
+    "description": "CSR 2021-22: Rs 9, CSR 2023-24: Rs 9"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 70 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288635-60.06",
+    "description": "CSR 2021-22: Rs 13, CSR 2023-24: Rs 13"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 95 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288636-60.07",
+    "description": "CSR 2021-22: Rs 15, CSR 2023-24: Rs 15"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 120 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288637-60.08",
+    "description": "CSR 2021-22: Rs 20, CSR 2023-24: Rs 20"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 150 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288638-60.09",
+    "description": "CSR 2021-22: Rs 24, CSR 2023-24: Rs 24"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 185 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288639-60.1",
+    "description": "CSR 2021-22: Rs 38, CSR 2023-24: Rs 39"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 225 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288640-60.11",
+    "description": "CSR 2021-22: Rs 41, CSR 2023-24: Rs 42"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 240 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288641-60.12",
+    "description": "CSR 2021-22: Rs 60, CSR 2023-24: Rs 61"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 300 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288642-60.13",
+    "description": "CSR 2021-22: Rs 71, CSR 2023-24: Rs 72"
+  },
+  {
+    "name": "Aluminium End Terminal (Lug) - 400 Sqmm",
+    "category": "Terminals",
+    "subcategory": "Aluminium Terminals",
+    "sku": "288643-60.14",
+    "description": "CSR 2021-22: Rs 92, CSR 2023-24: Rs 94"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x40 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733612-61.01",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x50 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733613-61.02",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x65 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733616-61.03",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x75 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733618-61.04",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x85 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733620-61.05",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x100 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733623-61.06",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x125 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733625-61.07",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x150 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733628-61.08",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x175 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733630-61.09",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x200 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733633-61.1",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x225 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut",
+    "sku": "733634-61.11",
+    "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x40 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280612-61.12",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x50 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280613-61.13",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x65 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280616-61.14",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x75 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280618-61.15",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x85 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280620-61.16",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x100 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280623-61.17",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x125 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280625-61.18",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x150 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280628-61.19",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x175 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280630-61.2",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x200 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280633-61.21",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "Full Threaded Bolt & Nut (MS) - 16x225 mm",
+    "category": "Hardware",
+    "subcategory": "MS Bolt & Nut (Heavy)",
+    "sku": "280634-61.22",
+    "description": "CSR 2021-22: Rs 116557, CSR 2023-24: Rs 132571"
+  },
+  {
+    "name": "LT Brass Terminal Connector for Transformer - 250 kVA",
+    "category": "Transformer Accessories",
+    "subcategory": "Brass Connectors",
+    "sku": "542180-62.01",
+    "description": "CSR 2021-22: Rs 856, CSR 2023-24: Rs 1036"
+  },
+  {
+    "name": "LT Brass Terminal Connector for Transformer - 500 kVA",
+    "category": "Transformer Accessories",
+    "subcategory": "Brass Connectors",
+    "sku": "542185-62.02",
+    "description": "CSR 2021-22: Rs 856, CSR 2023-24: Rs 1036"
+  },
+  {
+    "name": "Brass Cable Gland - 25 mm",
+    "category": "Cable Accessories",
+    "subcategory": "Brass Cable Glands",
+    "sku": "542190-63.01",
+    "description": "CSR 2021-22: Rs 65, CSR 2023-24: Rs 79"
+  },
+  {
+    "name": "Brass Cable Gland - 32 mm",
+    "category": "Cable Accessories",
+    "subcategory": "Brass Cable Glands",
+    "sku": "542192-63.02",
+    "description": "CSR 2021-22: Rs 79, CSR 2023-24: Rs 95"
+  },
+  {
+    "name": "Brass Cable Gland - 40 mm",
+    "category": "Cable Accessories",
+    "subcategory": "Brass Cable Glands",
+    "sku": "542194-63.03",
+    "description": "CSR 2021-22: Rs 122, CSR 2023-24: Rs 148"
+  },
+  {
+    "name": "Brass Cable Gland - 45 mm",
+    "category": "Cable Accessories",
+    "subcategory": "Brass Cable Glands",
+    "sku": "542196-63.04",
+    "description": "CSR 2021-22: Rs 163, CSR 2023-24: Rs 197"
+  },
+  {
+    "name": "DTC MS Box with CT Ratio 50/5 for 15/25 kVA",
+    "category": "Metering Boxes",
+    "subcategory": "DTC Boxes",
+    "sku": "358055-64.01",
+    "description": "CSR 2021-22: Rs 5825, CSR 2023-24: Rs 6836"
+  },
+  {
+    "name": "DTC MS Box with CT Ratio 100/5 for 50/63 kVA",
+    "category": "Metering Boxes",
+    "subcategory": "DTC Boxes",
+    "sku": "358060-64.02",
+    "description": "CSR 2021-22: Rs 5362, CSR 2023-24: Rs 6293"
+  },
+  {
+    "name": "DTC MS Box with CT Ratio 150/5 for 100 kVA",
+    "category": "Metering Boxes",
+    "subcategory": "DTC Boxes",
+    "sku": "358065-64.03",
+    "description": "CSR 2021-22: Rs 5028, CSR 2023-24: Rs 5902"
+  },
+  {
+    "name": "DTC MS Box with CT Ratio 400/5 for 250 kVA",
+    "category": "Metering Boxes",
+    "subcategory": "DTC Boxes",
+    "sku": "358070-64.04",
+    "description": "CSR 2021-22: Rs 5207, CSR 2023-24: Rs 6111"
+  },
+  {
+    "name": "DTC MS Box with CT Ratio 800/5 for 500 kVA",
+    "category": "Metering Boxes",
+    "subcategory": "DTC Boxes",
+    "sku": "358075-64.05",
+    "description": "CSR 2021-22: Rs 5352, CSR 2023-24: Rs 6282"
+  },
+  {
+    "name": "SMC Metering Box with CT Ratio 50/5 for 15/25 kVA DTC",
+    "category": "Metering Boxes",
+    "subcategory": "SMC DTC Boxes",
+    "sku": "358056-64.06",
+    "description": "CSR 2021-22: Rs 5825, CSR 2023-24: Rs 6836"
+  },
+  {
+    "name": "SMC Metering Box with CT Ratio 100/5 for 50/63 kVA DTC",
+    "category": "Metering Boxes",
+    "subcategory": "SMC DTC Boxes",
+    "sku": "358061-64.07",
+    "description": "CSR 2021-22: Rs 5362, CSR 2023-24: Rs 6293"
+  },
+  {
+    "name": "SMC Metering Box with CT Ratio 150/5 for 100 kVA DTC",
+    "category": "Metering Boxes",
+    "subcategory": "SMC DTC Boxes",
+    "sku": "358066-64.08",
+    "description": "CSR 2021-22: Rs 5028, CSR 2023-24: Rs 5902"
+  },
+  {
+    "name": "SMC Metering Box with CT Ratio 400/5 for 250 kVA DTC",
+    "category": "Metering Boxes",
+    "subcategory": "SMC DTC Boxes",
+    "sku": "358071-64.09",
+    "description": "CSR 2021-22: Rs 5207, CSR 2023-24: Rs 6111"
+  },
+  {
+    "name": "SMC Metering Box with CT Ratio 800/5 for 500 kVA DTC",
+    "category": "Metering Boxes",
+    "subcategory": "SMC DTC Boxes",
+    "sku": "358077-64.1",
+    "description": "CSR 2021-22: Rs 5352, CSR 2023-24: Rs 6282"
+  },
+  {
+    "name": "Compact Substation - 100 kVA Al Transformer, 250A MCCB Incomer + 2x100A MCCB Outgoing",
+    "category": "Compact Substations",
+    "subcategory": "Aluminium Transformer CSS",
+    "sku": "276530-65.01",
+    "description": "CSR 2021-22: Rs 1424492, CSR 2023-24: Rs 1671926"
+  },
+  {
+    "name": "Compact Substation - 250 kVA Al Transformer, 400A MCCB Incomer + 3x250A MCCB Outgoing",
+    "category": "Compact Substations",
+    "subcategory": "Aluminium Transformer CSS",
+    "sku": "276540-65.02",
+    "description": "CSR 2021-22: Rs 1823305, CSR 2023-24: Rs 2140013"
+  },
+  {
+    "name": "Compact Substation - 500 kVA Al Transformer, 800A ACB Incomer + 4x250A MCCB Outgoing",
+    "category": "Compact Substations",
+    "subcategory": "Aluminium Transformer CSS",
+    "sku": "276550-65.03",
+    "description": "CSR 2021-22: Rs 2397288, CSR 2023-24: Rs 2813697"
+  },
+  {
+    "name": "Compact Substation - 800 kVA Cu Transformer, 1250A ACB Incomer + 6x250A MCCB Outgoing",
+    "category": "Compact Substations",
+    "subcategory": "Copper Transformer CSS",
+    "sku": "276576-65.04",
+    "description": "CSR 2021-22: Rs 2974576, CSR 2023-24: Rs 3491260"
+  },
+  {
+    "name": "Compact Substation - 1000 kVA Cu Transformer, 1600A ACB Incomer + 2x400A + 4x250A MCCB Outgoing",
+    "category": "Compact Substations",
+    "subcategory": "Copper Transformer CSS",
+    "sku": "276599-65.05",
+    "description": "CSR 2021-22: Rs 3665339, CSR 2023-24: Rs 4300208"
+  },
+  {
+    "name": "800 kVA Transformer",
+    "category": "Transformers",
+    "subcategory": "Power Transformers",
+    "sku": "321475-65.06",
+    "description": "CSR 2021-22: Rs 932203, CSR 2023-24: Rs 1139426"
+  },
+  {
+    "name": "1000 kVA Transformer",
+    "category": "Transformers",
+    "subcategory": "Power Transformers",
+    "sku": "321490-65.07",
+    "description": "CSR 2021-22: Rs 1398035, CSR 2023-24: Rs 1708869"
+  },
+  {
+    "name": "LT ACB 800 Amps",
+    "category": "Switchgear",
+    "subcategory": "ACB",
+    "sku": "310521-65.08",
+    "description": "CSR 2021-22: Rs 178814, CSR 2023-24: Rs 209875"
+  },
+  {
+    "name": "LT ACB 1250 Amps",
+    "category": "Switchgear",
+    "subcategory": "ACB",
+    "sku": "310522-65.09",
+    "description": "CSR 2021-22: Rs 203390, CSR 2023-24: Rs 238719"
+  },
+  {
+    "name": "LT ACB 1600 Amps",
+    "category": "Switchgear",
+    "subcategory": "ACB",
+    "sku": "310523-65.1",
+    "description": "CSR 2021-22: Rs 254237, CSR 2023-24: Rs 298383"
+  },
+  {
+    "name": "MCCB 250 Amps",
+    "category": "Switchgear",
+    "subcategory": "MCCB",
+    "sku": "358093-65.11",
+    "description": "CSR 2021-22: Rs 21949, CSR 2023-24: Rs 25762"
+  },
+  {
+    "name": "MCCB 400 Amps",
+    "category": "Switchgear",
+    "subcategory": "MCCB",
+    "sku": "358095-65.12",
+    "description": "CSR 2021-22: Rs 28729, CSR 2023-24: Rs 33719"
+  },
+  {
+    "name": "288 Fibre OFC",
+    "category": "Optical Fibre Cable",
+    "subcategory": "OFC",
+    "sku": "286000-66.01",
+    "description": "CSR 2021-22: Rs 228995, CSR 2023-24: Rs 277084"
+  },
+  {
+    "name": "96 Fibre OFC",
+    "category": "Optical Fibre Cable",
+    "subcategory": "OFC",
+    "sku": "286001-66.02",
+    "description": "CSR 2021-22: Rs 85661, CSR 2023-24: Rs 103650"
+  }
+,
+
+
+  {
+    "name": "48 Fibre OFC",
+    "category": "Optical Fibre Cable",
+    "subcategory": "OFC",
+    "sku": "286002-66.03",
+    "description": "CSR 2021-22: Rs 63369, CSR 2023-24: Rs 76676"
+  },
+  {
+    "name": "HDPE/PLB Pipe 50/42 mm",
+    "category": "OFC Accessories",
+    "subcategory": "HDPE/PLB Pipes",
+    "sku": "286003-66.04",
+    "description": "CSR 2021-22: Rs 70259, CSR 2023-24: Rs 85014"
+  },
+  {
+    "name": "HDPE/PLB Pipe 40/33 mm",
+    "category": "OFC Accessories",
+    "subcategory": "HDPE/PLB Pipes",
+    "sku": "286004-66.05",
+    "description": "CSR 2021-22: Rs 51517, CSR 2023-24: Rs 62336"
+  },
+  {
+    "name": "Chambers at every 150 Mtr including pit",
+    "category": "OFC Accessories",
+    "subcategory": "Chambers",
+    "sku": "286005-66.06",
+    "description": "CSR 2021-22: Rs 5085, CSR 2023-24: Rs 6153"
+  },
+  {
+    "name": "Joint for 288 Fibre",
+    "category": "OFC Accessories",
+    "subcategory": "Joint Kits",
+    "sku": "286006-66.07",
+    "description": "CSR 2021-22: Rs 11640, CSR 2023-24: Rs 14084"
+  },
+  {
+    "name": "Joint for 96 Fibre",
+    "category": "OFC Accessories",
+    "subcategory": "Joint Kits",
+    "sku": "286007-66.08",
+    "description": "CSR 2021-22: Rs 4996, CSR 2023-24: Rs 6045"
+  },
+  {
+    "name": "Joint for 48 Fibre",
+    "category": "OFC Accessories",
+    "subcategory": "Joint Kits",
+    "sku": "286008-66.09",
+    "description": "CSR 2021-22: Rs 3335, CSR 2023-24: Rs 4035"
+  },
+  {
+    "name": "Blowing of cable above 24 Fibre",
+    "category": "OFC Installation",
+    "subcategory": "Cable Blowing",
+    "sku": "286009-66.1",
+    "description": "CSR 2021-22: Rs 16288, CSR 2023-24: Rs 19709"
+  },
+  {
+    "name": "End Plug for HDPE/PLB",
+    "category": "OFC Accessories",
+    "subcategory": "PLB Accessories",
+    "sku": "286010-66.11",
+    "description": "CSR 2021-22: Rs 17, CSR 2023-24: Rs 21"
+  },
+  {
+    "name": "Multimeter Electronic Type",
+    "category": "Tools & Instruments",
+    "subcategory": "Multimeters",
+    "sku": "359215-67.01",
+    "description": "CSR 2021-22: Rs 853, CSR 2023-24: Rs 1032"
+  },
+  {
+    "name": "Multimeter Electromechanical Type",
+    "category": "Tools & Instruments",
+    "subcategory": "Multimeters",
+    "sku": "359210-67.02",
+    "description": "CSR 2021-22: Rs 1535, CSR 2023-24: Rs 1857"
+  },
+  {
+    "name": "Rubber Hand gloves 15 kV, SEAMLESS Confirming to ISS",
+    "category": "Safety Equipment",
+    "subcategory": "Hand Gloves",
+    "sku": "427252-67.03",
+    "description": "CSR 2021-22: Rs 934, CSR 2023-24: Rs 1130"
+  },
+  {
+    "name": "Silica Gel",
+    "category": "Material",
+    "subcategory": "Electrical Consumables",
+    "sku": "607056-67.04",
+    "description": "CSR 2021-22: Rs 161, CSR 2023-24: Rs 195"
+  },
+  {
+    "name": "Telescopic Earthing Rod",
+    "category": "Safety Equipment",
+    "subcategory": "Earthing Tools",
+    "sku": "427215-67.05",
+    "description": "CSR 2021-22: Rs 1295, CSR 2023-24: Rs 1567"
+  },
+  {
+    "name": "FRP Telescopic Discharge Rod 10 ft (2 sticks, closed 6 ft, extended 10 ft, 2.8 kg total)",
+    "category": "Safety Equipment",
+    "subcategory": "Discharge Rods",
+    "sku": "-67.06",
+    "description": "CSR 2021-22: New Item, CSR 2023-24: Rs 5808"
+  },
+  {
+    "name": "FRP Telescopic Discharge Rod 16 ft (3 sticks, closed 7 ft, extended 16 ft, 4 kg total)",
+    "category": "Safety Equipment",
+    "subcategory": "Discharge Rods",
+    "sku": "-67.07",
+    "description": "CSR 2021-22: New Item, CSR 2023-24: Rs 6413"
+  },
+  {
+    "name": "LT Line Tester",
+    "category": "Tools & Instruments",
+    "subcategory": "Testers",
+    "sku": "440005-67.08",
+    "description": "CSR 2021-22: Rs 42, CSR 2023-24: Rs 51"
+  },
+  {
+    "name": "High Voltage Detector",
+    "category": "Tools & Instruments",
+    "subcategory": "Voltage Detectors",
+    "sku": "440008-67.09",
+    "description": "CSR 2021-22: Rs 15036, CSR 2023-24: Rs 18194"
+  },
+  {
+    "name": "Screw Driver 8\"",
+    "category": "Tools",
+    "subcategory": "Hand Tools",
+    "sku": "425518-67.1",
+    "description": "CSR 2021-22: Rs 76, CSR 2023-24: Rs 92"
+  },
+  {
+    "name": "Adjustable Screw Spanner 8\"",
+    "category": "Tools",
+    "subcategory": "Hand Tools",
+    "sku": "424364-67.11",
+    "description": "CSR 2021-22: Rs 153, CSR 2023-24: Rs 185"
+  },
+  {
+    "name": "Adjustable Screw Spanner 12\"",
+    "category": "Tools",
+    "subcategory": "Hand Tools",
+    "sku": "424365-67.12",
+    "description": "CSR 2021-22: Rs 254, CSR 2023-24: Rs 308"
+  },
+  {
+    "name": "Polypropylene Rope of 26 mm Dia",
+    "category": "Safety Equipment",
+    "subcategory": "Ropes",
+    "sku": "406351-67.13",
+    "description": "CSR 2021-22: Rs 190, CSR 2023-24: Rs 230"
+  },
+  {
+    "name": "Safety Belt with Accessories",
+    "category": "Safety Equipment",
+    "subcategory": "Safety Belts",
+    "sku": "427321-67.14",
+    "description": "CSR 2021-22: Rs 3085, CSR 2023-24: Rs 3751"
+  },
+  {
+    "name": "Electrical Safety Helmet with Electronic Induction Tester",
+    "category": "Safety Equipment",
+    "subcategory": "Helmets",
+    "sku": "427311-67.15",
+    "description": "CSR 2021-22: Rs 1477, CSR 2023-24: Rs 1787"
+  },
+  {
+    "name": "Hand Operated Crimping Tool 25 Sqmm to 400 Sqmm",
+    "category": "Tools & Instruments",
+    "subcategory": "Crimping Tools",
+    "sku": "425320-67.16",
+    "description": "CSR 2021-22: Rs 7459, CSR 2023-24: Rs 9026"
+  },
+  {
+    "name": "Common Meter Reading Instrument",
+    "category": "Metering",
+    "subcategory": "Reading Instruments",
+    "sku": "358361-67.17",
+    "description": "CSR 2021-22: Rs 24574, CSR 2023-24: Rs 29734"
+  },
+  {
+    "name": "Thermal Imaging Camera",
+    "category": "Tools & Instruments",
+    "subcategory": "Thermal Imaging",
+    "sku": "440661-67.18",
+    "description": "CSR 2021-22: Rs 338389, CSR 2023-24: Rs 409451"
+  },
+  {
+    "name": "Hydraulic Crimping Tool with Dies up to 400 Sqmm",
+    "category": "Tools & Instruments",
+    "subcategory": "Crimping Tools",
+    "sku": "425360-67.19",
+    "description": "CSR 2021-22: Rs 9005, CSR 2023-24: Rs 10896"
+  },
+  {
+    "name": "Hi Visibility Reflective Jacket",
+    "category": "Safety Equipment",
+    "subcategory": "Reflective Wear",
+    "sku": "407301-67.2",
+    "description": "CSR 2021-22: Rs 585, CSR 2023-24: Rs 708"
+  },
+  {
+    "name": "Hi Visibility Reflective Rain Wear",
+    "category": "Safety Equipment",
+    "subcategory": "Reflective Wear",
+    "sku": "407302-67.21",
+    "description": "CSR 2021-22: Rs 2350, CSR 2023-24: Rs 2844"
+  },
+  {
+    "name": "Protective Eye Wear with LED Lighting",
+    "category": "Safety Equipment",
+    "subcategory": "Eye Protection",
+    "sku": "407303-67.22",
+    "description": "CSR 2021-22: Rs 878, CSR 2023-24: Rs 1062"
+  },
+  {
+    "name": "Safety Shoes with Two Pair of Socks",
+    "category": "Safety Equipment",
+    "subcategory": "Footwear",
+    "sku": "427322-67.23",
+    "description": "CSR 2021-22: Rs 1465, CSR 2023-24: Rs 2880"
+  },
+  {
+    "name": "Motorised Chain Saw for firewood and tree shaping",
+    "category": "Tools",
+    "subcategory": "Cutting Tools",
+    "sku": "414371-67.24",
+    "description": "CSR 2021-22: Rs 23501, CSR 2023-24: Rs 28436"
+  },
+  {
+    "name": "Tubular Telescopic Tree Pruner (2 sticks, <3 kg, blade 15–16\", rod 6.5 m)",
+    "category": "Tools",
+    "subcategory": "Cutting Tools",
+    "sku": "-67.25",
+    "description": "CSR 2021-22: New Item, CSR 2023-24: Rs 22216"
+  },
+  {
+    "name": "Bolt Cutter - 24\" (Rubber Grip, Alloy Steel Jaws, Max Cut Capacity: 12 mm)",
+    "category": "Tools",
+    "subcategory": "Cutting Tools",
+    "sku": "-67.26",
+    "description": "CSR 2021-22: New Item, CSR 2023-24: Rs 2046"
+  },
+  {
+    "name": "FRP Wall Extension Ladder",
+    "category": "Safety Equipment",
+    "subcategory": "Ladders",
+    "sku": "427075-67.27",
+    "description": "CSR 2021-22: Rs 11000, CSR 2023-24: Rs 13310"
+  },
+  {
+    "name": "LDPE Safety Cone with ESCOM's Logo",
+    "category": "Safety Equipment",
+    "subcategory": "Safety Cones",
+    "sku": "407370-67.28",
+    "description": "CSR 2021-22: Rs 1525, CSR 2023-24: Rs 1846"
+  },
+  {
+    "name": "HM HDPE Barricade Tape 50 Microns with ESCOM's Logo, Caution, Danger & Men At Work",
+    "category": "Safety Equipment",
+    "subcategory": "Barricades",
+    "sku": "407375-67.29",
+    "description": "CSR 2021-22: Rs 2.4, CSR 2023-24: Rs 3"
+  },
+  {
+    "name": "Men at Work Sign Board",
+    "category": "Safety Equipment",
+    "subcategory": "Sign Boards",
+    "sku": "407380-67.3",
+    "description": "CSR 2021-22: Rs 1695, CSR 2023-24: Rs 2051"
+  },
+  {
+    "name": "Insulated Crowbar",
+    "category": "Safety Equipment",
+    "subcategory": "Insulated Tools",
+    "sku": "404065-67.31",
+    "description": "CSR 2021-22: Rs 636, CSR 2023-24: Rs 769"
+  },
+  {
+    "name": "Head Torch",
+    "category": "Safety Equipment",
+    "subcategory": "Lighting",
+    "sku": "427447-67.32",
+    "description": "CSR 2021-22: Rs 339, CSR 2023-24: Rs 410"
+  },
+  {
+    "name": "Insulated GOS Operating Handle/Rod for Redesigned GOS",
+    "category": "Switchgear Accessories",
+    "subcategory": "GOS Accessories",
+    "sku": "503215-67.33",
+    "description": "CSR 2021-22: Rs 1801, CSR 2023-24: Rs 2026"
+  },
+  {
+    "name": "RCC Hume Pipe 2000 mm long 150 mm Dia",
+    "category": "Civil Materials",
+    "subcategory": "Hume Pipes",
+    "sku": "820672-68.01",
+    "description": "CSR 2021-22: Rs 254, CSR 2023-24: Rs 307"
+  },
+  {
+    "name": "RCC Hume Pipe 2000 mm long 200 mm Dia",
+    "category": "Civil Materials",
+    "subcategory": "Hume Pipes",
+    "sku": "820673-68.02",
+    "description": "CSR 2021-22: Rs 322, CSR 2023-24: Rs 390"
+  },
+  {
+    "name": "Collars for RCC Hume Pipe 150 mm Dia",
+    "category": "Civil Materials",
+    "subcategory": "Hume Pipe Collars",
+    "sku": "820703-68.03",
+    "description": "CSR 2021-22: Rs 68, CSR 2023-24: Rs 82"
+  },
+  {
+    "name": "Collars for RCC Hume Pipe 200 mm Dia",
+    "category": "Civil Materials",
+    "subcategory": "Hume Pipe Collars",
+    "sku": "820704-68.04",
+    "description": "CSR 2021-22: Rs 85, CSR 2023-24: Rs 103"
+  },
+  {
+    "name": "MS Pipe 200 mm Dia with Collar",
+    "category": "Civil Materials",
+    "subcategory": "Pipes",
+    "sku": "765050-68.05",
+    "description": "CSR 2021-22: Rs 794, CSR 2023-24: Rs 961"
+  },
+  {
+    "name": "Cable Covering Tile 125x250x40 mm",
+    "category": "Civil Materials",
+    "subcategory": "Cable Tiles",
+    "sku": "801005-68.06",
+    "description": "CSR 2021-22: Rs 8475, CSR 2023-24: Rs 10255"
+  },
+  {
+    "name": "Cable Covering Tile 125x125x40 mm",
+    "category": "Civil Materials",
+    "subcategory": "Cable Tiles",
+    "sku": "801034-68.07",
+    "description": "CSR 2021-22: Rs 4237, CSR 2023-24: Rs 5127"
+  }
+,
+
+
+  {
+    "name": "Route & Joint Indicating Slab with MS Anchor Rod",
+    "category": "Civil Materials",
+    "subcategory": "Marking Slabs",
+    "sku": "802460-68.08",
+    "description": "CSR 2021-22: Rs 110, CSR 2023-24: Rs 133"
+  },
+  {
+    "name": "Black Cambric Tape 25 mm x 50 Mtr x 10 mil",
+    "category": "Consumables",
+    "subcategory": "Insulation Tape",
+    "sku": "622675-68.09",
+    "description": "CSR 2021-22: Rs 108, CSR 2023-24: Rs 131"
+  },
+  {
+    "name": "Yellow Cambric Tape 25 mm x 50 Mtr x 7 mil",
+    "category": "Consumables",
+    "subcategory": "Insulation Tape",
+    "sku": "622620-68.10",
+    "description": "CSR 2021-22: Rs 99, CSR 2023-24: Rs 120"
+  },
+  {
+    "name": "PVC Insulation Tape 19 mm x 10 Mtr",
+    "category": "Consumables",
+    "subcategory": "Insulation Tape",
+    "sku": "622720-68.11",
+    "description": "CSR 2021-22: Rs 12, CSR 2023-24: Rs 15"
+  },
+  {
+    "name": "Cotton Tape 19 mm x 50 Mtr",
+    "category": "Consumables",
+    "subcategory": "Cotton Tape",
+    "sku": "622124-68.12",
+    "description": "CSR 2021-22: Rs 31, CSR 2023-24: Rs 38"
+  },
+  {
+    "name": "Cotton Waste",
+    "category": "Consumables",
+    "subcategory": "Cleaning Materials",
+    "sku": "627520-68.13",
+    "description": "CSR 2021-22: Rs 42, CSR 2023-24: Rs 51"
+  },
+  {
+    "name": "Hack Saw Blade 300x12.5 mm",
+    "category": "Tools",
+    "subcategory": "Cutting Tools",
+    "sku": "418185-68.14",
+    "description": "CSR 2021-22: Rs 53, CSR 2023-24: Rs 64"
+  },
+  {
+    "name": "Monoplast",
+    "category": "Consumables",
+    "subcategory": "Sealing Compound",
+    "sku": "506559-68.15",
+    "description": "CSR 2021-22: Rs 53, CSR 2023-24: Rs 64"
+  },
+  {
+    "name": "Automatic Switch for Street Light",
+    "category": "Street Light Accessories",
+    "subcategory": "Control Switches",
+    "sku": "612645-68.16",
+    "description": "CSR 2021-22: Rs 1903, CSR 2023-24: Rs 2303"
+  },
+  {
+    "name": "Caution/Danger Board",
+    "category": "Safety Equipment",
+    "subcategory": "Sign Boards",
+    "sku": "613050-68.17",
+    "description": "CSR 2021-22: Rs 124, CSR 2023-24: Rs 150"
+  },
+  {
+    "name": "Street Light Metering Box (MS Sheet Steel with Clamp)",
+    "category": "Metering",
+    "subcategory": "Metering Boxes",
+    "sku": "358012-68.18",
+    "description": "CSR 2021-22: Rs 1271, CSR 2023-24: Rs 1538"
+  },
+  {
+    "name": "Street Light Metering Box made of SMC",
+    "category": "Metering",
+    "subcategory": "Metering Boxes",
+    "sku": "358013-68.19",
+    "description": "CSR 2021-22: Rs 1611, CSR 2023-24: Rs 1949"
+  },
+  {
+    "name": "Released Copper Conductor",
+    "category": "Scrap",
+    "subcategory": "Copper Scrap",
+    "sku": "791210-69.01",
+    "description": "CSR 2021-22: Rs 655.02, CSR 2023-24: Rs 616"
+  },
+  {
+    "name": "Copper Winding from Failed Distribution Transformer",
+    "category": "Scrap",
+    "subcategory": "Copper Scrap",
+    "sku": "731211-69.02",
+    "description": "CSR 2021-22: Rs 655.02, CSR 2023-24: Rs 616"
+  },
+  {
+    "name": "Copper Cable with Lead",
+    "category": "Scrap",
+    "subcategory": "Copper Scrap",
+    "sku": "791207-69.03",
+    "description": "CSR 2021-22: Rs 655.02, CSR 2023-24: Rs 616"
+  },
+  {
+    "name": "Aluminium Busbar/Wire Pieces",
+    "category": "Scrap",
+    "subcategory": "Aluminium Scrap",
+    "sku": "791010-69.04",
+    "description": "CSR 2021-22: Rs 161.68, CSR 2023-24: Rs 136"
+  },
+  {
+    "name": "Aluminium Winding from Failed Distribution Transformer",
+    "category": "Scrap",
+    "subcategory": "Aluminium Scrap",
+    "sku": "791175-69.05",
+    "description": "CSR 2021-22: Rs 161.68, CSR 2023-24: Rs 136"
+  },
+  {
+    "name": "Released ACSR Conductor",
+    "category": "Scrap",
+    "subcategory": "ACSR Scrap",
+    "sku": "791101-69.06",
+    "description": "CSR 2021-22: Rs 104.3, CSR 2023-24: Rs 88"
+  },
+  {
+    "name": "Released Aluminium Cable",
+    "category": "Scrap",
+    "subcategory": "Aluminium Scrap",
+    "sku": "791531-69.07",
+    "description": "CSR 2021-22: Rs 161.68, CSR 2023-24: Rs 136"
+  },
+  {
+    "name": "SM Rail Pole, I Beam",
+    "category": "Scrap",
+    "subcategory": "Steel Scrap",
+    "sku": "790100-69.08",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Ladder Pole, Tower Parts, Tubular Pole",
+    "category": "Scrap",
+    "subcategory": "Steel Scrap",
+    "sku": "790100-69.09",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Cross Arm, Clamp etc.",
+    "category": "Scrap",
+    "subcategory": "Steel Scrap",
+    "sku": "790104-69.10",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Steel from RCC Pole (Skeleton Rods)",
+    "category": "Scrap",
+    "subcategory": "Steel Scrap",
+    "sku": "790103-69.11",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Barbed/Ground Wire/Zinc Sheet etc.",
+    "category": "Scrap",
+    "subcategory": "Steel Scrap",
+    "sku": "790102-69.12",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Transformer Empty Tank (Various Capacities)",
+    "category": "Scrap",
+    "subcategory": "Transformer Scrap",
+    "sku": "790300-69.13",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Scrap GOS with Insulator",
+    "category": "Scrap",
+    "subcategory": "Switchgear Scrap",
+    "sku": "790401-69.14",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Broken Steel Furniture",
+    "category": "Scrap",
+    "subcategory": "Furniture Scrap",
+    "sku": "790402-69.15",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Brass",
+    "category": "Scrap",
+    "subcategory": "Brass Scrap",
+    "sku": "791300-69.16",
+    "description": "CSR 2021-22: Rs 195, CSR 2023-24: Rs 181"
+  },
+  {
+    "name": "Baliga Pole",
+    "category": "Scrap",
+    "subcategory": "Poles",
+    "sku": "793510-69.17",
+    "description": "CSR 2021-22: Rs 80, CSR 2023-24: Rs 80"
+  },
+  {
+    "name": "Scrap Wooden Furniture",
+    "category": "Scrap",
+    "subcategory": "Wood Scrap",
+    "sku": "793501-69.18",
+    "description": "CSR 2021-22: Rs 18, CSR 2023-24: Rs 18"
+  },
+  {
+    "name": "Empty Barrel (210 Ltr) - Good",
+    "category": "Scrap",
+    "subcategory": "Barrels",
+    "sku": "442120-69.19",
+    "description": "CSR 2021-22: Rs 504, CSR 2023-24: Rs 469"
+  },
+  {
+    "name": "Empty Barrel (210 Ltr) - Scrap",
+    "category": "Scrap",
+    "subcategory": "Barrels",
+    "sku": "795030-69.20",
+    "description": "CSR 2021-22: Rs 320, CSR 2023-24: Rs 298"
+  },
+  {
+    "name": "Lead",
+    "category": "Scrap",
+    "subcategory": "Lead Scrap",
+    "sku": "791400-69.21",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 32"
+  },
+  {
+    "name": "Released HT Metering Cubicle, Distribution Box, Feeder Pillar Box etc.",
+    "category": "Scrap",
+    "subcategory": "Electrical Scrap",
+    "sku": "795240-69.22",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Released Energy Meter",
+    "category": "Scrap",
+    "subcategory": "Meter Scrap",
+    "sku": "795910-69.23",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Released CT & PT",
+    "category": "Scrap",
+    "subcategory": "CT/PT Scrap",
+    "sku": "795500-69.24",
+    "description": "CSR 2021-22: Rs 31.91, CSR 2023-24: Rs 30"
+  },
+  {
+    "name": "Scrap Wooden Reel – In Good Condition",
+    "category": "Scrap",
+    "subcategory": "Wood Scrap",
+    "sku": "793504-69.25",
+    "description": "CSR 2021-22: Rs 16, CSR 2023-24: Rs 16"
+  },
+  {
+    "name": "Empty Wooden Reel (Deteriorated, with Iron Rod)",
+    "category": "Scrap",
+    "subcategory": "Wood Scrap",
+    "sku": "793550-69.26",
+    "description": "CSR 2021-22: Rs 85, CSR 2023-24: Rs 85"
+  },
+  {
+    "name": "Scrap RMU with/without Breaker (Rusted & Broken Panel, MEI Make)",
+    "category": "Scrap",
+    "subcategory": "RMU Scrap",
+    "sku": "795210-69.27",
+    "description": "CSR 2021-22: Rs 47801, CSR 2023-24: Rs 44455"
+  },
+  {
+    "name": "Scrap Transformer Oil",
+    "category": "Scrap",
+    "subcategory": "Oil Scrap",
+    "sku": "795211-69.28",
+    "description": "CSR 2021-22: Rs 29, CSR 2023-24: Rs 34"
+  }
+]
+
+
+
+
+
+
+
+
+
+
