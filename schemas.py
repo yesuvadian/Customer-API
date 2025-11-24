@@ -618,37 +618,119 @@ class DivisionResponse(DivisionBase):
     class Config:
         orm_mode = True
 
+# schema.py
+
+# 1. Add a simple schema for the Product details
+class ProductSimpleSchema(BaseModel):
+    id: int
+    name: str
+    sku: Optional[str] = None
+    
+    class Config:
+        orm_mode = True
+
+# 2. Update CompanyProductSchema to include the nested product
+class CompanyProductSchema(BaseModel):
+    id: int
+    company_id: UUID
+    product_id: int
+    price: float
+    stock_quantity: Optional[int] = 0
+    
+    # 🌟 ADD THIS: This allows the nested relationship to be serialized
+    product: Optional[ProductSimpleSchema] = None 
+
+    class Config:
+        orm_mode = True
+        allow_population_by_field_name = True
+
 
 class UserDocumentBase(BaseModel):
+
     document_name: str
+
     document_type: Optional[str] = None
+
     document_url: Optional[str] = None
+
     file_size: Optional[int] = None
+
     content_type: Optional[str] = None
+
     om_number: Optional[str] = None
+
     expiry_date: Optional[datetime] = None
+
     is_active: Optional[bool] = True
 
+   
+
+    # 🌟 ADDED NEW FIELD
+
+    company_product_id: Optional[int] = None
+
+
+
 class UserDocumentCreate(UserDocumentBase):
+
     user_id: UUID
+
     uploaded_by: Optional[UUID] = None
+
     file_data: Optional[bytes] = None
 
+
+
 class UserDocumentUpdate(BaseModel):
+
     om_number: Optional[str] = None
+
     expiry_date: Optional[datetime] = None
+
     is_active: Optional[bool] = None
+
     document_url: Optional[str] = None
+
     modified_by: Optional[UUID] = None
 
+   
+
+    # 🌟 ADDED NEW FIELD
+
+    company_product_id: Optional[int] = None
+
+
+
+
+
 class UserDocumentResponse(UserDocumentBase):
+
     id: UUID
+
     user_id: UUID
+
     uploaded_by: Optional[UUID]
+
     uploaded_at: datetime
-    division: DivisionResponse
+
+    # Assuming DivisionResponse and CategoryDetailsResponse exist
+
+    division: 'DivisionResponse'
+
     category_details: Optional['CategoryDetailsResponse'] = None
+
+   
+
+    # 🌟 ADDED NEW FIELD AND NESTED SCHEMA
+
+    company_product_id: Optional[int] = None # Include the raw ID
+
+    company_product: Optional[CompanyProductSchema] = None # Include the nested schema for relationships
+
+
+
     class Config:
+
         orm_mode = True
 
 class CategoryMasterBase(BaseModel):

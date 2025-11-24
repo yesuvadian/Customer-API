@@ -50,13 +50,19 @@ class CompanyProductService:
         # Convert SQLAlchemy models to plain dicts
         result = []
         for p in products:
+            prod_name = p.product.name if p.product else "Unknown Product"
+            prod_sku = p.product.sku if p.product else ""
             result.append({
                 "id": p.id,
                 "company_id": str(p.company_id),  # UUID → string
                 "product_id": p.product_id,
                 "price": p.price,
-                "stock": p.stock_quantity or 0
-                # add other fields if needed
+                "stock": p.stock_quantity or 0,
+               "product": {
+                    "id": p.product_id,
+                    "name": prod_name,
+                    "sku": prod_sku
+                }
             })
 
         return result
@@ -65,10 +71,6 @@ class CompanyProductService:
 
     @classmethod
     def bulk_assign(cls, db: Session, company_id: str, product_ids: List[int]):
-        """
-        Deletes old product mappings for a company and assigns new ones.
-        Safe for use within FastAPI's managed session.
-        """
         try:
             # 1️⃣ Delete existing mappings
             db.query(CompanyProduct).filter(
@@ -116,39 +118,4 @@ class CompanyProductService:
             db.delete(cp)
             db.commit()
         return cp
-
-    # 🔹 NEW: Bulk assignment method
-    @classmethod
-    def bulk_assign(cls, db: Session, company_id: str, product_ids: List[int]):
-        """
-        Deletes old product mappings for a company and assigns new ones.
-        Safe for use within FastAPI's managed session.
-        """
-        try:
-            # 1️⃣ Delete existing mappings
-            db.query(CompanyProduct).filter(
-                CompanyProduct.company_id == company_id
-            ).delete()
-
-            # 2️⃣ Add new mappings
-            assigned = []
-            for pid in product_ids:
-                cp = CompanyProduct(
-                    company_id=company_id,
-                    product_id=pid,
-                    price=0.0
-                )
-                db.add(cp)
-                assigned.append(cp)
-
-            # ✅ Commit once at the end
-            db.commit()
-            return assigned
-
-        except Exception as e:
-            db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Bulk assignment failed: {str(e)}"
-            )
 
