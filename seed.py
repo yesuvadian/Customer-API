@@ -200,7 +200,6 @@ def seed_modules(session):
         {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography"},
         {"name": "Addresses", "description": "User address book", "path": "addresses", "group_name": "User & Access"},
         {"name": "Tax Information", "description": "Company tax registration details", "path": "company_tax_info", "group_name": "Company"},
-        {"name": "Tax Documents", "description": "Upload company tax documents", "path": "company_tax_documents", "group_name": "Company"},
         {"name": "Product Categories", "description": "Define product categories", "path": "categories", "group_name": "Inventory"},
         {"name": "Product Subcategories", "description": "Define product subcategories", "path": "subcategories", "group_name": "Inventory"},
         {"name": "Products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
@@ -211,7 +210,6 @@ def seed_modules(session):
          {"name": "Assign User Roles", "description": "Assign roles to users", "path": "user_roles", "group_name": "User & Access"},
          {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access"},
          {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
-        {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company"},
 
         {"name": "Company Product Certificates", "description": "Upload product performance certificates", "path": "company_product_certificates", "group_name": "Company"},
 {"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company"},
@@ -255,9 +253,12 @@ def seed_modules(session):
 def seed_privileges(session, role_ids, module_ids):
     module_names = [
     "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
-    "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
+    "Countries", "States", "Addresses", "Tax Information",
     "Product Categories", "Product Subcategories", "Products", "Users",
     "Company Products", "Plans", "Dashboard", "Assign User Roles",
+    "User Product Search", "Bank Information",  "Divisions", "User Documents",
+    "Company Product Certificates", "Company Product Supply References", 
+    "Sync ERP Vendor", "Sync ERP Products"              
     "User Product Search", "Bank Information", "Bank Documents",
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
