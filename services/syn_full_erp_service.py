@@ -166,7 +166,8 @@ class ERPService:
                     "subgroup": p.category_obj.name if p.category_obj else None,
                     "subgroup2": p.subcategory_obj.name if p.subcategory_obj else None,
                     "itemid": p.sku,
-                    "itemdesc": p.description
+                    "itemdesc": p.description,
+                    "createdfrom": "APP"
                 }
             })
 

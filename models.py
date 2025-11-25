@@ -246,7 +246,7 @@ class CompanyBankDocument(Base):
     file_data = Column(LargeBinary, nullable=False)
     file_type = Column(String(50))
     file_data = Column(LargeBinary, nullable=False) # BYTEA
-    pending_kyc = Column(Boolean, default=True)
+    pending_kyc = Column(Boolean, default=False)
     document_type = Column(Enum(DocumentTypeEnum, name="bank_document_type_enum"))
     is_verified = Column(Boolean, default=False)
     verified_by = Column(String)
@@ -605,6 +605,10 @@ class Country(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), unique=True, nullable=False)
     code = Column(String(10), unique=True)
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
 
     # Relationships
     states = relationship("State", back_populates="country", cascade="all, delete")
@@ -618,14 +622,35 @@ class State(Base):
     name = Column(String(100), nullable=False)
     code = Column(String(10))
     country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="CASCADE"), nullable=False)
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
 
     # Relationships
     country = relationship("Country", back_populates="states")
+    cities = relationship("City", back_populates="state", cascade="all, delete")
 
 
 
     #country = relationship("Country", back_populates="states")
     #company_tax_infos = relationship("CompanyTaxInfo", back_populates="state")
+class City(Base):
+    __tablename__ = "cities"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    code = Column(String(10), unique=True)
+    state_id = Column(Integer, ForeignKey("public.states.id", ondelete="CASCADE"), nullable=False)
+    
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
+
+    # Relationships
+    state = relationship("State", back_populates="cities")
     
 class CompanyTaxInfo(Base):
     __tablename__ = "company_tax_info"
