@@ -245,6 +245,8 @@ class CompanyBankDocument(Base):
     file_name = Column(String(255), nullable=False)
     file_data = Column(LargeBinary, nullable=False)
     file_type = Column(String(50))
+    file_data = Column(LargeBinary, nullable=False) # BYTEA
+    pending_kyc = Column(Boolean, default=False)
     document_type = Column(Enum(DocumentTypeEnum, name="bank_document_type_enum"))
     is_verified = Column(Boolean, default=False)
     verified_by = Column(String)
@@ -593,6 +595,7 @@ class CompanyProduct(Base):
     cts = Column(DateTime(timezone=True), server_default=func.now())
 
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    pending_kyc = Column(Boolean, default=True)
 
    
 
@@ -649,6 +652,10 @@ class Country(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), unique=True, nullable=False)
     code = Column(String(10), unique=True)
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
 
     # Relationships
     states = relationship("State", back_populates="country", cascade="all, delete")
@@ -662,14 +669,35 @@ class State(Base):
     name = Column(String(100), nullable=False)
     code = Column(String(10))
     country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="CASCADE"), nullable=False)
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
 
     # Relationships
     country = relationship("Country", back_populates="states")
+    cities = relationship("City", back_populates="state", cascade="all, delete")
 
 
 
     #country = relationship("Country", back_populates="states")
     #company_tax_infos = relationship("CompanyTaxInfo", back_populates="state")
+class City(Base):
+    __tablename__ = "cities"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    code = Column(String(10), unique=True)
+    state_id = Column(Integer, ForeignKey("public.states.id", ondelete="CASCADE"), nullable=False)
+    
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
+
+    # Relationships
+    state = relationship("State", back_populates="cities")
     
 class CompanyTaxInfo(Base):
     __tablename__ = "company_tax_info"
@@ -729,6 +757,7 @@ class CompanyTaxDocument(Base):
     company_tax_info_id = Column(Integer, ForeignKey("public.company_tax_info.id", ondelete="CASCADE"), nullable=False)
     file_name = Column(String(255), nullable=False)
     file_data = Column(LargeBinary, nullable=False)
+    pending_kyc = Column(Boolean, default=True)
     file_type = Column(String(50))
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
@@ -757,6 +786,7 @@ class CompanyProductCertificate(Base):
     file_type = Column(String(100))   # MIME (e.g. application/pdf)
     file_size = Column(Integer)       # bytes
     file_data = Column(LargeBinary, nullable=False)
+    pending_kyc = Column(Boolean, default=True)
 
     issued_date = Column(DateTime(timezone=True), nullable=True)
     expiry_date = Column(DateTime(timezone=True), nullable=True)
@@ -993,6 +1023,7 @@ class CompanyProductSupplyReference(Base):
     file_type = Column(String(100))
     file_size = Column(Integer)
     file_data = Column(LargeBinary, nullable=False)
+    pending_kyc = Column(Boolean, default=True)
 
     description = Column(Text)
     customer_name = Column(String(255))

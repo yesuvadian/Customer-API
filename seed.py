@@ -175,11 +175,13 @@ def seed_category_details(session, master_ids):
     session.commit()
     print("✅ Category Details for 'Company Documents' seeded successfully.")
 def seed_country_india(session):
-    existing = session.query(Country).filter_by(name="India").first()
+    existing = session.query(Country).filter_by(name="INDIA").first()
     if not existing:
         country = Country(
-            name="India",
-            code="IN"
+            name="INDIA",
+            code="IND",
+            erp_external_id="1473917605099"
+            
         )
         session.add(country)
         session.commit()
@@ -214,6 +216,10 @@ def seed_modules(session):
 {"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
 {"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company"},
 {"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP"},
+{"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
+{"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
+{"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
+
 
 
     ]
@@ -253,6 +259,11 @@ def seed_privileges(session, role_ids, module_ids):
     "User Product Search", "Bank Information",  "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References", 
     "Sync ERP Vendor", "Sync ERP Products"              
+    "User Product Search", "Bank Information", "Bank Documents",
+    "Divisions", "User Documents",
+    "Company Product Certificates", "Company Product Supply References",
+    "Category Master", "Category Details", 
+    "Sync ERP Vendor","KYC Status"           
     ]
 
 
@@ -600,60 +611,64 @@ def seed_product_subcategories(session, category_ids):
     return subcategory_ids
 def seed_indian_states(session, india):
     states_data = [
-        {"name": "Andhra Pradesh", "code": "AP"},
-        {"name": "Arunachal Pradesh", "code": "AR"},
-        {"name": "Assam", "code": "AS"},
-        {"name": "Bihar", "code": "BR"},
-        {"name": "Chhattisgarh", "code": "CG"},
-        {"name": "Goa", "code": "GA"},
-        {"name": "Gujarat", "code": "GJ"},
-        {"name": "Haryana", "code": "HR"},
-        {"name": "Himachal Pradesh", "code": "HP"},
-        {"name": "Jharkhand", "code": "JH"},
-        {"name": "Karnataka", "code": "KA"},
-        {"name": "Kerala", "code": "KL"},
-        {"name": "Madhya Pradesh", "code": "MP"},
-        {"name": "Maharashtra", "code": "MH"},
-        {"name": "Manipur", "code": "MN"},
-        {"name": "Meghalaya", "code": "ML"},
-        {"name": "Mizoram", "code": "MZ"},
-        {"name": "Nagaland", "code": "NL"},
-        {"name": "Odisha", "code": "OR"},
-        {"name": "Punjab", "code": "PB"},
-        {"name": "Rajasthan", "code": "RJ"},
-        {"name": "Sikkim", "code": "SK"},
-        {"name": "Tamil Nadu", "code": "TN"},
-        {"name": "Telangana", "code": "TG"},
-        {"name": "Tripura", "code": "TR"},
-        {"name": "Uttar Pradesh", "code": "UP"},
-        {"name": "Uttarakhand", "code": "UK"},
-        {"name": "West Bengal", "code": "WB"},
-        {"name": "Andaman and Nicobar Islands", "code": "AN"},
-        {"name": "Chandigarh", "code": "CH"},
-        {"name": "Dadra and Nagar Haveli and Daman & Diu", "code": "DN"},
-        {"name": "Delhi", "code": "DL"},
-        {"name": "Jammu and Kashmir", "code": "JK"},
-        {"name": "Ladakh", "code": "LA"},
-        {"name": "Lakshadweep", "code": "LD"},
-        {"name": "Puducherry", "code": "PY"},
+       {"erp_external_id": 6000001, "name": "ANDAMAN AND NICOBAR", "code": "AN"},
+       {"erp_external_id": 6000002, "name": "ANDHRA PRADESH", "code": "AP"},
+       {"erp_external_id": 6000003, "name": "ARUNACHAL PRADESH", "code": "AR"},
+       {"erp_external_id": 6000004, "name": "ASSAM", "code": "AS"},
+       {"erp_external_id": 6000005, "name": "BIHAR", "code": "BH"},
+       {"erp_external_id": 6000006, "name": "CHANDIGARH", "code": "CH"},
+       {"erp_external_id": 6000007, "name": "CHHATTISGARH", "code": "CG"},
+       {"erp_external_id": 6000008, "name": "DADRA AND NAGAR HAVELI", "code": "DN"},
+       {"erp_external_id": 6000009, "name": "DAMAN AND DIU", "code": "DD"},
+       {"erp_external_id": 6000010, "name": "DELHI", "code": "DL"},
+       {"erp_external_id": 6000011, "name": "GOA", "code": "GA"},
+       {"erp_external_id": 6000012, "name": "GUJARAT", "code": "GJ"},
+       {"erp_external_id": 6000013, "name": "HARYANA", "code": "HR"},
+       {"erp_external_id": 6000014, "name": "HIMACHAL PRADESH", "code": "HP"},
+       {"erp_external_id": 6000015, "name": "JAMMU AND KASHMIR", "code": "JK"},
+       {"erp_external_id": 6000016, "name": "JHARKHAND", "code": "JH"},
+       {"erp_external_id": 6000017, "name": "KARNATAKA", "code": "KA"},
+       {"erp_external_id": 6000018, "name": "KERALA", "code": "KL"},
+       {"erp_external_id": 6000019, "name": "LAKSHADWEEP", "code": "LD"},
+       {"erp_external_id": 6000020, "name": "MADHYA PRADESH", "code": "MP"},
+       {"erp_external_id": 6000021, "name": "MAHARASHTRA", "code": "MH"},
+       {"erp_external_id": 6000022, "name": "MANIPUR", "code": "MN"},
+       {"erp_external_id": 6000023, "name": "MEGHALAYA", "code": "ML"},
+       {"erp_external_id": 6000024, "name": "MIZORAM", "code": "MM"},
+       {"erp_external_id": 6000025, "name": "NAGALAND", "code": "NL"},
+       {"erp_external_id": 6000026, "name": "ODISHA", "code": "OR"},
+       {"erp_external_id": 6000027, "name": "PUDUCHERRY", "code": "PN"},
+       {"erp_external_id": 6000028, "name": "PUNJAB", "code": "PJ"},
+       {"erp_external_id": 6000029, "name": "RAJASTHAN", "code": "RJ"},
+       {"erp_external_id": 6000030, "name": "SIKKIM", "code": "SK"},
+       {"erp_external_id": 6000031, "name": "TAMIL NADU", "code": "TN"},
+       {"erp_external_id": 6000032, "name": "TRIPURA", "code": "TR"},
+       {"erp_external_id": 6000033, "name": "UTTAR PRADESH", "code": "UP"},
+       {"erp_external_id": 6000034, "name": "UTTARANCHAAL", "code": "UT"},
+       {"erp_external_id": 6000035, "name": "WEST BENGAL", "code": "WB"},
+       {"erp_external_id": 1502861055959, "name": "TELANGANA", "code": "TS"},
+       {"erp_external_id": 1614244756824, "name": "OTHER COUNTRY", "code": "OTC"},
+       {"erp_external_id": 1614244756822, "name": "OTHER TERRITORY", "code": "OTH"},
+       {"erp_external_id": 1696053504315, "name": "LADAKH", "code": "LD"},
     ]
 
     for s in states_data:
         existing = session.query(State).filter_by(name=s["name"], country_id=india.id).first()
         if not existing:
-            state = State(name=s["name"], code=s["code"], country_id=india.id)
+            state = State(name=s["name"], code=s["code"], erp_external_id=s["erp_external_id"], country_id=india.id)
             session.add(state)
     session.commit()
     print("✅ Indian states seeded successfully.")
 # ----------------- Country & States Seed -----------------
 def seed_india_country(session):
-    india = session.query(Country).filter_by(name="India").first()
+    india = session.query(Country).filter_by(name="INDIA").first()
     if not india:
-        india = Country(name="India", code="IN")
+        india = Country(name="INDIA", code="IND", erp_external_id="1473917605099")
         session.add(india)
         session.commit()
         print("✅ India seeded successfully.")
-    return session.query(Country).filter_by(name="India").first()
+        
+    return session.query(Country).filter_by(name="INDIA").first()
 
 import json
 

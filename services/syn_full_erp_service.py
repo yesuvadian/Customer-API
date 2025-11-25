@@ -100,8 +100,8 @@ class ERPService:
                 "add2": primary_address.address_line2 if primary_address else None,
                 "add3": None,
                 "city": primary_address.city if primary_address else None,
-                "bcs_state": primary_address.state.name if primary_address and primary_address.state else None,
-                "country": primary_address.country.name if primary_address and primary_address.country else None,
+                "bcs_state": primary_address.state.erp_external_id if primary_address and primary_address.state else None,
+                "country": primary_address.country.erp_external_id if primary_address and primary_address.country else None,
                 "panno": tax_info.pan if tax_info else None,
                 "gstnumsuf": None,
                 "gstno": tax_info.gstin if tax_info else None,
@@ -115,9 +115,8 @@ class ERPService:
                 "versionid": user.id if user.id else None,
                 "projectid": "AVPPC_HESCOM",
                 "rolename": "LICENSE_ROLE" 
-                
-                
-            }
+           }
+
 
             # -------- Step 4: Documents JSON --------
             partymastdoc = {
@@ -166,7 +165,8 @@ class ERPService:
                     "subgroup": p.category_obj.name if p.category_obj else None,
                     "subgroup2": p.subcategory_obj.name if p.subcategory_obj else None,
                     "itemid": p.sku,
-                    "itemdesc": p.description
+                    "itemdesc": p.description,
+                    "createdfrom": "APP"
                 }
             })
 
