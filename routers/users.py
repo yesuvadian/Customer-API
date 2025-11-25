@@ -19,7 +19,7 @@ router = APIRouter(
 user_service_instance = UserService()
 
 @router.post("/", response_model=schemas.User)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+def create_user(user: schemas.UserRegistor, db: Session = Depends(get_db)):
     """Create a new user."""
     return user_service_instance.create_user(db, user)
 
