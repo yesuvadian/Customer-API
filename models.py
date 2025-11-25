@@ -561,42 +561,89 @@ class Product(Base):
 # CompanyProduct (Company ↔ Product)
 # ------------------------------
 class CompanyProduct(Base):
+
     __tablename__ = "company_products"
+
     __table_args__ = (
+
         UniqueConstraint("company_id", "product_id", name="uq_company_product"),
+
         {"schema": "public"},
+
     )
+
+
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+
     company_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"))
+
     product_id = Column(Integer, ForeignKey("public.products.id", ondelete="CASCADE"))
+
     company_sku = Column(String(50))
+
     price = Column(Float)
+
     stock_quantity = Column(Integer, default=0)
 
+
+
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+
     cts = Column(DateTime(timezone=True), server_default=func.now())
+
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     pending_kyc = Column(Boolean, default=True)
+
    
 
+   
+
+
+
     company = relationship("User", foreign_keys=[company_id])
+
     product = relationship("Product", back_populates="companies")
+
     created_user = relationship("User", foreign_keys=[created_by])
+
     modified_user = relationship("User", foreign_keys=[modified_by])
+
     certificates = relationship(
+
     "CompanyProductCertificate",
+
     back_populates="company_product",
+
     cascade="all, delete-orphan"
+
     )
 
+
+
     supply_references = relationship(
+
     "CompanyProductSupplyReference",
+
     back_populates="company_product",
+
     cascade="all, delete-orphan"
+
    )
 
+
+
+    documents = relationship(
+
+        "UserDocument",
+
+        back_populates="company_product",
+
+        cascade="all, delete-orphan"
+
+    )
 
 class Country(Base):
     __tablename__ = "countries"
@@ -815,60 +862,126 @@ class CategoryDetails(Base):
     )
 
 class UserDocument(Base):
+
     __tablename__ = "user_documents"
+
     __table_args__ = {"schema": "public"}
+
+
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
 
+
+
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
 
+
+
     #division_name = Column(String(255), nullable=False)
+
     division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id"), nullable=False)
+
     category_detail_id = Column(
+
        Integer,
+
         # Changed 'categorydetail' to 'CategoryDetails' to match the model's __tablename__
-        ForeignKey("public.CategoryDetails.id"), 
+
+        ForeignKey("public.CategoryDetails.id"),
+
         nullable=False
-    ) 
+
+    )
+
+
+
+    company_product_id = Column(Integer, ForeignKey("public.company_products.id", ondelete="CASCADE"), nullable=True)
+
+
 
     document_name = Column(String(255), nullable=False)
+
     document_type = Column(String(100))
+
     document_url = Column(Text)
-    file_data = Column(LargeBinary, nullable=False)
-    pending_kyc = Column(Boolean, default=True)
+
+    file_data = Column(LargeBinary)
+
     file_size = Column(Integer)
+
     content_type = Column(String(100))
 
+
+
     om_number = Column(String(100))
+
     expiry_date = Column(DateTime(timezone=True))
+
     is_active = Column(Boolean, default=True)
 
+
+
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+
     cts = Column(DateTime(timezone=True), server_default=func.now())
+
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+
+
     erp_sync_status = Column(String(10), default="pending")
+
     erp_last_sync_at = Column(DateTime(timezone=True))
+
     erp_error_message = Column(Text)
+
     erp_external_id = Column(String(255))
 
+
+
     # Relationships
+
     user = relationship("User", back_populates="documents", foreign_keys=[user_id])
+
     uploader = relationship("User", foreign_keys=[uploaded_by], backref="uploaded_documents")
 
+
+
     division = relationship(
+
         "Division",
+
         back_populates="documents",
+
         foreign_keys=[division_id]
+
     )
+
+
 
     categorydetails = relationship(
+
         "CategoryDetails",
+
         back_populates="user_documents",
+
         foreign_keys=[category_detail_id]
+
     )
 
+
+
+    company_product = relationship(
+
+        "CompanyProduct",
+
+        back_populates="documents", # This back-populates field must be added to CompanyProduct
+
+        foreign_keys=[company_product_id]
+
+    )
 class Division(Base):
     __tablename__ = "divisions"
     __table_args__ = {"schema": "public"}
