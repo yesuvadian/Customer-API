@@ -676,7 +676,7 @@ class State(Base):
 
     # Relationships
     country = relationship("Country", back_populates="states")
-    cities = relationship("City", back_populates="state", cascade="all, delete")
+    cities = relationship("City", back_populates="state")
 
 
 
@@ -688,8 +688,9 @@ class City(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    code = Column(String(10), unique=True)
     state_id = Column(Integer, ForeignKey("public.states.id", ondelete="CASCADE"), nullable=False)
+    #code = Column(String(10), unique=True)
+   # state_id = Column(Integer, ForeignKey("public.states.id", ondelete="CASCADE"), nullable=False)
     
     erp_sync_status = Column(String(10), default="pending")
     erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
