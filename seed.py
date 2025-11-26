@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 from database import SessionLocal
-from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module
+from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module ,City
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
@@ -651,14 +651,26 @@ def seed_indian_states(session, india):
        {"erp_external_id": 1614244756822, "name": "OTHER TERRITORY", "code": "OTH"},
        {"erp_external_id": 1696053504315, "name": "LADAKH", "code": "LD"},
     ]
-
+    inserted_states = {}
     for s in states_data:
         existing = session.query(State).filter_by(name=s["name"], country_id=india.id).first()
         if not existing:
-            state = State(name=s["name"], code=s["code"], erp_external_id=s["erp_external_id"], country_id=india.id)
+            state = State(
+                name=s["name"],
+                code=s["code"],
+                erp_external_id=s["erp_external_id"],
+                country_id=india.id
+            )
             session.add(state)
+            session.flush()
+            inserted_states[s["name"]] = state.id  # use ID
+        else:
+            inserted_states[s["name"]] = existing.id
+
     session.commit()
     print("✅ Indian states seeded successfully.")
+    return inserted_states
+
 # ----------------- Country & States Seed -----------------
 def seed_india_country(session):
     india = session.query(Country).filter_by(name="INDIA").first()
@@ -751,9 +763,38 @@ def seed_products(session, category_ids, subcategory_ids, filepath="product.json
 
     session.commit()
     print("✅ Existing data + file data seeded successfully.")
+    
 
+def seed_cities(session, state_ids, filepath="city.json"):
+    """
+    Seed cities from city.json.
+    state_ids: a dict mapping state names to their IDs
+    """
+    with open(filepath, "r", encoding="utf-8") as f:
+        file_data = json.load(f)
 
+    for c in file_data:
+        state_id = state_ids.get(c["statename"])
+        if not state_id:
+            print(f"⚠️ State '{c['statename']}' not found. Skipping city '{c['name']}'.")
+            continue
 
+        existing = session.query(City).filter_by(name=c["name"], state_id=state_id).first()
+
+        if not existing:
+            city = City(
+                name=c["name"],
+                state_id=state_id,
+                erp_sync_status="pending",
+                erp_external_id=c["erp_external_id"]
+            )
+            session.add(city)
+        else:
+            existing.state_id = state_id
+            existing.erp_sync_status = "pending"
+
+    session.commit()
+    print("✅ Cities seeded successfully.")
 # ----------------- Run Seed -----------------
 
 def run_seed():
@@ -768,8 +809,10 @@ def run_seed():
         subcategory_ids = seed_product_subcategories(session, category_ids)
         seed_products(session, category_ids, subcategory_ids)
             # Geography
+        seed_country_india
         india = seed_india_country(session)
-        seed_indian_states(session, india)
+        state_ids=seed_indian_states(session, india)
+        seed_cities(session,state_ids)
         seed_divisions(session)
         master_ids=seed_category_master(session)
         seed_category_details(session, master_ids)
