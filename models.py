@@ -71,11 +71,13 @@ class Plan(Base):
     )
 
 
-
 class UserAddress(Base):
     __tablename__ = "user_addresses"
     __table_args__ = (
-        UniqueConstraint("user_id", "address_type", "is_primary", name="user_addresses_user_id_address_type_is_primary_key"),
+        UniqueConstraint(
+            "user_id", "address_type", "is_primary",
+            name="user_addresses_user_id_address_type_is_primary_key"
+        ),
         {"schema": "public"}
     )
 
@@ -85,14 +87,13 @@ class UserAddress(Base):
     is_primary = Column(Boolean, default=False)
     address_line1 = Column(String(255), nullable=False)
     address_line2 = Column(String(255))
-    city = Column(String(100))
+    city_id = Column(Integer, ForeignKey("public.cities.id", ondelete="SET NULL"))  # <-- changed
     state_id = Column(Integer, ForeignKey("public.states.id", ondelete="SET NULL"))
     country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="SET NULL"))
     postal_code = Column(String(20))
     latitude = Column(Numeric(10, 8))
     longitude = Column(Numeric(11, 8))
-    
-    # inside UserAddress class (after mts)
+
     erp_sync_status = Column(String(10), default="pending")
     erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
     erp_error_message = Column(Text, nullable=True)
@@ -103,15 +104,13 @@ class UserAddress(Base):
     mts = Column(DateTime, default=UTCDateTimeMixin._utc_now, nullable=False)
 
     # Relationships
-    user = relationship(
-        "User",
-        back_populates="addresses",
-        foreign_keys=[user_id]
-    )
+    user = relationship("User", back_populates="addresses", foreign_keys=[user_id])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
     state = relationship("State", foreign_keys=[state_id])
     country = relationship("Country", foreign_keys=[country_id])
+    city = relationship("City", back_populates="addresses")  # <-- new relationship
+
 # ------------------------------
 # User Model
 # ------------------------------
@@ -689,8 +688,6 @@ class City(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
     state_id = Column(Integer, ForeignKey("public.states.id", ondelete="CASCADE"), nullable=False)
-    #code = Column(String(10), unique=True)
-   # state_id = Column(Integer, ForeignKey("public.states.id", ondelete="CASCADE"), nullable=False)
     
     erp_sync_status = Column(String(10), default="pending")
     erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
@@ -699,6 +696,8 @@ class City(Base):
 
     # Relationships
     state = relationship("State", back_populates="cities")
+    addresses = relationship("UserAddress", back_populates="city")  # <-- new
+
     
 class CompanyTaxInfo(Base):
     __tablename__ = "company_tax_info"
