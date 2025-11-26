@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 from database import SessionLocal
-from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module
+from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module ,City
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
@@ -175,11 +175,13 @@ def seed_category_details(session, master_ids):
     session.commit()
     print("✅ Category Details for 'Company Documents' seeded successfully.")
 def seed_country_india(session):
-    existing = session.query(Country).filter_by(name="India").first()
+    existing = session.query(Country).filter_by(name="INDIA").first()
     if not existing:
         country = Country(
-            name="India",
-            code="IN"
+            name="INDIA",
+            code="IND",
+            erp_external_id="1473917605099"
+            
         )
         session.add(country)
         session.commit()
@@ -198,7 +200,6 @@ def seed_modules(session):
         {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography"},
         {"name": "Addresses", "description": "User address book", "path": "addresses", "group_name": "User & Access"},
         {"name": "Tax Information", "description": "Company tax registration details", "path": "company_tax_info", "group_name": "Company"},
-        {"name": "Tax Documents", "description": "Upload company tax documents", "path": "company_tax_documents", "group_name": "Company"},
         {"name": "Product Categories", "description": "Define product categories", "path": "categories", "group_name": "Inventory"},
         {"name": "Product Subcategories", "description": "Define product subcategories", "path": "subcategories", "group_name": "Inventory"},
         {"name": "Products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
@@ -209,7 +210,6 @@ def seed_modules(session):
          {"name": "Assign User Roles", "description": "Assign roles to users", "path": "user_roles", "group_name": "User & Access"},
          {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access"},
          {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
-        {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company"},
 
         {"name": "Company Product Certificates", "description": "Upload product performance certificates", "path": "company_product_certificates", "group_name": "Company"},
 {"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company"},
@@ -218,6 +218,7 @@ def seed_modules(session):
 {"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP"},
 {"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
 {"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
+{"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
 
 
 
@@ -252,14 +253,17 @@ def seed_modules(session):
 def seed_privileges(session, role_ids, module_ids):
     module_names = [
     "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
-    "Countries", "States", "Addresses", "Tax Information", "Tax Documents",
+    "Countries", "States", "Addresses", "Tax Information",
     "Product Categories", "Product Subcategories", "Products", "Users",
     "Company Products", "Plans", "Dashboard", "Assign User Roles",
+    "User Product Search", "Bank Information",  "Divisions", "User Documents",
+    "Company Product Certificates", "Company Product Supply References", 
+    "Sync ERP Vendor", "Sync ERP Products"              
     "User Product Search", "Bank Information", "Bank Documents",
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
     "Category Master", "Category Details", 
-    "Sync ERP Vendor", "Sync ERP Products"              
+    "Sync ERP Vendor","KYC Status"           
     ]
 
 
@@ -607,60 +611,76 @@ def seed_product_subcategories(session, category_ids):
     return subcategory_ids
 def seed_indian_states(session, india):
     states_data = [
-        {"name": "Andhra Pradesh", "code": "AP"},
-        {"name": "Arunachal Pradesh", "code": "AR"},
-        {"name": "Assam", "code": "AS"},
-        {"name": "Bihar", "code": "BR"},
-        {"name": "Chhattisgarh", "code": "CG"},
-        {"name": "Goa", "code": "GA"},
-        {"name": "Gujarat", "code": "GJ"},
-        {"name": "Haryana", "code": "HR"},
-        {"name": "Himachal Pradesh", "code": "HP"},
-        {"name": "Jharkhand", "code": "JH"},
-        {"name": "Karnataka", "code": "KA"},
-        {"name": "Kerala", "code": "KL"},
-        {"name": "Madhya Pradesh", "code": "MP"},
-        {"name": "Maharashtra", "code": "MH"},
-        {"name": "Manipur", "code": "MN"},
-        {"name": "Meghalaya", "code": "ML"},
-        {"name": "Mizoram", "code": "MZ"},
-        {"name": "Nagaland", "code": "NL"},
-        {"name": "Odisha", "code": "OR"},
-        {"name": "Punjab", "code": "PB"},
-        {"name": "Rajasthan", "code": "RJ"},
-        {"name": "Sikkim", "code": "SK"},
-        {"name": "Tamil Nadu", "code": "TN"},
-        {"name": "Telangana", "code": "TG"},
-        {"name": "Tripura", "code": "TR"},
-        {"name": "Uttar Pradesh", "code": "UP"},
-        {"name": "Uttarakhand", "code": "UK"},
-        {"name": "West Bengal", "code": "WB"},
-        {"name": "Andaman and Nicobar Islands", "code": "AN"},
-        {"name": "Chandigarh", "code": "CH"},
-        {"name": "Dadra and Nagar Haveli and Daman & Diu", "code": "DN"},
-        {"name": "Delhi", "code": "DL"},
-        {"name": "Jammu and Kashmir", "code": "JK"},
-        {"name": "Ladakh", "code": "LA"},
-        {"name": "Lakshadweep", "code": "LD"},
-        {"name": "Puducherry", "code": "PY"},
+       {"erp_external_id": 6000001, "name": "ANDAMAN AND NICOBAR", "code": "AN"},
+       {"erp_external_id": 6000002, "name": "ANDHRA PRADESH", "code": "AP"},
+       {"erp_external_id": 6000003, "name": "ARUNACHAL PRADESH", "code": "AR"},
+       {"erp_external_id": 6000004, "name": "ASSAM", "code": "AS"},
+       {"erp_external_id": 6000005, "name": "BIHAR", "code": "BH"},
+       {"erp_external_id": 6000006, "name": "CHANDIGARH", "code": "CH"},
+       {"erp_external_id": 6000007, "name": "CHHATTISGARH", "code": "CG"},
+       {"erp_external_id": 6000008, "name": "DADRA AND NAGAR HAVELI", "code": "DN"},
+       {"erp_external_id": 6000009, "name": "DAMAN AND DIU", "code": "DD"},
+       {"erp_external_id": 6000010, "name": "DELHI", "code": "DL"},
+       {"erp_external_id": 6000011, "name": "GOA", "code": "GA"},
+       {"erp_external_id": 6000012, "name": "GUJARAT", "code": "GJ"},
+       {"erp_external_id": 6000013, "name": "HARYANA", "code": "HR"},
+       {"erp_external_id": 6000014, "name": "HIMACHAL PRADESH", "code": "HP"},
+       {"erp_external_id": 6000015, "name": "JAMMU AND KASHMIR", "code": "JK"},
+       {"erp_external_id": 6000016, "name": "JHARKHAND", "code": "JH"},
+       {"erp_external_id": 6000017, "name": "KARNATAKA", "code": "KA"},
+       {"erp_external_id": 6000018, "name": "KERALA", "code": "KL"},
+       {"erp_external_id": 6000019, "name": "LAKSHADWEEP", "code": "LD"},
+       {"erp_external_id": 6000020, "name": "MADHYA PRADESH", "code": "MP"},
+       {"erp_external_id": 6000021, "name": "MAHARASHTRA", "code": "MH"},
+       {"erp_external_id": 6000022, "name": "MANIPUR", "code": "MN"},
+       {"erp_external_id": 6000023, "name": "MEGHALAYA", "code": "ML"},
+       {"erp_external_id": 6000024, "name": "MIZORAM", "code": "MM"},
+       {"erp_external_id": 6000025, "name": "NAGALAND", "code": "NL"},
+       {"erp_external_id": 6000026, "name": "ODISHA", "code": "OR"},
+       {"erp_external_id": 6000027, "name": "PUDUCHERRY", "code": "PN"},
+       {"erp_external_id": 6000028, "name": "PUNJAB", "code": "PJ"},
+       {"erp_external_id": 6000029, "name": "RAJASTHAN", "code": "RJ"},
+       {"erp_external_id": 6000030, "name": "SIKKIM", "code": "SK"},
+       {"erp_external_id": 6000031, "name": "TAMIL NADU", "code": "TN"},
+       {"erp_external_id": 6000032, "name": "TRIPURA", "code": "TR"},
+       {"erp_external_id": 6000033, "name": "UTTAR PRADESH", "code": "UP"},
+       {"erp_external_id": 6000034, "name": "UTTARANCHAAL", "code": "UT"},
+       {"erp_external_id": 6000035, "name": "WEST BENGAL", "code": "WB"},
+       {"erp_external_id": 1502861055959, "name": "TELANGANA", "code": "TS"},
+       {"erp_external_id": 1614244756824, "name": "OTHER COUNTRY", "code": "OTC"},
+       {"erp_external_id": 1614244756822, "name": "OTHER TERRITORY", "code": "OTH"},
+       {"erp_external_id": 1696053504315, "name": "LADAKH", "code": "LD"},
     ]
-
+    inserted_states = {}
     for s in states_data:
         existing = session.query(State).filter_by(name=s["name"], country_id=india.id).first()
         if not existing:
-            state = State(name=s["name"], code=s["code"], country_id=india.id)
+            state = State(
+                name=s["name"],
+                code=s["code"],
+                erp_external_id=s["erp_external_id"],
+                country_id=india.id
+            )
             session.add(state)
+            session.flush()
+            inserted_states[s["name"]] = state.id  # use ID
+        else:
+            inserted_states[s["name"]] = existing.id
+
     session.commit()
     print("✅ Indian states seeded successfully.")
+    return inserted_states
+
 # ----------------- Country & States Seed -----------------
 def seed_india_country(session):
-    india = session.query(Country).filter_by(name="India").first()
+    india = session.query(Country).filter_by(name="INDIA").first()
     if not india:
-        india = Country(name="India", code="IN")
+        india = Country(name="INDIA", code="IND", erp_external_id="1473917605099")
         session.add(india)
         session.commit()
         print("✅ India seeded successfully.")
-    return session.query(Country).filter_by(name="India").first()
+        
+    return session.query(Country).filter_by(name="INDIA").first()
 
 import json
 
@@ -743,9 +763,38 @@ def seed_products(session, category_ids, subcategory_ids, filepath="product.json
 
     session.commit()
     print("✅ Existing data + file data seeded successfully.")
+    
 
+def seed_cities(session, state_ids, filepath="city.json"):
+    """
+    Seed cities from city.json.
+    state_ids: a dict mapping state names to their IDs
+    """
+    with open(filepath, "r", encoding="utf-8") as f:
+        file_data = json.load(f)
 
+    for c in file_data:
+        state_id = state_ids.get(c["statename"])
+        if not state_id:
+            print(f"⚠️ State '{c['statename']}' not found. Skipping city '{c['name']}'.")
+            continue
 
+        existing = session.query(City).filter_by(name=c["name"], state_id=state_id).first()
+
+        if not existing:
+            city = City(
+                name=c["name"],
+                state_id=state_id,
+                erp_sync_status="pending",
+                erp_external_id=c["erp_external_id"]
+            )
+            session.add(city)
+        else:
+            existing.state_id = state_id
+            existing.erp_sync_status = "pending"
+
+    session.commit()
+    print("✅ Cities seeded successfully.")
 # ----------------- Run Seed -----------------
 
 def run_seed():
@@ -760,8 +809,10 @@ def run_seed():
         subcategory_ids = seed_product_subcategories(session, category_ids)
         seed_products(session, category_ids, subcategory_ids)
             # Geography
+        seed_country_india
         india = seed_india_country(session)
-        seed_indian_states(session, india)
+        state_ids=seed_indian_states(session, india)
+        seed_cities(session,state_ids)
         seed_divisions(session)
         master_ids=seed_category_master(session)
         seed_category_details(session, master_ids)

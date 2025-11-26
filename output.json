@@ -1,0 +1,6267 @@
+[
+    {
+        "erp_external_id": "8000437",
+        "name": "BAGODAR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000438",
+        "name": "BAHARAGORA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000439",
+        "name": "BALUMATH",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000440",
+        "name": "BARHI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000441",
+        "name": "BARKAGAON",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000442",
+        "name": "BARWADIH",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000443",
+        "name": "BASIA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000444",
+        "name": "BERMO",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000445",
+        "name": "BHANDARIA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000446",
+        "name": "BHAWANATHPUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000447",
+        "name": "BISHRAMPUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000448",
+        "name": "BOKARO",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000449",
+        "name": "BOLWA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000450",
+        "name": "BUNDU",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000451",
+        "name": "CHAIBASA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000452",
+        "name": "CHAINPUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000453",
+        "name": "CHAKARDHARPUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000454",
+        "name": "CHANDIL",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000455",
+        "name": "CHATRA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000456",
+        "name": "CHAVPARAN",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000457",
+        "name": "DALTONGANJ",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000458",
+        "name": "DEOGHAR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000459",
+        "name": "DHANBAD",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000460",
+        "name": "DUMKA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000461",
+        "name": "DUMRI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000462",
+        "name": "GARHWA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000463",
+        "name": "GARU",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000464",
+        "name": "GHAGHRA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000465",
+        "name": "GHATSILA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000466",
+        "name": "GIRIDIH",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000467",
+        "name": "GODDA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000468",
+        "name": "GOMIA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000469",
+        "name": "GOVINDPUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000470",
+        "name": "GUMLA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000471",
+        "name": "HAZARIBAGH",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000472",
+        "name": "HUNTERGANJ",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000473",
+        "name": "ICHAK",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000474",
+        "name": "ITKI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000475",
+        "name": "JAGARNATHPUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000476",
+        "name": "JAMSHEDPUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000477",
+        "name": "JAMTARA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000478",
+        "name": "JAPLA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000479",
+        "name": "JHARMUNDI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000480",
+        "name": "JHINKPANI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000481",
+        "name": "JHUMARITALAIYA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000482",
+        "name": "KATHIKUND",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000483",
+        "name": "KHARSAWA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000484",
+        "name": "KHUNTI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000485",
+        "name": "KODERMA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000486",
+        "name": "KOLEBIRA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000487",
+        "name": "LATEHAR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000488",
+        "name": "LOHARDAGA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000489",
+        "name": "MADHUPUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000490",
+        "name": "MAHAGAMA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000491",
+        "name": "MAHESHPUR RAJ",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000492",
+        "name": "MANDAR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000493",
+        "name": "MANDU",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000494",
+        "name": "MANOHARPUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000495",
+        "name": "MURI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000496",
+        "name": "NAGARUTATRI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000497",
+        "name": "NALA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000498",
+        "name": "NOAMUNDI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000499",
+        "name": "PAKUR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000500",
+        "name": "PALAMU",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000501",
+        "name": "PALKOT",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000503",
+        "name": "RAJDHANWAR",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000504",
+        "name": "RAJMAHAL",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000505",
+        "name": "RAMGARH",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000506",
+        "name": "RANCHI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000507",
+        "name": "SAHIBGANJ",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000508",
+        "name": "SARAIKELA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000509",
+        "name": "SIMARIA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000510",
+        "name": "SIMDEGA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000511",
+        "name": "SINGHBHUM",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000512",
+        "name": "TISRI",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000513",
+        "name": "TORPA",
+        "statename": "JHARKHAND"
+    },
+    {
+        "erp_external_id": "8000514",
+        "name": "AFZALPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000515",
+        "name": "AINAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000516",
+        "name": "ALAND",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000517",
+        "name": "ALUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000518",
+        "name": "ANEKAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000519",
+        "name": "ANKOLA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000520",
+        "name": "ARSIKERE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000521",
+        "name": "ATHANI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000522",
+        "name": "AURAD",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000523",
+        "name": "BABLESHWAR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000524",
+        "name": "BADAMI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000525",
+        "name": "BAGALKOT",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000526",
+        "name": "BAGEPALLI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000527",
+        "name": "BAILHONGAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000528",
+        "name": "BANGALORE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000529",
+        "name": "BANGALORE RURAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000530",
+        "name": "BANGARPET",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000531",
+        "name": "BANTWAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000532",
+        "name": "BASAVAKALYAN",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000533",
+        "name": "BASAVANABAGEWADI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000534",
+        "name": "BASAVAPATNA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000535",
+        "name": "BELGAUM",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000536",
+        "name": "BELLARY",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000537",
+        "name": "BELTHANGADY",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000538",
+        "name": "BELUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000539",
+        "name": "BHADRAVATI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000540",
+        "name": "BHALKI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000541",
+        "name": "BHATKAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000542",
+        "name": "BIDAR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000543",
+        "name": "BIJAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000544",
+        "name": "BILIGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000545",
+        "name": "CHADCHAN",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000546",
+        "name": "CHALLAKERE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000547",
+        "name": "CHAMRAJNAGAR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000548",
+        "name": "CHANNAGIRI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000549",
+        "name": "CHANNAPATNA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000550",
+        "name": "CHANNARAYAPATNA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000551",
+        "name": "CHICKMAGALUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000552",
+        "name": "CHIKBALLAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000553",
+        "name": "CHIKKABALLAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000554",
+        "name": "CHIKKANAYAKANAHALLI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000555",
+        "name": "CHIKKODI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000556",
+        "name": "CHIKMAGALUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000557",
+        "name": "CHINCHOLI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000558",
+        "name": "CHINTAMANI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000559",
+        "name": "CHITRADURGA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000560",
+        "name": "CHITTAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000561",
+        "name": "COWDAHALLI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000562",
+        "name": "DAVANAGERE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000563",
+        "name": "DEODURGA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000564",
+        "name": "DEVANGERE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000565",
+        "name": "DEVARAHIPPARGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000566",
+        "name": "DHARWAD",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000567",
+        "name": "DODDABALLAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000568",
+        "name": "GADAG",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000569",
+        "name": "GANGAVATHI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000570",
+        "name": "GOKAK",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000571",
+        "name": "GOWRIBDANPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000572",
+        "name": "GUBBI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000573",
+        "name": "GULBARGA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000574",
+        "name": "GUNDLUPET",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000575",
+        "name": "HAGARIBOMMANA HALLI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000576",
+        "name": "HD KOTE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000577",
+        "name": "HALIYAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000578",
+        "name": "HAMPI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000579",
+        "name": "HANGAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000580",
+        "name": "HARAPANAHALLI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000581",
+        "name": "HASSAN",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000582",
+        "name": "HAVERI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000583",
+        "name": "HEBRI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000584",
+        "name": "HIREKERUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000585",
+        "name": "HIRIYUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000586",
+        "name": "HOLALKERE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000587",
+        "name": "HOLENARSIPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000588",
+        "name": "HONNALI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000589",
+        "name": "HONNAVAR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000590",
+        "name": "HOSADURGA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000591",
+        "name": "HOSAKOTE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000592",
+        "name": "HOSANAGARA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000593",
+        "name": "HOSPET",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000594",
+        "name": "HUBLI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000595",
+        "name": "HUKKERI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000596",
+        "name": "HUMNABAD",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000597",
+        "name": "HUNGUND",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000598",
+        "name": "HUNSAGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000599",
+        "name": "HUNSUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000600",
+        "name": "HUVINAHADAGALI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000601",
+        "name": "INDI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000602",
+        "name": "JAGALUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000603",
+        "name": "JAMKHANDI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000604",
+        "name": "JEWARGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000605",
+        "name": "JOIDA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000606",
+        "name": "KR NAGAR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000607",
+        "name": "KADUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000608",
+        "name": "KALGHATAGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000609",
+        "name": "KAMALAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000610",
+        "name": "KANAKAPURA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000611",
+        "name": "KANNADA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000612",
+        "name": "KARGAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000613",
+        "name": "KARKALA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000614",
+        "name": "KARWAR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000615",
+        "name": "KHANAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000616",
+        "name": "KODAGU",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000617",
+        "name": "KOLAR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000618",
+        "name": "KOLLEGAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000619",
+        "name": "KOPPA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000620",
+        "name": "KOPPAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000621",
+        "name": "KORATAGERI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000622",
+        "name": "KRISHNARAJAPET",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000623",
+        "name": "KUDLIGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000624",
+        "name": "KUMTA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000625",
+        "name": "KUNDAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000626",
+        "name": "KUNDGOL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000627",
+        "name": "KUNIGAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000628",
+        "name": "KURUGODU",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000629",
+        "name": "KUSTAGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000630",
+        "name": "LINGSUGUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000631",
+        "name": "MADIKERI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000632",
+        "name": "MADUGIRI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000633",
+        "name": "MALAVALLI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000634",
+        "name": "MALUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000635",
+        "name": "MANDYA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000636",
+        "name": "MANGALORE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000637",
+        "name": "MANIPAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000638",
+        "name": "MANVI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000639",
+        "name": "MASHAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000640",
+        "name": "MOLKALMURU",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000641",
+        "name": "MUDALGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000642",
+        "name": "MUDDEBIHAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000643",
+        "name": "MUDHOL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000644",
+        "name": "MUDIGERE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000645",
+        "name": "MULBAGAL",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000646",
+        "name": "MUNDAGOD",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000647",
+        "name": "MUNDARGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000648",
+        "name": "MURUGOD",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000859",
+        "name": "DHAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000649",
+        "name": "MYSORE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000650",
+        "name": "NAGAMANGALA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000651",
+        "name": "NANJANGUD",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000652",
+        "name": "NARGUND",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000653",
+        "name": "NARSIMRAJAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000654",
+        "name": "NAVALGUND",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000655",
+        "name": "NELAMANGALA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000656",
+        "name": "NIMBURGA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000657",
+        "name": "PANDAVAPURA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000658",
+        "name": "PAVAGADA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000659",
+        "name": "PUTTUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000660",
+        "name": "RAIBAG",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000661",
+        "name": "RAICHUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000662",
+        "name": "RAMDURG",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000663",
+        "name": "RANEBENNUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000664",
+        "name": "RON",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000665",
+        "name": "SAGAR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000666",
+        "name": "SAKLESHPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000667",
+        "name": "SALKANI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000668",
+        "name": "SANDUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000669",
+        "name": "SAUNDATTI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000670",
+        "name": "SAVANUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000671",
+        "name": "SEDAM",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000672",
+        "name": "SHAHAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000673",
+        "name": "SHANKARNARAYANA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000674",
+        "name": "SHIKARIPURA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000675",
+        "name": "SHIMOGA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000676",
+        "name": "SHIRAHATTI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000677",
+        "name": "SHORAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000678",
+        "name": "SIDDAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000679",
+        "name": "SIDLAGHATTA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000680",
+        "name": "SINDAGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000681",
+        "name": "SINDHANUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000682",
+        "name": "SIRA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000683",
+        "name": "SIRSI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000684",
+        "name": "SIRUGUPPA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000685",
+        "name": "SOMWARPET",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000686",
+        "name": "SORAB",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000687",
+        "name": "SRINGERI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000688",
+        "name": "SRINIWASPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000689",
+        "name": "SRIRANGAPATNA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000690",
+        "name": "SULLIA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000691",
+        "name": "T NARSIPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000692",
+        "name": "TALLAK",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000693",
+        "name": "TARIKERE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000694",
+        "name": "TELGI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000695",
+        "name": "THIRTHAHALLI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000696",
+        "name": "TIPTUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000697",
+        "name": "TUMKUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000698",
+        "name": "TURUVEKERE",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000699",
+        "name": "UDUPI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000700",
+        "name": "VIRAJPET",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000701",
+        "name": "WADI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000702",
+        "name": "YADGIRI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000703",
+        "name": "YELBURGA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000704",
+        "name": "YELLAPUR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "8000705",
+        "name": "ADIMALY",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000706",
+        "name": "ADOOR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000707",
+        "name": "AGATHY",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000708",
+        "name": "ALAPPUZHA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000709",
+        "name": "ALATHUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000710",
+        "name": "ALLEPPEY",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000711",
+        "name": "ALWAYE",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000712",
+        "name": "AMINI",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000713",
+        "name": "ANDROTH",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000714",
+        "name": "ATTINGAL",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000715",
+        "name": "BADAGARA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000716",
+        "name": "BITRA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000717",
+        "name": "CALICUT",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000718",
+        "name": "CANNANORE",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000719",
+        "name": "CHETLET",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000720",
+        "name": "ERNAKULAM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000721",
+        "name": "IDUKKI",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000722",
+        "name": "IRINJALAKUDA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000723",
+        "name": "KADAMATH",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000724",
+        "name": "KALPENI",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000725",
+        "name": "KALPETTA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000726",
+        "name": "KANHANGAD",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000727",
+        "name": "KANJIRAPALLY",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000728",
+        "name": "KANNUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000729",
+        "name": "KARUNGAPALLY",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000730",
+        "name": "KASARGODE",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000731",
+        "name": "KAVARATHY",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000732",
+        "name": "KILTAN",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000733",
+        "name": "KOCHI",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000734",
+        "name": "KODUVAYUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000735",
+        "name": "KOLLAM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000736",
+        "name": "KOTTAYAM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000737",
+        "name": "KOVALAM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000738",
+        "name": "KOZHIKODE",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000739",
+        "name": "KUNNAMKULAM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000740",
+        "name": "MALAPPURAM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000741",
+        "name": "MANANTHODI",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000742",
+        "name": "MANJERI",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000743",
+        "name": "MANNARGHAT",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000744",
+        "name": "MAVELIKKARA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000745",
+        "name": "MINICOY",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000746",
+        "name": "MUNNAR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000747",
+        "name": "MUVATTUPUZHA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000748",
+        "name": "NEDUMANDAD",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000749",
+        "name": "NEDUMGANDAM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000750",
+        "name": "NILAMBUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000751",
+        "name": "PALAI",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000752",
+        "name": "PALAKKAD",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000753",
+        "name": "PALGHAT",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000077",
+        "name": "AMAL",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000754",
+        "name": "PATHAANAMTHITTA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000755",
+        "name": "PATHANAMTHITTA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000756",
+        "name": "PAYYANUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000757",
+        "name": "PEERMEDU",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000758",
+        "name": "PERINTHALMANNA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000759",
+        "name": "PERUMBAVOOR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000760",
+        "name": "PUNALUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000761",
+        "name": "QUILON",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000762",
+        "name": "RANNI",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000763",
+        "name": "SHERTALLAI",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000764",
+        "name": "SHORANUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000765",
+        "name": "TALIPARAMBA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000766",
+        "name": "TELLICHERRY",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000767",
+        "name": "THIRUVANANTHAPURAM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000768",
+        "name": "THODUPUZHA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000769",
+        "name": "THRISSUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000770",
+        "name": "TIRUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000771",
+        "name": "TIRUVALLA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000772",
+        "name": "TRICHUR",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000773",
+        "name": "TRIVANDRUM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000774",
+        "name": "UPPALA",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000775",
+        "name": "VADAKKANCHERY",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000776",
+        "name": "VIKOM",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000777",
+        "name": "WAYANAD",
+        "statename": "KERALA"
+    },
+    {
+        "erp_external_id": "8000778",
+        "name": "AGATTI ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000779",
+        "name": "BINGARAM ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000780",
+        "name": "BITRA ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000781",
+        "name": "CHETLAT ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000782",
+        "name": "KADMAT ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000783",
+        "name": "KALPENI ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000784",
+        "name": "KAVARATTI ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000785",
+        "name": "KILTAN ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000786",
+        "name": "LAKSHADWEEP SEA",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000787",
+        "name": "MINICOY ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000788",
+        "name": "NORTH ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000789",
+        "name": "SOUTH ISLAND",
+        "statename": "LAKSHADWEEP"
+    },
+    {
+        "erp_external_id": "8000790",
+        "name": "AGAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000791",
+        "name": "AJAIGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000792",
+        "name": "ALIRAJPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000793",
+        "name": "AMARPATAN",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000794",
+        "name": "AMARWADA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000795",
+        "name": "AMBAH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000796",
+        "name": "ANUPPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000797",
+        "name": "ARONE",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000798",
+        "name": "ASHOKNAGAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000799",
+        "name": "ASHTA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000800",
+        "name": "ATNER",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000801",
+        "name": "BABAICHICHLI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000802",
+        "name": "BADAMALHERA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000803",
+        "name": "BADARWSAS",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000804",
+        "name": "BADNAGAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000805",
+        "name": "BADNAWAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000806",
+        "name": "BADWANI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000807",
+        "name": "BAGLI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000808",
+        "name": "BAIHAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000809",
+        "name": "BALAGHAT",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000810",
+        "name": "BALDEOGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000811",
+        "name": "BALDI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000812",
+        "name": "BAMORI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000813",
+        "name": "BANDA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000814",
+        "name": "BANDHAVGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000815",
+        "name": "BARELI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000817",
+        "name": "BARWAHA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000818",
+        "name": "BARWANI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000819",
+        "name": "BATKAKHAPA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000820",
+        "name": "BEGAMGANJ",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000821",
+        "name": "BEOHARI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000822",
+        "name": "BERASIA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000823",
+        "name": "BERCHHA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000824",
+        "name": "BETUL",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000825",
+        "name": "BHAINSDEHI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000826",
+        "name": "BHANDER",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000827",
+        "name": "BHANPURA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000828",
+        "name": "BHIKANGAON",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000829",
+        "name": "BHIMPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000830",
+        "name": "BHIND",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000831",
+        "name": "BHITARWAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000832",
+        "name": "BHOPAL",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000833",
+        "name": "BIAORA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000834",
+        "name": "BIJADANDI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000835",
+        "name": "BIJAWAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000836",
+        "name": "BIJAYPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000837",
+        "name": "BINA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000838",
+        "name": "BIRSA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000839",
+        "name": "BIRSINGHPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000840",
+        "name": "BUDHNI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000841",
+        "name": "BURHANPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000842",
+        "name": "BUXWAHA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000843",
+        "name": "CHACHAURA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000844",
+        "name": "CHANDERI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000845",
+        "name": "CHAURAI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000846",
+        "name": "CHHAPARA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000847",
+        "name": "CHHATARPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000848",
+        "name": "CHHINDWARA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000849",
+        "name": "CHICHOLI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000850",
+        "name": "CHITRANGI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000851",
+        "name": "CHURHAT",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000852",
+        "name": "DABRA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000853",
+        "name": "DAMOH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000854",
+        "name": "DATIA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000855",
+        "name": "DEORI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000856",
+        "name": "DEOSAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000857",
+        "name": "DEPALPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000858",
+        "name": "DEWAS",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000423",
+        "name": "NYOMA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000424",
+        "name": "PADAM",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000425",
+        "name": "PAHALGAM",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000426",
+        "name": "PATNITOP",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000427",
+        "name": "POONCH",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000428",
+        "name": "PULWAMA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000429",
+        "name": "RAJOURI",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000430",
+        "name": "RAMBAN",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000431",
+        "name": "RAMNAGAR",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000432",
+        "name": "REASI",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000433",
+        "name": "SAMBA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000434",
+        "name": "SRINAGAR",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000435",
+        "name": "UDHAMPUR",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000436",
+        "name": "VAISHNO DEVI",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000860",
+        "name": "DHARAMPURI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000861",
+        "name": "DINDORI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000862",
+        "name": "GADARWARA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000863",
+        "name": "GAIRATGANJ",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000864",
+        "name": "GANJBASODA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000865",
+        "name": "GAROTH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000866",
+        "name": "GHANSOUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000867",
+        "name": "GHATIA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000868",
+        "name": "GHATIGAON",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000869",
+        "name": "GHORANDOGRI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000870",
+        "name": "GHUGHARI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000871",
+        "name": "GOGAON",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000872",
+        "name": "GOHAD",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000873",
+        "name": "GOHARGANJ",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000874",
+        "name": "GOPALGANJ",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000875",
+        "name": "GOTEGAON",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000876",
+        "name": "GOURIHAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000877",
+        "name": "GUNA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000878",
+        "name": "GUNNORE",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000879",
+        "name": "GWALIOR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000880",
+        "name": "GYRASPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000881",
+        "name": "HANUMANA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000882",
+        "name": "HARDA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000883",
+        "name": "HARRAI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000884",
+        "name": "HARSUD",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000885",
+        "name": "HATTA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000886",
+        "name": "HOSHANGABAD",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000887",
+        "name": "ICHHAWAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000888",
+        "name": "INDORE",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000889",
+        "name": "ISAGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000890",
+        "name": "ITARSI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000891",
+        "name": "JABALPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000892",
+        "name": "JABERA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000894",
+        "name": "JAISINGHNAGAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000895",
+        "name": "JAITHARI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000896",
+        "name": "JAITPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000897",
+        "name": "JAITWARA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000898",
+        "name": "JAMAI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000899",
+        "name": "JAORA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000900",
+        "name": "JATARA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000901",
+        "name": "JAWAD",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000902",
+        "name": "JHABUA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000903",
+        "name": "JOBAT",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000904",
+        "name": "JORA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000905",
+        "name": "KAKAIYA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000906",
+        "name": "KANNOD",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000907",
+        "name": "KANNODI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000908",
+        "name": "KARANJIA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000909",
+        "name": "KARELI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000910",
+        "name": "KARERA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000911",
+        "name": "KARHAL",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000912",
+        "name": "KARPA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000913",
+        "name": "KASRAWAD",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000914",
+        "name": "KATANGI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000915",
+        "name": "KATNI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000916",
+        "name": "KEOLARI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000917",
+        "name": "KHACHROD",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000918",
+        "name": "KHAJURAHO",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000919",
+        "name": "KHAKNER",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000920",
+        "name": "KHALWA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000921",
+        "name": "KHANDWA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000922",
+        "name": "KHANIADHANA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000923",
+        "name": "KHARGONE",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000924",
+        "name": "KHATEGAON",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000925",
+        "name": "KHETIA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000926",
+        "name": "KHILCHIPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000927",
+        "name": "KHIRKIYA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000928",
+        "name": "KHURAI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000929",
+        "name": "KOLARAS",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000930",
+        "name": "KOTMA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000931",
+        "name": "KUKSHI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000932",
+        "name": "KUNDAM",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000933",
+        "name": "KURWAI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000934",
+        "name": "KUSMI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000935",
+        "name": "LAHER",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000936",
+        "name": "LAKHNADON",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000937",
+        "name": "LAMTA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000938",
+        "name": "LANJI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000939",
+        "name": "LATERI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000001",
+        "name": "FINGESHWAR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000940",
+        "name": "LAUNDI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000941",
+        "name": "MAHESHWAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000942",
+        "name": "MAHIDPURCITY",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000943",
+        "name": "MAIHAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000944",
+        "name": "MAJHAGWAN",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000945",
+        "name": "MAJHOLI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000946",
+        "name": "MALHARGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000947",
+        "name": "MANASA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000948",
+        "name": "MANAWAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000949",
+        "name": "MANDLA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000950",
+        "name": "MANDSAUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000951",
+        "name": "MANPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000952",
+        "name": "MAUGANJ",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000953",
+        "name": "MAWAI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000954",
+        "name": "MEHGAON",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000955",
+        "name": "MHOW",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000956",
+        "name": "MORENA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000957",
+        "name": "MULTAI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000958",
+        "name": "MUNGAOLI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000959",
+        "name": "NAGOD",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000960",
+        "name": "NAINPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000961",
+        "name": "NARSINGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000962",
+        "name": "NARSINGHPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000963",
+        "name": "NARWAR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000964",
+        "name": "NASRULLAGANJ",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000965",
+        "name": "NATERAN",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000966",
+        "name": "NEEMUCH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000967",
+        "name": "NIWARI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000968",
+        "name": "NIWAS",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000969",
+        "name": "NOWGAON",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000970",
+        "name": "PACHMARHI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000971",
+        "name": "PANDHANA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000972",
+        "name": "PANDHURNA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000973",
+        "name": "PANNA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000974",
+        "name": "PARASIA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000976",
+        "name": "PATERA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000977",
+        "name": "PATHARIA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000978",
+        "name": "PAWAI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000979",
+        "name": "PETLAWAD",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000980",
+        "name": "PICHHORE",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000981",
+        "name": "PIPARIA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000982",
+        "name": "POHARI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000983",
+        "name": "PRABHAPATTAN",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000984",
+        "name": "PUNASA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000985",
+        "name": "PUSHPRAJGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000986",
+        "name": "RAGHOGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000987",
+        "name": "RAGHUNATHPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000988",
+        "name": "RAHATGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000989",
+        "name": "RAISEN",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000992",
+        "name": "RATLAM",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000993",
+        "name": "REHLI",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000994",
+        "name": "REWA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000995",
+        "name": "SABALGARH",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000997",
+        "name": "SAILANA",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000998",
+        "name": "SANWER",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8000999",
+        "name": "SARANGPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "8001000",
+        "name": "SARDARPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "1498311764603",
+        "name": "NEW CITY 12",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000002",
+        "name": "GARIABAND",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000003",
+        "name": "GARPA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000004",
+        "name": "GHARGHODA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000005",
+        "name": "GOGUNDA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000006",
+        "name": "ILAMIDI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000007",
+        "name": "JAGDALPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000008",
+        "name": "JANJGIR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000009",
+        "name": "JANJGIR-CHAMPA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000010",
+        "name": "JARWA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000011",
+        "name": "JASHPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000012",
+        "name": "JASHPURNAGAR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000013",
+        "name": "KABIRDHAM-KAWARDHA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000014",
+        "name": "KANKER",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000015",
+        "name": "KASDOL",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000016",
+        "name": "KATHDOL",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000017",
+        "name": "KATHGHORA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000018",
+        "name": "KAWARDHA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000019",
+        "name": "KESKAL",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000020",
+        "name": "KHAIRGARH",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000021",
+        "name": "KONDAGAON",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000022",
+        "name": "KONTA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000023",
+        "name": "KORBA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000024",
+        "name": "KOREA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000025",
+        "name": "KOTA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000026",
+        "name": "KOYELIBEDA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000027",
+        "name": "KUAKUNDA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000028",
+        "name": "KUNKURI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000029",
+        "name": "KURUD",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000030",
+        "name": "LOHADIGUNDAH",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000031",
+        "name": "LORMI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000032",
+        "name": "LUCKWADA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000033",
+        "name": "MAHASAMUND",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000034",
+        "name": "MAKODI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000035",
+        "name": "MANENDRAGARH",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000037",
+        "name": "MARWAHI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000038",
+        "name": "MOHLA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000039",
+        "name": "MUNGELI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000040",
+        "name": "NAGRI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000041",
+        "name": "NARAINPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000042",
+        "name": "NARAYANPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000043",
+        "name": "NEORA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000044",
+        "name": "NETANAR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000045",
+        "name": "ODGI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000046",
+        "name": "PADAMKOT",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000047",
+        "name": "PAKHANJUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000048",
+        "name": "PALI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000049",
+        "name": "PANDARIA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000050",
+        "name": "PANDISHANKAR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000051",
+        "name": "PARASGAON",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000052",
+        "name": "PASAN",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000053",
+        "name": "PATAN",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000054",
+        "name": "PATHALGAON",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000055",
+        "name": "PENDRA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000056",
+        "name": "PRATAPPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000057",
+        "name": "PREMNAGAR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000058",
+        "name": "RAIGARH",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000059",
+        "name": "RAIPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000060",
+        "name": "RAJNANDGAON",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000061",
+        "name": "RAJPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000062",
+        "name": "RAMCHANDRAPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000063",
+        "name": "SARAIPALI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000064",
+        "name": "SARANGGARH",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000065",
+        "name": "SARONA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000066",
+        "name": "SEMARIA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000067",
+        "name": "SHAKTI",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000068",
+        "name": "SITAPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000069",
+        "name": "SUKMA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000070",
+        "name": "SURAJPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000071",
+        "name": "SURGUJA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000072",
+        "name": "TAPKARA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000073",
+        "name": "TOYNAR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000074",
+        "name": "UDAIPUR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000075",
+        "name": "UPRODA",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000076",
+        "name": "WADRAINAGAR",
+        "statename": "CHHATTISGARH"
+    },
+    {
+        "erp_external_id": "8000078",
+        "name": "AMLI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000079",
+        "name": "BEDPA",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000080",
+        "name": "CHIKHLI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000081",
+        "name": "DADRA & NAGAR HAVELI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000082",
+        "name": "DAHIKHED",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000083",
+        "name": "DOLARA",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000084",
+        "name": "GALONDA",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000085",
+        "name": "KANADI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000086",
+        "name": "KARCHOND",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000087",
+        "name": "KHADOLI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000088",
+        "name": "KHARADPADA",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000089",
+        "name": "KHERABARI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000090",
+        "name": "KHERDI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000091",
+        "name": "KOTHAR",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000092",
+        "name": "LUARI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000093",
+        "name": "MASHAT",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000094",
+        "name": "RAKHOLI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000095",
+        "name": "RUDANA",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000096",
+        "name": "SAILI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000097",
+        "name": "SILI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000098",
+        "name": "SILVASSA",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000099",
+        "name": "SINDAVNI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000100",
+        "name": "UDVA",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000101",
+        "name": "UMBARKOI",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000102",
+        "name": "VANSDA",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000103",
+        "name": "VASONA",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000104",
+        "name": "VELUGAM",
+        "statename": "DADRA AND NAGAR HAVELI"
+    },
+    {
+        "erp_external_id": "8000105",
+        "name": "NCAVARE",
+        "statename": "DAMAN AND DIU"
+    },
+    {
+        "erp_external_id": "8000106",
+        "name": "DAGASI",
+        "statename": "DAMAN AND DIU"
+    },
+    {
+        "erp_external_id": "8000107",
+        "name": "DAMAN",
+        "statename": "DAMAN AND DIU"
+    },
+    {
+        "erp_external_id": "8000108",
+        "name": "DIU",
+        "statename": "DAMAN AND DIU"
+    },
+    {
+        "erp_external_id": "8000109",
+        "name": "MAGARVARA",
+        "statename": "DAMAN AND DIU"
+    },
+    {
+        "erp_external_id": "8000110",
+        "name": "NAGWA",
+        "statename": "DAMAN AND DIU"
+    },
+    {
+        "erp_external_id": "8000111",
+        "name": "PARIALI",
+        "statename": "DAMAN AND DIU"
+    },
+    {
+        "erp_external_id": "8000112",
+        "name": "PASSO COVO",
+        "statename": "DAMAN AND DIU"
+    },
+    {
+        "erp_external_id": "8000113",
+        "name": "CENTRAL DELHI",
+        "statename": "DELHI"
+    },
+    {
+        "erp_external_id": "8000114",
+        "name": "EAST DELHI",
+        "statename": "DELHI"
+    },
+    {
+        "erp_external_id": "8000115",
+        "name": "NEW DELHI",
+        "statename": "DELHI"
+    },
+    {
+        "erp_external_id": "8000116",
+        "name": "NORTH DELHI",
+        "statename": "DELHI"
+    },
+    {
+        "erp_external_id": "8000117",
+        "name": "NORTH EAST DELHI",
+        "statename": "DELHI"
+    },
+    {
+        "erp_external_id": "8000118",
+        "name": "NORTH WEST DELHI",
+        "statename": "DELHI"
+    },
+    {
+        "erp_external_id": "8000119",
+        "name": "SOUTH DELHI",
+        "statename": "DELHI"
+    },
+    {
+        "erp_external_id": "8000120",
+        "name": "SOUTH WEST DELHI",
+        "statename": "DELHI"
+    },
+    {
+        "erp_external_id": "8000121",
+        "name": "WEST DELHI",
+        "statename": "DELHI"
+    },
+    {
+        "erp_external_id": "8000136",
+        "name": "AHMEDABAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000137",
+        "name": "AHWA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000138",
+        "name": "AMOD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000139",
+        "name": "AMRELI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000140",
+        "name": "ANAND",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000141",
+        "name": "ANJAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000142",
+        "name": "ANKALESHWAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000143",
+        "name": "BABRA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000144",
+        "name": "BALASINOR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000145",
+        "name": "BANASKANTHA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000146",
+        "name": "BANSADA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000147",
+        "name": "BARDOLI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000148",
+        "name": "BAREJA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000149",
+        "name": "BARODA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000151",
+        "name": "BAYAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000152",
+        "name": "BHACHAV",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000153",
+        "name": "BHANVAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000154",
+        "name": "BHARUCH",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000155",
+        "name": "BHAVNAGAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000156",
+        "name": "BHILODA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000157",
+        "name": "BHUJ",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000158",
+        "name": "BILLIMORA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000159",
+        "name": "BORSAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000160",
+        "name": "BOTAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000161",
+        "name": "CHANASMA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000162",
+        "name": "CHHOTA UDAIPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000163",
+        "name": "CHOTILA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000164",
+        "name": "DABHOI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000165",
+        "name": "DAHOD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000166",
+        "name": "DAMNAGAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000167",
+        "name": "DANG",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000168",
+        "name": "DANTA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000169",
+        "name": "DASADA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000170",
+        "name": "DEDIAPADA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000171",
+        "name": "DEESA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000172",
+        "name": "DEHGAM",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000173",
+        "name": "DEODAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000174",
+        "name": "DEVGADHBARIA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000175",
+        "name": "DHANDHUKA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000176",
+        "name": "DHANERA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000177",
+        "name": "DHARAMPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000178",
+        "name": "DHARI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000179",
+        "name": "DHOLKA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000180",
+        "name": "DHORAJI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000181",
+        "name": "DHRANGADHRA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000182",
+        "name": "DHROL",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000183",
+        "name": "DWARKA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000184",
+        "name": "FORTSONGADH",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000185",
+        "name": "GADHADA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000186",
+        "name": "GANDHI NAGAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000187",
+        "name": "GARIADHAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000188",
+        "name": "GODHRA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000189",
+        "name": "GOGODAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000190",
+        "name": "GONDAL",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000191",
+        "name": "HALOL",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000192",
+        "name": "HALVAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000193",
+        "name": "HARIJ",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000194",
+        "name": "HIMATNAGAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000195",
+        "name": "IDAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000196",
+        "name": "JAMBUSAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000197",
+        "name": "JAMJODHPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000198",
+        "name": "JAMKALYANPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000199",
+        "name": "JAMNAGAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000200",
+        "name": "JASDAN",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000201",
+        "name": "JETPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000202",
+        "name": "JHAGADIA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000203",
+        "name": "JHALOD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000204",
+        "name": "JODIA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000205",
+        "name": "JUNAGADH",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000206",
+        "name": "JUNAGARH",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000207",
+        "name": "KALAWAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000208",
+        "name": "KALOL",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000209",
+        "name": "KAPAD WANJ",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000210",
+        "name": "KESHOD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000211",
+        "name": "KHAMBAT",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000212",
+        "name": "KHAMBHALIA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000213",
+        "name": "KHAVDA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000214",
+        "name": "KHEDA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000215",
+        "name": "KHEDBRAHMA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000216",
+        "name": "KHERALU",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000217",
+        "name": "KODINAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000218",
+        "name": "KOTDASANGHANI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000219",
+        "name": "KUNKAWAV",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000220",
+        "name": "KUTCH",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000221",
+        "name": "KUTCHMANDVI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000222",
+        "name": "KUTIYANA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000223",
+        "name": "LAKHPAT",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000224",
+        "name": "LAKHTAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000225",
+        "name": "LALPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000226",
+        "name": "LIMBDI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000227",
+        "name": "LIMKHEDA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000228",
+        "name": "LUNAVADA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000229",
+        "name": "MMMANGROL",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000230",
+        "name": "MAHUVA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000231",
+        "name": "MALIA-HATINA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000232",
+        "name": "MALIYA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000233",
+        "name": "MALPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000234",
+        "name": "MANAVADAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000235",
+        "name": "MANDVI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000236",
+        "name": "MANGROL",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000237",
+        "name": "MEHMEDABAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000238",
+        "name": "MEHSANA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000239",
+        "name": "MIYAGAM",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000240",
+        "name": "MODASA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000241",
+        "name": "MORVI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000242",
+        "name": "MULI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000243",
+        "name": "MUNDRA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000244",
+        "name": "NADIAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000245",
+        "name": "NAKHATRANA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000246",
+        "name": "NALIA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000247",
+        "name": "NARMADA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000248",
+        "name": "NASWADI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000249",
+        "name": "NAVASARI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000250",
+        "name": "NIZAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000251",
+        "name": "OKHA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000252",
+        "name": "PADDHARI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000253",
+        "name": "PADRA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000254",
+        "name": "PALANPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000255",
+        "name": "PALITANA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000256",
+        "name": "PANCHMAHALS",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000258",
+        "name": "PAVIJETPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000259",
+        "name": "PORBANDAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000260",
+        "name": "PRANTIJ",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000261",
+        "name": "RADHANPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000262",
+        "name": "RAHPAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000263",
+        "name": "RAJAULA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000264",
+        "name": "RAJKOT",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000265",
+        "name": "RAJPIPLA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000266",
+        "name": "RANAVAV",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000267",
+        "name": "SABARKANTHA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000268",
+        "name": "SANAND",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000269",
+        "name": "SANKHEDA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000270",
+        "name": "SANTALPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000271",
+        "name": "SANTRAMPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000272",
+        "name": "SAVARKUNDLA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000273",
+        "name": "SAVLI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000274",
+        "name": "SAYAN",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000275",
+        "name": "SAYLA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000373",
+        "name": "HAMIRPUR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000374",
+        "name": "JOGINDERNAGAR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000375",
+        "name": "KALPA",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000376",
+        "name": "KANGRA",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000377",
+        "name": "KINNAUR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000378",
+        "name": "KULLU",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000379",
+        "name": "LAHAUL",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000380",
+        "name": "MANDI",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000381",
+        "name": "NAHAN",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000382",
+        "name": "NALAGARH",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000383",
+        "name": "NIRMAND",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000384",
+        "name": "NURPUR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000385",
+        "name": "PALAMPUR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000386",
+        "name": "PANGI",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000387",
+        "name": "PAONTA",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000388",
+        "name": "POOH",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000389",
+        "name": "RAJGARH",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000390",
+        "name": "RAMPUR BUSHAHAR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000391",
+        "name": "ROHRU",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000392",
+        "name": "SHIMLA",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000393",
+        "name": "SIRMAUR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000394",
+        "name": "SOLAN",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000395",
+        "name": "SPITI",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000396",
+        "name": "SUNDERNAGAR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000397",
+        "name": "THEOG",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000399",
+        "name": "UNA",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000400",
+        "name": "AKHNOOR",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000401",
+        "name": "ANANTNAG",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000402",
+        "name": "BADGAM",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000403",
+        "name": "BANDIPUR",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000404",
+        "name": "BARAMULLA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000405",
+        "name": "BASHOLI",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000406",
+        "name": "BEDARWAH",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000407",
+        "name": "BUDGAM",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000408",
+        "name": "DODA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000409",
+        "name": "GULMARG",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000410",
+        "name": "JAMMU",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000411",
+        "name": "KALAKOT",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000412",
+        "name": "KARGIL",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000413",
+        "name": "KARNAH",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000414",
+        "name": "KATHUA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000415",
+        "name": "KISHTWAR",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000416",
+        "name": "KULGAM",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000417",
+        "name": "KUPWARA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000418",
+        "name": "LEH",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000419",
+        "name": "MAHORE",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000420",
+        "name": "NAGROTA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000421",
+        "name": "NOBRA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000422",
+        "name": "NOWSHERA",
+        "statename": "JAMMU AND KASHMIR"
+    },
+    {
+        "erp_external_id": "8000276",
+        "name": "SHEHRA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000277",
+        "name": "SIDHPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000278",
+        "name": "SIHOR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000279",
+        "name": "SOJITRA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000280",
+        "name": "SUMRASAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000281",
+        "name": "SURAT",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000282",
+        "name": "SURENDRANAGAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000283",
+        "name": "TALAJA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000284",
+        "name": "THARA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000285",
+        "name": "THARAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000286",
+        "name": "THASRA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000287",
+        "name": "UNA-DIU",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000288",
+        "name": "UPLETA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000289",
+        "name": "VADGAM",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000290",
+        "name": "VADODARA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000291",
+        "name": "VALIA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000292",
+        "name": "VALLABHIPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000293",
+        "name": "VALOD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000294",
+        "name": "VALSAD",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000295",
+        "name": "VANTHALI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000296",
+        "name": "VAPI",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000297",
+        "name": "VAV",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000298",
+        "name": "VERAVAL",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000299",
+        "name": "VIJAPUR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000300",
+        "name": "VIRAMGAM",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000301",
+        "name": "VISAVADAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000302",
+        "name": "VISNAGAR",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000303",
+        "name": "VYARA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000304",
+        "name": "WAGHODIA",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000305",
+        "name": "WANKANER",
+        "statename": "GUJARAT"
+    },
+    {
+        "erp_external_id": "8000306",
+        "name": "ADAMPUR MANDI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000307",
+        "name": "AMBALA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000308",
+        "name": "ASSANDH",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000309",
+        "name": "BAHADURGARH",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000310",
+        "name": "BARARA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000311",
+        "name": "BARWALA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000313",
+        "name": "BAWANIKHERA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000314",
+        "name": "BHIWANI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000315",
+        "name": "CHARKHIDADRI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000316",
+        "name": "CHEEKA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000317",
+        "name": "CHHACHRAULI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000318",
+        "name": "DABWALI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000319",
+        "name": "ELLENABAD",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000320",
+        "name": "FARIDABAD",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000321",
+        "name": "FATEHABAD",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000322",
+        "name": "FEROJPUR JHIRKA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000323",
+        "name": "GHARAUNDA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000324",
+        "name": "GOHANA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000325",
+        "name": "GURGAON",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000326",
+        "name": "HANSI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000327",
+        "name": "HISAR",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000328",
+        "name": "JAGADHARI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000329",
+        "name": "JATUSANA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000330",
+        "name": "JHAJJAR",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000331",
+        "name": "JIND",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000332",
+        "name": "JULANA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000333",
+        "name": "KAITHAL",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000334",
+        "name": "KALANAUR",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000335",
+        "name": "KALANWALI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000336",
+        "name": "KALKA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000337",
+        "name": "KARNAL",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000338",
+        "name": "KOSLI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000339",
+        "name": "KURUKSHETRA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000340",
+        "name": "LOHARU",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000341",
+        "name": "MAHENDRAGARH",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000342",
+        "name": "MEHAM",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000343",
+        "name": "MEWAT",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000344",
+        "name": "MOHINDERGARH",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000345",
+        "name": "NARAINGARH",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000346",
+        "name": "NARNAUL",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000347",
+        "name": "NARWANA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000348",
+        "name": "NILOKHERI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000349",
+        "name": "NUH",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000350",
+        "name": "PALWAL",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000351",
+        "name": "PANCHKULA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000352",
+        "name": "PANIPAT",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000353",
+        "name": "PEHOWA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000354",
+        "name": "RATIA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000355",
+        "name": "REWARI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000356",
+        "name": "ROHTAK",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000357",
+        "name": "SAFIDON",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000358",
+        "name": "SIRSA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000359",
+        "name": "SIWANI",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000360",
+        "name": "SONIPAT",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000361",
+        "name": "TOHANA",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000362",
+        "name": "TOHSAM",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000363",
+        "name": "YAMUNANAGAR",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "8000364",
+        "name": "AMB",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000365",
+        "name": "ARKI",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000366",
+        "name": "BANJAR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000367",
+        "name": "BHARMOUR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000368",
+        "name": "BILASPUR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000369",
+        "name": "CHAMBA",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000370",
+        "name": "CHURAH",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000371",
+        "name": "DALHOUSIE",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "8000372",
+        "name": "DEHRA GOPIPUR",
+        "statename": "HIMACHAL PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573765",
+        "name": "KOMRAM BHEEM DISTRICT",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573766",
+        "name": "MAHABUBABAD",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573767",
+        "name": "MAHBUBNAGAR",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573768",
+        "name": "MANCHERIAL",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573769",
+        "name": "MEDAK",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573770",
+        "name": "MEDCHAL",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573771",
+        "name": "NAGARKURNOOL",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573772",
+        "name": "NALGONDA",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573773",
+        "name": "NIRMAL",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573774",
+        "name": "NIZAMABAD",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573775",
+        "name": "PEDDAPALLI",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573776",
+        "name": "RAJANNA",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573777",
+        "name": "RANGA REDDY",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573778",
+        "name": "SANGAREDDY",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573779",
+        "name": "SIDDIPET",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573780",
+        "name": "SURYAPET",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573781",
+        "name": "VIKARABAD",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1508217837695",
+        "name": "RR NAGAR",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "1508217837698",
+        "name": "NOIDA",
+        "statename": "UTTAR PRADESH"
+    },
+    {
+        "erp_external_id": "1508217887856",
+        "name": "PORT BLAIR",
+        "statename": "ANDAMAN AND NICOBAR"
+    },
+    {
+        "erp_external_id": "1508217887859",
+        "name": "PATNA",
+        "statename": "BIHAR"
+    },
+    {
+        "erp_external_id": "1510546806352",
+        "name": "BHADRAVATHI",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "1521437845566",
+        "name": "SRIKAKULAM",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1533282124302",
+        "name": "HONGA SANDRA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "1534222573755",
+        "name": "ADILABAD",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573756",
+        "name": "BHADRADRI",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573757",
+        "name": "GADWAL",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573758",
+        "name": "HYDERABAD",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573759",
+        "name": "JAGTIAL",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573760",
+        "name": "JANGAON",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573761",
+        "name": "JAYASHANKAR",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573762",
+        "name": "KAMAREDDY",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573763",
+        "name": "KARIMNAGAR",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573764",
+        "name": "KHAMMAM",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573782",
+        "name": "WANAPARTHY",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573783",
+        "name": "WARANGAL (RURAL)",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573784",
+        "name": "WARANGAL (URBAN)",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573785",
+        "name": "YADADRI",
+        "statename": "TELANGANA"
+    },
+    {
+        "erp_external_id": "1534222573791",
+        "name": "ADONI",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573792",
+        "name": "AMARAVATI",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573793",
+        "name": "ANANTAPUR",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573794",
+        "name": "BHIMAVARAM",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573795",
+        "name": "CHILAKALURIPET",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573796",
+        "name": "CHITTOOR",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573797",
+        "name": "DHARMAVARAM",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573798",
+        "name": "ELURU",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573799",
+        "name": "GUDIVADA",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573800",
+        "name": "GUNTAKAL",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573801",
+        "name": "GUNTUR",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573802",
+        "name": "HINDUPUR",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573803",
+        "name": "KADAPA",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573804",
+        "name": "KAKINADA",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573805",
+        "name": "KURNOOL",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573806",
+        "name": "MACHILIPATNAM",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573807",
+        "name": "MADANAPALLE",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573808",
+        "name": "NANDYAL",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573809",
+        "name": "NARASARAOPET",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573810",
+        "name": "NELLORE",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573811",
+        "name": "ONGOLE",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573812",
+        "name": "PRODDATUR",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573813",
+        "name": "RAJAHMUNDRY",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573814",
+        "name": "TADEPALLIGUDEM",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573815",
+        "name": "TADIPATRI",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573816",
+        "name": "TENALI",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573817",
+        "name": "TIRUPATI",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573818",
+        "name": "VIJAYAWADA",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573819",
+        "name": "VISAKHAPATNAM",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1534222573820",
+        "name": "VIZIANAGARAM",
+        "statename": "ANDHRA PRADESH"
+    },
+    {
+        "erp_external_id": "1542953269997",
+        "name": "NAGPUR",
+        "statename": "MADHYA PRADESH"
+    },
+    {
+        "erp_external_id": "1626172092330",
+        "name": "MUMBAI",
+        "statename": "MAHARASHTRA"
+    },
+    {
+        "erp_external_id": "1658300820764",
+        "name": "SHIVAMOGGA",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "1658300820763",
+        "name": "BENGALURU",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "1658300820765",
+        "name": "MYSURU",
+        "statename": "KARNATAKA"
+    },
+    {
+        "erp_external_id": "1686991637719",
+        "name": "PUNE",
+        "statename": "MAHARASHTRA"
+    },
+    {
+        "erp_external_id": "1487911557241",
+        "name": "CHENNAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1487911557242",
+        "name": "MADURAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1487911557243",
+        "name": "TIRUCHIRAPPALLI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1487911557244",
+        "name": "NAGERCOIL",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1498814311489",
+        "name": "TIRUPPUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031890",
+        "name": "ARIYALUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031891",
+        "name": "CUDDALORE",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031892",
+        "name": "DHARMAPURI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031893",
+        "name": "DINDIGUL",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031894",
+        "name": "ERODE",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031895",
+        "name": "KANCHIPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031896",
+        "name": "KANNIYAKUMARI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031897",
+        "name": "KARUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031898",
+        "name": "KRISHNAGIRI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031899",
+        "name": "NAGAPATTINAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031900",
+        "name": "NAMAKKAL",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031901",
+        "name": "THE NILGIRIS",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031902",
+        "name": "PERAMBALUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031903",
+        "name": "PUDUKKOTTAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031904",
+        "name": "RAMANATHAPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031905",
+        "name": "SALEM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031906",
+        "name": "SIVAGANGAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031907",
+        "name": "THANJAVUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031908",
+        "name": "THENI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031909",
+        "name": "THOOTHUKUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031910",
+        "name": "TIRUNELVELI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031911",
+        "name": "TIRUVALLUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031912",
+        "name": "TIRUVANNAMALAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031913",
+        "name": "TIRUVARUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031914",
+        "name": "VELLORE",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031915",
+        "name": "VILUPPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031916",
+        "name": "VIRUDHUNAGAR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031917",
+        "name": "ARCOT",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031919",
+        "name": "BHAVANI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031921",
+        "name": "COIMBATORE",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031923",
+        "name": "COONOOR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031925",
+        "name": "GUDIYATHAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031927",
+        "name": "KANCHEEPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031929",
+        "name": "KARAIKKUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031931",
+        "name": "KUMBAKONAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031933",
+        "name": "NEYVELI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031935",
+        "name": "POLLACHI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031937",
+        "name": "RAJAPALAYAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031939",
+        "name": "SIVAKASI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031941",
+        "name": "THOOTHUKKUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031943",
+        "name": "VANIYAMBADI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031945",
+        "name": "AMBASAMUDRAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031947",
+        "name": "AMBUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031949",
+        "name": "ARAKONAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031951",
+        "name": "ARANI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031953",
+        "name": "ARUPPUKKOTTAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031955",
+        "name": "ATTUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031957",
+        "name": "BODINAYAKANUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031959",
+        "name": "CHENGALPATTU",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031961",
+        "name": "CHIDAMBARAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031963",
+        "name": "DEVARSHOLA",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031965",
+        "name": "DHARAPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031967",
+        "name": "GOBICHETTIPALAYAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031969",
+        "name": "HOSUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031971",
+        "name": "KADAYANALLUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031973",
+        "name": "KAMBAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031975",
+        "name": "KOVILPATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031977",
+        "name": "MANNARGUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031979",
+        "name": "MAYILADUTHURAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031981",
+        "name": "METTUPALAYAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031983",
+        "name": "METTUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031985",
+        "name": "PALANI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031987",
+        "name": "PANRUTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031989",
+        "name": "PARAMAKUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031991",
+        "name": "PATTUKKOTTAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031993",
+        "name": "PULIYANKUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031995",
+        "name": "SANKARANKOIL",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031997",
+        "name": "SRIVILLIPUTHUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686031999",
+        "name": "TENKASI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032001",
+        "name": "THENI ALLINAGARAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032003",
+        "name": "THIRUVARUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032005",
+        "name": "TINDIVANAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032007",
+        "name": "TIRUCHENDUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032009",
+        "name": "TIRUCHENGODE",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032011",
+        "name": "TIRUPATHUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032013",
+        "name": "UDHAGAMANDALAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032015",
+        "name": "UDUMALAIPETTAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032017",
+        "name": "VALPARAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032019",
+        "name": "VIRUDHACHALAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032021",
+        "name": "ADIRAMAPATTINAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032023",
+        "name": "ADIPATTI JAKKAMPATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032025",
+        "name": "ANTHIYUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032027",
+        "name": "ARANTHANGI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032029",
+        "name": "AYAKUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032031",
+        "name": "BATLAGUNDU",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032033",
+        "name": "CHENGAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032035",
+        "name": "CHINNALAPATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032037",
+        "name": "CHINNAMANUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032039",
+        "name": "DEVAKOTTAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032041",
+        "name": "EDAGANASALAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032043",
+        "name": "EDAIKODU",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032045",
+        "name": "EDAKALINADU",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032047",
+        "name": "EDAPPADI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032049",
+        "name": "GINGEE",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032051",
+        "name": "GUDALUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032053",
+        "name": "HARUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032055",
+        "name": "JAYANKONDAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032057",
+        "name": "JOLARPET",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032059",
+        "name": "KALAKKAD",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032061",
+        "name": "KALAKKURICHI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032063",
+        "name": "KANGEYAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032065",
+        "name": "KARAMADAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032067",
+        "name": "KARUMANDI CHELLIPALAYAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032069",
+        "name": "KARUMATHAMPATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032071",
+        "name": "KATTUMANNARKOIL",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032073",
+        "name": "KEELAKARAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032075",
+        "name": "KEEZHAPAVUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032077",
+        "name": "KETHI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032079",
+        "name": "KODAIKANAL",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032081",
+        "name": "KOLACHAL",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032083",
+        "name": "KOLLANKODU",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032085",
+        "name": "KOTAGIRI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032087",
+        "name": "KOTTAKUPPAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032089",
+        "name": "KOTTUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032091",
+        "name": "KULITHALAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032093",
+        "name": "KURINJIPADI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032095",
+        "name": "KUTHANALLUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032097",
+        "name": "KUZHITHURAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032099",
+        "name": "LALGUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032101",
+        "name": "MADATHUKULAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032103",
+        "name": "MADURANTHAKAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032105",
+        "name": "MALLASAMUDRAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032107",
+        "name": "MANACHANALLUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032109",
+        "name": "MANAMADURAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032111",
+        "name": "MANAPPARAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032113",
+        "name": "MARAIMALAINAGAR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032115",
+        "name": "MECHERI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032117",
+        "name": "MELUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032119",
+        "name": "MELVISHARAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032121",
+        "name": "MINJUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032123",
+        "name": "MUSIRI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032125",
+        "name": "MUTTAYYAPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032127",
+        "name": "NAMAGIRIPETTAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032129",
+        "name": "NANDIVARAM - GUDUVANCHERI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032131",
+        "name": "NANJIKOTTAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032133",
+        "name": "NATHAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032135",
+        "name": "NELLIKUPPAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032139",
+        "name": "ODDANCHATRAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032141",
+        "name": "PN PATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032145",
+        "name": "PADMANABHAPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032147",
+        "name": "PALLADAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032149",
+        "name": "PALLAPATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032151",
+        "name": "PALLIKONDA",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032153",
+        "name": "PANAGUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032221",
+        "name": "TIRUKKOYILUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032223",
+        "name": "THIRUPATHUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032225",
+        "name": "TIRUTTANI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032227",
+        "name": "TIRUVETHIPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032229",
+        "name": "TITTAKUDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032231",
+        "name": "UNNAMALAIKADAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032233",
+        "name": "USILAMPATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032235",
+        "name": "UTHAMAPALAYAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032237",
+        "name": "UTHIRAMERUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032239",
+        "name": "VADAKKUVALLIYUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032243",
+        "name": "VADIPATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032245",
+        "name": "VANDAVASI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032247",
+        "name": "VEDARANYAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032249",
+        "name": "VELLAKOIL",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032251",
+        "name": "VIKRAMASINGAPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032253",
+        "name": "VISWANATHAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1522301339075",
+        "name": "SOOLAKARAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1522301339076",
+        "name": "THAYILPATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1745243613592",
+        "name": "UVRAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1763532708794",
+        "name": "TENI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "8000312",
+        "name": "BAWAL",
+        "statename": "HARYANA"
+    },
+    {
+        "erp_external_id": "1502686032155",
+        "name": "PARANGIPETTAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032157",
+        "name": "PERAVURANI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032159",
+        "name": "PERIYAKULAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032161",
+        "name": "PERIYASEMUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032163",
+        "name": "PERNAMPATTU",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032165",
+        "name": "POLUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032167",
+        "name": "PONNERI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032169",
+        "name": "PUDUPATTINAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032171",
+        "name": "PUNJAIPUGALUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032173",
+        "name": "RAMESWARAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032175",
+        "name": "RASIPURAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032177",
+        "name": "SANKARI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032179",
+        "name": "SATHYAMANGALAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032181",
+        "name": "SATTUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032183",
+        "name": "SHENKOTTAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032185",
+        "name": "SHOLAVANDAN",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032187",
+        "name": "SHOLINGUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032189",
+        "name": "SIRKALI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032191",
+        "name": "SIVAGANGA",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032193",
+        "name": "SIVAGIRI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032195",
+        "name": "SURANDAI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032197",
+        "name": "SURIYAMPALAYAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032199",
+        "name": "THAMMAMPATTI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032201",
+        "name": "THARAMANGALAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032203",
+        "name": "THARANGAMBADI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032205",
+        "name": "THIRUMANGALAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032207",
+        "name": "THIRUNINDRAVUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032209",
+        "name": "THIRUPARAPPU",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032211",
+        "name": "THIRUPUVANAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032213",
+        "name": "THIRUTHURAIPOONDI",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032215",
+        "name": "THIRUVALLUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032217",
+        "name": "THURAIYUR",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032219",
+        "name": "TIRUKALUKUNDRAM",
+        "statename": "TAMIL NADU"
+    },
+    {
+        "erp_external_id": "1502686032241",
+        "name": "VADALUR",
+        "statename": "TAMIL NADU"
+    }
+]
