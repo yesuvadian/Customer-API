@@ -11,10 +11,10 @@ class ProductService:
         return db.query(Product).filter(Product.id == product_id).first()
 
     @classmethod
-    def get_products(cls, db: Session, skip: int = 0, limit: int = 100, search: str | None = None):
+    def get_products(cls, db: Session, skip: int = 0, limit: int = 600, search: str | None = None):
         query = db.query(Product)
         if search:
-            query = query.filter(Product.name.ilike(f"%{search}%"))
+            query = query.filter(Product.name.ilike(f"{search}%"))
         return query.offset(skip).limit(limit).all()
 
     @classmethod
