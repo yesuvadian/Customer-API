@@ -366,7 +366,8 @@ class CompanyAssignedProductSchema(BaseModel):
     class Config:
         orm_mode = True
 
-
+class IdList(BaseModel):
+    ids: List[int]
 class ProductSchema(BaseModel):
     id: int
     name: str
