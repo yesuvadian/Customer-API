@@ -1,7 +1,9 @@
+import datetime
 from sqlalchemy.orm import Session
+from datetime import date
 from fastapi import HTTPException, status
 from models import (
-    Product, User, UserAddress, UserRole, CompanyBankInfo,
+    Product, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
     CompanyTaxInfo, CompanyBankDocument, CompanyTaxDocument
 )
 
@@ -171,3 +173,50 @@ class ERPService:
             })
 
         return result
+    @classmethod
+    def build_ombasic_json(cls, db: Session):
+        """
+        Fetch all user_documents (pending or completed) and build 'ombasic' JSON for ERP.
+        After building JSON, update the ERP sync status in the database to 'completed'.
+        """
+        # Step 1: Fetch all user documents
+        user_docs = db.query(UserDocument).all()
+
+        if not user_docs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No user documents found"
+            )
+
+        result = []
+
+        # Step 2: Loop through documents and build JSON
+        for doc in user_docs:
+            user = doc.user
+            division = doc.division
+
+            efffromdate = date.today()
+            efftodate = doc.expiry_date.date() if doc.expiry_date else None
+
+            ombasic_json = {
+                "ombasic": {
+                    "ombasicid": doc.erp_external_id if doc.erp_external_id else None,
+                    "partyid": user.erp_external_id if user else None,
+                    "branchid": division.erp_external_id if division else None,
+                    "omno": doc.om_number,
+                    "efffromdate": efffromdate.strftime("%Y-%m-%d") if efffromdate else None,
+                    "efftodate": efftodate.strftime("%Y-%m-%d") if efftodate else None
+                }
+            }
+
+            result.append(ombasic_json)
+
+            # Step 3: Update ERP sync status in DB
+            if doc.erp_sync_status != "completed":
+                doc.erp_sync_status = "completed"
+
+        # Step 4: Commit all updates at once
+        db.commit()
+
+        return result
+  
