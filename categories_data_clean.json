@@ -1,0 +1,350 @@
+[
+    {
+        "name": "Transformers",
+        "description": "Distribution and power transformers"
+    },
+    {
+        "name": "Meters",
+        "description": "Electricity meters – single phase, three phase"
+    },
+    {
+        "name": "Cables & Wires",
+        "description": "Electrical cables, wires, and conductors"
+    },
+    {
+        "name": "Switchgear & Panels",
+        "description": "Circuit breakers, panels, and switchgear"
+    },
+    {
+        "name": "Street Lighting",
+        "description": "LED lamps, poles, and lighting equipment"
+    },
+    {
+        "name": "Tools & Accessories",
+        "description": "Electrical tools, testers, and accessories"
+    },
+    {
+        "name": "Solar Combiner Boxes",
+        "description": "Polycarbonate and FRP/GRP enclosures for solar combiner systems"
+    },
+    {
+        "name": "Cable Glands",
+        "description": "Brass and polyamide cable glands for secure cable terminations"
+    },
+    {
+        "name": "Sockets",
+        "description": "Panel-mounted sockets for industrial power connections"
+    },
+    {
+        "name": "Plug",
+        "description": "Industrial power plugs for electrical connections"
+    },
+    {
+        "name": "Fuse Holder",
+        "description": "Fuse holders for electrical and photovoltaic protection"
+    },
+    {
+        "name": "Fuse",
+        "description": "Fuses for circuit protection and electrical safety"
+    },
+    {
+        "name": "EV Changer",
+        "description": "AC, DC, and EV charging connectors"
+    },
+    {
+        "name": "Surge Protection",
+        "description": "Devices for surge and overvoltage protection"
+    },
+    {
+        "name": "Filteration",
+        "description": "Transformer oil filtration systems"
+    },
+    {
+        "name": "Transformer Safety",
+        "description": "Transformer safety and fire protection systems"
+    },
+    {
+        "name": "Poles",
+        "description": "Poles"
+    },
+    {
+        "name": "Cross Arms",
+        "description": "Cross Arms"
+    },
+    {
+        "name": "Supports",
+        "description": "Supports"
+    },
+    {
+        "name": "Accessories",
+        "description": "Accessories"
+    },
+    {
+        "name": "Earthing",
+        "description": "Earthing"
+    },
+    {
+        "name": "Clamps",
+        "description": "Clamps"
+    },
+    {
+        "name": "Anchors",
+        "description": "Anchors"
+    },
+    {
+        "name": "Plates",
+        "description": "Plates"
+    },
+    {
+        "name": "Insulators",
+        "description": "Insulators"
+    },
+    {
+        "name": "Conductors",
+        "description": "Conductors"
+    },
+    {
+        "name": "Wires",
+        "description": "Wires"
+    },
+    {
+        "name": "Connectors",
+        "description": "Connectors"
+    },
+    {
+        "name": "Transformer Oils",
+        "description": "Transformer oils"
+    },
+    {
+        "name": "Protection",
+        "description": "Protection equipment"
+    },
+    {
+        "name": "Distribution Boxes",
+        "description": "Distribution boxes"
+    },
+    {
+        "name": "Lightning Arresters",
+        "description": "Lightning arresters"
+    },
+    {
+        "name": "Fuses",
+        "description": "Fuse units"
+    },
+    {
+        "name": "Mounting Structures",
+        "description": "Mounting structures"
+    },
+    {
+        "name": "H Frames",
+        "description": "H frame structures"
+    },
+    {
+        "name": "Platforms",
+        "description": "Platforms and FRP components"
+    },
+    {
+        "name": "GOS",
+        "description": "Gang operated switches"
+    },
+    {
+        "name": "GOS Components",
+        "description": "Components for GOS"
+    },
+    {
+        "name": "DOLO",
+        "description": "Drop out fuse (DOLO)"
+    },
+    {
+        "name": "Guarding",
+        "description": "Guarding for road, telephone, HT & LT line crossings. CSR 2021-22: Rs 83, CSR 2023-24: Rs 93"
+    },
+    {
+        "name": "LT Feeder Pillar",
+        "description": "CSR 2021-22: Rs 44406, CSR 2023-24: Rs 52119"
+    },
+    {
+        "name": "TC Wiring",
+        "description": "CSR 2021-22: Rs 59, CSR 2023-24: Rs 71"
+    },
+    {
+        "name": "Cables",
+        "description": "CSR 2021-22: Rs 68731, CSR 2023-24: Rs 63406"
+    },
+    {
+        "name": "Lugs & Cable Accessories",
+        "description": "CSR 2021-22: Rs 3, CSR 2023-24: Rs 3"
+    },
+    {
+        "name": "Cable Jointing Kits",
+        "description": "CSR 2021-22: Rs 577, CSR 2023-24: Rs 698"
+    },
+    {
+        "name": "Testing Equipment",
+        "description": "CSR 2021-22: Rs 3859433, CSR 2023-24: Rs 4669914"
+    },
+    {
+        "name": "Switchgear",
+        "description": "CSR 2021-22: Rs 493220, CSR 2023-24: Rs 578892"
+    },
+    {
+        "name": "Instrument Transformers",
+        "description": "CSR 2021-22: Rs 30010, CSR 2023-24: Rs 36675"
+    },
+    {
+        "name": "Communication Equipment",
+        "description": "CSR 2021-22: Rs 11913, CSR 2023-24: Rs 14415"
+    },
+    {
+        "name": "Fabrication",
+        "description": "CSR 2021-22: Rs 6601, CSR 2023-24: Rs 7428"
+    },
+    {
+        "name": "Surge Arrestors",
+        "description": "CSR 2021-22: Rs 1324, CSR 2023-24: Rs 1506"
+    },
+    {
+        "name": "RMU",
+        "description": "CSR 2021-22: Rs 1202116, CSR 2023-24: Rs 1410924"
+    },
+    {
+        "name": "RMU Components",
+        "description": "CSR 2021-22: Rs 397003, CSR 2023-24: Rs 465962"
+    },
+    {
+        "name": "Protection Devices",
+        "description": "CSR 2021-22: Rs 12551, CSR 2023-24: Rs 15187"
+    },
+    {
+        "name": "AB Cable",
+        "description": "CSR 2021-22: Rs 907223, CSR 2023-24: Rs 959730"
+    },
+    {
+        "name": "AB Cable Accessories",
+        "description": "CSR 2021-22: Rs 312, CSR 2023-24: Rs 355"
+    },
+    {
+        "name": "Cable Accessories",
+        "description": "CSR 2021-22: Rs 19, CSR 2023-24: Rs 23"
+    },
+    {
+        "name": "Covered Conductor Accessories",
+        "description": "CSR 2021-22: Rs 592, CSR 2023-24: Rs 716"
+    },
+    {
+        "name": "Fuse Boards",
+        "description": "CSR 2021-22: Rs 793, CSR 2023-24: Rs 960"
+    },
+    {
+        "name": "PVC Wires",
+        "description": "CSR 2021-22: Rs 1361, CSR 2023-24: Rs 1484"
+    },
+    {
+        "name": "Fuse Wire",
+        "description": "CSR 2021-22: Rs 992, CSR 2023-24: Rs 1128"
+    },
+    {
+        "name": "Earthing Materials",
+        "description": "CSR 2021-22: Rs 653, CSR 2023-24: Rs 743"
+    },
+    {
+        "name": "Miscellaneous",
+        "description": "CSR 2021-22: Rs 427, CSR 2023-24: Rs 517"
+    },
+    {
+        "name": "Energy Meters",
+        "description": "CSR 2021-22: Rs 16211, CSR 2023-24: Rs 19615"
+    },
+    {
+        "name": "Communication Devices",
+        "description": "CSR 2021-22: Rs 3800, CSR 2023-24: Rs 4598"
+    },
+    {
+        "name": "EV Charging Equipment",
+        "description": "CSR 2021-22: Rs 169492, CSR 2023-24: Rs 205085"
+    },
+    {
+        "name": "Metering Accessories",
+        "description": "CSR 2021-22: Rs 5217, CSR 2023-24: Rs 6123"
+    },
+    {
+        "name": "CTs",
+        "description": "CSR 2021-22: Rs 738, CSR 2023-24: Rs 902"
+    },
+    {
+        "name": "Metering Cubicles",
+        "description": "CSR 2021-22: Rs 207440, CSR 2023-24: Rs 243472"
+    },
+    {
+        "name": "Terminals",
+        "description": "CSR 2021-22: Rs 24, CSR 2023-24: Rs 27"
+    },
+    {
+        "name": "Hardware",
+        "description": "CSR 2021-22: Rs 86943, CSR 2023-24: Rs 97836"
+    },
+    {
+        "name": "Transformer Accessories",
+        "description": "CSR 2021-22: Rs 856, CSR 2023-24: Rs 1036"
+    },
+    {
+        "name": "Metering Boxes",
+        "description": "CSR 2021-22: Rs 5825, CSR 2023-24: Rs 6836"
+    },
+    {
+        "name": "Compact Substations",
+        "description": "CSR 2021-22: Rs 1424492, CSR 2023-24: Rs 1671926"
+    },
+    {
+        "name": "Optical Fibre Cable",
+        "description": "CSR 2021-22: Rs 228995, CSR 2023-24: Rs 277084"
+    },
+    {
+        "name": "OFC Accessories",
+        "description": "CSR 2021-22: Rs 70259, CSR 2023-24: Rs 85014"
+    },
+    {
+        "name": "OFC Installation",
+        "description": "CSR 2021-22: Rs 16288, CSR 2023-24: Rs 19709"
+    },
+    {
+        "name": "Tools & Instruments",
+        "description": "CSR 2021-22: Rs 853, CSR 2023-24: Rs 1032"
+    },
+    {
+        "name": "Safety Equipment",
+        "description": "CSR 2021-22: Rs 934, CSR 2023-24: Rs 1130"
+    },
+    {
+        "name": "Material",
+        "description": "CSR 2021-22: Rs 161, CSR 2023-24: Rs 195"
+    },
+    {
+        "name": "Tools",
+        "description": "CSR 2021-22: Rs 76, CSR 2023-24: Rs 92"
+    },
+    {
+        "name": "Metering",
+        "description": "CSR 2021-22: Rs 24574, CSR 2023-24: Rs 29734"
+    },
+    {
+        "name": "Switchgear Accessories",
+        "description": "CSR 2021-22: Rs 1801, CSR 2023-24: Rs 2026"
+    },
+    {
+        "name": "Civil Materials",
+        "description": "CSR 2021-22: Rs 254, CSR 2023-24: Rs 307"
+    },
+    {
+        "name": "Consumables",
+        "description": "CSR 2021-22: Rs 108, CSR 2023-24: Rs 131"
+    },
+    {
+        "name": "Street Light Accessories",
+        "description": "CSR 2021-22: Rs 1903, CSR 2023-24: Rs 2303"
+    },
+    {
+        "name": "Scrap",
+        "description": "CSR 2021-22: Rs 655.02, CSR 2023-24: Rs 616"
+    }
+]

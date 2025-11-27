@@ -61,3 +61,6 @@ class ProductService:
             db.delete(product)
             db.commit()
         return product
+    @staticmethod
+    def get_products_by_ids(db: Session, ids: list[int]):
+        return db.query(Product).filter(Product.id.in_(ids)).all()

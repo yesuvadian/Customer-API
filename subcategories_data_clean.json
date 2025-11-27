@@ -1,0 +1,970 @@
+[
+    {
+        "name": "Distribution Transformers",
+        "category": "Transformers"
+    },
+    {
+        "name": "Three Phase Meters",
+        "category": "Meters"
+    },
+    {
+        "name": "XLPE Cables",
+        "category": "Cables & Wires"
+    },
+    {
+        "name": "Circuit Breakers",
+        "category": "Switchgear & Panels"
+    },
+    {
+        "name": "LED Lamps",
+        "category": "Street Lighting"
+    },
+    {
+        "name": "Testers",
+        "category": "Tools & Accessories"
+    },
+    {
+        "name": "Polycarbonate Enclosures",
+        "category": "Solar Combiner Boxes"
+    },
+    {
+        "name": "FRP/GRP Enclosures",
+        "category": "Solar Combiner Boxes"
+    },
+    {
+        "name": "Brass",
+        "category": "Cable Glands"
+    },
+    {
+        "name": "Polyamide",
+        "category": "Cable Glands"
+    },
+    {
+        "name": "Panel Mounted Sockets",
+        "category": "Sockets"
+    },
+    {
+        "name": "Industrial Plug",
+        "category": "Plug"
+    },
+    {
+        "name": "Fuse Accessories",
+        "category": "Fuse Holder"
+    },
+    {
+        "name": "Fuse Links",
+        "category": "Fuse"
+    },
+    {
+        "name": "EV Connectors",
+        "category": "EV Changer"
+    },
+    {
+        "name": "SPD",
+        "category": "Surge Protection"
+    },
+    {
+        "name": "Filteration",
+        "category": "Filteration"
+    },
+    {
+        "name": "Transformer Safety",
+        "category": "Transformer Safety"
+    },
+    {
+        "name": "RCC Poles",
+        "category": "Poles"
+    },
+    {
+        "name": "PSCC Poles",
+        "category": "Poles"
+    },
+    {
+        "name": "Tubular Spun Poles",
+        "category": "Poles"
+    },
+    {
+        "name": "Mild Steel Cross Arms",
+        "category": "Cross Arms"
+    },
+    {
+        "name": "Galvanized Iron Cross Arms",
+        "category": "Cross Arms"
+    },
+    {
+        "name": "SMC Cross Arms",
+        "category": "Cross Arms"
+    },
+    {
+        "name": "Mild Steel Supports",
+        "category": "Supports"
+    },
+    {
+        "name": "Galvanized Iron Supports",
+        "category": "Supports"
+    },
+    {
+        "name": "Stirrups",
+        "category": "Accessories"
+    },
+    {
+        "name": "Spikes",
+        "category": "Accessories"
+    },
+    {
+        "name": "Electrodes",
+        "category": "Earthing"
+    },
+    {
+        "name": "Mild Steel Clamps",
+        "category": "Clamps"
+    },
+    {
+        "name": "Galvanized Iron Clamps",
+        "category": "Clamps"
+    },
+    {
+        "name": "Strain Clamps",
+        "category": "Clamps"
+    },
+    {
+        "name": "T-Clamps",
+        "category": "Clamps"
+    },
+    {
+        "name": "Pad Clamps",
+        "category": "Clamps"
+    },
+    {
+        "name": "Mild Steel Anchor Rods",
+        "category": "Anchors"
+    },
+    {
+        "name": "Galvanized Iron Anchor Rods",
+        "category": "Anchors"
+    },
+    {
+        "name": "Mild Steel Plates",
+        "category": "Plates"
+    },
+    {
+        "name": "Galvanized Iron Plates",
+        "category": "Plates"
+    },
+    {
+        "name": "Ceramic Pin Insulators",
+        "category": "Insulators"
+    },
+    {
+        "name": "GI Pins",
+        "category": "Insulators"
+    },
+    {
+        "name": "Polymeric Pin Insulators",
+        "category": "Insulators"
+    },
+    {
+        "name": "Strain Insulators",
+        "category": "Insulators"
+    },
+    {
+        "name": "Disc Insulators",
+        "category": "Insulators"
+    },
+    {
+        "name": "Polymeric Insulators",
+        "category": "Insulators"
+    },
+    {
+        "name": "ACSR Conductors",
+        "category": "Conductors"
+    },
+    {
+        "name": "Aluminium Conductors",
+        "category": "Conductors"
+    },
+    {
+        "name": "Guy Wires",
+        "category": "Wires"
+    },
+    {
+        "name": "GI Wires",
+        "category": "Wires"
+    },
+    {
+        "name": "Barbed Wire",
+        "category": "Wires"
+    },
+    {
+        "name": "ACSR Connectors",
+        "category": "Connectors"
+    },
+    {
+        "name": "Wedge Connectors",
+        "category": "Connectors"
+    },
+    {
+        "name": "Conventional Transformers",
+        "category": "Transformers"
+    },
+    {
+        "name": "Star Rated Transformers",
+        "category": "Transformers"
+    },
+    {
+        "name": "EHV Grade Oil",
+        "category": "Transformer Oils"
+    },
+    {
+        "name": "Reclaimed Oil",
+        "category": "Transformer Oils"
+    },
+    {
+        "name": "Contaminated Oil",
+        "category": "Transformer Oils"
+    },
+    {
+        "name": "LT Kits",
+        "category": "Protection"
+    },
+    {
+        "name": "Sheet Metal Boxes",
+        "category": "Distribution Boxes"
+    },
+    {
+        "name": "SMC Boxes",
+        "category": "Distribution Boxes"
+    },
+    {
+        "name": "Ceramic Arresters",
+        "category": "Lightning Arresters"
+    },
+    {
+        "name": "Polymeric Arresters",
+        "category": "Lightning Arresters"
+    },
+    {
+        "name": "HG Fuse Units",
+        "category": "Fuses"
+    },
+    {
+        "name": "MS Structures",
+        "category": "Mounting Structures"
+    },
+    {
+        "name": "GI Structures",
+        "category": "Mounting Structures"
+    },
+    {
+        "name": "MS Structures",
+        "category": "H Frames"
+    },
+    {
+        "name": "GI Structures",
+        "category": "H Frames"
+    },
+    {
+        "name": "MS Structures",
+        "category": "Platforms"
+    },
+    {
+        "name": "FRP Components",
+        "category": "Platforms"
+    },
+    {
+        "name": "Conventional",
+        "category": "GOS"
+    },
+    {
+        "name": "Polymer",
+        "category": "GOS"
+    },
+    {
+        "name": "Special Roaster",
+        "category": "GOS"
+    },
+    {
+        "name": "Contacts",
+        "category": "GOS Components"
+    },
+    {
+        "name": "Operating Rods",
+        "category": "GOS Components"
+    },
+    {
+        "name": "Conventional",
+        "category": "DOLO"
+    },
+    {
+        "name": "REC Specification",
+        "category": "DOLO"
+    },
+    {
+        "name": "11kV CT",
+        "category": "CTs"
+    },
+    {
+        "name": "Connectors",
+        "category": "Communication Equipment"
+    },
+    {
+        "name": "Bentonite",
+        "category": "Earthing Materials"
+    },
+    {
+        "name": "Sealing Wire",
+        "category": "Metering Accessories"
+    },
+    {
+        "name": "Three Phase",
+        "category": "Distribution Boxes"
+    },
+    {
+        "name": "PLB Accessories",
+        "category": "OFC Accessories"
+    },
+    {
+        "name": "Heat Shrinkable",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Transformer Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Control Cable",
+        "category": "Communication Equipment"
+    },
+    {
+        "name": "Cable Blowing",
+        "category": "OFC Installation"
+    },
+    {
+        "name": "Aluminium Terminals",
+        "category": "Terminals"
+    },
+    {
+        "name": "MS Bolt & Nut (Heavy)",
+        "category": "Hardware"
+    },
+    {
+        "name": "Electrical Consumables",
+        "category": "Material"
+    },
+    {
+        "name": "Smart Meter Assemblies",
+        "category": "Energy Meters"
+    },
+    {
+        "name": "End Cap",
+        "category": "Covered Conductor Accessories"
+    },
+    {
+        "name": "Lead Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Service Connectors",
+        "category": "Connectors"
+    },
+    {
+        "name": "Crimping Tools",
+        "category": "Tools & Instruments"
+    },
+    {
+        "name": "Barrels",
+        "category": "Scrap"
+    },
+    {
+        "name": "End Caps",
+        "category": "Cable Accessories"
+    },
+    {
+        "name": "Insulation Tape",
+        "category": "Consumables"
+    },
+    {
+        "name": "Fault Locator",
+        "category": "Testing Equipment"
+    },
+    {
+        "name": "Tee Connectors",
+        "category": "Connectors"
+    },
+    {
+        "name": "Insulated Tools",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Sealing Compound",
+        "category": "Consumables"
+    },
+    {
+        "name": "DC Chargers",
+        "category": "EV Charging Equipment"
+    },
+    {
+        "name": "Pipes",
+        "category": "Civil Materials"
+    },
+    {
+        "name": "Indoor Termination (XLPE)",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "DTC Boxes",
+        "category": "Metering Boxes"
+    },
+    {
+        "name": "Brass Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "LT AB Cable",
+        "category": "Cables"
+    },
+    {
+        "name": "HDPE/PLB Pipes",
+        "category": "OFC Accessories"
+    },
+    {
+        "name": "Lighting",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "CT/PT Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Sectionalizer",
+        "category": "Switchgear"
+    },
+    {
+        "name": "Surge Arrester",
+        "category": "Protection Devices"
+    },
+    {
+        "name": "OD Panel",
+        "category": "RMU Components"
+    },
+    {
+        "name": "Indoor Termination (PILC)",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Marking Slabs",
+        "category": "Civil Materials"
+    },
+    {
+        "name": "Clamps",
+        "category": "AB Cable Accessories"
+    },
+    {
+        "name": "Steel Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Seals",
+        "category": "Metering Accessories"
+    },
+    {
+        "name": "Eye Protection",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Three Phase",
+        "category": "Energy Meters"
+    },
+    {
+        "name": "Copper Transformer CSS",
+        "category": "Compact Substations"
+    },
+    {
+        "name": "Hume Pipes",
+        "category": "Civil Materials"
+    },
+    {
+        "name": "Clamps",
+        "category": "Covered Conductor Accessories"
+    },
+    {
+        "name": "Street Light Cable",
+        "category": "AB Cable"
+    },
+    {
+        "name": "Switchgear Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Safety Belts",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Smart CT/PT Operated",
+        "category": "Energy Meters"
+    },
+    {
+        "name": "Salt",
+        "category": "Earthing Materials"
+    },
+    {
+        "name": "Smart CT Operated",
+        "category": "Energy Meters"
+    },
+    {
+        "name": "Straight Through (XLPE)",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Fast Chargers",
+        "category": "EV Charging Equipment"
+    },
+    {
+        "name": "Cable Tiles",
+        "category": "Civil Materials"
+    },
+    {
+        "name": "Helmets",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Reading Instruments",
+        "category": "Metering"
+    },
+    {
+        "name": "Paddles",
+        "category": "Connectors"
+    },
+    {
+        "name": "ACSR Accessories",
+        "category": "Connectors"
+    },
+    {
+        "name": "Covered Conductor",
+        "category": "Conductors"
+    },
+    {
+        "name": "Furniture Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Modems",
+        "category": "Communication Devices"
+    },
+    {
+        "name": "VL Panel",
+        "category": "RMU Components"
+    },
+    {
+        "name": "ACSR",
+        "category": "Connectors"
+    },
+    {
+        "name": "Porcelain Type",
+        "category": "Surge Arrestors"
+    },
+    {
+        "name": "Pre-Insulated Lugs",
+        "category": "Lugs & Cable Accessories"
+    },
+    {
+        "name": "Line Guarding",
+        "category": "Guarding"
+    },
+    {
+        "name": "Termination",
+        "category": "Covered Conductor Accessories"
+    },
+    {
+        "name": "Reflective Wear",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "RMU Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Thermal Imaging",
+        "category": "Tools & Instruments"
+    },
+    {
+        "name": "Outdoor Termination (PILC)",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Electrical Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Pre-Paid Meter",
+        "category": "Energy Meters"
+    },
+    {
+        "name": "Thermoset Plastic",
+        "category": "LT Feeder Pillar"
+    },
+    {
+        "name": "HT AB Cable",
+        "category": "Conductors"
+    },
+    {
+        "name": "Control Transformer",
+        "category": "Transformers"
+    },
+    {
+        "name": "Metering Boxes",
+        "category": "Metering Accessories"
+    },
+    {
+        "name": "MCCB",
+        "category": "Switchgear"
+    },
+    {
+        "name": "Hooks",
+        "category": "AB Cable Accessories"
+    },
+    {
+        "name": "IPC",
+        "category": "Covered Conductor Accessories"
+    },
+    {
+        "name": "FGRP Aerial Fuse Board",
+        "category": "Fuse Boards"
+    },
+    {
+        "name": "CT/PT Operated",
+        "category": "Energy Meters"
+    },
+    {
+        "name": "SMC DTC Boxes",
+        "category": "Metering Boxes"
+    },
+    {
+        "name": "Wood Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Ultra Fast Chargers",
+        "category": "EV Charging Equipment"
+    },
+    {
+        "name": "Ladders",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Aluminium Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "OD/VL Type",
+        "category": "RMU"
+    },
+    {
+        "name": "Cotton Tape",
+        "category": "Consumables"
+    },
+    {
+        "name": "LT Cubicles",
+        "category": "Metering Cubicles"
+    },
+    {
+        "name": "LT CT",
+        "category": "CTs"
+    },
+    {
+        "name": "Testers",
+        "category": "Tools & Instruments"
+    },
+    {
+        "name": "Accessories",
+        "category": "TC Wiring"
+    },
+    {
+        "name": "Relays",
+        "category": "Protection Devices"
+    },
+    {
+        "name": "Hand Gloves",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Piercing Connector",
+        "category": "AB Cable Accessories"
+    },
+    {
+        "name": "Discharge Rods",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Joint Kits",
+        "category": "OFC Accessories"
+    },
+    {
+        "name": "Tinned Copper",
+        "category": "Fuse Wire"
+    },
+    {
+        "name": "Alignment",
+        "category": "Covered Conductor Accessories"
+    },
+    {
+        "name": "Alkathine Tube",
+        "category": "Miscellaneous"
+    },
+    {
+        "name": "Multimeters",
+        "category": "Tools & Instruments"
+    },
+    {
+        "name": "Ropes",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "HT Cubicles",
+        "category": "Metering Cubicles"
+    },
+    {
+        "name": "Termination Kits",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Hand Tools",
+        "category": "Tools"
+    },
+    {
+        "name": "Charcoal",
+        "category": "Earthing Materials"
+    },
+    {
+        "name": "Auto Recloser",
+        "category": "Switchgear"
+    },
+    {
+        "name": "Outdoor Termination (XLPE)",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Brass Cable Glands",
+        "category": "Cable Accessories"
+    },
+    {
+        "name": "Control Switches",
+        "category": "Street Light Accessories"
+    },
+    {
+        "name": "Copper Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Porcelain Type",
+        "category": "LT Feeder Pillar"
+    },
+    {
+        "name": "OFC",
+        "category": "Optical Fibre Cable"
+    },
+    {
+        "name": "Rod Earthing",
+        "category": "Earthing Materials"
+    },
+    {
+        "name": "Barricades",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Metering Boxes",
+        "category": "Metering"
+    },
+    {
+        "name": "Power Transformers",
+        "category": "Transformers"
+    },
+    {
+        "name": "Smart Meters",
+        "category": "Energy Meters"
+    },
+    {
+        "name": "Footwear",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Cleaning Materials",
+        "category": "Consumables"
+    },
+    {
+        "name": "Aluminium Transformer CSS",
+        "category": "Compact Substations"
+    },
+    {
+        "name": "Chambers",
+        "category": "OFC Accessories"
+    },
+    {
+        "name": "HT Kits",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Straight Through (PILC)",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "MJPT",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Protection Boxes",
+        "category": "Metering Accessories"
+    },
+    {
+        "name": "GOS Accessories",
+        "category": "Switchgear Accessories"
+    },
+    {
+        "name": "ACSR Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Meter Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "Poles",
+        "category": "Scrap"
+    },
+    {
+        "name": "GI Pipe Earthing",
+        "category": "Earthing Materials"
+    },
+    {
+        "name": "Hume Pipe Collars",
+        "category": "Civil Materials"
+    },
+    {
+        "name": "Single Phase",
+        "category": "Energy Meters"
+    },
+    {
+        "name": "Single Phase",
+        "category": "Distribution Boxes"
+    },
+    {
+        "name": "GSM Modem",
+        "category": "Communication Equipment"
+    },
+    {
+        "name": "LT Wire",
+        "category": "PVC Wires"
+    },
+    {
+        "name": "Cutting Tools",
+        "category": "Tools"
+    },
+    {
+        "name": "Earthing Tools",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Copper Terminals",
+        "category": "Terminals"
+    },
+    {
+        "name": "PT",
+        "category": "Instrument Transformers"
+    },
+    {
+        "name": "Cable Lugs",
+        "category": "Lugs & Cable Accessories"
+    },
+    {
+        "name": "HT AB Cable",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Structural Steel",
+        "category": "Fabrication"
+    },
+    {
+        "name": "Safety Cones",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "ACB",
+        "category": "Switchgear"
+    },
+    {
+        "name": "AC Chargers",
+        "category": "EV Charging Equipment"
+    },
+    {
+        "name": "Earthing",
+        "category": "AB Cable Accessories"
+    },
+    {
+        "name": "Joints",
+        "category": "Covered Conductor Accessories"
+    },
+    {
+        "name": "Fault Passage Indicator",
+        "category": "Protection Devices"
+    },
+    {
+        "name": "LT Kits",
+        "category": "Cable Jointing Kits"
+    },
+    {
+        "name": "Metering Boxes",
+        "category": "Street Lighting"
+    },
+    {
+        "name": "Sign Boards",
+        "category": "Safety Equipment"
+    },
+    {
+        "name": "Voltage Detectors",
+        "category": "Tools & Instruments"
+    },
+    {
+        "name": "Oil Scrap",
+        "category": "Scrap"
+    },
+    {
+        "name": "RTU",
+        "category": "Communication Equipment"
+    },
+    {
+        "name": "Messenger Wire",
+        "category": "AB Cable"
+    },
+    {
+        "name": "MS Bolt & Nut",
+        "category": "Hardware"
+    },
+    {
+        "name": "AC/DC Chargers",
+        "category": "EV Charging Equipment"
+    },
+    {
+        "name": "CT Operated",
+        "category": "Energy Meters"
+    },
+    {
+        "name": "Brass Connectors",
+        "category": "Transformer Accessories"
+    },
+    {
+        "name": "Hardware",
+        "category": "AB Cable Accessories"
+    },
+    {
+        "name": "Breaker Panels",
+        "category": "RMU Components"
+    },
+    {
+        "name": "Ties",
+        "category": "Cable Accessories"
+    },
+    {
+        "name": "Load Break Switch",
+        "category": "Switchgear"
+    }
+]

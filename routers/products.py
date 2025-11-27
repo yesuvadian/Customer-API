@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 from services.product_service import ProductService
-from schemas import ProductSchema  # <-- Pydantic schema
+from schemas import IdList, ProductSchema  # <-- Pydantic schema
 
 router = APIRouter(prefix="/products", tags=["products"],dependencies=[Depends(get_current_user)])
 
@@ -41,3 +41,10 @@ def update_product(product_id: int, updates: dict, db: Session = Depends(get_db)
 @router.delete("/{product_id}", response_model=ProductSchema)
 def delete_product(product_id: int, db: Session = Depends(get_db)):
     return ProductService.delete_product(db, product_id)
+from typing import List
+
+
+@router.post("/by_ids", response_model=list[ProductSchema])
+def get_products_by_ids(ids: IdList, db: Session = Depends(get_db)):
+    products = ProductService.get_products_by_ids(db, ids.ids)
+    return products

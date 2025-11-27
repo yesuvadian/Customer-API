@@ -3,6 +3,22 @@ from pydantic import BaseModel, EmailStr, Field, constr
 from typing import Annotated, Dict, List, Optional
 from uuid import UUID
 from datetime import datetime
+from pydantic import BaseModel
+from typing import Optional
+
+class CategorySchema(BaseModel):
+    id: int
+    name: str
+
+class ProductSubCategorySchema(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    category_id: int
+    category: Optional[CategorySchema] = None
+
+    class Config:
+        orm_mode = True
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -388,7 +404,8 @@ class CompanyAssignedProductSchema(BaseModel):
     class Config:
         orm_mode = True
 
-
+class IdList(BaseModel):
+    ids: List[int]
 class ProductSchema(BaseModel):
     id: int
     name: str

@@ -1,7 +1,9 @@
+import datetime
 from sqlalchemy.orm import Session
+from datetime import date
 from fastapi import HTTPException, status
 from models import (
-    Product, User, UserAddress, UserRole, CompanyBankInfo,
+    Product, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
     CompanyTaxInfo, CompanyBankDocument, CompanyTaxDocument
 )
 
@@ -99,7 +101,7 @@ class ERPService:
                 "add1": primary_address.address_line1 if primary_address else None,
                 "add2": primary_address.address_line2 if primary_address else None,
                 "add3": None,
-                "city": primary_address.city if primary_address else None,
+                "city": primary_address.city.erp_external_id if primary_address else None,
                 "bcs_state": primary_address.state.erp_external_id if primary_address and primary_address.state else None,
                 "country": primary_address.country.erp_external_id if primary_address and primary_address.country else None,
                 "panno": tax_info.pan if tax_info else None,
@@ -171,3 +173,68 @@ class ERPService:
             })
 
         return result
+    @classmethod
+    def build_ombasic_json(cls, db: Session):
+        """
+        Fetch ONLY ONE valid user_document per user:
+        Only process documents where ERP sync status is NOT completed.
+        Valid = omno NOT NULL AND expiry_date NOT NULL.
+        """
+
+        # Fetch only pending or NULL sync status docs
+        user_docs = db.query(UserDocument).filter(
+            (UserDocument.erp_sync_status.is_(None)) |
+            (UserDocument.erp_sync_status != "completed")
+        ).all()
+
+        if not user_docs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No pending user documents found"
+            )
+
+        result = []
+        processed_users = set()  # Only one doc per user
+
+        for doc in user_docs:
+            user = doc.user
+
+            # Skip invalid cases
+            if not user or user.id in processed_users:
+                continue
+
+            # If omno or expiry date is missing → keep status as pending & skip
+            if not doc.om_number or not doc.expiry_date:
+                if doc.erp_sync_status != "pending":
+                    doc.erp_sync_status = "pending"
+                continue
+
+            # Build final JSON → Valid document
+            division = doc.division
+            efffromdate = date.today()
+            efftodate = doc.expiry_date.date()
+
+            ombasic_json = {
+                "ombasic": {
+                    "ombasicid": doc.erp_external_id,
+                    "partyid": user.erp_external_id,
+                    "branchid": division.erp_external_id if division else None,
+                    "omno": doc.om_number,
+                    "efffromdate": efffromdate.strftime("%Y-%m-%d"),
+                    "efftodate": efftodate.strftime("%Y-%m-%d")
+                }
+            }
+
+            result.append(ombasic_json)
+
+            # Mark user as processed
+            processed_users.add(user.id)
+
+            # Update ERP status to COMPLETED
+            doc.erp_sync_status = "completed"
+
+        db.commit()
+        return result
+
+
+  

@@ -98,6 +98,7 @@ def seed_category_master(session):
     
     category_master_data = [
         {"name": "Company Documents", "description": "Mandatory compliance, technical, and financial documentation."},
+        {"name": "Tax Documents", "description": "Mandatory compliance, technical, and financial documentation."},
     ]
 
     master_ids = {}
@@ -140,6 +141,8 @@ def seed_category_details(session, master_ids):
         {"master_name": "Company Documents", "name": "Audit Report", "description": "Latest external financial audit report."},
         {"master_name": "Company Documents", "name": "Profit and Loss", "description": "Most recent Profit and Loss (Income) Statement."},
         {"master_name": "Company Documents", "name": "3 years cash flow statement", "description": "Cash flow statements for the last three financial years."},
+        {"master_name": "Tax Documents", "name": "GST Certificate", "description": "GST Certificate."},
+        {"master_name": "Tax Documents", "name": "Pan Card", "description": "Pan Card."},
     ]
 
     for d in category_details_data:
@@ -365,64 +368,39 @@ def seed_user_roles(session, role_ids):
 
 # ----------------- TNEB Product Seed -----------------
 
+import json
+
 def seed_product_categories(session):
- 
+
+    # ---- 1️⃣ READ categories from JSON file ----
+    with open("categories_data_clean.json", "r", encoding="utf-8") as f:
+        categories_raw = json.load(f)
+
+    # ---- 2️⃣ REMOVE DUPLICATES BY CATEGORY NAME ----
+    unique_categories = {}
+    for item in categories_raw:
+        name = item["name"].strip()
+
+        # Keep ONLY first occurrence
+        if name not in unique_categories:
+            unique_categories[name] = item["description"].strip()
+
+    # Convert back to list of dicts
     categories_data = [
-        {"name": "Transformers", "description": "Distribution and power transformers"},
-        {"name": "Meters", "description": "Electricity meters – single phase, three phase"},
-        {"name": "Cables & Wires", "description": "Electrical cables, wires, and conductors"},
-        {"name": "Switchgear & Panels", "description": "Circuit breakers, panels, and switchgear"},
-        {"name": "Street Lighting", "description": "LED lamps, poles, and lighting equipment"},
-        {"name": "Tools & Accessories", "description": "Electrical tools, testers, and accessories"},
-        {"name": "Solar Combiner Boxes", "description": "Polycarbonate and FRP/GRP enclosures for solar combiner systems"},
-        {"name": "Cable Glands", "description": "Brass and polyamide cable glands for secure cable terminations"},
-        {"name": "Sockets", "description": "Panel-mounted sockets for industrial power connections"},
-        {"name": "Plug", "description": "Industrial power plugs for electrical connections"},
-        {"name": "Fuse Holder", "description": "Fuse holders for electrical and photovoltaic protection"},
-        {"name": "Fuse", "description": "Fuses for circuit protection and electrical safety"},
-        {"name": "EV Changer", "description": "AC, DC, and EV charging connectors"},
-        {"name": "Surge Protection", "description": "Devices for surge and overvoltage protection"},
-        {"name": "Filteration", "description": "Transformer oil filtration systems"},
-        {"name": "Transformer Safety", "description": "Transformer safety and fire protection systems"},
-        
-  {"name": "Poles", "description": "Poles"},
-  {"name": "Cross Arms", "description": "Cross Arms"},
-  {"name": "Supports", "description": "Supports"},
-  {"name": "Accessories", "description": "Accessories"},
-  {"name": "Earthing", "description": "Earthing"},
-  {"name": "Clamps", "description": "Clamps"},
-  {"name": "Anchors", "description": "Anchors"},
-  {"name": "Plates", "description": "Plates"},
-  {"name": "Insulators", "description": "Insulators"},
-  {"name": "Conductors", "description": "Conductors"},
-  {"name": "Wires", "description": "Wires"},
-  {"name": "Connectors", "description": "Connectors"},
-  {"name": "Transformers", "description": "Various types of electrical transformers"},
-  {"name": "Transformer Oils", "description": "Transformer oils"},
-  {"name": "Protection", "description": "Protection equipment"},
-  {"name": "Distribution Boxes", "description": "Distribution boxes"},
-  {"name": "Lightning Arresters", "description": "Lightning arresters"},
-  {"name": "Fuses", "description": "Fuse units"},
-  {"name": "Mounting Structures", "description": "Mounting structures"},
-  {"name": "H Frames", "description": "H frame structures"},
-  {"name": "Platforms", "description": "Platforms and FRP components"},
-  {"name": "GOS", "description": "Gang operated switches"},
-  {"name": "GOS Components", "description": "Components for GOS"},
-  {"name": "DOLO", "description": "Drop out fuse (DOLO)"}
-
-
+        {"name": name, "description": desc}
+        for name, desc in unique_categories.items()
     ]
 
-
+    # ---- 3️⃣ SEED INTO DATABASE (your original logic) ----
     category_ids = {}
+
     for c in categories_data:
         existing = session.query(ProductCategory).filter_by(name=c["name"]).first()
+
         if not existing:
             category = ProductCategory(
                 name=c["name"],
                 description=c["description"],
-               # path=f"category_{c['name'].lower().replace(' ', '_')}",
-                #group_name="Inventory",
                 is_active=True
             )
             session.add(category)
@@ -432,19 +410,19 @@ def seed_product_categories(session):
             existing.description = c["description"]
             existing.is_active = True
             category_ids[c["name"]] = existing.id
+
     session.commit()
+
     print("✅ Product categories seeded successfully.")
     return category_ids
+
 
 def seed_divisions(session):
     """
     Seeds default divisions that can be used for approval and user document uploads.
     """
     divisions_data = [
-        {"division_name": "Electrical Division", "code": "ELEC", "is_active": True, "description": "Handles all electrical-related approvals"},
-        {"division_name": "Mechanical Division", "code": "MECH","is_active": True, "description": "Handles mechanical and fabrication approvals"},
-        {"division_name": "Civil Division", "code": "CIVIL","is_active": True, "description": "Handles civil and infrastructure approvals"},
-        {"division_name": "IT Division", "code": "IT","is_active": True, "description": "Handles IT, software, and digital infrastructure"},
+        {"division_name": "HESCOM", "code": "HESCOM","is_active": True, "description": "Handles IT, software, and digital infrastructure", "erp_external_id": 1758544460722},
     ]
 
     for d in divisions_data:
@@ -464,150 +442,83 @@ def seed_divisions(session):
     session.commit()
     print("✅ Divisions seeded successfully.")
 
+import json
+
+import json
+
 def seed_product_subcategories(session, category_ids):
-    subcategories_data = [
-        {"name": "Distribution Transformers", "category": "Transformers"},
-        {"name": "Three Phase Meters", "category": "Meters"},
-        {"name": "XLPE Cables", "category": "Cables & Wires"},
-        {"name": "Circuit Breakers", "category": "Switchgear & Panels"},
-        {"name": "LED Lamps", "category": "Street Lighting"},
-        {"name": "Testers", "category": "Tools & Accessories"},
-        {"name": "Polycarbonate Enclosures", "category": "Solar Combiner Boxes"},
-        {"name": "FRP/GRP Enclosures", "category": "Solar Combiner Boxes"},
-        {"name": "Brass", "category": "Cable Glands"},
-        {"name": "Polyamide", "category": "Cable Glands"},
-        {"name": "Panel Mounted Sockets", "category": "Sockets"},
-        {"name": "Industrial Plug", "category": "Plug"},
-        {"name": "Fuse Accessories", "category": "Fuse Holder"},
-        {"name": "Fuse Links", "category": "Fuse"},
-        {"name": "EV Connectors", "category": "EV Changer"},
-        {"name": "SPD", "category": "Surge Protection"},
-        {"name": "Filteration", "category": "Filteration"},
-        {"name": "Transformer Safety", "category": "Transformer Safety"},
-    
-  {"name": "RCC Poles", "category": "Poles"},
-  {"name": "PSCC Poles", "category": "Poles"},
-  {"name": "Tubular Spun Poles", "category": "Poles"},
-  
-  {"name": "Mild Steel Cross Arms", "category": "Cross Arms"},
-  {"name": "Galvanized Iron Cross Arms", "category": "Cross Arms"},
-  {"name": "SMC Cross Arms", "category": "Cross Arms"},
-  
-  {"name": "Mild Steel Supports", "category": "Supports"},
-  {"name": "Galvanized Iron Supports", "category": "Supports"},
-  
-  {"name": "Stirrups", "category": "Accessories"},
-  {"name": "Spikes", "category": "Accessories"},
-  
-  {"name": "Electrodes", "category": "Earthing"},
-  
-  {"name": "Mild Steel Clamps", "category": "Clamps"},
-  {"name": "Galvanized Iron Clamps", "category": "Clamps"},
-  {"name": "Strain Clamps", "category": "Clamps"},
-  {"name": "T-Clamps", "category": "Clamps"},
-  {"name": "Pad Clamps", "category": "Clamps"},
-  
-  {"name": "Mild Steel Anchor Rods", "category": "Anchors"},
-  {"name": "Galvanized Iron Anchor Rods", "category": "Anchors"},
-  
-  {"name": "Mild Steel Plates", "category": "Plates"},
-  {"name": "Galvanized Iron Plates", "category": "Plates"},
-  
-  {"name": "Ceramic Pin Insulators", "category": "Insulators"},
-  {"name": "GI Pins", "category": "Insulators"},
-  {"name": "Polymeric Pin Insulators", "category": "Insulators"},
-  {"name": "Strain Insulators", "category": "Insulators"},
-  {"name": "Disc Insulators", "category": "Insulators"},
-  {"name": "Polymeric Insulators", "category": "Insulators"},
-  
-  {"name": "ACSR Conductors", "category": "Conductors"},
-  {"name": "Aluminium Conductors", "category": "Conductors"},
-  
-  {"name": "Guy Wires", "category": "Wires"},
-  {"name": "GI Wires", "category": "Wires"},
-  {"name": "Barbed Wire", "category": "Wires"},
-  
-  {"name": "ACSR Connectors", "category": "Connectors"},
-  {"name": "Wedge Connectors", "category": "Connectors"},
-  
-  {"name": "Distribution Transformers", "category": "Transformers"},
-  {"name": "Conventional Transformers", "category": "Transformers"},
-  {"name": "Star Rated Transformers", "category": "Transformers"},
-  
-  {"name": "EHV Grade Oil", "category": "Transformer Oils"},
-  {"name": "Reclaimed Oil", "category": "Transformer Oils"},
-  {"name": "Contaminated Oil", "category": "Transformer Oils"},
-  
-  {"name": "LT Kits", "category": "Protection"},
-  
-  {"name": "Sheet Metal Boxes", "category": "Distribution Boxes"},
-  {"name": "SMC Boxes", "category": "Distribution Boxes"},
-  
-  {"name": "Ceramic Arresters", "category": "Lightning Arresters"},
-  {"name": "Polymeric Arresters", "category": "Lightning Arresters"},
-  
-  {"name": "HG Fuse Units", "category": "Fuses"},
-  
-  {"name": "MS Structures", "category": "Mounting Structures"},
-  {"name": "GI Structures", "category": "Mounting Structures"},
-  
-  {"name": "MS Structures", "category": "H Frames"},
-  {"name": "GI Structures", "category": "H Frames"},
-  
-  {"name": "MS Structures", "category": "Platforms"},
-  {"name": "FRP Components", "category": "Platforms"},
-  
-  {"name": "Conventional", "category": "GOS"},
-  {"name": "Polymer", "category": "GOS"},
-  {"name": "Special Roaster", "category": "GOS"},
-  
-  {"name": "Contacts", "category": "GOS Components"},
-  {"name": "Operating Rods", "category": "GOS Components"},
-  
-  {"name": "Conventional", "category": "DOLO"},
-  {"name": "REC Specification", "category": "DOLO"}
-]
 
-    
+    # ---- 1️⃣ Load subcategories from JSON file ----
+    with open("subcategories_data_clean.json", "r", encoding="utf-8") as f:
+        subcategories_raw = json.load(f)
 
+    # ---- 2️⃣ Remove duplicates (unique by name + category) ----
+    unique_pairs = set()
+    subcategories_data = []
 
+    for item in subcategories_raw:
+        name = item["name"].strip()
+        category = item["category"].strip()
 
+        key = (name, category)
+        if key not in unique_pairs:
+            unique_pairs.add(key)
+            subcategories_data.append({
+                "name": name,
+                "category": category
+            })
+
+    print(f"🔎 Unique subcategories found: {len(subcategories_data)}")
+
+    # ---- 3️⃣ Seed subcategories into DB ----
     subcategory_ids = {}
+
     for sc in subcategories_data:
         category_name = sc["category"]
         subcategory_name = sc["name"]
+
+        # Must exist in categories
         category_id = category_ids.get(category_name)
         if not category_id:
             print(f"⚠️ Category not found for subcategory: {subcategory_name}")
             continue
 
+        # Check if subcategory already exists under this category
         existing = session.query(ProductSubCategory).filter_by(
             name=subcategory_name,
-            category_id=category_id 
+            category_id=category_id
         ).first()
+
         description = f"{subcategory_name} under {category_name}"
+
         if not existing:
+            # Create new record
             subcat = ProductSubCategory(
                 name=subcategory_name,
                 description=description,
-                category_id=category_id,  # ✅ FIX 2: Assign category_id during creation
-                #path=f"subcategory_{sc['name'].lower().replace(' ', '_')}",
-                #group_name="Inventory",
+                category_id=category_id,
                 is_active=True
             )
             session.add(subcat)
             session.flush()
-            # Store the subcategory ID using its name (or its unique name+category combo)
-            subcategory_ids[subcategory_name] = subcat.id 
+
+            # ❗ Store ID by pure subcategory name
+            subcategory_ids[subcategory_name] = subcat.id
+
         else:
+            # Update existing
             existing.description = description
+            existing.category_id = category_id
             existing.is_active = True
-            existing.category_id = category_id # Update category_id on existing for consistency
+
             subcategory_ids[subcategory_name] = existing.id
 
     session.commit()
+
     print("✅ Product subcategories seeded successfully.")
     return subcategory_ids
+
+
 def seed_indian_states(session, india):
     states_data = [
        {"erp_external_id": 6000001, "name": "ANDAMAN AND NICOBAR", "code": "AN"},
