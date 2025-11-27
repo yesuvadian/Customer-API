@@ -435,10 +435,7 @@ def seed_divisions(session):
     Seeds default divisions that can be used for approval and user document uploads.
     """
     divisions_data = [
-        {"division_name": "Electrical Division", "code": "ELEC", "is_active": True, "description": "Handles all electrical-related approvals"},
-        {"division_name": "Mechanical Division", "code": "MECH","is_active": True, "description": "Handles mechanical and fabrication approvals"},
-        {"division_name": "Civil Division", "code": "CIVIL","is_active": True, "description": "Handles civil and infrastructure approvals"},
-        {"division_name": "IT Division", "code": "IT","is_active": True, "description": "Handles IT, software, and digital infrastructure"},
+        {"division_name": "HESCOM", "code": "HESCOM","is_active": True, "description": "Handles IT, software, and digital infrastructure", "erp_external_id": 1758544460722},
     ]
 
     for d in divisions_data:
