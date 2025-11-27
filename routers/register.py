@@ -2,6 +2,7 @@ import json
 from typing import List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile,status
 import httpx
+from services import city_service
 from sqlalchemy.orm import Session
 
 from auth_utils import get_registration_user
@@ -13,6 +14,7 @@ from services.companybankdocument_service import CompanyBankDocumentService
 from services.companybankinfo_service import CompanyBankInfoService
 from services.country_service import CountryService
 from services.state_service import StateService
+from services.city_service import CityService
 from services.user_service import UserService  # import the class
 from services.user_address_service import UserAddressService
 from services.company_tax_service import CompanyTaxService
@@ -112,7 +114,17 @@ def get_details_by_master_name(
             detail=f"No details found for master name: {master_name}"
         )
 
-    return details
+@router.get("/cities", response_model=list[schemas.CityOut])
+def get_list_cities(
+    skip: int = 0, 
+    limit: int = 100, 
+    search: str = None, 
+    state_id: int = None, # <-- NEW QUERY PARAMETER
+    db: Session = Depends(get_db)
+):
+    service = city_service.CityService()
+    # Pass state_id to the service
+    return service.get_cities(db, skip=skip, limit=limit, search=search, state_id=state_id)
 
 
 @router.post("/verify-otp")
