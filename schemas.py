@@ -138,6 +138,28 @@ class StateOut(BaseModel):
     class Config:
         orm_mode = True
 
+class CityBase(BaseModel):
+    name: str = Field(..., max_length=100)
+    code: Optional[str] = Field(None, max_length=10, description="Optional unique code for the city")
+    state_id: int = Field(..., description="ID of the State the city belongs to")
+
+class CityCreate(CityBase):
+    pass
+class CityUpdate(CityBase):
+    name: Optional[str] = Field(None, max_length=100)
+    code: Optional[str] = Field(None, max_length=10, description="Optional unique code for the city")
+    state_id: Optional[int] = Field(None, description="ID of the State the city belongs to")
+
+class CityOut(CityBase):
+    id: int
+    erp_sync_status: str
+    erp_last_sync_at: Optional[datetime]
+    erp_error_message: Optional[str]
+    erp_external_id: Optional[str]
+
+    class Config:
+        from_attributes = True
+
 
 class UserMinimalOut(BaseModel):
     id: uuid.UUID
@@ -165,7 +187,7 @@ class UserAddressCreate(BaseModel):
     is_primary: bool = Field(default=False, description="Whether this is the primary address")
     address_line1: str = Field(..., max_length=255)
     address_line2: Optional[str] = Field(None, max_length=255)
-    city: Optional[str] = Field(None, max_length=100)
+    city_id: Optional[str] = Field(None, max_length=100)
     state_id: Optional[int] = Field(None, description="Foreign key reference to states table")
     country_id: Optional[int] = Field(None, description="Foreign key reference to countries table")
     postal_code: Optional[str] = Field(None, max_length=20)
@@ -279,7 +301,7 @@ class UserAddressOut(BaseModel):
     is_primary: bool
     address_line1: str
     address_line2: Optional[str] = None
-    city: Optional[str] = None                         # ✅ Added
+    city_id_id: Optional[str] = None                         # ✅ Added
     state_id: Optional[int] = None
     country_id: Optional[int] = None
     postal_code: Optional[str] = None
