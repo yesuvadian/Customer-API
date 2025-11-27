@@ -98,6 +98,7 @@ def seed_category_master(session):
     
     category_master_data = [
         {"name": "Company Documents", "description": "Mandatory compliance, technical, and financial documentation."},
+        {"name": "Tax Documents", "description": "Mandatory compliance, technical, and financial documentation."},
     ]
 
     master_ids = {}
@@ -140,6 +141,8 @@ def seed_category_details(session, master_ids):
         {"master_name": "Company Documents", "name": "Audit Report", "description": "Latest external financial audit report."},
         {"master_name": "Company Documents", "name": "Profit and Loss", "description": "Most recent Profit and Loss (Income) Statement."},
         {"master_name": "Company Documents", "name": "3 years cash flow statement", "description": "Cash flow statements for the last three financial years."},
+        {"master_name": "Tax Documents", "name": "GST Certificate", "description": "GST Certificate."},
+        {"master_name": "Tax Documents", "name": "Pan Card", "description": "Pan Card."},
     ]
 
     for d in category_details_data:
@@ -435,10 +438,7 @@ def seed_divisions(session):
     Seeds default divisions that can be used for approval and user document uploads.
     """
     divisions_data = [
-        {"division_name": "Electrical Division", "code": "ELEC", "is_active": True, "description": "Handles all electrical-related approvals"},
-        {"division_name": "Mechanical Division", "code": "MECH","is_active": True, "description": "Handles mechanical and fabrication approvals"},
-        {"division_name": "Civil Division", "code": "CIVIL","is_active": True, "description": "Handles civil and infrastructure approvals"},
-        {"division_name": "IT Division", "code": "IT","is_active": True, "description": "Handles IT, software, and digital infrastructure"},
+        {"division_name": "HESCOM", "code": "HESCOM","is_active": True, "description": "Handles IT, software, and digital infrastructure", "erp_external_id": 1758544460722},
     ]
 
     for d in divisions_data:

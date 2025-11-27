@@ -48,3 +48,21 @@ def sync_erp_products(db: Session = Depends(get_db)):
         raise e
 
     return data
+# ---------------- New endpoint ----------------
+@router.get(
+    "/sync_ombasic",
+    summary="Fetch all user documents in ERP ombasic format",
+    description="Return ombasic JSON for all user documents; ERP sync status is updated in DB automatically."
+)
+def sync_erp_ombasic(db: Session = Depends(get_db)):
+    """
+    Fetch all user_documents, return ombasic JSON, and mark ERP sync as completed.
+    """
+    try:
+        data = ERPService.build_ombasic_json(db)
+    except HTTPException as e:
+        if e.status_code == status.HTTP_404_NOT_FOUND:
+            return []  # Return empty list if no documents found
+        raise e
+
+    return data
