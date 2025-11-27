@@ -805,7 +805,7 @@ class CompanyProductCertificate(Base):
 
 
 class CategoryMaster(Base):
-    __tablename__ = "CategoryMaster"  # Matching the SQL table name
+    __tablename__ = "CategoryMaster"
     __table_args__ = {"schema": "public"}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -819,24 +819,22 @@ class CategoryMaster(Base):
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    # ✅ Relationship: One-to-Many (One Master has many Details)
+    # ✅ One-to-Many: Master → Details
     details = relationship(
         "CategoryDetails",
         back_populates="master",
-        cascade="all, delete-orphan",  # Deletes details if Master is deleted
-        foreign_keys="[CategoryDetails.category_master_id]"
+        cascade="all, delete-orphan",
+        foreign_keys="CategoryDetails.category_master_id"
     )
 
 
 class CategoryDetails(Base):
-    __tablename__ = "CategoryDetails"  # Matching the SQL table name
+    __tablename__ = "CategoryDetails"
     __table_args__ = {"schema": "public"}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    
-    # ✅ Foreign Key to Master
     category_master_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
-    
+
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -847,141 +845,57 @@ class CategoryDetails(Base):
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    # ✅ Relationship: Many-to-One (Many Details belong to one Master)
+    # ✅ Many-to-One: Detail → Master
     master = relationship(
         "CategoryMaster",
         back_populates="details",
         foreign_keys=[category_master_id]
     )
 
+    # ✅ One-to-Many: Detail → UserDocuments
     user_documents = relationship(
         "UserDocument",
-        back_populates="categorydetails", 
+        back_populates="categorydetails",
         cascade="all, delete-orphan",
-        foreign_keys="[UserDocument.category_detail_id]"
+        foreign_keys="UserDocument.category_detail_id"
     )
+
 
 class UserDocument(Base):
-
     __tablename__ = "user_documents"
-
     __table_args__ = {"schema": "public"}
 
-
-
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-
-
-
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
-
-
-
-    #division_name = Column(String(255), nullable=False)
-
     division_id = Column(UUID(as_uuid=True), ForeignKey("public.divisions.id"), nullable=False)
-
-    category_detail_id = Column(
-
-       Integer,
-
-        # Changed 'categorydetail' to 'CategoryDetails' to match the model's __tablename__
-
-        ForeignKey("public.CategoryDetails.id"),
-
-        nullable=False
-
-    )
-
-
-
+    category_detail_id = Column(Integer, ForeignKey("public.CategoryDetails.id"), nullable=False)
     company_product_id = Column(Integer, ForeignKey("public.company_products.id", ondelete="CASCADE"), nullable=True)
 
-
-
     document_name = Column(String(255), nullable=False)
-
     document_type = Column(String(100))
-
     document_url = Column(Text)
-
     file_data = Column(LargeBinary)
-
     file_size = Column(Integer)
-
     content_type = Column(String(100))
-
-
-
     om_number = Column(String(100))
-
     expiry_date = Column(DateTime(timezone=True))
-
     is_active = Column(Boolean, default=True)
-
-
-
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
-
     cts = Column(DateTime(timezone=True), server_default=func.now())
-
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-
-
     erp_sync_status = Column(String(10), default="pending")
-
     erp_last_sync_at = Column(DateTime(timezone=True))
-
     erp_error_message = Column(Text)
-
     erp_external_id = Column(String(255))
 
-
-
     # Relationships
-
     user = relationship("User", back_populates="documents", foreign_keys=[user_id])
-
     uploader = relationship("User", foreign_keys=[uploaded_by], backref="uploaded_documents")
+    division = relationship("Division", back_populates="documents", foreign_keys=[division_id])
+    categorydetails = relationship("CategoryDetails", back_populates="user_documents", foreign_keys=[category_detail_id])
+    company_product = relationship("CompanyProduct", back_populates="documents", foreign_keys=[company_product_id])
 
-
-
-    division = relationship(
-
-        "Division",
-
-        back_populates="documents",
-
-        foreign_keys=[division_id]
-
-    )
-
-
-
-    categorydetails = relationship(
-
-        "CategoryDetails",
-
-        back_populates="user_documents",
-
-        foreign_keys=[category_detail_id]
-
-    )
-
-
-
-    company_product = relationship(
-
-        "CompanyProduct",
-
-        back_populates="documents", # This back-populates field must be added to CompanyProduct
-
-        foreign_keys=[company_product_id]
-
-    )
 class Division(Base):
     __tablename__ = "divisions"
     __table_args__ = {"schema": "public"}

@@ -24,6 +24,27 @@ class CategoryDetailsService:
             query = query.filter(CategoryDetails.name.ilike(f"%{search}%"))
             
         return query.offset(skip).limit(limit).all()
+    @classmethod
+    def get_category_details_by_master_name(
+        cls,
+        db: Session,
+        master_name: str,
+        skip: int = 0,
+        limit: int = 100
+    ):
+        # 1️⃣ Get master id by name (exact match)
+        master = db.query(CategoryMaster).filter(CategoryMaster.name == master_name).first()
+        if not master:
+            return []  # or raise HTTPException if needed
+
+        # 2️⃣ Fetch category details using master_id
+        return (
+            db.query(CategoryDetails)
+            .filter(CategoryDetails.category_master_id == master.id)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
     @classmethod
     def create_category_detail(cls, db: Session, master_id: int, name: str, description: str | None = None, created_by: UUID | None = None):
