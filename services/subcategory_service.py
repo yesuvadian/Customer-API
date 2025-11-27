@@ -1,24 +1,30 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from models import ProductSubCategory
-
+from sqlalchemy.orm import joinedload
+from models import ProductSubCategory
 
 class SubCategoryService:
 
     @classmethod
     def get_subcategory(cls, db: Session, subcategory_id: int):
-        return db.query(ProductSubCategory).filter(ProductSubCategory.id == subcategory_id).first()
+        return db.query(ProductSubCategory)\
+                 .options(joinedload(ProductSubCategory.category))\
+                 .filter(ProductSubCategory.id == subcategory_id).first()
 
     @classmethod
     def get_subcategories(cls, db: Session, skip: int = 0, limit: int = 100, search: str | None = None):
-        query = db.query(ProductSubCategory)
+        query = db.query(ProductSubCategory).options(joinedload(ProductSubCategory.category))
         if search:
             query = query.filter(ProductSubCategory.name.ilike(f"%{search}%"))
         return query.offset(skip).limit(limit).all()
 
     @classmethod
     def get_by_category(cls, db: Session, category_id: int):
-        return db.query(ProductSubCategory).filter(ProductSubCategory.category_id == category_id).all()
+        return db.query(ProductSubCategory)\
+                 .options(joinedload(ProductSubCategory.category))\
+                 .filter(ProductSubCategory.category_id == category_id).all()
+
 
     @classmethod
     def create_subcategory(cls, db: Session, name: str, category_id: int, description: str | None = None):
