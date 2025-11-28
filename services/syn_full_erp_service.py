@@ -120,27 +120,12 @@ class ERPService:
            }
 
 
-            # -------- Step 4: Documents JSON --------
-            partymastdoc = {
-                "partymastid": user.erp_external_id if user.erp_external_id else None,
-                "empdocuid": bank_document.id if bank_document else None,
-                "doctype": bank_document.document_type.value if bank_document else None,
-                "attachfilename": bank_document.file_name if bank_document else None
-            }
-
-            # -------- Step 5: TDS JSON --------
-            tdssection = {
-                "partymastid": user.erp_external_id if user.erp_external_id else None,
-                "tdssectionid": tax_document.id if tax_document else None,
-                "taxtype": tax_document.file_type if tax_document else None,
-                "tdsper": None
-            }
+           
 
             # -------- Append to Final Result --------
             final_result.append({
-                "partymast": partymast,
-                "partymastdoc": partymastdoc,
-                "tdssection": tdssection
+                "partymast": partymast
+                
             })
 
         return final_result
@@ -176,40 +161,47 @@ class ERPService:
     @classmethod
     def build_ombasic_json(cls, db: Session):
         """
-        Fetch ONLY ONE valid user_document per user:
-        Only process documents where ERP sync status is NOT completed.
+        Only ONE document per user should be synced (ONLY ONCE).
+        If user already has a completed document → skip user.
         Valid = omno NOT NULL AND expiry_date NOT NULL.
         """
 
-        # Fetch only pending or NULL sync status docs
-        user_docs = db.query(UserDocument).filter(
-            (UserDocument.erp_sync_status.is_(None)) |
-            (UserDocument.erp_sync_status != "completed")
-        ).all()
+        # Fetch all user docs (any status)
+        user_docs = db.query(UserDocument).all()
 
         if not user_docs:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="No pending user documents found"
+                detail="No user documents found"
             )
 
         result = []
-        processed_users = set()  # Only one doc per user
+        processed_users = set()
 
         for doc in user_docs:
             user = doc.user
-
-            # Skip invalid cases
-            if not user or user.id in processed_users:
+            if not user:
                 continue
 
-            # If omno or expiry date is missing → keep status as pending & skip
+            # ⛔ If user already has completed doc → skip forever!
+            has_completed = db.query(UserDocument).filter(
+                UserDocument.user_id == user.id,
+                UserDocument.erp_sync_status == "completed"
+            ).first()
+
+            if has_completed:
+                continue   # This user already synced before, skip completely
+
+            # Skip user if already added in this loop
+            if user.id in processed_users:
+                continue
+
+            # ❌ Skip invalid docs, mark as pending
             if not doc.om_number or not doc.expiry_date:
-                if doc.erp_sync_status != "pending":
-                    doc.erp_sync_status = "pending"
+                doc.erp_sync_status = "pending"
                 continue
 
-            # Build final JSON → Valid document
+            # ✔ Valid document → Build JSON
             division = doc.division
             efffromdate = date.today()
             efftodate = doc.expiry_date.date()
@@ -227,14 +219,15 @@ class ERPService:
 
             result.append(ombasic_json)
 
-            # Mark user as processed
+            # ✅ Mark user as processed
             processed_users.add(user.id)
 
-            # Update ERP status to COMPLETED
+            # 🔵 Mark this doc as permanently completed
             doc.erp_sync_status = "completed"
 
         db.commit()
         return result
+
 
 
   
