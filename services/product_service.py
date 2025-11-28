@@ -1,6 +1,7 @@
 from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from models import Product
 
 
@@ -12,20 +13,40 @@ class ProductService:
 
     @classmethod
     def get_products(cls, db: Session, skip: int = 0, limit: int = 600, search: str | None = None):
+        """
+        Fetch products with optional search on name and SKU only.
+        Supports pagination with skip and limit.
+        """
         query = db.query(Product)
         if search:
-            query = query.filter(Product.name.ilike(f"{search}%"))
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                or_(
+                    Product.name.ilike(search_pattern),
+                    Product.sku.ilike(search_pattern)
+                )
+            )
         return query.offset(skip).limit(limit).all()
 
     @classmethod
-    def create_product(cls, db: Session, name: str, sku: str, category_id: int | None = None,
-                       subcategory_id: int | None = None, description: str | None = None,
-                       created_by: str | None = None, modified_by:str | None = None,
-    cts: datetime | None = None,
-    mts: datetime | None = None):
+    def create_product(
+        cls,
+        db: Session,
+        name: str,
+        sku: str,
+        category_id: int | None = None,
+        subcategory_id: int | None = None,
+        description: str | None = None,
+        created_by: str | None = None,
+        modified_by: str | None = None,
+        cts: datetime | None = None,
+        mts: datetime | None = None,
+    ):
         existing_sku = db.query(Product).filter(Product.sku == sku).first()
         if existing_sku:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU already exists")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="SKU already exists"
+            )
 
         product = Product(
             name=name,
@@ -47,7 +68,9 @@ class ProductService:
     def update_product(cls, db: Session, product_id: int, updates: dict):
         product = cls.get_product(db, product_id)
         if not product:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Product not found"
+            )
         for key, value in updates.items():
             setattr(product, key, value)
         db.commit()
@@ -61,6 +84,7 @@ class ProductService:
             db.delete(product)
             db.commit()
         return product
+
     @staticmethod
     def get_products_by_ids(db: Session, ids: list[int]):
         return db.query(Product).filter(Product.id.in_(ids)).all()
