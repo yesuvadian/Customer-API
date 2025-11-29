@@ -89,18 +89,10 @@ class VerifyOTPRequest(BaseModel):
     otp: str
 
 @router.get("/detailsbyname/{master_name}", response_model=List[schemas.CategoryDetailsResponse])
-def get_details_by_master_name(
-    master_name: str,
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db)
-):
-    """
-    Get Category Details using Master Name (exact match)
-    master_name → master_id → details
-    """
+def get_details_by_master_name(master_name: str, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     
     categoryDetailsService = category_details_service.CategoryDetailsService()
+
     details = categoryDetailsService.get_category_details_by_master_name(
         db=db,
         master_name=master_name,
@@ -108,11 +100,18 @@ def get_details_by_master_name(
         limit=limit
     )
 
+    # Safety: ensure it's always a list
+    if details is None:
+        details = []
+
     if not details:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No details found for master name: {master_name}"
         )
+
+    return details
+
 
 @router.get("/cities", response_model=list[schemas.CityOut])
 def get_list_cities(

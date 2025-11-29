@@ -38,14 +38,6 @@ class BankStatusEnum(PyEnum):
     approved = "approved"
     rejected = "rejected"
 
-class DocumentTypeEnum(PyEnum):
-    PAN = "PAN"
-    GST_CERT = "GST_CERT"
-    TAN = "TAN"
-    CANCELLED_CHEQUE = "CANCELLED_CHEQUE"
-    BANK_STATEMENT = "BANK_STATEMENT"
-    PASSBOOK = "PASSBOOK"
-    ADDRESS_PROOF = "ADDRESS_PROOF"
 
 class Plan(Base):
     __tablename__ = "plans"
@@ -241,37 +233,32 @@ class CompanyBankDocument(Base):
         nullable=False
     )
 
-    # 🔁 REPLACED Enum WITH CategoryDetails FK
-    category_detail_id = Column(
-        Integer,
-        ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"),
-        nullable=True
-    )
-
     file_name = Column(String(255), nullable=False)
-    file_data = Column(LargeBinary, nullable=False)  # BYTEA
+    file_data = Column(LargeBinary, nullable=False)
     file_type = Column(String(50))
+    file_data = Column(LargeBinary, nullable=False) # BYTEA
     pending_kyc = Column(Boolean, default=False)
     is_verified = Column(Boolean, default=False)
     verified_by = Column(String)
     verified_at = Column(DateTime(timezone=True))
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
+    category_detail_id = Column(
+        Integer, 
+        ForeignKey("public.CategoryDetails.id"), 
+        nullable=True
+    )
     company_bank_info = relationship(
         "CompanyBankInfo",
         back_populates="documents",
         foreign_keys=[company_bank_info_id]
     )
 
-    # 🔁 Relationship to CategoryDetails
-    categorydetails = relationship(
+    document_type_detail = relationship(
         "CategoryDetails",
-        back_populates="company_bank_documents",
         foreign_keys=[category_detail_id]
     )
-
-
+    
 
 class CompanyBankInfo(Base):
     __tablename__ = "company_bank_info"
@@ -283,19 +270,32 @@ class CompanyBankInfo(Base):
     bank_name = Column(String(255), nullable=False)
     account_number = Column(String(30), nullable=False)
     ifsc = Column(String(11), nullable=False)
-    branch_name = Column(String(255), nullable=True)  # ✅ Added
-    account_type = Column(String(20))
+    branch_name = Column(String(255), nullable=True)
+    
+    account_type_detail_id = Column(
+        Integer, 
+        ForeignKey("public.CategoryDetails.id"), 
+        nullable=True
+    )
+    
     is_primary = Column(Boolean, server_default="false", nullable=False)
     status = Column(Enum(BankStatusEnum), server_default="pending")
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # inside CompanyBankInfo class (after mts)
+    # ... (ERP columns)
     erp_sync_status = Column(String(10), default="pending")
     erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
     erp_error_message = Column(Text, nullable=True)
     erp_external_id = Column(String(255), nullable=True)
+    
+    # ✅ RELATIONSHIP: Account Type
+    account_type_detail = relationship(
+        "CategoryDetails",
+        foreign_keys=[account_type_detail_id]
+    )
+
     # ✅ Relationships
     user = relationship(
         "User",
@@ -310,10 +310,8 @@ class CompanyBankInfo(Base):
         "CompanyBankDocument",
         back_populates="company_bank_info",
         cascade="all, delete-orphan",
-        foreign_keys=lambda: [CompanyBankDocument.company_bank_info_id]
+        foreign_keys="[CompanyBankDocument.company_bank_info_id]"
     )
-
-   
 
 # ------------------------------
 # UserRole Model
@@ -811,8 +809,6 @@ class CompanyProductCertificate(Base):
         foreign_keys=[company_product_id]
     )
     creator = relationship("User", foreign_keys=[created_by])
-
-
 class CategoryMaster(Base):
     __tablename__ = "CategoryMaster"
     __table_args__ = {"schema": "public"}
@@ -848,18 +844,20 @@ class CategoryDetails(Base):
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
 
+    # Audit Columns
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # ✅ Many-to-One: Detail → Master
     master = relationship(
         "CategoryMaster",
         back_populates="details",
         foreign_keys=[category_master_id]
     )
 
-    # EXISTING RELATIONSHIP
+    # ✅ One-to-Many: Detail → UserDocuments
     user_documents = relationship(
         "UserDocument",
         back_populates="categorydetails",
@@ -867,13 +865,17 @@ class CategoryDetails(Base):
         foreign_keys="UserDocument.category_detail_id"
     )
 
-    # ⬇️ ADD THIS RELATIONSHIP
-    company_bank_documents = relationship(
-        "CompanyBankDocument",
-        back_populates="categorydetails",
-        foreign_keys="CompanyBankDocument.category_detail_id"
+    bank_info_accounts = relationship(
+        "CompanyBankInfo",
+        foreign_keys="[CompanyBankInfo.account_type_detail_id]",
+        back_populates="account_type_detail"
     )
 
+    bank_document_types = relationship(
+        "CompanyBankDocument",
+        foreign_keys="[CompanyBankDocument.category_detail_id]",
+        back_populates="document_type_detail"
+    )
 
 
 class UserDocument(Base):

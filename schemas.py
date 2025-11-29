@@ -223,14 +223,14 @@ class CompanyBankDocumentCreateSchema(BaseModel):
     so only metadata fields are here.
     """
     company_bank_info_id: int = Field(..., description="FK to CompanyBankInfo")
-    document_type: Optional[str] = Field(None, description="Document type e.g. CANCELLED_CHEQUE")
+    category_detail_id: int = Field(..., description="FK to CategoryDetails for Document Type (e.g., Cancelled Cheque Detail ID)")
     file_name: str = Field(..., max_length=255)
     file_type: Optional[str] = Field(None, max_length=100)  # e.g. application/pdf
 class CompanyBankDocumentUpdateSchema(BaseModel):
     """
     Partial update. Exclude unset fields when passing to service (updates.dict(exclude_unset=True)).
     """
-    document_type: Optional[str] = None
+    category_detail_id: Optional[int] = None
     file_name: Optional[str] = None
     file_type: Optional[str] = None
     is_verified: Optional[bool] = None
@@ -240,7 +240,6 @@ class CompanyBankDocumentUpdateSchema(BaseModel):
 class CompanyBankDocumentBase(BaseModel):
     file_name: str
     file_type: Optional[str] = None
-    document_type: Optional[str] = None
 
 
 class CompanyBankDocumentSchema(BaseModel):
@@ -249,7 +248,6 @@ class CompanyBankDocumentSchema(BaseModel):
     """
     id: int
     company_bank_info_id: int
-    document_type: Optional[str] = None
     file_name: str
     file_type: Optional[str] = None
     file_url: Optional[str] = None         # Public or S3 URL to the file (if applicable)
@@ -259,6 +257,7 @@ class CompanyBankDocumentSchema(BaseModel):
     verified_at: Optional[datetime] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    document_type_detail: Optional['CategoryDetailsResponse'] = None
 
     class Config:
         orm_mode = True
@@ -267,16 +266,10 @@ class CompanyBankDocumentSchema(BaseModel):
 class CompanyBankInfoBase(BaseModel):
     bank_name: str = Field(..., max_length=255)
     account_number: str = Field(..., max_length=50)
-    account_type:Optional[str] = None
+    account_type_detail_id: Optional[int] = None
     ifsc: str = Field(..., max_length=20)
     branch_name: Optional[str] = None
     account_holder_name: Optional[str] = None
-
-
-
-
-
-
 
 class CompanyBankInfoUpdateSchema(BaseModel):
     #company_id: UUID  # ✅ from client
@@ -286,13 +279,14 @@ class CompanyBankInfoUpdateSchema(BaseModel):
     branch_name: Optional[str] = None
     account_holder_name: Optional[str] = None
     is_primary: bool = True
+    account_type_detail_id: Optional[int] = None
 
 
 class CompanyBankInfoCreateSchema(BaseModel):
     company_id: UUID  # ✅ from client
     account_holder_name: str
     account_number: str
-    account_type:str
+    account_type_detail_id: int
     ifsc: str
     bank_name: str
     branch_name: Optional[str] = None
@@ -302,11 +296,13 @@ class CompanyBankInfoCreateSchema(BaseModel):
 class CompanyBankInfoSchema(CompanyBankInfoBase):
     id: int
     company_id: UUID
+    account_type_detail: Optional['CategoryDetailsResponse'] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
 
     class Config:
         orm_mode = True
+
 
 
 
