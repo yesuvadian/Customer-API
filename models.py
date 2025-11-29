@@ -766,6 +766,12 @@ class CompanyTaxDocument(Base):
     file_data = Column(LargeBinary, nullable=False)
     pending_kyc = Column(Boolean, default=True)
     file_type = Column(String(50))
+    
+    category_detail_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id"),   # 👈 this is required!
+        nullable=True
+    )
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
