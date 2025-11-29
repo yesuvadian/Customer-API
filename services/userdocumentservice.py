@@ -118,7 +118,7 @@ class UserDocumentService:
         )
     # ----------------- UPDATE -----------------
     # ✅ INDENTATION FIXED
-def update_document(
+    def update_document(
         self,
         document_id: UUID,
         # 🌟 NEW: Add company_product_id to updates
@@ -153,7 +153,7 @@ def update_document(
 
     # ----------------- DELETE -----------------
     # ✅ INDENTATION FIXED
-def delete_document(self, document_id: UUID) -> bool:
+    def delete_document(self, document_id: UUID) -> bool:
         # doc = self.get_document(document_id) # Using get_document is okay here, but a simpler query is also fine
         doc = self.db.query(UserDocument).filter(UserDocument.id == document_id).first()
         if not doc:

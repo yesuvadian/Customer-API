@@ -20,6 +20,31 @@ router = APIRouter(
     tags=["category_details"],
     dependencies=[Depends(get_current_user)]
 )
+@router.get("/details/by-master/{master_name}", response_model=List[CategoryDetailsResponse])
+def get_details_by_master_name(
+    master_name: str,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    Get Category Details using Master Name (exact match)
+    master_name → master_id → details
+    """
+    details = CategoryDetailsService.get_category_details_by_master_name(
+        db=db,
+        master_name=master_name,
+        skip=skip,
+        limit=limit
+    )
+
+    if not details:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No details found for master name: {master_name}"
+        )
+
+    return details
 
 @router.post("/details", response_model=CategoryDetailsResponse, status_code=status.HTTP_201_CREATED)
 def create_category_detail(

@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 from database import SessionLocal
-from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State, User, UserRole, Module ,City
+from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State,City, User, UserRole, Module ,City
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
@@ -98,6 +98,7 @@ def seed_category_master(session):
     
     category_master_data = [
         {"name": "Company Documents", "description": "Mandatory compliance, technical, and financial documentation."},
+        {"name": "Tax Documents", "description": "Mandatory compliance, technical, and financial documentation."},
     ]
 
     master_ids = {}
@@ -140,6 +141,8 @@ def seed_category_details(session, master_ids):
         {"master_name": "Company Documents", "name": "Audit Report", "description": "Latest external financial audit report."},
         {"master_name": "Company Documents", "name": "Profit and Loss", "description": "Most recent Profit and Loss (Income) Statement."},
         {"master_name": "Company Documents", "name": "3 years cash flow statement", "description": "Cash flow statements for the last three financial years."},
+        {"master_name": "Tax Documents", "name": "GST Certificate", "description": "GST Certificate."},
+        {"master_name": "Tax Documents", "name": "Pan Card", "description": "Pan Card."},
     ]
 
     for d in category_details_data:
@@ -198,8 +201,10 @@ def seed_modules(session):
         {"name": "Login Sessions", "description": "Track user login sessions", "path": "user_sessions", "group_name": "User & Access"},
         {"name": "Countries", "description": "Manage country list", "path": "countries", "group_name": "Geography"},
         {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography"},
+        {"name": "Cities", "description": "Manage cities list", "path": "cities", "group_name": "Geography"},
         {"name": "Addresses", "description": "User address book", "path": "addresses", "group_name": "User & Access"},
         {"name": "Tax Information", "description": "Company tax registration details", "path": "company_tax_info", "group_name": "Company"},
+        {"name": "Tax Documents", "description": "Upload company tax documents", "path": "company_tax_documents", "group_name": "Company"},
         {"name": "Product Categories", "description": "Define product categories", "path": "categories", "group_name": "Inventory"},
         {"name": "Product Subcategories", "description": "Define product subcategories", "path": "subcategories", "group_name": "Inventory"},
         {"name": "Products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
@@ -210,7 +215,7 @@ def seed_modules(session):
          {"name": "Assign User Roles", "description": "Assign roles to users", "path": "user_roles", "group_name": "User & Access"},
          {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access"},
          {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
-
+        {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company"},
         {"name": "Company Product Certificates", "description": "Upload product performance certificates", "path": "company_product_certificates", "group_name": "Company"},
 {"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company"},
 {"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
@@ -252,33 +257,15 @@ def seed_modules(session):
 
 def seed_privileges(session, role_ids, module_ids):
     module_names = [
-    "Roles",
-    "App Modules",
-    "User Roles",
-    "Role Permissions",
-    "Login Sessions",
-    "Countries",
-    "States",
-    "Addresses",
-    "Tax Information",
-    "Product Categories",
-    "Product Subcategories",
-    "Products",
-    "Users",
-    "Company Products",
-    "Plans",
-    "Dashboard",
-    "Assign User Roles",
-    "User Product Search",
-    "Bank Information",
-    "Divisions",
-    "User Documents",
-    "Company Product Certificates",
-    "Company Product Supply References",
-    "Sync ERP Vendor",
-    "Category Master",
-    "Category Details",
-    "KYC Status"
+    "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+    "Countries", "States", "Cities","Addresses", "Tax Information", "Tax Documents",
+    "Product Categories", "Product Subcategories", "Products", "Users",
+    "Company Products", "Plans", "Dashboard", "Assign User Roles",
+    "User Product Search", "Bank Information", "Bank Documents",
+    "Divisions", "User Documents",
+    "Company Product Certificates", "Company Product Supply References",
+    "Category Master", "Category Details", 
+    "Sync ERP Vendor", "Sync ERP Products"              
     ]
 
 
@@ -435,10 +422,7 @@ def seed_divisions(session):
     Seeds default divisions that can be used for approval and user document uploads.
     """
     divisions_data = [
-        {"division_name": "Electrical Division", "code": "ELEC", "is_active": True, "description": "Handles all electrical-related approvals"},
-        {"division_name": "Mechanical Division", "code": "MECH","is_active": True, "description": "Handles mechanical and fabrication approvals"},
-        {"division_name": "Civil Division", "code": "CIVIL","is_active": True, "description": "Handles civil and infrastructure approvals"},
-        {"division_name": "IT Division", "code": "IT","is_active": True, "description": "Handles IT, software, and digital infrastructure"},
+        {"division_name": "HESCOM", "code": "HESCOM","is_active": True, "description": "Handles IT, software, and digital infrastructure", "erp_external_id": 1758544460722},
     ]
 
     for d in divisions_data:

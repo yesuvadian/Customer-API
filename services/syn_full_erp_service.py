@@ -1,7 +1,9 @@
+import datetime
 from sqlalchemy.orm import Session
+from datetime import date
 from fastapi import HTTPException, status
 from models import (
-    Product, User, UserAddress, UserRole, CompanyBankInfo,
+    Product, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
     CompanyTaxInfo, CompanyBankDocument, CompanyTaxDocument
 )
 
@@ -99,7 +101,7 @@ class ERPService:
                 "add1": primary_address.address_line1 if primary_address else None,
                 "add2": primary_address.address_line2 if primary_address else None,
                 "add3": None,
-                "city": primary_address.city if primary_address else None,
+                "city": primary_address.city.erp_external_id if primary_address else None,
                 "bcs_state": primary_address.state.erp_external_id if primary_address and primary_address.state else None,
                 "country": primary_address.country.erp_external_id if primary_address and primary_address.country else None,
                 "panno": tax_info.pan if tax_info else None,
@@ -118,27 +120,12 @@ class ERPService:
            }
 
 
-            # -------- Step 4: Documents JSON --------
-            partymastdoc = {
-                "partymastid": user.erp_external_id if user.erp_external_id else None,
-                "empdocuid": bank_document.id if bank_document else None,
-                "doctype": bank_document.document_type.value if bank_document else None,
-                "attachfilename": bank_document.file_name if bank_document else None
-            }
-
-            # -------- Step 5: TDS JSON --------
-            tdssection = {
-                "partymastid": user.erp_external_id if user.erp_external_id else None,
-                "tdssectionid": tax_document.id if tax_document else None,
-                "taxtype": tax_document.file_type if tax_document else None,
-                "tdsper": None
-            }
+           
 
             # -------- Append to Final Result --------
             final_result.append({
-                "partymast": partymast,
-                "partymastdoc": partymastdoc,
-                "tdssection": tdssection
+                "partymast": partymast
+                
             })
 
         return final_result
@@ -171,3 +158,76 @@ class ERPService:
             })
 
         return result
+    @classmethod
+    def build_ombasic_json(cls, db: Session):
+        """
+        Only ONE document per user should be synced (ONLY ONCE).
+        If user already has a completed document → skip user.
+        Valid = omno NOT NULL AND expiry_date NOT NULL.
+        """
+
+        # Fetch all user docs (any status)
+        user_docs = db.query(UserDocument).all()
+
+        if not user_docs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No user documents found"
+            )
+
+        result = []
+        processed_users = set()
+
+        for doc in user_docs:
+            user = doc.user
+            if not user:
+                continue
+
+            # ⛔ If user already has completed doc → skip forever!
+            has_completed = db.query(UserDocument).filter(
+                UserDocument.user_id == user.id,
+                UserDocument.erp_sync_status == "completed"
+            ).first()
+
+            if has_completed:
+                continue   # This user already synced before, skip completely
+
+            # Skip user if already added in this loop
+            if user.id in processed_users:
+                continue
+
+            # ❌ Skip invalid docs, mark as pending
+            if not doc.om_number or not doc.expiry_date:
+                doc.erp_sync_status = "pending"
+                continue
+
+            # ✔ Valid document → Build JSON
+            division = doc.division
+            efffromdate = date.today()
+            efftodate = doc.expiry_date.date()
+
+            ombasic_json = {
+                "ombasic": {
+                    "ombasicid": doc.erp_external_id,
+                    "partyid": user.erp_external_id,
+                    "branchid": division.erp_external_id if division else None,
+                    "omno": doc.om_number,
+                    "efffromdate": efffromdate.strftime("%Y-%m-%d"),
+                    "efftodate": efftodate.strftime("%Y-%m-%d")
+                }
+            }
+
+            result.append(ombasic_json)
+
+            # ✅ Mark user as processed
+            processed_users.add(user.id)
+
+            # 🔵 Mark this doc as permanently completed
+            doc.erp_sync_status = "completed"
+
+        db.commit()
+        return result
+
+
+
+  

@@ -2,6 +2,7 @@ import json
 from typing import List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile,status
 import httpx
+from services import city_service
 from sqlalchemy.orm import Session
 
 from auth_utils import get_registration_user
@@ -13,10 +14,12 @@ from services.companybankdocument_service import CompanyBankDocumentService
 from services.companybankinfo_service import CompanyBankInfoService
 from services.country_service import CountryService
 from services.state_service import StateService
+from services.city_service import CityService
 from services.user_service import UserService  # import the class
 from services.user_address_service import UserAddressService
 from services.company_tax_service import CompanyTaxService
 from services.company_tax_document_service import CompanyTaxDocumentService
+from services import category_details_service 
 from utils.email_service import EmailService
 
 router = APIRouter(prefix="/register", tags=["register"])
@@ -85,7 +88,43 @@ class VerifyOTPRequest(BaseModel):
     phone: str | None = None
     otp: str
 
+@router.get("/detailsbyname/{master_name}", response_model=List[schemas.CategoryDetailsResponse])
+def get_details_by_master_name(
+    master_name: str,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    Get Category Details using Master Name (exact match)
+    master_name → master_id → details
+    """
+    
+    categoryDetailsService = category_details_service.CategoryDetailsService()
+    details = categoryDetailsService.get_category_details_by_master_name(
+        db=db,
+        master_name=master_name,
+        skip=skip,
+        limit=limit
+    )
 
+    if not details:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No details found for master name: {master_name}"
+        )
+
+@router.get("/cities", response_model=list[schemas.CityOut])
+def get_list_cities(
+    skip: int = 0, 
+    limit: int = 100, 
+    search: str = None, 
+    state_id: int = None, # <-- NEW QUERY PARAMETER
+    db: Session = Depends(get_db)
+):
+    service = city_service.CityService()
+    # Pass state_id to the service
+    return service.get_cities(db, skip=skip, limit=limit, search=search, state_id=state_id)
 
 
 @router.post("/verify-otp")
