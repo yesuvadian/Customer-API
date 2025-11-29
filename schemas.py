@@ -385,9 +385,12 @@ from uuid import UUID
 class PlanOut(BaseModel):
     id: UUID
     planname: str
-    description: str = Field(..., alias="plan_description")  # map SQLAlchemy field
+    plan_description: Optional[str] = None  # ✅ Use same name as DB field
     plan_limit: int
     isactive: bool
+
+    class Config:
+        orm_mode = True
 
     class Config:
         orm_mode = True

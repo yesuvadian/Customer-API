@@ -1,11 +1,13 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from uuid import UUID
-
 from models import Plan
 
 class PlanService:
 
+    # ---------------------------------------
+    # GET ALL PLANS
+    # ---------------------------------------
     @classmethod
     def get_plans(cls, db: Session, skip: int = 0, limit: int = 100, search: str | None = None, active_only: bool = True):
         query = db.query(Plan)
@@ -18,20 +20,23 @@ class PlanService:
         
         return query.offset(skip).limit(limit).all()
 
+    # ---------------------------------------
+    # GET SINGLE PLAN  <-- MISSING BEFORE
+    # ---------------------------------------
     @classmethod
-    def get_plans(cls, db: Session, skip: int = 0, limit: int = 100, search: str | None = None, active_only: bool = True):
-        query = db.query(Plan)
-        
-        if active_only:
-            query = query.filter(Plan.isactive == True)
-        
-        if search:
-            query = query.filter(Plan.planname.ilike(f"%{search}%"))
-        
-        return query.offset(skip).limit(limit).all()
+    def get_plan(cls, db: Session, plan_id: UUID):
+        plan = db.query(Plan).filter(Plan.id == plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+        return plan
 
+    # ---------------------------------------
+    # CREATE PLAN
+    # ---------------------------------------
     @classmethod
-    def create_plan(cls, db: Session, planname: str, plan_description: str | None = None, plan_limit: int = 0, isactive: bool = True, created_by: UUID | None = None):
+    def create_plan(cls, db: Session, planname: str, plan_description: str | None = None, 
+                    plan_limit: int = 0, isactive: bool = True, created_by: UUID | None = None):
+
         existing = db.query(Plan).filter(Plan.planname == planname).first()
         if existing:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan with this name already exists")
@@ -48,16 +53,41 @@ class PlanService:
         db.refresh(plan)
         return plan
 
+    # ---------------------------------------
+    # UPDATE PLAN
+    # ---------------------------------------
     @classmethod
     def update_plan(cls, db: Session, plan_id: UUID, updates: dict):
         plan = cls.get_plan(db, plan_id)
+
+        # Extract planname if included in update
+        new_name = updates.get("planname")
+
+        if new_name:
+            # Check if another plan already uses this name
+            existing = (
+                db.query(Plan)
+                .filter(Plan.planname == new_name, Plan.id != plan_id)
+                .first()
+            )
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Plan with this name already exists"
+                )
+
+        # Apply updates normally
         for key, value in updates.items():
             if hasattr(plan, key):
                 setattr(plan, key, value)
+
         db.commit()
         db.refresh(plan)
         return plan
 
+    # ---------------------------------------
+    # DELETE PLAN
+    # ---------------------------------------
     @classmethod
     def delete_plan(cls, db: Session, plan_id: UUID):
         plan = cls.get_plan(db, plan_id)
