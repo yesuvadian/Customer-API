@@ -79,18 +79,23 @@ class CategoryDetailsService:
         if not detail:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category Detail not found")
         
-        # If updating the master_id, verify the new master exists
+        # Verify new master exists if updating master_id
         if 'category_master_id' in updates:
-             new_master_id = updates['category_master_id']
-             master_exists = db.query(CategoryMaster).filter(CategoryMaster.id == new_master_id).first()
-             if not master_exists:
-                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="New Category Master ID not found")
+            new_master_id = updates['category_master_id']
+            master_exists = db.query(CategoryMaster).filter(CategoryMaster.id == new_master_id).first()
+            if not master_exists:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="New Category Master ID not found")
 
-        for key, value in updates.items():
-            setattr(detail, key, value)
+        try:
+            for key, value in updates.items():
+                setattr(detail, key, value)
             
-        db.commit()
-        db.refresh(detail)
+            db.commit()
+            db.refresh(detail)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
+        
         return detail
 
     @classmethod
@@ -98,7 +103,12 @@ class CategoryDetailsService:
         detail = cls.get_category_detail(db, detail_id)
         if not detail:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category Detail not found")
-            
-        db.delete(detail)
-        db.commit()
+
+        try:
+            db.delete(detail)
+            db.commit()
+        except Exception as e:
+            db.rollback()  # Rollback to keep the session clean
+            raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+        
         return detail

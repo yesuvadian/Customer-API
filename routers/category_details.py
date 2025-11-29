@@ -86,7 +86,7 @@ def get_category_detail(detail_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Category Detail not found")
     return detail
 
-@router.patch("/details/{detail_id}", response_model=CategoryDetailsResponse)
+@router.put("/details/{detail_id}", response_model=CategoryDetailsResponse)
 def update_category_detail(
     detail_id: int, 
     detail_update: CategoryDetailsUpdate, 
@@ -105,6 +105,14 @@ def update_category_detail(
 
 @router.delete("/details/{detail_id}", status_code=status.HTTP_200_OK)
 def delete_category_detail(detail_id: int, db: Session = Depends(get_db)):
-    """Delete a Category Detail"""
-    CategoryDetailsService.delete_category_detail(db, detail_id)
-    return {"message": "Category Detail deleted successfully"}
+    detail = CategoryDetailsService.get_category_detail(db, detail_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Category Detail not found")
+
+    try:
+        db.delete(detail)
+        db.commit()
+        return {"message": "Category Detail deleted successfully"}
+    except Exception as e:
+        db.rollback()  # Important to avoid leaving session in dirty state
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
