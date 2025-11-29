@@ -99,6 +99,8 @@ def seed_category_master(session):
     category_master_data = [
         {"name": "Company Documents", "description": "Mandatory compliance, technical, and financial documentation."},
         {"name": "Tax Documents", "description": "Mandatory compliance, technical, and financial documentation."},
+        {"name": "Bank Account Types", "description": "Dropdown values for company bank account types (e.g., savings, current, salary)."},
+        {"name": "Bank Document Types", "description": "Dropdown values for required company bank documents (e.g., cancelled cheque, bank statement)."},
     ]
 
     master_ids = {}
@@ -143,7 +145,17 @@ def seed_category_details(session, master_ids):
         {"master_name": "Company Documents", "name": "3 years cash flow statement", "description": "Cash flow statements for the last three financial years."},
         {"master_name": "Tax Documents", "name": "GST Certificate", "description": "GST Certificate."},
         {"master_name": "Tax Documents", "name": "Pan Card", "description": "Pan Card."},
+
+        {"master_name": "Bank Account Types", "name": "savings", "description": "Savings Account"},
+        {"master_name": "Bank Account Types", "name": "current", "description": "Current Account"},
+        {"master_name": "Bank Account Types", "name": "salary", "description": "Salary Account"},
+
+        {"master_name": "Bank Document Types", "name": "CANCELLED_CHEQUE", "description": "Cancelled Cheque"},
+        {"master_name": "Bank Document Types", "name": "BANK_STATEMENT", "description": "Bank Statement"},
+        {"master_name": "Bank Document Types", "name": "PASSBOOK", "description": "Passbook"},
+        {"master_name": "Bank Document Types", "name": "OTHER", "description": "Other Bank Document"},
     ]
+  
 
     for d in category_details_data:
         master_name = d["master_name"]
