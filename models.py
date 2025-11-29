@@ -776,6 +776,7 @@ class CompanyTaxDocument(Base):
     erp_external_id = Column(String(255), nullable=True)
     # Relationships
     company_tax_info = relationship("CompanyTaxInfo", back_populates="documents")
+    category_detail = relationship("CategoryDetails", backref="company_tax_documents")
 
 class CompanyProductCertificate(Base):
     __tablename__ = "company_product_certificates"
@@ -876,6 +877,12 @@ class CategoryDetails(Base):
         foreign_keys="[CompanyBankDocument.category_detail_id]",
         back_populates="document_type_detail"
     )
+    tax_document_types = relationship(
+    "CompanyTaxDocument",
+    foreign_keys="[CompanyTaxDocument.category_detail_id]",
+    back_populates="category_detail",
+    cascade="all, delete-orphan"
+)
 
 
 class UserDocument(Base):
