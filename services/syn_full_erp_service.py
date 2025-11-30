@@ -6,6 +6,7 @@ from models import (
     Product, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
     CompanyTaxInfo, CompanyBankDocument, CompanyTaxDocument
 )
+from models import UserDocument
 
 class ERPService:
 
@@ -228,6 +229,100 @@ class ERPService:
         db.commit()
         return result
 
+    @classmethod
+    def build_vendor_json(cls, db: Session, folder_name: str = "vendor"):
+        """
+        Build vendor JSON for all users with non-null plan_id,
+        grouped by erp_external_id.
+        Each user/company will include:
+          - bank_documents
+          - tax_documents
+          - user_documents
+        """
+        users = (
+            db.query(User)
+            .filter(
+                ((User.erp_sync_status == None) | (User.erp_sync_status == "pending")) &
+                (User.plan_id != None)  # <-- Only users with a plan
+            )
+            .all()
+        )
 
+        if not users:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No pending users with plan found"
+            )
 
-  
+        final_result = {}
+
+        for user in users:
+            erp_id = user.erp_external_id or str(user.id)
+
+            # Fetch related documents
+            tax_docs = (
+                db.query(CompanyTaxDocument)
+                .join(CompanyTaxInfo, CompanyTaxInfo.id == CompanyTaxDocument.company_tax_info_id)
+                .filter(CompanyTaxInfo.company_id == user.id)
+                .all()
+            )
+
+            bank_docs = (
+                db.query(CompanyBankDocument)
+                .join(CompanyBankInfo, CompanyBankInfo.id == CompanyBankDocument.company_bank_info_id)
+                .filter(CompanyBankInfo.company_id == user.id)
+                .all()
+            )
+
+            user_docs = (
+                db.query(UserDocument)
+                .filter(UserDocument.user_id == user.id)
+                .all()
+            )
+
+            # Prepare JSON lists
+            tax_docs_json = [
+                {
+                    "file_name": td.file_name,
+                    "file_data": td.file_data,
+                    "category_detail_name": td.category_detail_name,
+                    "folder_name": folder_name
+                }
+                for td in tax_docs
+            ]
+
+            bank_docs_json = [
+                {
+                    "file_name": bd.file_name,
+                    "file_data": bd.file_data,
+                    "category_detail_name": bd.category_detail_name,
+                    "folder_name": folder_name
+                }
+                for bd in bank_docs
+            ]
+
+            user_docs_json = [
+                {
+                    "file_name": ud.document_name,
+                    "file_data": ud.file_data,
+                    "category_detail_name": ud.category_detail_name,
+                    "folder_name": folder_name
+                }
+                for ud in user_docs
+            ]
+
+            final_result[erp_id] = {
+                "bank_documents": bank_docs_json,
+                "tax_documents": tax_docs_json,
+                "user_documents": user_docs_json
+            }
+
+            # Mark all documents as synced
+            for doc in tax_docs + bank_docs + user_docs:
+                doc.erp_sync_status = "completed"
+
+            # Mark user ERP sync as completed
+            user.erp_sync_status = "completed"
+
+        db.commit()
+        return final_result

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 from services.syn_full_erp_service import ERPService
-
+from fastapi import Query
 
 from models import User
 
@@ -63,6 +63,28 @@ def sync_erp_ombasic(db: Session = Depends(get_db)):
     except HTTPException as e:
         if e.status_code == status.HTTP_404_NOT_FOUND:
             return []  # Return empty list if no documents found
+        raise e
+
+    return data
+
+@router.get(
+    "/sync_vendor_documents",
+    summary="Fetch vendor documents grouped by ERP ID",
+    description="Returns bank, tax, and user documents for all vendor users grouped by ERP external ID. Only includes users with a plan_id."
+)
+def sync_erp_vendor_documents(
+    folder_name: str = Query("vendor", description="Folder name for documents"),
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch all vendor documents, group by erp_external_id, mark ERP sync as completed.
+    Optionally specify `folder_name` for the documents.
+    """
+    try:
+        data = ERPService.build_vendor_json(db, folder_name=folder_name)
+    except HTTPException as e:
+        if e.status_code == status.HTTP_404_NOT_FOUND:
+            return {}
         raise e
 
     return data

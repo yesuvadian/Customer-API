@@ -18,13 +18,15 @@ class CompanyBankDocumentService:
         )
 
     @classmethod
-    def create_document(cls, db: Session, *, bank_info_id: int, file_name: str, file_data: bytes, file_type: str | None = None, document_type=None):
+    def create_document(cls, db: Session, *, bank_info_id: int, file_name: str, file_data: bytes, file_type: str | None = None,
+                         category_detail_id: int | None = None):
         document = CompanyBankDocument(
             company_bank_info_id=bank_info_id,
             file_name=file_name,
             file_data=file_data,
             file_type=file_type,
-            document_type=document_type
+            # CHANGE: Map to the correct model field
+            category_detail_id=category_detail_id
         )
         db.add(document)
         db.commit()

@@ -203,7 +203,7 @@ class UserAddressCreate(BaseModel):
     is_primary: bool = Field(default=False, description="Whether this is the primary address")
     address_line1: str = Field(..., max_length=255)
     address_line2: Optional[str] = Field(None, max_length=255)
-    city_id: Optional[str] = Field(None, max_length=100)
+    city_id: Optional[int] = Field(None, description="City ID Foreign Key")
     state_id: Optional[int] = Field(None, description="Foreign key reference to states table")
     country_id: Optional[int] = Field(None, description="Foreign key reference to countries table")
     postal_code: Optional[str] = Field(None, max_length=20)

@@ -766,6 +766,12 @@ class CompanyTaxDocument(Base):
     file_data = Column(LargeBinary, nullable=False)
     pending_kyc = Column(Boolean, default=True)
     file_type = Column(String(50))
+    
+    category_detail_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id"),   # 👈 this is required!
+        nullable=True
+    )
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -776,6 +782,7 @@ class CompanyTaxDocument(Base):
     erp_external_id = Column(String(255), nullable=True)
     # Relationships
     company_tax_info = relationship("CompanyTaxInfo", back_populates="documents")
+    category_detail = relationship("CategoryDetails", backref="company_tax_documents")
 
 class CompanyProductCertificate(Base):
     __tablename__ = "company_product_certificates"
@@ -876,6 +883,12 @@ class CategoryDetails(Base):
         foreign_keys="[CompanyBankDocument.category_detail_id]",
         back_populates="document_type_detail"
     )
+    tax_document_types = relationship(
+    "CompanyTaxDocument",
+    foreign_keys="[CompanyTaxDocument.category_detail_id]",
+    back_populates="category_detail",
+    cascade="all, delete-orphan"
+)
 
 
 class UserDocument(Base):
