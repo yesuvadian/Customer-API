@@ -36,10 +36,18 @@ def get_bank_info(bank_info_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=CompanyBankInfoSchema)
 def create_bank_info(data: CompanyBankInfoCreateSchema, db: Session = Depends(get_db)):
+    
+    company_id_str = get_current_user().id
+    
+    try:
+        company_id_uuid = UUID(company_id_str)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid Company ID format.")
+    
     return CompanyBankInfoService.create_bank_info(
         db,
-        user_id=get_current_user().id,
-        data=data.dict()
+        company_id=company_id_uuid, 
+        data=data.dict() 
     )
 
 @router.put("/{bank_info_id}", response_model=CompanyBankInfoSchema)

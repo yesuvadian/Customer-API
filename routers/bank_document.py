@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -19,9 +19,9 @@ def list_bank_documents(bank_info_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=CompanyBankDocumentSchema)
 async def upload_bank_document(
-    bank_info_id: int,
+    bank_info_id: int = Form(...),  # Now 'Form' is defined
     file: UploadFile = File(...),
-    document_type: str | None = None,
+    document_type: str | None = Form(None),
     db: Session = Depends(get_db)
 ):
     file_data = await file.read()
