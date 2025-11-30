@@ -227,19 +227,9 @@ async def upload_tax_document_reg(
         # Read file content
         file_data = await file.read()
 
-        # Validate file size
-        if len(file_data) > MAX_FILE_SIZE_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File too large. Max allowed: {MAX_FILE_SIZE_KB} KB",
-            )
+     
 
-        # Validate file type
-        if file.content_type not in ALLOWED_MIME_TYPES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only PDF / JPG / PNG allowed",
-            )
+      
 
         # Save via service
         saved_doc = taxdocumentservice.create_document_for_company(

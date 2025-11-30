@@ -52,19 +52,24 @@ def get_document(doc_id: int, db: Session = Depends(get_db)):
 # 🏢 Get all documents for a company
 # =====================================================
 @router.get("/company/{company_id}")
-def get_company_documents(company_id: UUID, db: Session = Depends(get_db)): # <--- 2. CHANGED TYPE TO UUID
-    docs = service.get_documents_by_company(db, str(company_id)) # <--- Pass as str() if service expects str
-    if not docs:
-        return []
+def get_company_tax_documents(company_id: UUID, db: Session = Depends(get_db)):
+    docs = service.get_documents_by_company(db, company_id)
 
     return [
         {
             "id": d.id,
+            "company_tax_info_id": d.company_tax_info_id,
             "file_name": d.file_name,
             "file_type": d.file_type,
+            "document_type": d.category_detail.name if d.category_detail else None,
+            "pending_kyc": d.pending_kyc,
+               # ✅ Timestamps
+            "cts": d.cts,
+            "mts": d.mts,
         }
         for d in docs
     ]
+
 
 
 # =====================================================

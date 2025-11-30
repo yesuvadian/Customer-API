@@ -1,6 +1,6 @@
 from typing import Optional
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session,joinedload
 from models import CompanyTaxDocument, CompanyTaxInfo
 from uuid import UUID # ✅ Add UUID import
 
@@ -18,13 +18,22 @@ class CompanyTaxDocumentService:
             )
         return tax_info
 
+    
     @classmethod
-    def get_documents_by_company(cls, db: Session, company_id: UUID): # ✅ Change type from str to UUID
-        """Fetch all documents for a given company ID"""
+    def get_documents_by_company(cls, db: Session, company_id: UUID):
+        """Fetch all tax documents for a given company"""
+
         tax_info = cls.get_tax_info_by_company(db, company_id)
-        return db.query(CompanyTaxDocument).filter(
-            CompanyTaxDocument.company_tax_info_id == tax_info.id
-        ).all()
+
+        return (
+            db.query(CompanyTaxDocument)
+            .options(joinedload(CompanyTaxDocument.category_detail))   # ✅ load CategoryDetails
+            .filter(
+                CompanyTaxDocument.company_tax_info_id == tax_info.id
+            )
+            .all()
+        )
+
 
     @classmethod
     def create_document_for_company(

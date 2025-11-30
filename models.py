@@ -782,7 +782,10 @@ class CompanyTaxDocument(Base):
     erp_external_id = Column(String(255), nullable=True)
     # Relationships
     company_tax_info = relationship("CompanyTaxInfo", back_populates="documents")
-    category_detail = relationship("CategoryDetails", backref="company_tax_documents")
+    category_detail = relationship(
+    "CategoryDetails",
+    back_populates="tax_document_types"
+)
 
 class CompanyProductCertificate(Base):
     __tablename__ = "company_product_certificates"
