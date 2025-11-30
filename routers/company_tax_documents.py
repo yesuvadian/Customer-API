@@ -1,10 +1,12 @@
 import os
+from typing import Optional
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
     UploadFile,
     File,
+    Form,
     status
 )
 from sqlalchemy.orm import Session
@@ -107,32 +109,50 @@ def upload_company_document(
 # =====================================================
 # ✏️ Update (replace) an existing document by ID (with size check) (No change needed)
 # =====================================================
+# In your FastAPI router file
+# ...
+
 @router.put("/{doc_id}")
 def update_company_document(
     doc_id: int,
     file: UploadFile = File(...),
+    category_detail_id: Optional[int] = None, # <-- New Parameter
     db: Session = Depends(get_db)
 ):
     """
-    Replace an existing document file (update name/type/content).
+    Replace an existing document file (update name/type/content) and optional category.
     """
     try:
+        # 1. READ THE FILE DATA (THIS WAS MISSING)
         file_data = file.file.read()
 
-        # 🧩 Validate file size
+        # 2. FILE SIZE VALIDATION (This was implied by your comments)
         if len(file_data) > MAX_FILE_SIZE_BYTES:
-            # ... (rest of the code unchanged)
-            pass
-
-        # ... (rest of the code unchanged)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File too large. Max size allowed: {MAX_FILE_SIZE_KB} KB",
+            )
+        
+        # 3. Call the updated service method
+        updated_doc = service.update_document(
+            db=db,
+            doc_id=doc_id,
+            file_name=file.filename,
+            file_data=file_data,
+            file_type=file.content_type,
+            category_detail_id=category_detail_id # <-- Pass the new parameter
+        )
+        return {"id": updated_doc.id, "file_name": updated_doc.file_name, "file_type": updated_doc.file_type}
+        
     except HTTPException as e:
+        # Re-raise explicit HTTP exceptions (e.g., 400 for size, 404 from service)
         raise e
     except Exception as e:
+        # Catch all other exceptions and return a 500
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error updating document: {e}"
         )
-
 
 # =====================================================
 # 🗑️ Delete document (No change needed)
