@@ -158,23 +158,23 @@ class CityBase(BaseModel):
     name: str = Field(..., max_length=100)
     code: Optional[str] = Field(None, max_length=10, description="Optional unique code for the city")
     state_id: int = Field(..., description="ID of the State the city belongs to")
+class CityCreate(BaseModel):
+    name: str
+    state_id: int
+    erp_external_id: Optional[str] = None  # allow setting it on creation
+class CityUpdate(BaseModel):
+    name: Optional[str] = None
+    state_id: Optional[int] = None
+    erp_external_id: Optional[str] = None  # allow updating
 
-class CityCreate(CityBase):
-    pass
-class CityUpdate(CityBase):
-    name: Optional[str] = Field(None, max_length=100)
-    code: Optional[str] = Field(None, max_length=10, description="Optional unique code for the city")
-    state_id: Optional[int] = Field(None, description="ID of the State the city belongs to")
-
-class CityOut(CityBase):
+class CityOut(BaseModel):
     id: int
-    erp_sync_status: str
-    erp_last_sync_at: Optional[datetime]
-    erp_error_message: Optional[str]
-    erp_external_id: Optional[str]
+    name: str
+    state_id: int
+    erp_external_id: Optional[str] = None  # ✅ kept
 
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 
 class UserMinimalOut(BaseModel):
