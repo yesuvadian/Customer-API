@@ -116,7 +116,7 @@ def get_details_by_master_name(master_name: str, skip: int = 0, limit: int = 100
 @router.get("/cities", response_model=list[schemas.CityOut])
 def get_list_cities(
     skip: int = 0, 
-    limit: int = 100, 
+    limit: int = 10000, 
     search: str = None, 
     state_id: int = None, # <-- NEW QUERY PARAMETER
     db: Session = Depends(get_db)
