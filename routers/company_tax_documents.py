@@ -72,50 +72,6 @@ def get_company_tax_documents(company_id: UUID, db: Session = Depends(get_db)):
 
 
 
-# =====================================================
-# 📤 Upload a new document for a company (with file size validation)
-# =====================================================
-@router.post("/company/{company_id}", status_code=status.HTTP_201_CREATED)
-def upload_company_document(
-    company_id: UUID, # <--- 3. CHANGED TYPE TO UUID
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
-    """
-    Upload a document and automatically associate it with the company's tax info.
-    """
-    try:
-        file_data = file.file.read()
-
-        # 🧩 Validate file size
-        if len(file_data) > MAX_FILE_SIZE_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File too large. Max size allowed: {MAX_FILE_SIZE_KB} KB",
-            )
-
-        doc = service.create_document_for_company(
-            db=db,
-            company_id=company_id,# <--- Pass as str() if service expects str
-            file_name=file.filename,
-            file_data=file_data,
-            file_type=file.content_type,
-        )
-        return {"id": doc.id, "file_name": doc.file_name, "file_type": doc.file_type}
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload document: {e}"
-        )
-
-
-# =====================================================
-# ✏️ Update (replace) an existing document by ID (with size check) (No change needed)
-# =====================================================
-# In your FastAPI router file
-# ...
 
 @router.put("/{doc_id}")
 def update_company_document(
@@ -188,16 +144,45 @@ def list_documents(company_id: UUID, db: Session = Depends(get_db)): # <--- 4. C
     ]
 
 @router.post("/company/{company_id}")
-def upload_document(company_id: UUID, file: UploadFile = File(...), db: Session = Depends(get_db)): # <--- 5. CHANGED TYPE TO UUID
-    file_data = file.file.read()
-    if len(file_data) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(status_code=400, detail=f"File exceeds {MAX_FILE_SIZE_KB} KB limit")
+async def create_tax_document(
+    company_id: str,
+    category_detail_id: int = Form(...),   # ⬅ Make required (same as bank)
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        print("📌 DEBUG RECEIVED category_detail_id =", category_detail_id)
+        # Read file content
+        file_data = await file.read()
 
-    doc = service.create_document_for_company(
-        db,
-        company_id=str(company_id),
-        file_name=file.filename,
-        file_data=file_data,
-        file_type=file.content_type,
-    )
-    return {"id": doc.id, "file_name": doc.file_name, "file_type": doc.file_type}
+     
+
+      
+
+        # Save via service
+        saved_doc = service.create_document_for_company(
+            db=db,
+            company_id=company_id,
+            file_name=file.filename,
+            file_data=file_data,
+            file_type=file.content_type,
+            category_detail_id=category_detail_id,
+        )
+
+        # Response
+        return {
+            "id": saved_doc.id,
+            "company_id": company_id,
+            "category_detail_id": category_detail_id,
+            "file_name": saved_doc.file_name,
+            "file_type": saved_doc.file_type,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Upload failed: {str(e)}",
+        )
