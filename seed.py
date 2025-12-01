@@ -277,7 +277,7 @@ def seed_privileges(session, role_ids, module_ids):
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
     "Category Master", "Category Details", 
-    "Sync ERP Vendor"             
+    "Sync ERP Vendor"          
     ]
 
 

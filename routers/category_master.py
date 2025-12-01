@@ -1,17 +1,17 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from uuid import UUID
 
-# Adjust imports based on your project structure
 from database import get_db
-from auth_utils import get_current_user 
-# Assuming your User model has an .id attribute. Adjust if it's a dict.
+from auth_utils import get_current_user
 
 from schemas import (
-    CategoryMasterCreate, CategoryMasterUpdate, CategoryMasterResponse,
+    CategoryMasterCreate,
+    CategoryMasterUpdate,
+    CategoryMasterResponse,
 )
 from services.category_master_service import CategoryMasterService
+from models import CategoryMaster, CategoryDetails
 
 router = APIRouter(
     prefix="/category_master",
@@ -19,70 +19,105 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)]
 )
 
-# ==========================================
-#  CATEGORY MASTER ENDPOINTS
-# ==========================================
-
-@router.post("/masters", response_model=CategoryMasterResponse, status_code=status.HTTP_201_CREATED)
+# ============================================================
+# CREATE MASTER CATEGORY
+# ============================================================
+@router.post(
+    "/masters",
+    response_model=CategoryMasterResponse,
+    status_code=status.HTTP_201_CREATED
+)
 def create_category_master(
     category: CategoryMasterCreate,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user)
 ):
-    """Create a new Master Category"""
     return CategoryMasterService.create_master_category(
         db=db,
         name=category.name,
         description=category.description,
-        created_by=current_user.id  # Auto-assign logged-in user
+        created_by=current_user.id
     )
 
-@router.get("/masters", response_model=List[CategoryMasterResponse])
+# ============================================================
+# LIST MASTER CATEGORIES
+# ============================================================
+@router.get(
+    "/masters",
+    response_model=List[CategoryMasterResponse]
+)
 def list_category_masters(
-    skip: int = 0, 
-    limit: int = 100, 
+    skip: int = 0,
+    limit: int = 100,
     search: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """List all Master Categories with optional search"""
     return CategoryMasterService.get_master_categories(
-        db=db, 
-        skip=skip, 
-        limit=limit, 
+        db=db,
+        skip=skip,
+        limit=limit,
         search=search
     )
 
-@router.get("/masters/{master_id}", response_model=CategoryMasterResponse)
+# ============================================================
+# GET SINGLE MASTER CATEGORY
+# ============================================================
+@router.get(
+    "/masters/{master_id}",
+    response_model=CategoryMasterResponse
+)
 def get_category_master(master_id: int, db: Session = Depends(get_db)):
-    """Get a specific Master Category by ID"""
     master = CategoryMasterService.get_master_category(db, master_id)
     if not master:
-        raise HTTPException(status_code=404, detail="Category Master not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Category Master not found"
+        )
     return master
 
-@router.patch("/masters/{master_id}", response_model=CategoryMasterResponse)
+# ============================================================
+# UPDATE MASTER CATEGORY
+# ============================================================
+@router.put(
+    "/masters/{master_id}",
+    response_model=CategoryMasterResponse
+)
 def update_category_master(
-    master_id: int, 
-    category_update: CategoryMasterUpdate, 
+    master_id: int,
+    category_update: CategoryMasterUpdate,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user)
 ):
-    """Update a Master Category"""
-    # Convert Pydantic model to dict, excluding None values
     updates = category_update.dict(exclude_unset=True)
-    
-    # Add the modifier
-    updates['modified_by'] = current_user.id
-    
+    updates["modified_by"] = current_user.id
+
     return CategoryMasterService.update_master_category(
-        db=db, 
-        category_id=master_id, 
+        db=db,
+        category_id=master_id,
         updates=updates
     )
 
-@router.delete("/masters/{master_id}", status_code=status.HTTP_200_OK)
-def delete_category_master(master_id: int, db: Session = Depends(get_db)):
-    """Delete a Master Category"""
-    CategoryMasterService.delete_master_category(db, master_id)
-    return {"message": "Category Master deleted successfully"}
+# ============================================================
+# DELETE MASTER CATEGORY
+# ============================================================
+@router.delete(
+    "/masters/{master_id}",
+    status_code=status.HTTP_200_OK
+)
+def delete_category_master(
+    master_id: int,
+    db: Session = Depends(get_db)
+):
+    # Check if master category has children
+    has_children = db.query(CategoryDetails).filter(CategoryDetails.master.has(id=master_id)).first()
+    if has_children:
+        return {"status": "warning", "message": "Cannot delete category master: it has child categories"}
 
+    # Proceed to delete
+    master = db.query(CategoryMaster).filter(CategoryMaster.id == master_id).first()
+    if not master:
+        raise HTTPException(status_code=404, detail="Category master not found")
+
+    db.delete(master)
+    db.commit()
+    return {"status": "success", "message": "Category deleted successfully"}
