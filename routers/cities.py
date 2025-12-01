@@ -1,4 +1,3 @@
-# cities.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -31,13 +30,12 @@ def list_cities(
 # POST - Create a new city
 @router.post("/", response_model=CityOut, status_code=status.HTTP_201_CREATED)
 def create_city(city: CityCreate, db: Session = Depends(get_db)):
-    """Create a city with optional code and ERP external ID"""
+    """Create a city with optional ERP external ID"""
     return service.create_city(
         db,
         name=city.name,
         state_id=city.state_id,
-        code=getattr(city, "code", None),
-        erp_external_id=getattr(city, "erp_external_id", None)
+        erp_external_id=city.erp_external_id
     )
 
 
@@ -45,15 +43,13 @@ def create_city(city: CityCreate, db: Session = Depends(get_db)):
 @router.get("/{city_id}", response_model=CityOut)
 def get_city(city_id: int, db: Session = Depends(get_db)):
     """Fetch a single city by ID"""
-    city = service.get_city(db, city_id)
-    return city
+    return service.get_city(db, city_id)
 
 
 # PUT - Update an existing city
 @router.put("/{city_id}", response_model=CityOut)
 def update_city(city_id: int, updates: CityUpdate, db: Session = Depends(get_db)):
     """Update a city using only the provided fields"""
-    # For Pydantic v2
     update_data = updates.model_dump(exclude_unset=True)
     return service.update_city(db, city_id, update_data)
 
@@ -62,7 +58,4 @@ def update_city(city_id: int, updates: CityUpdate, db: Session = Depends(get_db)
 @router.delete("/{city_id}", response_model=CityOut)
 def delete_city(city_id: int, db: Session = Depends(get_db)):
     """Delete a city"""
-    deleted_city = service.delete_city(db, city_id)
-    if not deleted_city:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="City not found")
-    return deleted_city
+    return service.delete_city(db, city_id)
