@@ -64,7 +64,7 @@ class UserAddressService(UTCDateTimeMixin):
             is_primary=address_data.is_primary or False,
             address_line1=address_data.address_line1,
             address_line2=address_data.address_line2,
-            city=address_data.city,
+            city_id=address_data.city_id,
             state_id=address_data.state_id,
             country_id=address_data.country_id,
             postal_code=address_data.postal_code,

@@ -1,18 +1,13 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from uuid import UUID
-
 
 # Adjust imports based on your project structure
 from database import get_db
-from auth_utils import get_current_user 
-# Assuming your User model has an .id attribute. Adjust if it's a dict.
-
+from auth_utils import get_current_user
 from schemas import (
     CategoryDetailsCreate, CategoryDetailsUpdate, CategoryDetailsResponse
 )
-
 from services.category_details_service import CategoryDetailsService
 
 router = APIRouter(
@@ -20,6 +15,10 @@ router = APIRouter(
     tags=["category_details"],
     dependencies=[Depends(get_current_user)]
 )
+
+# ---------------------------
+# GET DETAILS BY MASTER NAME
+# ---------------------------
 @router.get("/details/by-master/{master_name}", response_model=List[CategoryDetailsResponse])
 def get_details_by_master_name(
     master_name: str,
@@ -46,6 +45,9 @@ def get_details_by_master_name(
 
     return details
 
+# ---------------------------
+# CREATE CATEGORY DETAIL
+# ---------------------------
 @router.post("/details", response_model=CategoryDetailsResponse, status_code=status.HTTP_201_CREATED)
 def create_category_detail(
     detail: CategoryDetailsCreate,
@@ -61,15 +63,18 @@ def create_category_detail(
         created_by=current_user.id
     )
 
+# ---------------------------
+# LIST CATEGORY DETAILS
+# ---------------------------
 @router.get("/details", response_model=List[CategoryDetailsResponse])
 def list_category_details(
     skip: int = 0, 
     limit: int = 100, 
     search: Optional[str] = None,
-    master_id: Optional[int] = None, # Filter details by their parent master
+    master_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """List details. Optional: Filter by Master ID"""
+    """List Category Details. Optional filter by Master ID"""
     return CategoryDetailsService.get_category_details(
         db=db, 
         skip=skip, 
@@ -78,14 +83,20 @@ def list_category_details(
         master_id=master_id
     )
 
+# ---------------------------
+# GET SINGLE CATEGORY DETAIL
+# ---------------------------
 @router.get("/details/{detail_id}", response_model=CategoryDetailsResponse)
 def get_category_detail(detail_id: int, db: Session = Depends(get_db)):
-    """Get a specific Category Detail"""
+    """Get a specific Category Detail by ID"""
     detail = CategoryDetailsService.get_category_detail(db, detail_id)
     if not detail:
-        raise HTTPException(status_code=404, detail="Category Detail not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category Detail not found")
     return detail
 
+# ---------------------------
+# UPDATE CATEGORY DETAIL
+# ---------------------------
 @router.put("/details/{detail_id}", response_model=CategoryDetailsResponse)
 def update_category_detail(
     detail_id: int, 
@@ -103,16 +114,13 @@ def update_category_detail(
         updates=updates
     )
 
+# ---------------------------
+# DELETE CATEGORY DETAIL
+# ---------------------------
 @router.delete("/details/{detail_id}", status_code=status.HTTP_200_OK)
 def delete_category_detail(detail_id: int, db: Session = Depends(get_db)):
-    detail = CategoryDetailsService.get_category_detail(db, detail_id)
-    if not detail:
-        raise HTTPException(status_code=404, detail="Category Detail not found")
-
-    try:
-        db.delete(detail)
-        db.commit()
-        return {"message": "Category Detail deleted successfully"}
-    except Exception as e:
-        db.rollback()  # Important to avoid leaving session in dirty state
-        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+    """
+    Delete a Category Detail by ID.
+    Returns 404 if not found or 500 if deletion fails.
+    """
+    return CategoryDetailsService.delete_category_detail(db=db, detail_id=detail_id)

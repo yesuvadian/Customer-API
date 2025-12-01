@@ -198,7 +198,7 @@ def create_address_reg(address: schemas.UserAddressCreate, db: Session = Depends
 @router.post("/bank_documents", response_model=schemas.CompanyBankDocumentSchema)
 async def upload_bank_document_reg(
     bank_info_id: int = Form(...),
-    document_type: str = Form(...),
+    category_detail_id: int = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
@@ -210,7 +210,7 @@ async def upload_bank_document_reg(
         file_name=file.filename,
         file_data=file_data,
         file_type=file.content_type,
-        document_type=document_type,
+        category_detail_id=category_detail_id,
     )
 # =====================================================
 # 📤 Upload a new document for a company (with file size validation)
@@ -218,52 +218,48 @@ async def upload_bank_document_reg(
 @router.post("/tax-documents/{company_id}", status_code=status.HTTP_201_CREATED)
 async def upload_tax_document_reg(
     company_id: str,
+    category_detail_id: int = Form(...),   # ⬅ Make required (same as bank)
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """
-    Upload tax related document and link to company tax info record
-    """
     try:
+        print("📌 DEBUG RECEIVED category_detail_id =", category_detail_id)
+        # Read file content
         file_data = await file.read()
 
-        # ✅ Validate size
-        if len(file_data) > MAX_FILE_SIZE_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File too large. Max allowed: {MAX_FILE_SIZE_KB} KB",
-            )
+     
 
-        # ✅ Validate MIME types
-        if file.content_type not in ALLOWED_MIME_TYPES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only PDF / JPG / PNG allowed",
-            )
+      
 
-        # ✅ Save document via service
+        # Save via service
         saved_doc = taxdocumentservice.create_document_for_company(
             db=db,
             company_id=company_id,
             file_name=file.filename,
             file_data=file_data,
             file_type=file.content_type,
+            category_detail_id=category_detail_id,
         )
 
+        # Response
         return {
             "id": saved_doc.id,
             "company_id": company_id,
+            "category_detail_id": category_detail_id,
             "file_name": saved_doc.file_name,
             "file_type": saved_doc.file_type,
         }
 
     except HTTPException:
         raise
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Upload failed: {str(e)}",
         )
+
+        
 
 
 @router.get("/reverse-geocode")
