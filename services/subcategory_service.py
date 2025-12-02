@@ -1,6 +1,6 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from models import ProductSubCategory
+from models import ProductSubCategory, Product  # Import Product for dependency check
 
 
 class SubCategoryService:
@@ -118,11 +118,20 @@ class SubCategoryService:
         return sub
 
     # ---------------------------------------
-    # DELETE SUBCATEGORY
+    # DELETE SUBCATEGORY (SAFE DELETE)
     # ---------------------------------------
     @classmethod
     def delete_subcategory(cls, db: Session, subcategory_id: int):
         sub = cls.get_subcategory(db, subcategory_id)
+
+        # Check if subcategory has linked products
+        product_count = db.query(Product).filter(Product.subcategory_id == subcategory_id).count()
+        if product_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete subcategory: it has linked products"
+            )
+
         db.delete(sub)
         db.commit()
         return sub

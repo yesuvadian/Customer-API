@@ -1,9 +1,6 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-
-from models import ProductCategory
-
-
+from models import ProductCategory, ProductSubCategory  # Import subcategory for dependency check
 
 class CategoryService:
 
@@ -22,7 +19,10 @@ class CategoryService:
     def create_category(cls, db: Session, name: str, description: str | None = None):
         existing = db.query(ProductCategory).filter(ProductCategory.name == name).first()
         if existing:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category already exists")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Category already exists"
+            )
         category = ProductCategory(name=name, description=description)
         db.add(category)
         db.commit()
@@ -33,7 +33,10 @@ class CategoryService:
     def update_category(cls, db: Session, category_id: int, updates: dict):
         category = cls.get_category(db, category_id)
         if not category:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Category not found"
+            )
         for key, value in updates.items():
             setattr(category, key, value)
         db.commit()
@@ -43,7 +46,22 @@ class CategoryService:
     @classmethod
     def delete_category(cls, db: Session, category_id: int):
         category = cls.get_category(db, category_id)
-        if category:
-            db.delete(category)
-            db.commit()
+        if not category:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Category not found"
+            )
+
+        # ------------------------
+        # Safe delete: check for subcategories
+        # ------------------------
+        sub_count = db.query(ProductSubCategory).filter(ProductSubCategory.category_id == category_id).count()
+        if sub_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete category: it has subcategories"
+            )
+
+        db.delete(category)
+        db.commit()
         return category

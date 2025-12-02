@@ -1,34 +1,50 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 from services.subcategory_service import SubCategoryService
-from schemas import ProductSubCategorySchema  # <-- use Pydantic schema
+from schemas import ProductSubCategorySchema
 from pydantic import BaseModel
 
+# ----------------- Pydantic Schemas -----------------
 class ProductSubCategoryCreate(BaseModel):
     name: str
     category_id: int
     description: str | None = None
 
+class ProductSubCategoryUpdate(BaseModel):
+    name: str | None = None
+    category_id: int | None = None
+    description: str | None = None
 
-router = APIRouter(prefix="/subcategories", tags=["subcategories"],dependencies=[Depends(get_current_user)])
+# ----------------- Router -----------------
+router = APIRouter(
+    prefix="/subcategories",
+    tags=["subcategories"],
+    dependencies=[Depends(get_current_user)]
+)
 
+# ----------------- List Subcategories -----------------
 @router.get("/", response_model=list[ProductSubCategorySchema])
-def list_subcategories(skip: int = 0, limit: int = 10000, search: str | None = None, db: Session = Depends(get_db)):
+def list_subcategories(
+    skip: int = 0,
+    limit: int = 10000,
+    search: str | None = None,
+    db: Session = Depends(get_db)
+):
     return SubCategoryService.get_subcategories(db, skip, limit, search)
 
+# ----------------- Get Subcategory by ID -----------------
 @router.get("/{subcategory_id}", response_model=ProductSubCategorySchema)
 def get_subcategory(subcategory_id: int, db: Session = Depends(get_db)):
-    sub = SubCategoryService.get_subcategory(db, subcategory_id)
-    if not sub:
-        raise HTTPException(status_code=404, detail="Subcategory not found")
-    return sub
+    return SubCategoryService.get_subcategory(db, subcategory_id)
 
+# ----------------- Get Subcategories by Category -----------------
 @router.get("/by_category/{category_id}", response_model=list[ProductSubCategorySchema])
 def get_by_category(category_id: int, db: Session = Depends(get_db)):
     return SubCategoryService.get_by_category(db, category_id)
 
+# ----------------- Create Subcategory -----------------
 @router.post("/", response_model=ProductSubCategorySchema)
 def create_subcategory(
     subcategory_in: ProductSubCategoryCreate,
@@ -41,11 +57,7 @@ def create_subcategory(
         description=subcategory_in.description
     )
 
-class ProductSubCategoryUpdate(BaseModel):
-    name: str | None = None
-    category_id: int | None = None
-    description: str | None = None
-
+# ----------------- Update Subcategory -----------------
 @router.put("/{subcategory_id}", response_model=ProductSubCategorySchema)
 def update_subcategory(
     subcategory_id: int,
@@ -58,7 +70,15 @@ def update_subcategory(
         updates.dict(exclude_unset=True)
     )
 
-
+# ----------------- Delete Subcategory (safe) -----------------
 @router.delete("/{subcategory_id}", response_model=ProductSubCategorySchema)
 def delete_subcategory(subcategory_id: int, db: Session = Depends(get_db)):
-    return SubCategoryService.delete_subcategory(db, subcategory_id)
+    try:
+        return SubCategoryService.delete_subcategory(db, subcategory_id)
+    except HTTPException as e:
+        if e.status_code == status.HTTP_400_BAD_REQUEST:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete subcategory: it has linked products"
+            )
+        raise e
