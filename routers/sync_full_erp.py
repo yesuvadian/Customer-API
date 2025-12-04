@@ -88,3 +88,16 @@ def sync_erp_vendor_documents(
         raise e
 
     return data
+@router.get(
+    "/sync_branchmast",
+    summary="Sync branchmast data to ERP",
+    description="Fetch all users and divisions to build branchmast JSON for ERP."
+)
+def sync_erp_branchmast(db: Session = Depends(get_db)):
+    try:
+        data = ERPService.build_branchmast_json(db)
+    except HTTPException as e:
+        if e.status_code == status.HTTP_404_NOT_FOUND:
+            return []  # Return empty list if no users/divisions found
+        raise e
+    return data

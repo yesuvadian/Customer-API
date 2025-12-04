@@ -7,6 +7,7 @@ from models import (
     CompanyTaxInfo, CompanyBankDocument, CompanyTaxDocument
 )
 from models import UserDocument
+from models import Division
 
 class ERPService:
 
@@ -326,3 +327,34 @@ class ERPService:
 
         db.commit()
         return final_result
+    @classmethod
+    def build_branchmast_json(cls, db: Session):
+        """
+        Build JSON for 'branchmast' table using users and divisions.
+        """
+        # Fetch all users with ERP external ID
+        users = db.query(User).filter(User.erp_external_id != None).all()
+        if not users:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No users with ERP external ID found"
+            )
+
+        result = []
+
+        for user in users:
+            # Find the division linked to this user (if any)
+            division = db.query(Division).filter(Division.code != None).first()
+
+            # If division exists, build JSON
+            if division:
+                branchmast_json = {
+                    "branchmast": {
+                        "branchmastid": user.erp_external_id,
+                        "branchid": division.erp_external_id if division else None,
+                        "branchname": division.division_name
+                    }
+                }
+                result.append(branchmast_json)
+
+        return result

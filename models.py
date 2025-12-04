@@ -237,7 +237,7 @@ class CompanyBankDocument(Base):
     file_data = Column(LargeBinary, nullable=False)
     file_type = Column(String(50))
     file_data = Column(LargeBinary, nullable=False) # BYTEA
-    pending_kyc = Column(Boolean, default=False)
+    pending_kyc = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     verified_by = Column(String)
     verified_at = Column(DateTime(timezone=True))
@@ -921,6 +921,8 @@ class UserDocument(Base):
     erp_last_sync_at = Column(DateTime(timezone=True))
     erp_error_message = Column(Text)
     erp_external_id = Column(String(255))
+    pending_kyc = Column(Boolean, default=True)
+
 
     # Relationships
     user = relationship("User", back_populates="documents", foreign_keys=[user_id])
