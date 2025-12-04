@@ -208,15 +208,15 @@ def seed_modules(session):
     modules_data = [
         {"name": "Roles", "description": "Manage roles", "path": "roles", "group_name": "User & Access"},
         {"name": "App Modules", "description": "Manage application modules", "path": "modules", "group_name": "User & Access"},
-        {"name": "User Roles", "description": "Assign roles to users", "path": "roles", "group_name": "User & Access"},
+        {"name": "User Roles", "description": "Assign roles to users", "path": "roles", "group_name": "User & Access", "is_active": False},
         {"name": "Role Permissions", "description": "Configure role-based privileges", "path": "role_module_privileges", "group_name": "User & Access"},
-        {"name": "Login Sessions", "description": "Track user login sessions", "path": "user_sessions", "group_name": "User & Access"},
+       {"name": "Login Sessions", "description": "Track user login sessions", "path": "user_sessions", "group_name": "User & Access", "is_active": False},
         {"name": "Countries", "description": "Manage country list", "path": "countries", "group_name": "Geography"},
         {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography"},
         {"name": "Cities", "description": "Manage cities list", "path": "cities", "group_name": "Geography"},
         {"name": "Addresses", "description": "User address book", "path": "addresses", "group_name": "User & Access"},
         {"name": "Tax Information", "description": "Company tax registration details", "path": "company_tax_info", "group_name": "Company"},
-        {"name": "Tax Documents", "description": "Upload company tax documents", "path": "company_tax_documents", "group_name": "Company"},
+        {"name": "Tax Documents", "description": "Upload company tax documents", "path": "company_tax_documents", "group_name": "Company", "is_active": False},
         {"name": "Product Categories", "description": "Define product categories", "path": "categories", "group_name": "Inventory"},
         {"name": "Product Subcategories", "description": "Define product subcategories", "path": "subcategories", "group_name": "Inventory"},
         {"name": "Products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
@@ -225,14 +225,14 @@ def seed_modules(session):
         {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access"},
          {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory"},
          {"name": "Assign User Roles", "description": "Assign roles to users", "path": "user_roles", "group_name": "User & Access"},
-         {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access"},
+         {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access", "is_active": False},
          {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
-        {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company"},
+        {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company", "is_active": False},
         {"name": "Company Product Certificates", "description": "Upload product performance certificates", "path": "company_product_certificates", "group_name": "Company"},
 {"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company"},
 {"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
 {"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company"},
-{"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP"},
+{"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP", "is_active": False},
 {"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
 {"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
 {"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
@@ -242,25 +242,31 @@ def seed_modules(session):
     ]
 
     module_ids = {}
+
     for m in modules_data:
-        existing_module = session.query(Module).filter_by(name=m["name"]).first()
-        if not existing_module:
+        existing = session.query(Module).filter_by(name=m["name"]).first()
+
+        if not existing:
             module = Module(
                 name=m["name"],
                 description=m["description"],
                 path=m["path"],
                 group_name=m["group_name"],
-                is_active=True
+                is_active=m.get("is_active", True)
             )
             session.add(module)
             session.flush()
             module_ids[m["name"]] = module.id
+
         else:
-            existing_module.description = m["description"]
-            existing_module.path = m["path"]
-            existing_module.group_name = m["group_name"]
-            existing_module.is_active = True
-            module_ids[m["name"]] = existing_module.id
+            existing.description = m["description"]
+            existing.path = m["path"]
+            existing.group_name = m["group_name"]
+
+            # 🔥 MOST IMPORTANT FIX
+            existing.is_active = m.get("is_active", True)
+
+            module_ids[m["name"]] = existing.id
 
     session.commit()
     print("✅ Modules seeded successfully.")
