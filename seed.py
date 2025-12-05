@@ -26,6 +26,8 @@ def seed_users(session):
          "phone_number": "7777777777", "password": "Operator@123"},
         {"first_name": "Auditor", "last_name": "User", "email": "auditor@relu.com",
          "phone_number": "6666666666", "password": "Auditor@123"},
+        {"first_name": "Vendor", "last_name": "User", "email": "vendor@relu.com",
+         "phone_number": "6666666666", "password": "vendor@123"},
     ]
 
     for u in users_data:
@@ -52,7 +54,8 @@ def seed_roles(session):
         {"name": "Admin", "description": "Full access to all modules"},
         {"name": "Viewer", "description": "Read-only access"},
         {"name": "Operator", "description": "Can scan and submit inventory"},
-        {"name": "Auditor", "description": "Can view scan history and audit trails"}
+        {"name": "Auditor", "description": "Can view scan history and audit trails"},
+        {"name": "Vendor", "description": "Can have access over products"},
     ]
 
     role_ids = {}
@@ -290,51 +293,99 @@ def seed_privileges(session, role_ids, module_ids):
 
 
     privileges_data = [
-        # Admin full access
-        *[
-            {
-                "role": "Admin",
-                "module": module,
-                "can_view": True,
-                "can_add": True,
-                "can_edit": True,
-                "can_delete": True,
-                "can_search": True,
-                "can_import": True,
-                "can_export": True
-            }
-            for module in module_names
-        ],
-        # Viewer read-only access
-        *[
-            {
-                "role": "Viewer",
-                "module": module,
-                "can_view": True
-            }
-            for module in module_names
-        ],
-        # Operator limited access
-        *[
-            {
-                "role": "Operator",
-                "module": module,
-                "can_view": True,
-                "can_search": module in ["Products", "Company Products", "Login Sessions"]
-            }
-            for module in ["Products", "Company Products", "Login Sessions"]
-        ],
-        # Auditor view-only access
-        *[
-            {
-                "role": "Auditor",
-                "module": module,
-                "can_view": True,
-                "can_search": module in ["Products", "Company Products", "Login Sessions"]
-            }
-            for module in module_names
+    # Admin full access
+    *[
+        {
+            "role": "Admin",
+            "module": module,
+            "can_view": True,
+            "can_add": True,
+            "can_edit": True,
+            "can_delete": True,
+            "can_search": True,
+            "can_import": True,
+            "can_export": True
+        }
+        for module in module_names
+    ],
+
+    # Viewer read-only access
+    *[
+        {
+            "role": "Viewer",
+            "module": module,
+            "can_view": True
+        }
+        for module in module_names
+    ],
+
+    # Operator limited access
+    *[
+        {
+            "role": "Operator",
+            "module": module,
+            "can_view": True,
+            "can_search": module in ["Products", "Company Products", "Login Sessions"]
+        }
+        for module in ["Products", "Company Products", "Login Sessions"]
+    ],
+
+    # Auditor view-only access
+    *[
+        {
+            "role": "Auditor",
+            "module": module,
+            "can_view": True,
+            "can_search": module in ["Products", "Company Products", "Login Sessions"]
+        }
+        for module in module_names
+    ],
+
+    # -------------------------------
+    # ⭐ Vendor FULL ACCESS
+    # -------------------------------
+    *[
+        {
+            "role": "Vendor",
+            "module": module,
+            "can_view": True,
+            "can_add": True,
+            "can_edit": True,
+            "can_delete": True,
+            "can_search": True,
+            "can_import": True,
+            "can_export": True
+        }
+        for module in [
+            "Tax Information",
+            "Bank Information",
+            "User Documents"
         ]
-    ]
+    ],
+
+    # -------------------------------
+    # ⭐ Vendor VIEW-ONLY ACCESS
+    # -------------------------------
+    *[
+        {
+            "role": "Vendor",
+            "module": module,
+            "can_view": True,
+            "can_add": False,
+            "can_edit": False,
+            "can_delete": False,
+            "can_search": False,
+            "can_import": False,
+            "can_export": False
+        }
+        for module in [
+            "Products",
+            "Product Categories",
+            "Product Subcategories",
+            "Company Products"
+        ]
+    ],
+]
 
     for p in privileges_data:
         role_id = role_ids.get(p["role"])
@@ -370,7 +421,8 @@ def seed_user_roles(session, role_ids):
         {"email": "admin@relu.com", "role": "Admin"},
         {"email": "viewer@relu.com", "role": "Viewer"},
         {"email": "operator@relu.com", "role": "Operator"},
-        {"email": "auditor@relu.com", "role": "Auditor"}
+        {"email": "auditor@relu.com", "role": "Auditor"},
+        {"email": "vendor@relu.com", "role": "Vendor"}
     ]
 
     for ur in user_roles_data:
