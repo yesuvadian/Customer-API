@@ -1,13 +1,13 @@
 from contextlib import contextmanager
 from datetime import datetime
-from database import SessionLocal
+from database import VendorSessionLocal
 from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State,City, User, UserRole, Module ,City
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
 @contextmanager
 def get_db_session():
-    session = SessionLocal()
+    session = VendorSessionLocal()
     try:
         yield session
     finally:
@@ -234,6 +234,7 @@ def seed_modules(session):
 {"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
 {"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company"},
 {"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP"},
+{"name": "ERP", "description": "update pending users to ERP", "path": "erpupdate", "group_name": "ERP"},
 {"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
 {"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
 {"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
@@ -278,7 +279,7 @@ def seed_privileges(session, role_ids, module_ids):
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
     "Category Master", "Category Details", 
-    "Sync ERP Vendor"          
+    "Sync ERP Vendor", "ERP", "KYC Status"        
     ]
 
 

@@ -17,3 +17,5 @@ httpx
 dotenv
 requests
 pandas
+asyncpg
+pymongo
