@@ -6,6 +6,7 @@ import auth_utils
 import traceback
 PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/","/auth/", "/files/"]
 
+# Map HTTP methods to action names
 METHOD_ACTION_MAP = {
     "GET": "can_view",
     "POST": "can_add",
@@ -15,9 +16,10 @@ METHOD_ACTION_MAP = {
 
 
 async def auth_and_privilege_middleware(request: Request, call_next):
-    # Allow public endpoints
     path = request.url.path
-    if  request.method == "OPTIONS" or any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
+
+    # Allow OPTIONS and public endpoints
+    if request.method == "OPTIONS" or any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
         try:
             return await call_next(request)
         except Exception as e:
@@ -57,6 +59,10 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         request.state.user = user
 
         # --- Privilege check ---
+        # Skip privilege check for KYC endpoint
+        if path.startswith("/kyc/"):
+            return await call_next(request)
+
         path_parts = request.url.path.strip("/").split("/")
         module_name = path_parts[0] if path_parts else None
         endpoint_name = request.scope.get("endpoint").__name__ if request.scope.get("endpoint") else ""
