@@ -350,8 +350,8 @@ class ERPService:
             if division:
                 branchmast_json = {
                     "branchmast": {
-                        "branchmastid": user.erp_external_id,
-                        "branchid": division.erp_external_id if division else None,
+                        "branchmastid": division.erp_external_id if division.erp_external_id else None ,
+                        "branchid": division.division_name,
                         "branchname": division.division_name
                     }
                 }

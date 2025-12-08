@@ -18,7 +18,9 @@ from routers import (
     company_products,
     dashboard,
     divisions,
+    erp_router,
     module,
+    mongo_router,
     plan,
     products,
     register,
@@ -128,7 +130,8 @@ app.include_router(sync_full_erp.router)
 app.include_router(kyc_router)
 
 app.include_router(file_download_router)
-
+app.include_router(erp_router.router)
+app.include_router(mongo_router.router)
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")
 # async def startup_event():
