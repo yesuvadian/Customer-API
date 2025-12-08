@@ -4,19 +4,7 @@ from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User
 import auth_utils
 import traceback
-
-# -----------------------------
-# Public endpoints
-# -----------------------------
-PUBLIC_ENDPOINTS = [
-    "/token",
-    "/docs",
-    "/openapi.json",
-    "/redoc",
-    "/register/",
-    "/auth/",
-    "/kyc/"  # <-- allow KYC endpoints for authenticated users
-]
+PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/","/auth/", "/files/"]
 
 # Map HTTP methods to action names
 METHOD_ACTION_MAP = {

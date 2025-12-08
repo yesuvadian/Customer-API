@@ -143,6 +143,7 @@ def seed_category_details(session, master_ids):
         {"master_name": "Company Documents", "name": "Audit Report", "description": "Latest external financial audit report."},
         {"master_name": "Company Documents", "name": "Profit and Loss", "description": "Most recent Profit and Loss (Income) Statement."},
         {"master_name": "Company Documents", "name": "3 years cash flow statement", "description": "Cash flow statements for the last three financial years."},
+        
         {"master_name": "Tax Documents", "name": "GST Certificate", "description": "GST Certificate."},
         {"master_name": "Tax Documents", "name": "Pan Card", "description": "Pan Card."},
 
