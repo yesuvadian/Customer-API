@@ -1,31 +1,35 @@
 import datetime
+from operator import or_
+import asyncpg
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import date
 from fastapi import HTTPException, status
+from config import POSTGRES_CONFIG
 from models import (
-    Product, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
+    CategoryDetails, CategoryMaster, Product, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
     CompanyTaxInfo, CompanyBankDocument, CompanyTaxDocument
 )
 from models import UserDocument
 from models import Division
+from services.erp_service import ERPService
+from services.mongo_service import MongoService
 
-class ERPService:
+class ERPSyncService:
 
     @classmethod
     def build_party_json(cls, db: Session):
         """
-        Fetch complete ERP party JSON for ALL users
-        whose ERP sync status is 'pending' or NULL.
+        Build ERP Party JSON payload.
+        - Only include users with erp_sync_status = 'pending' or NULL
+        - If user has erp_external_id → UPDATE payload
+        - Else → INSERT payload
         """
 
-        # -------- Step 1: Fetch all pending/unsynced users --------
-        users = (
-            db.query(User)
-                .filter(
-                    (User.erp_sync_status == None) | (User.erp_sync_status == "pending")
-                )
-                .all()
-        )
+        # Fetch users pending ERP sync
+        users = db.query(User).filter(
+            (User.erp_sync_status == None) | (User.erp_sync_status == "pending")
+        ).all()
 
         if not users:
             raise HTTPException(
@@ -33,57 +37,35 @@ class ERPService:
                 detail="No pending users found"
             )
 
-        final_result = []   # to store JSON for each user
+        insert_payload = []
+        update_payload = []
 
-        # -------- Step 2: Loop through users & fetch related tables --------
         for user in users:
-            primary_address = (
-                db.query(UserAddress)
-                .filter(UserAddress.user_id == user.id, UserAddress.is_primary == True)
-                .first()
-            )
+            primary_address = db.query(UserAddress).filter(
+                UserAddress.user_id == user.id,
+                UserAddress.is_primary == True
+            ).first()
 
-            tax_info = (
-                db.query(CompanyTaxInfo)
-                .filter(CompanyTaxInfo.company_id == user.id)
-                .first()
-            )
+            tax_info = db.query(CompanyTaxInfo).filter(
+                CompanyTaxInfo.company_id == user.id
+            ).first()
 
-            bank_info = (
-                db.query(CompanyBankInfo)
-                .filter(CompanyBankInfo.company_id == user.id)
-                .first()
-            )
+            bank_info = db.query(CompanyBankInfo).filter(
+                CompanyBankInfo.company_id == user.id
+            ).first()
 
-            user_role = (
-                db.query(UserRole)
-                .filter(UserRole.user_id == user.id)
-                .first()
-            )
+            user_role = db.query(UserRole).filter(
+                UserRole.user_id == user.id
+            ).first()
 
-            tax_document = (
-                db.query(CompanyTaxDocument)
-                .join(CompanyTaxInfo, CompanyTaxInfo.id == CompanyTaxDocument.company_tax_info_id)
-                .filter(CompanyTaxInfo.company_id == user.id)
-                .first()
-            )
-
-            bank_document = (
-                db.query(CompanyBankDocument)
-                .join(CompanyBankInfo, CompanyBankInfo.id == CompanyBankDocument.company_bank_info_id)
-                .filter(CompanyBankInfo.company_id == user.id)
-                .first()
-            )
-
-            # -------- Step 3: Partymast JSON --------
+            # -------- Party JSON --------
             partymast = {
-                "partymastid": user.erp_external_id if user.erp_external_id else None,
                 "docdate": None,
                 "title": "Mr.",
                 "partyid": f"{user.firstname or ''} {user.lastname or ''}".strip(),
                 "partyname": f"{user.firstname or ''} {user.lastname or ''}".strip(),
                 "vtype": "SUPPLIER [GOODS]",
-                "agroupname": 1591714846604,  # Fixed value as per ERP requirement
+                "agroupname": 1591714846604,
                 "typename": "REGISTERED",
                 "gstpartytype": "DOMESTIC",
                 "grade": "A",
@@ -97,7 +79,7 @@ class ERPService:
                 "evaldate": None,
                 "natureofbusiness": None,
                 "status": None,
-                "activeyn": "YES" if user.isactive else "NO",  
+                "activeyn": "YES" if user.isactive else "NO",
                 "tdspartyyn": "NO",
                 "typeofded": None,
                 "add1": primary_address.address_line1 if primary_address else None,
@@ -115,51 +97,82 @@ class ERPService:
                 "bankbranch": bank_info.branch_name if bank_info else None,
                 "branchcode": None,
                 "baccountname": bank_info.account_holder_name if bank_info else None,
-                "ifsccode": bank_info.ifsc if bank_info else None ,
-                "versionid": user.id if user.id else None,
+                "ifsccode": bank_info.ifsc if bank_info else None,
+                "versionid": user.id,
                 "projectid": "AVPPC_HESCOM",
-                "rolename": "LICENSE_ROLE" 
-           }
+                "rolename": "LICENSE_ROLE"
+            }
 
+            data = {"partymast": partymast}
 
-           
+            # -------- INSERT vs UPDATE --------
+            if user.erp_external_id:
+                data["partymast"]["partymastid"] = user.erp_external_id
+                update_payload.append(data)
+            else:
+                insert_payload.append(data)
 
-            # -------- Append to Final Result --------
-            final_result.append({
-                "partymast": partymast
-                
-            })
+        return {
+            "insert": insert_payload,
+            "update": update_payload
+        }
 
-        return final_result
 
     
     @classmethod
     def build_itemmaster_json(cls, db: Session):
         """
-        Fetch all products and return each under its own 'Itemmaster' key.
+        Build itemmaster JSON payload for ERP.
+        - Only include products with erp_sync_status = 'pending'
+        - If product has erp_external_id → UPDATE payload
+        - Else → INSERT payload
         """
-        products = db.query(Product).all()  # You can filter for unsynced if needed
 
+      # Fetch products that need syncing (pending or NULL)
+        products = db.query(Product).filter(
+            or_(
+                Product.erp_sync_status == "pending",
+                Product.erp_sync_status.is_(None)
+            )
+        ).all()
         if not products:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No products found"
+                status_code=404,
+                detail="No pending products to sync"
             )
 
-        result = []
+        insert_payload = []
+        update_payload = []
+
         for p in products:
-            result.append({
+            data = {
                 "itemmaster": {
-                    "itemmasterid": products.erp_external_id if p.erp_external_id else None,
-                    "subgroup": p.category_obj.name if p.category_obj else None,
-                    "subgroup2": p.subcategory_obj.name if p.subcategory_obj else None,
+                    "subgroup": p.category_obj.id if p.category_obj else None,
+                    "subgroup2": p.subcategory_obj.id if p.subcategory_obj else None,
                     "itemid": p.sku,
                     "itemdesc": p.description,
-                    "createdfrom": "APP"
+                    "createdfrom": "APP",
+                    "maingroup":1
+ 
+                    
                 }
-            })
+            }
 
-        return result
+            # -------- UPDATE case --------
+            if p.erp_external_id:
+                data["itemmaster"]["itemmasterid"] = p.erp_external_id
+                update_payload.append(data)
+
+            # -------- INSERT case --------
+            else:
+                # For insert, do not send ERP ID
+                insert_payload.append(data)
+
+        return {
+            "insert": insert_payload,
+            "update": update_payload
+        }
+
     @classmethod
     def build_ombasic_json(cls, db: Session):
         """
@@ -330,31 +343,129 @@ class ERPService:
     @classmethod
     def build_branchmast_json(cls, db: Session):
         """
-        Build JSON for 'branchmast' table using users and divisions.
+        Build branchmast JSON payload for ERP.
+        - Only include divisions with erp_sync_status = 'pending'
+        - If division has erp_external_id → UPDATE payload
+        - Else → INSERT payload
         """
-        # Fetch all users with ERP external ID
-        users = db.query(User).filter(User.erp_external_id != None).all()
-        if not users:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No users with ERP external ID found"
-            )
 
-        result = []
+        # Get all divisions with code and pending ERP sync
+        divisions = db.query(Division).filter(
+            Division.code != None,
+            Division.erp_sync_status == "pending"
+        ).all()
+
+        if not divisions:
+            raise HTTPException(404, "No pending divisions to sync")
+
+        insert_payload = []
+        update_payload = []
+
+        for division in divisions:
+
+            data = {
+                "branchmast": {
+                    "branchid": division.division_name,
+                    "branchname": division.division_name
+                }
+            }
+
+            # -------- UPDATE case --------
+            if division.erp_external_id:
+                data["branchmast"]["branchmastid"] = division.erp_external_id
+                update_payload.append(data)
+
+            # -------- INSERT case --------
+            else:
+                # For insert, DO NOT send ID → ERP will generate new one
+                insert_payload.append(data)
+
+        return {
+            "insert": insert_payload,
+            "update": update_payload
+        }
+
+    @classmethod
+    async def init_pool(cls):
+        if cls.pool is None:
+            cls.pool = await asyncpg.create_pool(**POSTGRES_CONFIG)
+
+    @classmethod
+    async def fetch_and_insert_partymastdoc(cls, db: Session):
+        users = db.query(User).filter(User.erp_external_id.isnot(None)).all()
+        inserted_results = []
 
         for user in users:
-            # Find the division linked to this user (if any)
-            division = db.query(Division).filter(Division.code != None).first()
+            erp_id = user.erp_external_id
+            user_id = user.id
 
-            # If division exists, build JSON
-            if division:
-                branchmast_json = {
-                    "branchmast": {
-                        "branchmastid": division.erp_external_id if division.erp_external_id else None ,
-                        "branchid": division.division_name,
-                        "branchname": division.division_name
-                    }
+            def get_master_id(name):
+                return db.query(CategoryMaster.id).filter(CategoryMaster.name == name).scalar()
+
+            company_master_id = get_master_id("Company Documents")
+            tax_master_id = get_master_id("Tax Documents")
+            bank_master_id = get_master_id("Bank Document Types")
+
+            # Check master completion
+            def is_master_complete(master_id):
+                required_count = (
+                    db.query(func.count(CategoryDetails.id))
+                    .filter(CategoryDetails.category_master_id == master_id)
+                    .scalar()
+                )
+                uploaded_count = (
+                    db.query(func.count(UserDocument.id))
+                    .filter(UserDocument.user_id == user_id)
+                    .join(CategoryDetails, UserDocument.category_detail_id == CategoryDetails.id)
+                    .filter(CategoryDetails.category_master_id == master_id)
+                    .filter(UserDocument.is_active == True)
+                    .scalar()
+                )
+                return uploaded_count == required_count
+
+            include_company = is_master_complete(company_master_id)
+            include_tax = is_master_complete(tax_master_id)
+            include_bank = is_master_complete(bank_master_id)
+
+            if not any([include_company, include_tax, include_bank]):
+                continue
+
+            all_docs = (
+                db.query(UserDocument, CategoryDetails)
+                .join(CategoryDetails, UserDocument.category_detail_id == CategoryDetails.id)
+                .filter(
+                    UserDocument.user_id == user_id,
+                    CategoryDetails.category_master_id.in_([
+                        company_master_id if include_company else -1,
+                        tax_master_id if include_tax else -1,
+                        bank_master_id if include_bank else -1
+                    ])
+                )
+                .all()
+            )
+
+            for doc, cat in all_docs:
+                mongo_payload = {
+                    "filename": doc.file_url.split("/")[-1] if doc.file_url else "1.doc",
+                    "filedata": doc.file_data or [],
+                    "foldername": "vendor"
                 }
-                result.append(branchmast_json)
 
-        return result
+                mongo_result = MongoService.insert(mongo_payload)
+                mongo_id = mongo_result["id"]
+
+                partymastdoc_payload = [{
+                    "partymastdoc": {
+                        "partymastdocid": None,
+                        "partymastid": erp_id,
+                        "doctype": cat.name,
+                        "objected": mongo_id,
+                        "attachfilename": mongo_payload["filename"]
+                    }
+                }]
+
+                await cls.init_pool()
+                result = await cls.insert_data(partymastdoc_payload)
+                inserted_results.extend(result)
+
+        return inserted_results

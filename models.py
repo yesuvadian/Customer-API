@@ -499,6 +499,11 @@ class ProductCategory(Base):
 
     created_user = relationship("User", foreign_keys=[created_by])
     modified_user = relationship("User", foreign_keys=[modified_by])
+    
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
 
     subcategories = relationship("ProductSubCategory", back_populates="category", cascade="all, delete")
     products = relationship("Product", back_populates="category_obj")
@@ -519,6 +524,11 @@ class ProductSubCategory(Base):
     name = Column(String(100), nullable=False)
     description = Column(String(255))
     is_active = Column(Boolean, default=True)
+    
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))

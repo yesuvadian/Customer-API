@@ -2,52 +2,198 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
-from services.syn_full_erp_service import ERPService
+from services.erp_service import ERPService
+from services.syn_full_erp_service import  ERPSyncService
 from fastapi import Query
 
-from models import User
+from models import Division, Product, User
 
 router = APIRouter(prefix="/erp", tags=["ERP Sync"],dependencies=[Depends(get_current_user)])
 
 @router.post(
-    "/sync_erp_vendor",                # <-- changed here
+    "/sync_erp_vendor",
     summary="Sync pending vendor data to ERP",
-    description="Fetch all vendor users with pending ERP status and return full ERP JSON data."
+    description="Sync all users whose ERP status is pending or NULL."
 )
-def sync_erp_vendor(db: Session = Depends(get_db)):
+async def sync_erp_vendor(db: Session = Depends(get_db)):
     """
-    Sync ERP vendor data for all users whose ERP status is 'pending' or NULL.
+    Sync ERP vendor data for all users whose ERP sync status is pending or NULL.
+    Handles INSERT and UPDATE separately.
     """
     try:
-        data = ERPService.build_party_json(db)
+        await ERPService.init_pool()  # ensure asyncpg pool is ready
+
+        payload = ERPSyncService.build_party_json(db)
+
+        insert_payload = payload.get("insert", [])
+        update_payload = payload.get("update", [])
+
+        insert_result = []
+        update_result = []
+
+        # ------------------------------------------------------------------
+        # INSERT LOGIC (No erp_external_id)
+        # ------------------------------------------------------------------
+        if insert_payload:
+            insert_result = await ERPService.insert_data(insert_payload)
+
+            # Save returned ERP IDs to user table
+            for rec in insert_result:
+                if "partymast" in rec:
+                    new_id = rec["partymast"]["partymastid"]
+                    user_id = rec["partymast"]["versionid"]
+
+                    user = db.query(User).filter(User.id == user_id).first()
+                    if user:
+                        user.erp_external_id = new_id
+                        user.erp_sync_status = "completed"
+                        db.add(user)
+
+            db.commit()
+
+        # ------------------------------------------------------------------
+        # UPDATE LOGIC (Has erp_external_id)
+        # ------------------------------------------------------------------
+        if update_payload:
+            update_result = await ERPService.update_data(update_payload)
+
+            # Mark these users as completed
+            update_user_ids = [
+                item["partymast"]["versionid"]
+                for item in update_payload
+            ]
+            db.query(User).filter(User.id.in_(update_user_ids)).update(
+                {User.erp_sync_status: "completed"},
+                synchronize_session=False
+            )
+            db.commit()
+
+        # ------------------------------------------------------------------
+        # FINAL RESPONSE
+        # ------------------------------------------------------------------
+        return {
+            "status": "success",
+            "inserted": insert_result,
+            "updated": update_result
+        }
+
     except HTTPException as e:
         if e.status_code == status.HTTP_404_NOT_FOUND:
-            return []  # return empty list to match response_model
+            return {
+                "status": "no-pending-users",
+                "inserted": [],
+                "updated": []
+            }
         raise e
 
-    # Update ERP sync status for processed users
-    user_ids = [item["partymast"]["versionid"] for item in data]
-    if user_ids:
-        db.query(User).filter(User.id.in_(user_ids)).update(
-            {User.erp_sync_status: "completed"}, synchronize_session=False
-        )
-        db.commit()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    return data
 @router.get(
-    "/sync_products",                # <-- changed here
+    "/sync_products",
     summary="Sync products to ERP",
-    description="Fetch all products in ERP Itemmaster format."
+    description="Fetch all products in ERP Itemmaster format and sync."
 )
-def sync_erp_products(db: Session = Depends(get_db)):
+async def sync_erp_products(db: Session = Depends(get_db)):
     try:
-        data = ERPService.build_itemmaster_json(db)
+        # Ensure PostgreSQL pool is ready
+        await ERPService.init_pool()
+
+        # Build ERP payload
+        payload = ERPSyncService.build_itemmaster_json(db)
+        insert_payload = payload.get("insert", [])
+        update_payload = payload.get("update", [])
+
+        insert_result = []
+        update_result = []
+
+        synced_product_ids = []
+
+        # ---------- INSERT ----------
+        if insert_payload:
+            insert_result = await ERPService.insert_data(insert_payload)
+
+            # Save returned erp_external_id into Product table
+            for rec in insert_result:
+                item = rec.get("itemmaster")
+                if item:
+                    erp_id = item.get("itemmasterid")
+                    sku = item.get("itemid")
+
+                    product = db.query(Product).filter(Product.sku == sku).first()
+                    if product:
+                        product.erp_external_id = erp_id
+                        synced_product_ids.append(product.id)
+                        db.add(product)
+
+            db.commit()
+
+        # ---------- UPDATE ----------
+        if update_payload:
+            update_result = await ERPService.update_data(update_payload)
+
+            # Track updated products
+            for rec in update_result:
+                item = rec.get("itemmaster")
+                if item:
+                    sku = item.get("itemid")
+                    product = db.query(Product).filter(Product.sku == sku).first()
+                    if product:
+                        synced_product_ids.append(product.id)
+
+        # ---------- MARK ERP SYNC COMPLETED ----------
+        if synced_product_ids:
+            db.query(Product).filter(Product.id.in_(synced_product_ids)).update(
+                {"erp_sync_status": "completed"},
+                synchronize_session=False
+            )
+            db.commit()
+
+        return {
+            "status": "success",
+            "inserted": insert_result,
+            "updated": update_result
+        }
+
     except HTTPException as e:
         if e.status_code == status.HTTP_404_NOT_FOUND:
             return []
         raise e
 
-    return data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+# =========================================
+# Endpoint: Fetch and Insert Party Mast Docs
+# =========================================
+@router.post("/sync_partymastdoc", summary="Fetch documents and insert into Mongo + Postgres")
+async def sync_partymastdoc(db: Session = Depends(get_db)):
+    """
+    Fetch all user documents, insert each into MongoDB, then wrap and insert
+    into PostgreSQL as 'partymastdoc' entries.
+    """
+    try:
+        # Ensure PostgreSQL pool is initialized
+        await ERPService.init_pool()
+
+        # Call the class method to fetch docs, insert into MongoDB, then Postgres
+        inserted_results = await ERPService.fetch_and_insert_partymastdoc(db)
+
+        return {
+            "status": "success",
+            "message": f"{len(inserted_results)} documents processed",
+            "data": inserted_results
+        }
+
+    except AttributeError:
+        # Likely cause: method not defined or wrong import
+        raise HTTPException(
+            status_code=500,
+            detail="ERPService.fetch_and_insert_partymastdoc method not found. Ensure it is defined with @classmethod."
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ---------------- New endpoint ----------------
 @router.get(
     "/sync_ombasic",
@@ -59,7 +205,7 @@ def sync_erp_ombasic(db: Session = Depends(get_db)):
     Fetch all user_documents, return ombasic JSON, and mark ERP sync as completed.
     """
     try:
-        data = ERPService.build_ombasic_json(db)
+        data = ERPSyncService.build_ombasic_json(db)
     except HTTPException as e:
         if e.status_code == status.HTTP_404_NOT_FOUND:
             return []  # Return empty list if no documents found
@@ -81,23 +227,82 @@ def sync_erp_vendor_documents(
     Optionally specify `folder_name` for the documents.
     """
     try:
-        data = ERPService.build_vendor_json(db, folder_name=folder_name)
+        data = ERPSyncService.build_vendor_json(db, folder_name=folder_name)
     except HTTPException as e:
         if e.status_code == status.HTTP_404_NOT_FOUND:
             return {}
         raise e
 
     return data
-@router.get(
-    "/sync_branchmast",
-    summary="Sync branchmast data to ERP",
-    description="Fetch all users and divisions to build branchmast JSON for ERP."
-)
-def sync_erp_branchmast(db: Session = Depends(get_db)):
+@router.get("/sync_branchmast")
+async def sync_erp_branchmast(db: Session = Depends(get_db)):
     try:
-        data = ERPService.build_branchmast_json(db)
-    except HTTPException as e:
-        if e.status_code == status.HTTP_404_NOT_FOUND:
-            return []  # Return empty list if no users/divisions found
-        raise e
-    return data
+        # Ensure PostgreSQL pool is ready
+        await ERPService.init_pool()
+
+        # Build ERP payload
+        payload = ERPSyncService.build_branchmast_json(db)
+        insert_payload = payload.get("insert", [])
+        update_payload = payload.get("update", [])
+
+        insert_result = []
+        update_result = []
+
+        synced_division_ids = []
+
+        # ---------- INSERT ----------
+        if insert_payload:
+            insert_result = await ERPService.insert_data(insert_payload)
+
+            # Save returned erp_external_id into Division table
+            for rec in insert_result:
+                branch = rec.get("branchmast")
+                if branch:
+                    branch_id = branch.get("branchmastid")
+                    branch_name = branch.get("branchname")
+
+                    division = db.query(Division).filter(
+                        Division.division_name == branch_name
+                    ).first()
+
+                    if division:
+                        division.erp_external_id = branch_id
+                        synced_division_ids.append(division.id)
+                        db.add(division)
+
+            db.commit()
+
+        # ---------- UPDATE ----------
+        if update_payload:
+            update_result = await ERPService.update_data(update_payload)
+
+            # Mark divisions updated as synced
+            for rec in update_result:
+                branch = rec.get("branchmast")
+                if branch:
+                    branch_name = branch.get("branchname")
+                    division = db.query(Division).filter(
+                        Division.division_name == branch_name
+                    ).first()
+                    if division:
+                        synced_division_ids.append(division.id)
+
+        # ---------- MARK ERP SYNC COMPLETED ----------
+        if synced_division_ids:
+            db.query(Division).filter(Division.id.in_(synced_division_ids)).update(
+                {"erp_sync_status": "completed"},
+                synchronize_session=False
+            )
+            db.commit()
+
+        return {
+            "status": "success",
+            "inserted": insert_result,
+            "updated": update_result
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
