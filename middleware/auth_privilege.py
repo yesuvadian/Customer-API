@@ -4,7 +4,7 @@ from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User
 import auth_utils
 import traceback
-PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/","/auth/"]
+PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/","/auth/", "/files/"]
 
 METHOD_ACTION_MAP = {
     "GET": "can_view",

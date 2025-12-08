@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
+from fastapi import Response
 
 from auth_utils import get_current_user
 from database import get_db
@@ -23,8 +24,7 @@ def list_bank_documents(bank_info_id: int, db: Session = Depends(get_db)):
 async def upload_bank_document(
     bank_info_id: int = Form(...),
     file: UploadFile = File(...),
-    # CHANGE: Renamed argument to match the database/schema
-    category_detail_id: int = Form(...), # Make it required based on your schema/model
+    category_detail_id: int = Form(...),
     db: Session = Depends(get_db)
 ):
     file_data = await file.read()
@@ -53,6 +53,7 @@ async def update_bank_document(
         updates.dict(exclude_unset=True)
     )
 
-@router.delete("/{document_id}", response_model=CompanyBankDocumentSchema)
+@router.delete("/{document_id}", status_code=204)
 def delete_bank_document(document_id: int, db: Session = Depends(get_db)):
-    return CompanyBankDocumentService.delete_document(db, document_id)
+    CompanyBankDocumentService.delete_document(db, document_id)
+    return Response(status_code=204)
