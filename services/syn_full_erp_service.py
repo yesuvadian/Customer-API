@@ -28,7 +28,8 @@ class ERPSyncService:
 
         # Fetch users pending ERP sync
         users = db.query(User).filter(
-            (User.erp_sync_status == None) | (User.erp_sync_status == "pending")
+            (User.erp_sync_status == None) | (User.erp_sync_status == "pending"),
+            User.plan_id != None  # Only users with a plan
         ).all()
 
         if not users:
@@ -85,9 +86,9 @@ class ERPSyncService:
                 "add1": primary_address.address_line1 if primary_address else None,
                 "add2": primary_address.address_line2 if primary_address else None,
                 "add3": None,
-                "city": primary_address.city.erp_external_id if primary_address else None,
-                "bcs_state": primary_address.state.erp_external_id if primary_address and primary_address.state else None,
-                "country": primary_address.country.erp_external_id if primary_address and primary_address.country else None,
+                "city": int(primary_address.city.erp_external_id) if primary_address else None,
+                "bcs_state": int(primary_address.state.erp_external_id) if primary_address and primary_address.state else None,
+                "country": int(primary_address.country.erp_external_id) if primary_address and primary_address.country else None,
                 "panno": tax_info.pan if tax_info else None,
                 "gstnumsuf": None,
                 "gstno": tax_info.gstin if tax_info else None,
@@ -98,7 +99,7 @@ class ERPSyncService:
                 "branchcode": None,
                 "baccountname": bank_info.account_holder_name if bank_info else None,
                 "ifsccode": bank_info.ifsc if bank_info else None,
-                "versionid": user.id,
+                "versionid": str(user.id),
                 "projectid": "AVPPC_HESCOM",
                 "rolename": "LICENSE_ROLE"
             }
