@@ -1,13 +1,13 @@
 from contextlib import contextmanager
 from datetime import datetime
-from database import SessionLocal
+from database import VendorSessionLocal
 from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State,City, User, UserRole, Module ,City
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
 @contextmanager
 def get_db_session():
-    session = SessionLocal()
+    session = VendorSessionLocal()
     try:
         yield session
     finally:
@@ -146,6 +146,7 @@ def seed_category_details(session, master_ids):
         {"master_name": "Company Documents", "name": "Audit Report", "description": "Latest external financial audit report."},
         {"master_name": "Company Documents", "name": "Profit and Loss", "description": "Most recent Profit and Loss (Income) Statement."},
         {"master_name": "Company Documents", "name": "3 years cash flow statement", "description": "Cash flow statements for the last three financial years."},
+        
         {"master_name": "Tax Documents", "name": "GST Certificate", "description": "GST Certificate."},
         {"master_name": "Tax Documents", "name": "Pan Card", "description": "Pan Card."},
 
@@ -286,7 +287,7 @@ def seed_privileges(session, role_ids, module_ids):
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
     "Category Master", "Category Details", 
-    "Sync ERP Vendor"          
+    "Sync ERP Vendor", "ERP", "KYC Status"        
     ]
 
 

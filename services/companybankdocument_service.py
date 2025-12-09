@@ -52,8 +52,10 @@ class CompanyBankDocumentService:
 
     @classmethod
     def delete_document(cls, db: Session, document_id: int):
-        document = cls.get_document(db, document_id)
-        if document:
-            db.delete(document)
-            db.commit()
-        return document
+        doc = db.query(CompanyBankDocument).filter(CompanyBankDocument.id == document_id).first()
+
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        db.delete(doc)
+        db.commit() 

@@ -1,97 +1,102 @@
-from typing import Optional
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session,joinedload
+from sqlalchemy.orm import Session
+from uuid import UUID
+
 from models import CompanyTaxDocument, CompanyTaxInfo
-from uuid import UUID # ✅ Add UUID import
+
 
 class CompanyTaxDocumentService:
+
     # =====================================================
+    # Helpers
+    # =====================================================
+
     @classmethod
-    def get_tax_info_by_company(cls, db: Session, company_id: UUID): # ✅ Change type from str to UUID
-        """Get the CompanyTaxInfo row for a company (required to link documents)"""
-        # SQLAlchemy can query UUID column directly with a UUID object
-        tax_info = db.query(CompanyTaxInfo).filter(CompanyTaxInfo.company_id == company_id).first()
+    def get_document(cls, db: Session, document_id: int):
+        return db.query(CompanyTaxDocument).filter(
+            CompanyTaxDocument.id == document_id
+        ).first()
+
+    @classmethod
+    def delete_document(cls, db: Session, document_id: int):
+        doc = cls.get_document(db, document_id)
+        if not doc:
+            return None
+
+        db.delete(doc)
+        db.commit()
+        return doc
+
+    # =====================================================
+    # Company Operations
+    # =====================================================
+
+    @classmethod
+    def get_tax_info_by_company(cls, db: Session, company_id: UUID):
+        tax_info = db.query(CompanyTaxInfo).filter(
+            CompanyTaxInfo.company_id == company_id
+        ).first()
+
         if not tax_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Company tax info not found for this company"
             )
+
         return tax_info
 
-    
     @classmethod
     def get_documents_by_company(cls, db: Session, company_id: UUID):
-        """Fetch all tax documents for a given company"""
-
         tax_info = cls.get_tax_info_by_company(db, company_id)
+        return db.query(CompanyTaxDocument).filter(
+            CompanyTaxDocument.company_tax_info_id == tax_info.id
+        ).all()
 
-        return (
-            db.query(CompanyTaxDocument)
-            .options(joinedload(CompanyTaxDocument.category_detail))   # ✅ load CategoryDetails
-            .filter(
-                CompanyTaxDocument.company_tax_info_id == tax_info.id
-            )
-            .all()
-        )
+    # =====================================================
+    # Unique Category Check
+    # =====================================================
 
+    @classmethod
+    def document_exists_for_category(cls, db: Session, tax_info_id: int, category_detail_id: int):
+        return db.query(CompanyTaxDocument).filter(
+            CompanyTaxDocument.company_tax_info_id == tax_info_id,
+            CompanyTaxDocument.category_detail_id == category_detail_id
+        ).first()
+
+    # =====================================================
+    # Create Document
+    # =====================================================
 
     @classmethod
     def create_document_for_company(
-        cls, 
-        db: Session, 
-        company_id: UUID, 
-        file_name: str, 
-        file_data: bytes, 
-        file_type: str, 
-        # 👇 ADDED THE OPTIONAL PARAMETER
-        category_detail_id: Optional[int] = None 
+        cls,
+        db: Session,
+        company_id: UUID,
+        category_detail_id: int,
+        file_name: str,
+        file_data: bytes,
+        file_type: str
     ):
-        """Create a document for a company (auto-links to CompanyTaxInfo)"""
+
         tax_info = cls.get_tax_info_by_company(db, company_id)
-        
+
+        # 🚫 Prevent uploading more than one document for same category
+        existing = cls.document_exists_for_category(db, tax_info.id, category_detail_id)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document already exists for this category (category_detail_id={category_detail_id})"
+            )
+
         doc = CompanyTaxDocument(
             company_tax_info_id=tax_info.id,
+            category_detail_id=category_detail_id,
             file_name=file_name,
             file_data=file_data,
-            file_type=file_type,
-            # 👇 SAVE THE NEW PARAMETER
-            category_detail_id=category_detail_id 
+            file_type=file_type
         )
-        
+
         db.add(doc)
         db.commit()
         db.refresh(doc)
-        return doc
-    @classmethod
-    def update_document(
-        cls, 
-        db: Session, 
-        doc_id: int, 
-        file_name: str, 
-        file_data: bytes, 
-        file_type: str,
-        category_detail_id: Optional[int] = None
-    ):
-        """
-        Updates an existing CompanyTaxDocument record with new file content and details.
-        """
-        # 1. Fetch the existing document
-        doc = cls.get_document(db, doc_id)
-
-        # 2. Apply updates
-        doc.file_name = file_name
-        doc.file_data = file_data # The new file content
-        doc.file_type = file_type
-        
-        if category_detail_id is not None:
-             doc.category_detail_id = category_detail_id
-
-        # 3. Mark for ERP resync upon update
-        doc.pending_kyc = True
-        doc.erp_sync_status = "pending"
-
-        # 4. Commit changes
-        db.commit()
-        db.refresh(doc)
-        
         return doc

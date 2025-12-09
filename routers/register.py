@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from auth_utils import get_registration_user
 from config import MAX_FILE_SIZE_KB, NOMINATIM_URL
 from database import get_db
-from routers.company_tax_documents import MAX_FILE_SIZE_BYTES
 import schemas
 from services.companybankdocument_service import CompanyBankDocumentService
 from services.companybankinfo_service import CompanyBankInfoService
