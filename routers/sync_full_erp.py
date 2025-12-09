@@ -6,7 +6,7 @@ from services.erp_service import ERPService
 from services.syn_full_erp_service import  ERPSyncService
 from fastapi import Query
 
-from models import Division, Product, User
+from models import Division, Product, User, UserDocument
 
 router = APIRouter(prefix="/erp", tags=["ERP Sync"],dependencies=[Depends(get_current_user)])
 
@@ -195,23 +195,94 @@ async def sync_partymastdoc(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------- New endpoint ----------------
-@router.get(
-    "/sync_ombasic",
-    summary="Fetch all user documents in ERP ombasic format",
-    description="Return ombasic JSON for all user documents; ERP sync status is updated in DB automatically."
-)
-def sync_erp_ombasic(db: Session = Depends(get_db)):
-    """
-    Fetch all user_documents, return ombasic JSON, and mark ERP sync as completed.
-    """
+@router.get("/sync_ombasic")
+async def sync_erp_ombasic(db: Session = Depends(get_db)):
     try:
-        data = ERPSyncService.build_ombasic_json(db)
-    except HTTPException as e:
-        if e.status_code == status.HTTP_404_NOT_FOUND:
-            return []  # Return empty list if no documents found
-        raise e
+        await ERPService.init_pool()
 
-    return data
+        payload = ERPSyncService.build_ombasic_json(db)
+        insert_payload = payload.get("insert")
+        update_payload = payload.get("update")
+
+        inserted = None
+        updated = None
+        omdetail_inserted = None
+        omdetail_updated = None
+        synced_doc_id = None
+
+        # ---------- INSERT ----------
+        if insert_payload:
+            inserted_list = await ERPService.insert_data([insert_payload])
+            rec = inserted_list[0]["ombasic"]
+            omno = rec["omno"]
+            ombasicid = rec["ombasicid"]
+
+            doc = db.query(UserDocument).filter(
+                UserDocument.om_number == omno
+            ).first()
+
+            if doc:
+                doc.erp_external_id = ombasicid
+                doc.erp_sync_status = "completed"
+                synced_doc_id = doc.id
+                user_id = doc.user_id
+
+            db.commit()
+            inserted = rec
+
+            # ---------- OMDTAIL ----------
+            omdetail_inserted = ERPSyncService.build_omdetail(
+                db=db,
+                ombasic_id=ombasicid,
+                company_id=user_id
+            )
+
+            # Send directly without wrapping
+            await ERPService.insert_data(omdetail_inserted)
+
+        # ---------- UPDATE ----------
+        if update_payload:
+            updated_list = await ERPService.update_data([update_payload])
+            rec = updated_list[0]["ombasic"]
+            omno = rec["omno"]
+
+            doc = db.query(UserDocument).filter(
+                UserDocument.om_number == omno
+            ).first()
+
+            if doc:
+                doc.erp_sync_status = "completed"
+                synced_doc_id = doc.id
+                user_id = doc.user_id
+
+            db.commit()
+            updated = rec
+
+            # ---------- OMDTAIL ----------
+            omdetail_updated = ERPSyncService.build_omdetail(
+                db=db,
+                ombasic_id=doc.erp_external_id,
+                company_id=user_id
+            )
+
+            await ERPService.update_data(omdetail_updated)
+
+        return {
+            "status": "success",
+            "ombasic_inserted": inserted,
+            "ombasic_updated": updated,
+            "omdetail_inserted": omdetail_inserted,
+            "omdetail_updated": omdetail_updated,
+            "synced_document_id": synced_doc_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
 
 @router.get(
     "/sync_vendor_documents",

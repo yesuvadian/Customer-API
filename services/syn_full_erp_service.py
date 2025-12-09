@@ -1,13 +1,13 @@
 import datetime
 from operator import or_
 import asyncpg
-from sqlalchemy import func
+from sqlalchemy import UUID, func
 from sqlalchemy.orm import Session
 from datetime import date
 from fastapi import HTTPException, status
 from config import POSTGRES_CONFIG
 from models import (
-    CategoryDetails, CategoryMaster, Product, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
+    CategoryDetails, CategoryMaster, CompanyProduct, Product, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
     CompanyTaxInfo, CompanyBankDocument, CompanyTaxDocument
 )
 from models import UserDocument
@@ -176,54 +176,55 @@ class ERPSyncService:
     @classmethod
     def build_ombasic_json(cls, db: Session):
         """
-        Only ONE document per user should be synced (ONLY ONCE).
-        If user already has a completed document → skip user.
-        Valid = omno NOT NULL AND expiry_date NOT NULL.
+        Build ombasic JSON similar to branchmast JSON structure.
+        - Include only documents with erp_sync_status='pending'
+        - Skip users who already have any completed ombasic record
+        - If doc.erp_external_id → UPDATE payload
+        - If doc.erp_external_id is NULL → INSERT payload
+        - Only include valid docs (omno & expiry_date)
         """
 
-        # Fetch all user docs (any status)
-        user_docs = db.query(UserDocument).all()
+        # Fetch all pending docs
+        docs = db.query(UserDocument).filter(
+            UserDocument.erp_sync_status == "pending"
+        ).all()
 
-        if not user_docs:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No user documents found"
-            )
+        if not docs:
+            raise HTTPException(404, "No pending OM documents to sync")
 
-        result = []
+        insert_payload = []
+        update_payload = []
         processed_users = set()
 
-        for doc in user_docs:
+        for doc in docs:
             user = doc.user
             if not user:
                 continue
 
-            # ⛔ If user already has completed doc → skip forever!
+            # ⛔ Skip if user has ANY completed OM sync earlier
             has_completed = db.query(UserDocument).filter(
                 UserDocument.user_id == user.id,
                 UserDocument.erp_sync_status == "completed"
             ).first()
 
             if has_completed:
-                continue   # This user already synced before, skip completely
+                continue
 
-            # Skip user if already added in this loop
+            # ⛔ If user already included in this batch → skip
             if user.id in processed_users:
                 continue
 
-            # ❌ Skip invalid docs, mark as pending
+            # ❌ Invalid doc → keep as pending, do not include in payload
             if not doc.om_number or not doc.expiry_date:
                 doc.erp_sync_status = "pending"
                 continue
 
-            # ✔ Valid document → Build JSON
             division = doc.division
             efffromdate = date.today()
             efftodate = doc.expiry_date.date()
 
-            ombasic_json = {
+            data = {
                 "ombasic": {
-                    "ombasicid": doc.erp_external_id,
                     "partyid": user.erp_external_id,
                     "branchid": division.erp_external_id if division else None,
                     "omno": doc.om_number,
@@ -232,16 +233,26 @@ class ERPSyncService:
                 }
             }
 
-            result.append(ombasic_json)
+            # ---------------- UPDATE CASE ----------------
+            if doc.erp_external_id:
+                data["ombasic"]["ombasicid"] = doc.erp_external_id
+                update_payload.append(data)
 
-            # ✅ Mark user as processed
+            # ---------------- INSERT CASE ----------------
+            else:
+                # No ombasicid — ERP will generate new one
+                insert_payload.append(data)
+
             processed_users.add(user.id)
-
-            # 🔵 Mark this doc as permanently completed
             doc.erp_sync_status = "completed"
 
         db.commit()
-        return result
+
+        return {
+            "insert": insert_payload,
+            "update": update_payload
+        }
+
 
     @classmethod
     def build_vendor_json(cls, db: Session, folder_name: str = "vendor"):
@@ -469,3 +480,36 @@ class ERPSyncService:
                 inserted_results.extend(result)
 
         return inserted_results
+    @classmethod
+    def build_omdetail(cls, db: Session, ombasic_id: str, company_id: UUID):
+        """
+        Returns a list of key-value pairs exactly in the repeated JSON format required:
+        
+        "omdetail": { ... },
+        "omdetail": { ... }
+        """
+        company_products = (
+            db.query(CompanyProduct)
+            .filter(CompanyProduct.company_id == company_id)
+            .all()
+        )
+
+        output_blocks = []
+
+        for cp in company_products:
+            product = db.query(Product).filter(Product.id == cp.product_id).first()
+            if not product or not product.erp_external_id:
+                continue
+
+            block = (
+                '"omdetail": {\n'
+                f'  "ombasicid": "{ombasic_id}",\n'
+                f'  "itemid": "{product.erp_external_id}"\n'
+                '}'
+            )
+
+            output_blocks.append(block)
+
+        # Join with commas EXACTLY like your format
+        return ",\n\n".join(output_blocks)
+
