@@ -45,6 +45,9 @@ def get_document(doc_id: int, db: Session = Depends(get_db)):
         "category_detail_id": doc.category_detail_id,
         "file_name": doc.file_name,
         "file_type": doc.file_type,
+        "pending_kyc": doc.pending_kyc,
+        "cts": doc.cts,
+        "mts": doc.mts,
     }
 
 
@@ -76,7 +79,7 @@ def get_company_documents(company_id: UUID, db: Session = Depends(get_db)):
 @router.post("/company/{company_id}", status_code=status.HTTP_201_CREATED)
 def upload_company_document(
     company_id: UUID,
-    category_detail_id: int = Form(...),  # <-- REQUIRED
+    category_detail_id: int = Form(...),  # REQUIRED
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
@@ -105,6 +108,9 @@ def upload_company_document(
             "category_detail_id": doc.category_detail_id,
             "file_name": doc.file_name,
             "file_type": doc.file_type,
+            "pending_kyc": doc.pending_kyc,
+            "cts": doc.cts,
+            "mts": doc.mts,
         }
 
     except HTTPException:
