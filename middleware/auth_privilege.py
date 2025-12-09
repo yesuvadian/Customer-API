@@ -3,9 +3,11 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User
 import auth_utils
-import traceback
 
-PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/", "/auth/", "/files/"]
+PUBLIC_ENDPOINTS = [
+    "/token", "/docs", "/openapi.json", "/redoc",
+    "/register/", "/auth/", "/files/"
+]
 
 METHOD_ACTION_MAP = {
     "GET": "can_view",
@@ -24,7 +26,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
 
     db: Session = SessionLocal()
     try:
-        # Token extraction
+        # ---------------- TOKEN VALIDATION ----------------
         auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Unauthorized: Missing or invalid token")
@@ -34,7 +36,6 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         if not payload:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-        # Load User
         user_id = payload.get("sub")
         user = db.query(User).filter_by(id=user_id).first()
         if not user:
@@ -42,20 +43,32 @@ async def auth_and_privilege_middleware(request: Request, call_next):
 
         request.state.user = user
 
-        # Skip privilege check for KYC
+        # Skip privilege check for /kyc/**
         if path.startswith("/kyc/"):
             return await call_next(request)
 
-        # *** OPTION-1 FIX ***
-        # Skip privilege check ONLY for /modules/* API
+        # ---------------- MODULE NAME ----------------
         parts = request.url.path.strip("/").split("/")
         module_name = parts[0] if parts else None
 
+        # -------------------------------------------------------
+        # OPTION-1: Skip privilege check ONLY for /modules/**
+        # because these are used in UI role privilege screen
+        # -------------------------------------------------------
         if module_name == "modules":
             return await call_next(request)
-        # *** END FIX ***
 
-        # Determine action
+        # -------------------------------------------------------
+        # FIX: Skip privilege check for listing endpoints:
+        # Example: GET /products/?skip=0  (products list)
+        # Vendor should NOT be blocked for list APIs.
+        # -------------------------------------------------------
+        if request.method == "GET" and len(parts) == 1:
+            # /products/
+            return await call_next(request)
+        # -------------------------------------------------------
+
+        # Determine permission type for request
         endpoint_name = request.scope.get("endpoint").__name__ if request.scope.get("endpoint") else ""
         action = None
 
@@ -66,28 +79,32 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         else:
             action = METHOD_ACTION_MAP.get(request.method)
 
-        if module_name and action:
-            module = db.query(Module).filter_by(path=module_name).first()
-            if not module:
-                raise HTTPException(status_code=404, detail=f'Module "{module_name}" not registered')
+        # If no module or no action → skip
+        if not module_name or not action:
+            return await call_next(request)
 
-            user_roles = db.query(UserRole).filter_by(user_id=user.id).all()
-            if not user_roles:
-                raise HTTPException(status_code=403, detail="User has no assigned roles")
+        # ---------------- MODULE + PRIVILEGE CHECK ----------------
+        module = db.query(Module).filter_by(path=module_name).first()
+        if not module:
+            raise HTTPException(status_code=404, detail=f'Module "{module_name}" not registered')
 
-            role_ids = [r.role_id for r in user_roles]
+        user_roles = db.query(UserRole).filter_by(user_id=user.id).all()
+        if not user_roles:
+            raise HTTPException(status_code=403, detail="User has no assigned roles")
 
-            allowed = db.query(RoleModulePrivilege).filter(
-                RoleModulePrivilege.role_id.in_(role_ids),
-                RoleModulePrivilege.module_id == module.id,
-                getattr(RoleModulePrivilege, action) == True
-            ).first()
+        role_ids = [r.role_id for r in user_roles]
 
-            if not allowed:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Access denied for action '{action}' on module '{module_name}'"
-                )
+        allowed = db.query(RoleModulePrivilege).filter(
+            RoleModulePrivilege.role_id.in_(role_ids),
+            RoleModulePrivilege.module_id == module.id,
+            getattr(RoleModulePrivilege, action) == True
+        ).first()
+
+        if not allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied for action '{action}' on module '{module_name}'"
+            )
 
         return await call_next(request)
 

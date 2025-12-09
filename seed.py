@@ -280,7 +280,7 @@ def seed_modules(session):
 def seed_privileges(session, role_ids, module_ids):
 
     # -------------------------------------------------------
-    # REMOVE all old vendor privileges before re-seeding
+    # REMOVE all Vendor privileges before re-seeding
     # -------------------------------------------------------
     vendor_role_id = role_ids.get("Vendor")
     if vendor_role_id:
@@ -289,6 +289,9 @@ def seed_privileges(session, role_ids, module_ids):
         ).delete()
         session.commit()
 
+    # -------------------------------------------------------
+    # ALL MODULES
+    # -------------------------------------------------------
     module_names = [
         "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
         "Countries", "States", "Cities", "Addresses", "Tax Information", "Tax Documents",
@@ -301,73 +304,94 @@ def seed_privileges(session, role_ids, module_ids):
         "Sync ERP Vendor", "KYC Status"
     ]
 
+    # -------------------------------------------------------
+    # PRIVILEGES DATA (ADMIN / VIEWER / OPERATOR / AUDITOR)
+    # -------------------------------------------------------
     privileges_data = [
 
-        # ADMIN FULL
+        # ADMIN FULL ACCESS
         *[
-            { "role": "Admin", "module": module,
-              "can_view": True, "can_add": True, "can_edit": True,
-              "can_delete": True, "can_search": True,
-              "can_import": True, "can_export": True }
+            {
+                "role": "Admin",
+                "module": module,
+                "can_view": True, "can_add": True, "can_edit": True,
+                "can_delete": True, "can_search": True,
+                "can_import": True, "can_export": True
+            }
             for module in module_names
         ],
 
-        # VIEWER
+        # VIEWER — only view
         *[
             { "role": "Viewer", "module": module, "can_view": True }
             for module in module_names
         ],
 
-        # OPERATOR
+        # OPERATOR — selected modules
         *[
             { "role": "Operator", "module": module, "can_view": True }
             for module in ["Products", "Company Products", "Login Sessions"]
         ],
 
-        # AUDITOR
+        # AUDITOR — view only all modules
         *[
             { "role": "Auditor", "module": module, "can_view": True }
             for module in module_names
+        ]
+    ]
+
+    # -------------------------------------------------------
+    # ⭐ NEW VENDOR PERMISSIONS (FULL + VIEW-ONLY)
+    # -------------------------------------------------------
+    vendor_privileges = [
+
+        # Vendor — FULL ACCESS modules
+        *[
+            {
+                "role": "Vendor",
+                "module": module,
+                "can_view": True,
+                "can_add": True,
+                "can_edit": True,
+                "can_delete": True,
+                "can_search": True,
+                "can_import": True,
+                "can_export": True
+            }
+            for module in [
+                "Dashboard",
+                "Company Products",
+                "Bank Information",
+                "Bank Documents",
+                "Tax Information",
+                "Tax Documents",
+                "User Documents",
+                "Addresses"
+            ]
         ],
 
-        # ------------------------------------------------
-        # NEW CLEAN VENDOR PERMISSIONS (Only 6 modules)
-        # ------------------------------------------------
-       # -------------------------------
-# ⭐ VENDOR — LIMITED MODULES
-# -------------------------------
-*[  
-    {
-        "role": "Vendor",
-        "module": module,
-        "can_view": True,
-        "can_add": True,
-        "can_edit": True,
-        "can_delete": True,
-        "can_search": True,
-        "can_import": True,
-        "can_export": True
-    }
-    for module in [
-        "Dashboard",
-        "Company Products",
-        "Bank Information",
-        "Tax Information",
-        "User Documents",
-        "Addresses"
-    ]
-],
-
-# 👉 Vendor VIEW-ONLY access to Divisions
-{
-    "role": "Vendor",
-    "module": "Divisions",
-    "can_view": True
-}
-
+        # Vendor — VIEW ONLY module
+        {
+            "role": "Vendor",
+            "module": "Divisions",
+            "can_view": True,
+            "can_add": False,
+            "can_edit": False,
+            "can_delete": False,
+            "can_search": False,
+            "can_import": False,
+            "can_export": False
+        }
     ]
 
-    # INSERT PRIVILEGES
+    # -------------------------------------------------------
+    # MERGE vendor privileges into main privilege list
+    # -------------------------------------------------------
+    privileges_data.extend(vendor_privileges)
+
+    # -------------------------------------------------------
+    # INSERT PRIVILEGES INTO DATABASE
+    # -------------------------------------------------------
     for p in privileges_data:
         role_id = role_ids.get(p["role"])
         module_id = module_ids.get(p["module"])
@@ -376,7 +400,8 @@ def seed_privileges(session, role_ids, module_ids):
             continue
 
         exists = session.query(RoleModulePrivilege).filter_by(
-            role_id=role_id, module_id=module_id
+            role_id=role_id,
+            module_id=module_id
         ).first()
 
         if not exists:
