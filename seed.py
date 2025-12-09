@@ -278,121 +278,101 @@ def seed_modules(session):
 
 
 def seed_privileges(session, role_ids, module_ids):
+
+    # -------------------------------------------------------
+    # REMOVE all old vendor privileges before re-seeding
+    # -------------------------------------------------------
+    vendor_role_id = role_ids.get("Vendor")
+    if vendor_role_id:
+        session.query(RoleModulePrivilege).filter(
+            RoleModulePrivilege.role_id == vendor_role_id
+        ).delete()
+        session.commit()
+
     module_names = [
-    "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
-    "Countries", "States", "Cities","Addresses", "Tax Information", "Tax Documents",
-    "Product Categories", "Product Subcategories", "Products", "Users",
-    "Company Products", "Plans", "Dashboard", "Assign User Roles",
-    "User Product Search", "Bank Information", "Bank Documents",
-    "Divisions", "User Documents",
-    "Company Product Certificates", "Company Product Supply References",
-    "Category Master", "Category Details", 
-    "Sync ERP Vendor", "ERP", "KYC Status"        
+        "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+        "Countries", "States", "Cities", "Addresses", "Tax Information", "Tax Documents",
+        "Product Categories", "Product Subcategories", "Products", "Users",
+        "Company Products", "Plans", "Dashboard", "Assign User Roles",
+        "User Product Search", "Bank Information", "Bank Documents",
+        "Divisions", "User Documents",
+        "Company Product Certificates", "Company Product Supply References",
+        "Category Master", "Category Details",
+        "Sync ERP Vendor", "KYC Status"
     ]
 
-
-
-
     privileges_data = [
-    # Admin full access
-    *[
-        {
-            "role": "Admin",
-            "module": module,
-            "can_view": True,
-            "can_add": True,
-            "can_edit": True,
-            "can_delete": True,
-            "can_search": True,
-            "can_import": True,
-            "can_export": True
-        }
-        for module in module_names
-    ],
 
-    # Viewer read-only access
-    *[
-        {
-            "role": "Viewer",
-            "module": module,
-            "can_view": True
-        }
-        for module in module_names
-    ],
+        # ADMIN FULL
+        *[
+            { "role": "Admin", "module": module,
+              "can_view": True, "can_add": True, "can_edit": True,
+              "can_delete": True, "can_search": True,
+              "can_import": True, "can_export": True }
+            for module in module_names
+        ],
 
-    # Operator limited access
-    *[
-        {
-            "role": "Operator",
-            "module": module,
-            "can_view": True,
-            "can_search": module in ["Products", "Company Products", "Login Sessions"]
-        }
-        for module in ["Products", "Company Products", "Login Sessions"]
-    ],
+        # VIEWER
+        *[
+            { "role": "Viewer", "module": module, "can_view": True }
+            for module in module_names
+        ],
 
-    # Auditor view-only access
-    *[
-        {
-            "role": "Auditor",
-            "module": module,
-            "can_view": True,
-            "can_search": module in ["Products", "Company Products", "Login Sessions"]
-        }
-        for module in module_names
-    ],
+        # OPERATOR
+        *[
+            { "role": "Operator", "module": module, "can_view": True }
+            for module in ["Products", "Company Products", "Login Sessions"]
+        ],
 
-    # -------------------------------
-    # ⭐ Vendor FULL ACCESS
-    # -------------------------------
-    *[
-        {
-            "role": "Vendor",
-            "module": module,
-            "can_view": True,
-            "can_add": True,
-            "can_edit": True,
-            "can_delete": True,
-            "can_search": True,
-            "can_import": True,
-            "can_export": True
-        }
-        for module in [
-            "Tax Information",
-            "Bank Information",
-            "User Documents"
-        ]
-    ],
+        # AUDITOR
+        *[
+            { "role": "Auditor", "module": module, "can_view": True }
+            for module in module_names
+        ],
 
-    # -------------------------------
-    # ⭐ Vendor VIEW-ONLY ACCESS
-    # -------------------------------
-    *[
-        {
-            "role": "Vendor",
-            "module": module,
-            "can_view": True,
-            "can_add": False,
-            "can_edit": False,
-            "can_delete": False,
-            "can_search": False,
-            "can_import": False,
-            "can_export": False
-        }
-        for module in [
-            "Products",
-            "Product Categories",
-            "Product Subcategories",
-            "Company Products"
-        ]
-    ],
-]
+        # ------------------------------------------------
+        # NEW CLEAN VENDOR PERMISSIONS (Only 6 modules)
+        # ------------------------------------------------
+       # -------------------------------
+# ⭐ VENDOR — LIMITED MODULES
+# -------------------------------
+*[  
+    {
+        "role": "Vendor",
+        "module": module,
+        "can_view": True,
+        "can_add": True,
+        "can_edit": True,
+        "can_delete": True,
+        "can_search": True,
+        "can_import": True,
+        "can_export": True
+    }
+    for module in [
+        "Dashboard",
+        "Company Products",
+        "Bank Information",
+        "Tax Information",
+        "User Documents",
+        "Addresses"
+    ]
+],
 
+# 👉 Vendor VIEW-ONLY access to Divisions
+{
+    "role": "Vendor",
+    "module": "Divisions",
+    "can_view": True
+}
+
+    ]
+
+    # INSERT PRIVILEGES
     for p in privileges_data:
         role_id = role_ids.get(p["role"])
         module_id = module_ids.get(p["module"])
+
         if not role_id or not module_id:
-            print(f"⚠️ Skipping privilege for missing role or module: {p['role']} - {p['module']}" )
             continue
 
         exists = session.query(RoleModulePrivilege).filter_by(
@@ -400,7 +380,7 @@ def seed_privileges(session, role_ids, module_ids):
         ).first()
 
         if not exists:
-            privilege = RoleModulePrivilege(
+            session.add(RoleModulePrivilege(
                 role_id=role_id,
                 module_id=module_id,
                 can_view=p.get("can_view", False),
@@ -409,12 +389,11 @@ def seed_privileges(session, role_ids, module_ids):
                 can_delete=p.get("can_delete", False),
                 can_search=p.get("can_search", False),
                 can_import=p.get("can_import", False),
-                can_export=p.get("can_export", False)
-            )
-            session.add(privilege)
+                can_export=p.get("can_export", False),
+            ))
 
     session.commit()
-    print("✅ Role-module privileges seeded successfully.")
+    print("✅ Privileges seeded successfully!")
 
 
 def seed_user_roles(session, role_ids):

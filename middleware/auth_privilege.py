@@ -4,9 +4,9 @@ from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User
 import auth_utils
 import traceback
-PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/","/auth/", "/files/"]
 
-# Map HTTP methods to action names
+PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/", "/auth/", "/files/"]
+
 METHOD_ACTION_MAP = {
     "GET": "can_view",
     "POST": "can_add",
@@ -20,51 +20,42 @@ async def auth_and_privilege_middleware(request: Request, call_next):
 
     # Allow OPTIONS and public endpoints
     if request.method == "OPTIONS" or any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
-        try:
-            return await call_next(request)
-        except Exception as e:
-            traceback.print_exc()
-            raise e
+        return await call_next(request)
 
     db: Session = SessionLocal()
     try:
-        # --- Extract Bearer token ---
+        # Token extraction
         auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized: Missing or invalid token header",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise HTTPException(status_code=401, detail="Unauthorized: Missing or invalid token")
 
         token = auth_header.split(" ")[1]
         payload = auth_utils.decode_access_token(token)
         if not payload:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-        # --- Fetch user from DB ---
+        # Load User
         user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Token missing user ID")
-
         user = db.query(User).filter_by(id=user_id).first()
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
 
-        # Attach user object to request
         request.state.user = user
 
-        # --- Privilege check ---
-        # Skip privilege check for KYC endpoint
+        # Skip privilege check for KYC
         if path.startswith("/kyc/"):
             return await call_next(request)
 
-        path_parts = request.url.path.strip("/").split("/")
-        module_name = path_parts[0] if path_parts else None
+        # *** OPTION-1 FIX ***
+        # Skip privilege check ONLY for /modules/* API
+        parts = request.url.path.strip("/").split("/")
+        module_name = parts[0] if parts else None
+
+        if module_name == "modules":
+            return await call_next(request)
+        # *** END FIX ***
+
+        # Determine action
         endpoint_name = request.scope.get("endpoint").__name__ if request.scope.get("endpoint") else ""
         action = None
 
@@ -98,9 +89,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                     detail=f"Access denied for action '{action}' on module '{module_name}'"
                 )
 
-        # --- Request passes ---
-        response = await call_next(request)
-        return response
+        return await call_next(request)
 
     finally:
         db.close()
