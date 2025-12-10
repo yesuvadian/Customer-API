@@ -1,6 +1,7 @@
 import base64
 import datetime
 from operator import or_
+from sqlite3 import Binary
 import asyncpg
 from sqlalchemy import UUID, func
 from sqlalchemy.orm import Session
@@ -405,39 +406,39 @@ class ERPSyncService:
             cls.pool = await asyncpg.create_pool(**POSTGRES_CONFIG)
 
 
-    import base64
-
+ 
     @classmethod
     async def fetch_and_insert_partymastdoc(cls, db: Session, folder_name: str = None):
         users = db.query(User).filter(User.erp_external_id.isnot(None)).all()
         inserted_results = []
 
+        # Initialize ERP pool once
+        await ERPService.init_pool()
+
+        # Helper to get master ID
+        def get_master_id(name):
+            return db.query(CategoryMaster.id).filter(CategoryMaster.name == name).scalar()
+
+        company_master_id = get_master_id("Company Documents")
+        tax_master_id = get_master_id("Tax Documents")
+        bank_master_id = get_master_id("Bank Document Types")
+
         for user in users:
             erp_id = user.erp_external_id
             user_id = user.id
 
-            def get_master_id(name):
-                return db.query(CategoryMaster.id).filter(CategoryMaster.name == name).scalar()
-
-            company_master_id = get_master_id("Company Documents")
-            tax_master_id = get_master_id("Tax Documents")
-            bank_master_id = get_master_id("Bank Document Types")
-
-            # Check master completion
+            # Check if master is complete
             def is_master_complete(master_id):
-                required_count = (
-                    db.query(func.count(CategoryDetails.id))
-                    .filter(CategoryDetails.category_master_id == master_id)
-                    .scalar()
-                )
-                uploaded_count = (
-                    db.query(func.count(UserDocument.id))
-                    .filter(UserDocument.user_id == user_id)
-                    .join(CategoryDetails, UserDocument.category_detail_id == CategoryDetails.id)
-                    .filter(CategoryDetails.category_master_id == master_id)
-                    .filter(UserDocument.is_active == True)
-                    .scalar()
-                )
+                required_count = db.query(func.count(CategoryDetails.id)).filter(
+                    CategoryDetails.category_master_id == master_id
+                ).scalar()
+                uploaded_count = db.query(func.count(UserDocument.id)).join(
+                    CategoryDetails, UserDocument.category_detail_id == CategoryDetails.id
+                ).filter(
+                    UserDocument.user_id == user_id,
+                    CategoryDetails.category_master_id == master_id,
+                    UserDocument.is_active == True
+                ).scalar()
                 return uploaded_count == required_count
 
             include_company = is_master_complete(company_master_id)
@@ -447,49 +448,38 @@ class ERPSyncService:
             if not any([include_company, include_tax, include_bank]):
                 continue
 
-            all_docs = (
-                db.query(UserDocument, CategoryDetails)
-                .join(CategoryDetails, UserDocument.category_detail_id == CategoryDetails.id)
-                .filter(
-                    UserDocument.user_id == user_id,
-                    CategoryDetails.category_master_id.in_([
-                        company_master_id if include_company else -1,
-                        tax_master_id if include_tax else -1,
-                        bank_master_id if include_bank else -1
-                    ])
-                )
-                .all()
-            )
+            all_docs = db.query(UserDocument, CategoryDetails).join(
+                CategoryDetails, UserDocument.category_detail_id == CategoryDetails.id
+            ).filter(
+                UserDocument.user_id == user_id,
+                CategoryDetails.category_master_id.in_([
+                    company_master_id if include_company else -1,
+                    tax_master_id if include_tax else -1,
+                    bank_master_id if include_bank else -1
+                ])
+            ).all()
 
             for doc, cat in all_docs:
-
-                # ================================
-                # 🔥 Convert file_data → Base64
-                # ================================
+                # Convert file_data to Mongo Binary
+                mongo_binary = None
                 if doc.file_data:
-                    try:
-                        file_b64 = base64.b64encode(doc.file_data).decode("utf-8")
-                    except Exception:
-                        file_b64 = None
-                else:
-                    file_b64 = None
+                    if isinstance(doc.file_data, memoryview):
+                        file_bytes = bytes(doc.file_data)
+                    else:
+                        file_bytes = doc.file_data
+                    mongo_binary = Binary(file_bytes)
 
-                # ================================
-                # MONGO PAYLOAD
-                # ================================
                 mongo_payload = {
                     "filename": doc.document_name,
-                    "filedata": file_b64,
-                    "content_type": getattr(doc, "file_mime_type", None),
+                    "filetype": getattr(doc, "content_type", None),  # fixed field
+                    "fileContent": mongo_binary,
                     "foldername": folder_name
                 }
 
+                # Insert into Mongo (sync call; safe if fast)
                 mongo_result = MongoService.insert(mongo_payload)
-                mongo_id = mongo_result["id"]
+                mongo_id = mongo_result.get("id") or mongo_result.get("_id")  # safer
 
-                # ================================
-                # ERP PAYLOAD
-                # ================================
                 partymastdoc_payload = [{
                     "partymastdoc": {
                         "partymastdocid": None,
@@ -500,12 +490,12 @@ class ERPSyncService:
                     }
                 }]
 
-                await ERPService.init_pool()
-                # Call insert_data from ERPService
+                # Insert into ERP asynchronously
                 insert_response = await ERPService.insert_data(partymastdoc_payload)
                 inserted_results.extend(insert_response)
 
         return inserted_results
+
 
 
     @classmethod

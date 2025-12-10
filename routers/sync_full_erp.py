@@ -162,37 +162,7 @@ async def sync_erp_products(db: Session = Depends(get_db)):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-# =========================================
-# Endpoint: Fetch and Insert Party Mast Docs
-# =========================================
-@router.post("/sync_partymastdoc", summary="Fetch documents and insert into Mongo + Postgres")
-async def sync_partymastdoc(db: Session = Depends(get_db)):
-    """
-    Fetch all user documents, insert each into MongoDB, then wrap and insert
-    into PostgreSQL as 'partymastdoc' entries.
-    """
-    try:
-        # Ensure PostgreSQL pool is initialized
-        await ERPService.init_pool()
 
-        # Call the class method to fetch docs, insert into MongoDB, then Postgres
-        inserted_results = await ERPService.fetch_and_insert_partymastdoc(db)
-
-        return {
-            "status": "success",
-            "message": f"{len(inserted_results)} documents processed",
-            "data": inserted_results
-        }
-
-    except AttributeError:
-        # Likely cause: method not defined or wrong import
-        raise HTTPException(
-            status_code=500,
-            detail="ERPService.fetch_and_insert_partymastdoc method not found. Ensure it is defined with @classmethod."
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------- New endpoint ----------------
 @router.get("/sync_ombasic")

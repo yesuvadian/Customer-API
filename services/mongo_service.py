@@ -1,26 +1,27 @@
 from bson.objectid import ObjectId
+from bson.binary import Binary
 from pymongo.errors import ConfigurationError, ServerSelectionTimeoutError
 from database import mongo_collection
 from utils.serializers import serialize_document
+from utils.serializers import sanitize_for_mongo   # <-- add this
+
 
 class MongoService:
-    
+
     @staticmethod
     def health_check():
-            """
-            Simple MongoDB health check.
-            Returns True if the DB is reachable.
-            """
-            try:
-                # Ping command to check connection
-                mongo_collection.database.command("ping")
-                return {"status": "ok", "message": "MongoDB connection healthy"}
-            except ServerSelectionTimeoutError:
-                return {"status": "error", "message": "MongoDB unreachable"}
-            except ConfigurationError as e:
-                return {"status": "error", "message": f"MongoDB configuration error: {str(e)}"}
-            except Exception as e:
-                return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+        """
+        Simple MongoDB health check.
+        """
+        try:
+            mongo_collection.database.command("ping")
+            return {"status": "ok", "message": "MongoDB connection healthy"}
+        except ServerSelectionTimeoutError:
+            return {"status": "error", "message": "MongoDB unreachable"}
+        except ConfigurationError as e:
+            return {"status": "error", "message": f"MongoDB configuration error: {str(e)}"}
+        except Exception as e:
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @staticmethod
     def list_all():
@@ -41,17 +42,42 @@ class MongoService:
 
     @staticmethod
     def insert(payload: dict):
+        """
+        INSERT document into MongoDB.
+        Automatically converts:
+        - memoryview → bytes
+        - bytes → Binary()
+        """
+        payload = sanitize_for_mongo(payload)
         result = mongo_collection.insert_one(payload)
         return {"id": str(result.inserted_id)}
+    
+    @staticmethod
+    def insertall(payload: dict):
+        """
+        INSERT document into MongoDB.
+        Automatically converts:
+        - memoryview → bytes
+        - bytes → Binary()
+        """
+        payload = sanitize_for_mongo(payload)
+        result = mongo_collection.insert_one(payload)
+        return result
 
     @staticmethod
     def update(doc_id: str, payload: dict):
+        """
+        UPDATE document.
+        Auto-sanitizes payload.
+        """
         oid = ObjectId(doc_id)
 
         if not mongo_collection.find_one({"_id": oid}):
             raise ValueError("Document not found")
 
+        payload = sanitize_for_mongo(payload)
         mongo_collection.update_one({"_id": oid}, {"$set": payload})
+
         return {"id": doc_id}
 
     @staticmethod
