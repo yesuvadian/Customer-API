@@ -2,16 +2,20 @@ import json
 from typing import List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile,status
 import httpx
-from services import city_service
+from models import User, UserRole
+from services import city_service, userrole_service
 from sqlalchemy.orm import Session
-
+from services.plan_service import PlanService
 from auth_utils import get_registration_user
 from config import MAX_FILE_SIZE_KB, NOMINATIM_URL
 from database import get_db
 import schemas
+from services import user_service
 from services.companybankdocument_service import CompanyBankDocumentService
 from services.companybankinfo_service import CompanyBankInfoService
+from services.companyproduct_service import CompanyProductService
 from services.country_service import CountryService
+from services.product_service import ProductService
 from services.state_service import StateService
 from services.city_service import CityService
 from services.user_service import UserService  # import the class
@@ -20,6 +24,12 @@ from services.company_tax_service import CompanyTaxService
 from services.company_tax_document_service import CompanyTaxDocumentService
 from services import category_details_service 
 from utils.email_service import EmailService
+from services.plan_service import PlanService
+from services.userrole_service import UserRoleService
+from models import Role, UserRole
+
+
+
 
 router = APIRouter(prefix="/register", tags=["register"])
 address_service = UserAddressService()
@@ -30,10 +40,60 @@ stateservice = StateService()
 taxservice = CompanyTaxService()
 taxdocumentservice = CompanyTaxDocumentService()
 ALLOWED_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
-@router.post("/", response_model=schemas.User)
-def create_user(user: schemas.UserRegistor, db: Session = Depends(get_db)):
-    """Create a new user."""
-    return user_service_instance.create_user(db, user)
+
+
+@router.post("/quick_register", response_model=schemas.QuickRegisterResponse)
+def quick_register(payload: schemas.QuickRegister, db: Session = Depends(get_db)):
+
+    # 1️⃣ Fetch default plan
+    basic_plan = PlanService.get_basic_plan(db)
+
+    # 2️⃣ Fetch the Vendor role
+    vendor_role = db.query(Role).filter(Role.name == "Vendor").first()
+    if not vendor_role:
+        raise HTTPException(status_code=400, detail="Vendor role not found")
+
+    # 3️⃣ Build a user registration object
+    user_data = schemas.UserRegistor(
+        email=payload.email,
+        password="vendor@123",        # default password
+        firstname=payload.firstname,
+        lastname="",
+        phone_number=payload.phone_number,
+        plan_id=basic_plan.id,        # default plan UUID
+        isactive=True
+    )
+
+    # 4️⃣ Create user
+    user = user_service_instance.create_user(db, user_data)
+
+    # 5️⃣ Assign Vendor role automatically
+    db.add(
+        UserRole(
+            user_id=user.id,
+            role_id=vendor_role.id,
+        )
+    )
+    db.commit()
+
+    # 6️⃣ Assign product IDs
+    CompanyProductService.bulk_assign(
+        db=db,
+        company_id=user.id,
+        product_ids=payload.product_ids or []
+    )
+
+    # 7️⃣ Return clean QuickRegister response
+    return schemas.QuickRegisterResponse(
+        id=user.id,
+        firstname=user.firstname,
+        email=user.email,
+        phone_number=user.phone_number,
+        product_ids=payload.product_ids
+    )
+
+
+
 @router.get("/countries", response_model=list[schemas.CountryOut])
 def list_allcountries(skip: int = 0, limit: int = 100, search: str = None, db: Session = Depends(get_db)):
     return countryservice.get_countries(db, skip=skip, limit=limit, search=search)
@@ -177,7 +237,25 @@ def check_email_exists(email: str = Query(...), db: Session = Depends(get_db)):
 def check_phone_exists(phone: str = Query(...), db: Session = Depends(get_db)):
     exists = user_service_instance.is_phone_exists(db, phone)
     return {"exists": exists}
-
+@router.get("/products", response_model=list[schemas.ProductSchema])
+def list_products(
+    skip: int = 0,
+    limit: int = 100,
+    search: str | None = Query(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Return global product list for QuickRegister.
+    Supports:
+      - pagination
+      - search
+    """
+    return ProductService.get_products(
+        db=db,
+        skip=skip,
+        limit=limit,
+        search=search
+    )
 @router.post("/bank-info", response_model=schemas.CompanyBankInfoSchema, status_code=201)
 def create_bank_info_reg(
     data: schemas.CompanyBankInfoCreateSchema,
@@ -192,7 +270,6 @@ def create_bank_info_reg(
 @router.post("/addresses", response_model=schemas.UserAddressOut, status_code=status.HTTP_201_CREATED)
 def create_address_reg(address: schemas.UserAddressCreate, db: Session = Depends(get_db)):
     return address_service.create_user_address(db, address)
-
 
 @router.post("/bank_documents", response_model=schemas.CompanyBankDocumentSchema)
 async def upload_bank_document_reg(

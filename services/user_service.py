@@ -35,7 +35,7 @@ class UserService(UTCDateTimeMixin):
             )
         return user
     @classmethod
-    def create_user(cls,db: Session, user: schemas.UserRegistor):
+    def create_user(cls, db: Session, user):
         # Check if email already exists
         existing_user_email = db.query(User).filter(User.email == user.email).first()
         if existing_user_email:
@@ -43,7 +43,7 @@ class UserService(UTCDateTimeMixin):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
             )
-        
+
         # Check if phone number already exists
         existing_user_phone = db.query(User).filter(User.phone_number == user.phone_number).first()
         if existing_user_phone:
@@ -51,27 +51,33 @@ class UserService(UTCDateTimeMixin):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Phone number already registered"
             )
-        
+
         # Hash the password
         hashed_pw = get_password_hash(user.password)
-        
+
+        # FIX: Support both QuickRegister(first_name) & normal(firstname)
+        firstname = getattr(user, "firstname", None) or getattr(user, "first_name", None)
+        lastname = getattr(user, "lastname", None) or getattr(user, "last_name", None) or ""
+
         # Create user
         db_user = User(
             email=user.email,
             password_hash=hashed_pw,
-            firstname=user.firstname,
-            lastname=user.lastname,
+            firstname=firstname,
+            lastname=lastname,
             phone_number=user.phone_number,
             plan_id=user.plan_id,
             isactive=user.isactive,
             mts=cls._utc_now(),
             cts=cls._utc_now()
         )
+
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
-        
+
         return db_user
+
 
     @classmethod
     def update_user(cls,db: Session, user_id: uuid.UUID, updates: dict):
