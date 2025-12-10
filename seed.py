@@ -241,6 +241,10 @@ def seed_modules(session):
 {"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
 {"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
 
+{"name": "ERP Database", "description": "Check user pending KYC sections", "path": "mongo", "group_name": "ERP"},
+
+{"name": "Mongo Database", "description": "Check user pending KYC sections", "path": "erp", "group_name": "ERP"},
+
 
 
     ]
@@ -278,6 +282,18 @@ def seed_modules(session):
 
 
 def seed_privileges(session, role_ids, module_ids):
+    module_names = [
+    "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+    "Countries", "States", "Cities","Addresses", "Tax Information", "Tax Documents",
+    "Product Categories", "Product Subcategories", "Products", "Users",
+    "Company Products", "Plans", "Dashboard", "Assign User Roles",
+    "User Product Search", "Bank Information", "Bank Documents",
+    "Divisions", "User Documents",
+    "Company Product Certificates", "Company Product Supply References",
+    "Category Master", "Category Details", 
+    "Sync ERP Vendor", "ERP", "KYC Status","ERP Database","Mongo Database"        
+    ]
+
 
     # -------------------------------------------------------
     # REMOVE all Vendor privileges before re-seeding

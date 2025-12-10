@@ -162,37 +162,7 @@ async def sync_erp_products(db: Session = Depends(get_db)):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-# =========================================
-# Endpoint: Fetch and Insert Party Mast Docs
-# =========================================
-@router.post("/sync_partymastdoc", summary="Fetch documents and insert into Mongo + Postgres")
-async def sync_partymastdoc(db: Session = Depends(get_db)):
-    """
-    Fetch all user documents, insert each into MongoDB, then wrap and insert
-    into PostgreSQL as 'partymastdoc' entries.
-    """
-    try:
-        # Ensure PostgreSQL pool is initialized
-        await ERPService.init_pool()
 
-        # Call the class method to fetch docs, insert into MongoDB, then Postgres
-        inserted_results = await ERPService.fetch_and_insert_partymastdoc(db)
-
-        return {
-            "status": "success",
-            "message": f"{len(inserted_results)} documents processed",
-            "data": inserted_results
-        }
-
-    except AttributeError:
-        # Likely cause: method not defined or wrong import
-        raise HTTPException(
-            status_code=500,
-            detail="ERPService.fetch_and_insert_partymastdoc method not found. Ensure it is defined with @classmethod."
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------- New endpoint ----------------
 @router.get("/sync_ombasic")
@@ -284,27 +254,35 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
 
 
 
-@router.get(
-    "/sync_vendor_documents",
-    summary="Fetch vendor documents grouped by ERP ID",
-    description="Returns bank, tax, and user documents for all vendor users grouped by ERP external ID. Only includes users with a plan_id."
-)
-def sync_erp_vendor_documents(
-    folder_name: str = Query("vendor", description="Folder name for documents"),
+@router.post("/sync_erp_vendor_documents")
+async def sync_erp_vendor_documents(
+    folder_name: str = "vendor",
     db: Session = Depends(get_db)
 ):
-    """
-    Fetch all vendor documents, group by erp_external_id, mark ERP sync as completed.
-    Optionally specify `folder_name` for the documents.
-    """
     try:
-        data = ERPSyncService.build_vendor_json(db, folder_name=folder_name)
-    except HTTPException as e:
-        if e.status_code == status.HTTP_404_NOT_FOUND:
-            return {}
-        raise e
+        await ERPService.init_pool()  # always initialize connection pool
 
-    return data
+        # MUST await because the service method is async
+        data = await ERPSyncService.fetch_and_insert_partymastdoc(
+            db=db,
+            folder_name=folder_name
+        )
+
+        return {
+            "status": "success",
+            "message": f"{len(data)} documents synced",
+            "inserted": data
+        }
+
+    except AttributeError:
+        raise HTTPException(
+            status_code=500,
+            detail="Error: fetch_and_insert_partymastdoc() not found or not marked async"
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/sync_branchmast")
 async def sync_erp_branchmast(db: Session = Depends(get_db)):
     try:

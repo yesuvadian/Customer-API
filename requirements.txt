@@ -18,4 +18,4 @@ dotenv
 requests
 pandas
 asyncpg
-pymongo
+pymongo==3.13.0

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 
+from routers.totp import get_current_user
 from services.erp_service import ERPService
 
 router = APIRouter(
     prefix="/erp",
-    tags=["ERP PostgreSQL"]
+    tags=["ERP Database"],dependencies=[Depends(get_current_user)]
 )
 
 
