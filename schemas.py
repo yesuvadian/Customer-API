@@ -313,7 +313,7 @@ class UserAddressOut(BaseModel):
     is_primary: bool
     address_line1: str
     address_line2: Optional[str] = None
-    city_id_id: Optional[str] = None                         # ✅ Added
+    city_id: Optional[str] = None                         # ✅ Added
     state_id: Optional[int] = None
     country_id: Optional[int] = None
     postal_code: Optional[str] = None
@@ -485,7 +485,7 @@ class UserRegistor(BaseModel):
     phone_number: str
 
     # Added fields for Quick Register
-    plan_id: int | None = None       # Plan ID is an integer, not UUID
+    plan_id: UUID | None = None    # Plan ID is an integer, not UUID
     isactive: bool = True            # Keep only ONE isactive field
 
     class Config:

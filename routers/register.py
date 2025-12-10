@@ -2,7 +2,7 @@ import json
 from typing import List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile,status
 import httpx
-from models import User
+from models import User, UserRole
 from services import city_service, userrole_service
 from sqlalchemy.orm import Session
 from services.plan_service import PlanService
@@ -26,6 +26,10 @@ from services import category_details_service
 from utils.email_service import EmailService
 from services.plan_service import PlanService
 from services.userrole_service import UserRoleService
+from models import Role, UserRole
+
+
+
 
 router = APIRouter(prefix="/register", tags=["register"])
 address_service = UserAddressService()
@@ -44,28 +48,42 @@ def quick_register(payload: schemas.QuickRegister, db: Session = Depends(get_db)
     # 1️⃣ Fetch default plan
     basic_plan = PlanService.get_basic_plan(db)
 
-    # 2️⃣ Build a user registration object
+    # 2️⃣ Fetch the Vendor role
+    vendor_role = db.query(Role).filter(Role.name == "Vendor").first()
+    if not vendor_role:
+        raise HTTPException(status_code=400, detail="Vendor role not found")
+
+    # 3️⃣ Build a user registration object
     user_data = schemas.UserRegistor(
         email=payload.email,
-        password="vendor@123",              # default password
+        password="vendor@123",        # default password
         firstname=payload.firstname,
-        lastname="",                        # quick register uses no last name
+        lastname="",
         phone_number=payload.phone_number,
-        plan_id=basic_plan.id,              # default plan
+        plan_id=basic_plan.id,        # default plan UUID
         isactive=True
     )
 
-    # 3️⃣ Create user
+    # 4️⃣ Create user
     user = user_service_instance.create_user(db, user_data)
 
-    # 4️⃣ Assign product IDs
+    # 5️⃣ Assign Vendor role automatically
+    db.add(
+        UserRole(
+            user_id=user.id,
+            role_id=vendor_role.id,
+        )
+    )
+    db.commit()
+
+    # 6️⃣ Assign product IDs
     CompanyProductService.bulk_assign(
         db=db,
         company_id=user.id,
         product_ids=payload.product_ids or []
     )
 
-    # 5️⃣ Return ONLY the fields you want
+    # 7️⃣ Return clean QuickRegister response
     return schemas.QuickRegisterResponse(
         id=user.id,
         firstname=user.firstname,
