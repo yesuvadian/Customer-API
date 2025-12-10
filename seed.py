@@ -26,6 +26,8 @@ def seed_users(session):
          "phone_number": "7777777777", "password": "Operator@123"},
         {"first_name": "Auditor", "last_name": "User", "email": "auditor@relu.com",
          "phone_number": "6666666666", "password": "Auditor@123"},
+        {"first_name": "Vendor", "last_name": "User", "email": "vendor@relu.com",
+         "phone_number": "6666666666", "password": "vendor@123"},
     ]
 
     for u in users_data:
@@ -52,7 +54,8 @@ def seed_roles(session):
         {"name": "Admin", "description": "Full access to all modules"},
         {"name": "Viewer", "description": "Read-only access"},
         {"name": "Operator", "description": "Can scan and submit inventory"},
-        {"name": "Auditor", "description": "Can view scan history and audit trails"}
+        {"name": "Auditor", "description": "Can view scan history and audit trails"},
+        {"name": "Vendor", "description": "Can have access over products"},
     ]
 
     role_ids = {}
@@ -209,15 +212,15 @@ def seed_modules(session):
     modules_data = [
         {"name": "Roles", "description": "Manage roles", "path": "roles", "group_name": "User & Access"},
         {"name": "App Modules", "description": "Manage application modules", "path": "modules", "group_name": "User & Access"},
-        {"name": "User Roles", "description": "Assign roles to users", "path": "roles", "group_name": "User & Access"},
+        {"name": "User Roles", "description": "Assign roles to users", "path": "roles", "group_name": "User & Access", "is_active": False},
         {"name": "Role Permissions", "description": "Configure role-based privileges", "path": "role_module_privileges", "group_name": "User & Access"},
-        {"name": "Login Sessions", "description": "Track user login sessions", "path": "user_sessions", "group_name": "User & Access"},
+       {"name": "Login Sessions", "description": "Track user login sessions", "path": "user_sessions", "group_name": "User & Access", "is_active": False},
         {"name": "Countries", "description": "Manage country list", "path": "countries", "group_name": "Geography"},
         {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography"},
         {"name": "Cities", "description": "Manage cities list", "path": "cities", "group_name": "Geography"},
         {"name": "Addresses", "description": "User address book", "path": "addresses", "group_name": "User & Access"},
         {"name": "Tax Information", "description": "Company tax registration details", "path": "company_tax_info", "group_name": "Company"},
-        {"name": "Tax Documents", "description": "Upload company tax documents", "path": "company_tax_documents", "group_name": "Company"},
+        {"name": "Tax Documents", "description": "Upload company tax documents", "path": "company_tax_documents", "group_name": "Company", "is_active": False},
         {"name": "Product Categories", "description": "Define product categories", "path": "categories", "group_name": "Inventory"},
         {"name": "Product Subcategories", "description": "Define product subcategories", "path": "subcategories", "group_name": "Inventory"},
         {"name": "Products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
@@ -226,15 +229,14 @@ def seed_modules(session):
         {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access"},
          {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory"},
          {"name": "Assign User Roles", "description": "Assign roles to users", "path": "user_roles", "group_name": "User & Access"},
-         {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access"},
+         {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access", "is_active": False},
          {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
-        {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company"},
+        {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company", "is_active": False},
         {"name": "Company Product Certificates", "description": "Upload product performance certificates", "path": "company_product_certificates", "group_name": "Company"},
 {"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company"},
 {"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
 {"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company"},
-{"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP"},
-{"name": "ERP", "description": "update pending users to ERP", "path": "erpupdate", "group_name": "ERP"},
+{"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP", "is_active": False},
 {"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
 {"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
 {"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
@@ -248,25 +250,31 @@ def seed_modules(session):
     ]
 
     module_ids = {}
+
     for m in modules_data:
-        existing_module = session.query(Module).filter_by(name=m["name"]).first()
-        if not existing_module:
+        existing = session.query(Module).filter_by(name=m["name"]).first()
+
+        if not existing:
             module = Module(
                 name=m["name"],
                 description=m["description"],
                 path=m["path"],
                 group_name=m["group_name"],
-                is_active=True
+                is_active=m.get("is_active", True)
             )
             session.add(module)
             session.flush()
             module_ids[m["name"]] = module.id
+
         else:
-            existing_module.description = m["description"]
-            existing_module.path = m["path"]
-            existing_module.group_name = m["group_name"]
-            existing_module.is_active = True
-            module_ids[m["name"]] = existing_module.id
+            existing.description = m["description"]
+            existing.path = m["path"]
+            existing.group_name = m["group_name"]
+
+            # 🔥 MOST IMPORTANT FIX
+            existing.is_active = m.get("is_active", True)
+
+            module_ids[m["name"]] = existing.id
 
     session.commit()
     print("✅ Modules seeded successfully.")
@@ -287,13 +295,76 @@ def seed_privileges(session, role_ids, module_ids):
     ]
 
 
+    # -------------------------------------------------------
+    # REMOVE all Vendor privileges before re-seeding
+    # -------------------------------------------------------
+    vendor_role_id = role_ids.get("Vendor")
+    if vendor_role_id:
+        session.query(RoleModulePrivilege).filter(
+            RoleModulePrivilege.role_id == vendor_role_id
+        ).delete()
+        session.commit()
 
+    # -------------------------------------------------------
+    # ALL MODULES
+    # -------------------------------------------------------
+    module_names = [
+        "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+        "Countries", "States", "Cities", "Addresses", "Tax Information", "Tax Documents",
+        "Product Categories", "Product Subcategories", "Products", "Users",
+        "Company Products", "Plans", "Dashboard", "Assign User Roles",
+        "User Product Search", "Bank Information", "Bank Documents",
+        "Divisions", "User Documents",
+        "Company Product Certificates", "Company Product Supply References",
+        "Category Master", "Category Details",
+        "Sync ERP Vendor", "KYC Status"
+    ]
 
+    # -------------------------------------------------------
+    # PRIVILEGES DATA (ADMIN / VIEWER / OPERATOR / AUDITOR)
+    # -------------------------------------------------------
     privileges_data = [
-        # Admin full access
+
+        # ADMIN FULL ACCESS
         *[
             {
                 "role": "Admin",
+                "module": module,
+                "can_view": True, "can_add": True, "can_edit": True,
+                "can_delete": True, "can_search": True,
+                "can_import": True, "can_export": True
+            }
+            for module in module_names
+        ],
+
+        # VIEWER — only view
+        *[
+            { "role": "Viewer", "module": module, "can_view": True }
+            for module in module_names
+        ],
+
+        # OPERATOR — selected modules
+        *[
+            { "role": "Operator", "module": module, "can_view": True }
+            for module in ["Products", "Company Products", "Login Sessions"]
+        ],
+
+        # AUDITOR — view only all modules
+        *[
+            { "role": "Auditor", "module": module, "can_view": True }
+            for module in module_names
+        ]
+    ]
+
+    # -------------------------------------------------------
+    # ⭐ NEW VENDOR PERMISSIONS (FULL + VIEW-ONLY)
+    # -------------------------------------------------------
+    vendor_privileges = [
+
+        # Vendor — FULL ACCESS modules
+        *[
+            {
+                "role": "Vendor",
                 "module": module,
                 "can_view": True,
                 "can_add": True,
@@ -303,52 +374,54 @@ def seed_privileges(session, role_ids, module_ids):
                 "can_import": True,
                 "can_export": True
             }
-            for module in module_names
+            for module in [
+                "Dashboard",
+                "Company Products",
+                "Bank Information",
+                "Bank Documents",
+                "Tax Information",
+                "Tax Documents",
+                "User Documents",
+                "Addresses"
+            ]
         ],
-        # Viewer read-only access
-        *[
-            {
-                "role": "Viewer",
-                "module": module,
-                "can_view": True
-            }
-            for module in module_names
-        ],
-        # Operator limited access
-        *[
-            {
-                "role": "Operator",
-                "module": module,
-                "can_view": True,
-                "can_search": module in ["Products", "Company Products", "Login Sessions"]
-            }
-            for module in ["Products", "Company Products", "Login Sessions"]
-        ],
-        # Auditor view-only access
-        *[
-            {
-                "role": "Auditor",
-                "module": module,
-                "can_view": True,
-                "can_search": module in ["Products", "Company Products", "Login Sessions"]
-            }
-            for module in module_names
-        ]
+
+        # Vendor — VIEW ONLY module
+        {
+            "role": "Vendor",
+            "module": "Divisions",
+            "can_view": True,
+            "can_add": False,
+            "can_edit": False,
+            "can_delete": False,
+            "can_search": False,
+            "can_import": False,
+            "can_export": False
+        }
     ]
 
+    # -------------------------------------------------------
+    # MERGE vendor privileges into main privilege list
+    # -------------------------------------------------------
+    privileges_data.extend(vendor_privileges)
+
+    # -------------------------------------------------------
+    # INSERT PRIVILEGES INTO DATABASE
+    # -------------------------------------------------------
     for p in privileges_data:
         role_id = role_ids.get(p["role"])
         module_id = module_ids.get(p["module"])
+
         if not role_id or not module_id:
-            print(f"⚠️ Skipping privilege for missing role or module: {p['role']} - {p['module']}" )
             continue
 
         exists = session.query(RoleModulePrivilege).filter_by(
-            role_id=role_id, module_id=module_id
+            role_id=role_id,
+            module_id=module_id
         ).first()
 
         if not exists:
-            privilege = RoleModulePrivilege(
+            session.add(RoleModulePrivilege(
                 role_id=role_id,
                 module_id=module_id,
                 can_view=p.get("can_view", False),
@@ -357,12 +430,11 @@ def seed_privileges(session, role_ids, module_ids):
                 can_delete=p.get("can_delete", False),
                 can_search=p.get("can_search", False),
                 can_import=p.get("can_import", False),
-                can_export=p.get("can_export", False)
-            )
-            session.add(privilege)
+                can_export=p.get("can_export", False),
+            ))
 
     session.commit()
-    print("✅ Role-module privileges seeded successfully.")
+    print("✅ Privileges seeded successfully!")
 
 
 def seed_user_roles(session, role_ids):
@@ -370,7 +442,8 @@ def seed_user_roles(session, role_ids):
         {"email": "admin@relu.com", "role": "Admin"},
         {"email": "viewer@relu.com", "role": "Viewer"},
         {"email": "operator@relu.com", "role": "Operator"},
-        {"email": "auditor@relu.com", "role": "Auditor"}
+        {"email": "auditor@relu.com", "role": "Auditor"},
+        {"email": "vendor@relu.com", "role": "Vendor"}
     ]
 
     for ur in user_roles_data:
