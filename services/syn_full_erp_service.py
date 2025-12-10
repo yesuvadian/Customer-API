@@ -1,3 +1,4 @@
+import base64
 import datetime
 from operator import or_
 import asyncpg
@@ -66,7 +67,7 @@ class ERPSyncService:
                 "partyid": f"{user.firstname or ''} {user.lastname or ''}".strip(),
                 "partyname": f"{user.firstname or ''} {user.lastname or ''}".strip(),
                 "vtype": "SUPPLIER [GOODS]",
-                "agroupname": 1591714846604,
+                "gaccountname": 1591714846604,
                 "typename": "REGISTERED",
                 "gstpartytype": "DOMESTIC",
                 "grade": "A",
@@ -101,7 +102,8 @@ class ERPSyncService:
                 "ifsccode": bank_info.ifsc if bank_info else None,
                 "versionid": str(user.id),
                 "projectid": "AVPPC_HESCOM",
-                "rolename": "LICENSE_ROLE"
+                "rolename": "LICENSE_ROLE",
+                "partycat":  "SUPPLIER"
             }
 
             data = {"partymast": partymast}
@@ -311,7 +313,7 @@ class ERPSyncService:
                 {
                     "file_name": td.file_name,
                     "file_data": td.file_data,
-                    "category_detail_name": td.category_detail_name,
+                    "category_detail_name": td.category_detail.name,
                     "folder_name": folder_name
                 }
                 for td in tax_docs
@@ -321,7 +323,7 @@ class ERPSyncService:
                 {
                     "file_name": bd.file_name,
                     "file_data": bd.file_data,
-                    "category_detail_name": bd.category_detail_name,
+                    "category_detail_name": bd.document_type_detail.name,
                     "folder_name": folder_name
                 }
                 for bd in bank_docs
@@ -331,7 +333,7 @@ class ERPSyncService:
                 {
                     "file_name": ud.document_name,
                     "file_data": ud.file_data,
-                    "category_detail_name": ud.category_detail_name,
+                    "category_detail_name": ud.categorydetails.name,
                     "folder_name": folder_name
                 }
                 for ud in user_docs
@@ -402,8 +404,11 @@ class ERPSyncService:
         if cls.pool is None:
             cls.pool = await asyncpg.create_pool(**POSTGRES_CONFIG)
 
+
+    import base64
+
     @classmethod
-    async def fetch_and_insert_partymastdoc(cls, db: Session):
+    async def fetch_and_insert_partymastdoc(cls, db: Session, folder_name: str = None):
         users = db.query(User).filter(User.erp_external_id.isnot(None)).all()
         inserted_results = []
 
@@ -457,30 +462,52 @@ class ERPSyncService:
             )
 
             for doc, cat in all_docs:
+
+                # ================================
+                # 🔥 Convert file_data → Base64
+                # ================================
+                if doc.file_data:
+                    try:
+                        file_b64 = base64.b64encode(doc.file_data).decode("utf-8")
+                    except Exception:
+                        file_b64 = None
+                else:
+                    file_b64 = None
+
+                # ================================
+                # MONGO PAYLOAD
+                # ================================
                 mongo_payload = {
-                    "filename": doc.file_url.split("/")[-1] if doc.file_url else "1.doc",
-                    "filedata": doc.file_data or [],
-                    "foldername": "vendor"
+                    "filename": doc.document_name,
+                    "filedata": file_b64,
+                    "content_type": getattr(doc, "file_mime_type", None),
+                    "foldername": folder_name
                 }
 
                 mongo_result = MongoService.insert(mongo_payload)
                 mongo_id = mongo_result["id"]
 
+                # ================================
+                # ERP PAYLOAD
+                # ================================
                 partymastdoc_payload = [{
                     "partymastdoc": {
                         "partymastdocid": None,
-                        "partymastid": erp_id,
+                        "partymastid": int(erp_id),
                         "doctype": cat.name,
-                        "objected": mongo_id,
+                        "objectid": mongo_id,
                         "attachfilename": mongo_payload["filename"]
                     }
                 }]
 
-                await cls.init_pool()
-                result = await cls.insert_data(partymastdoc_payload)
-                inserted_results.extend(result)
+                await ERPService.init_pool()
+                # Call insert_data from ERPService
+                insert_response = await ERPService.insert_data(partymastdoc_payload)
+                inserted_results.extend(insert_response)
 
         return inserted_results
+
+
     @classmethod
     def build_omdetail(cls, db: Session, ombasic_id: str, company_id: UUID):
         """

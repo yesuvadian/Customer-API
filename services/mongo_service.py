@@ -4,6 +4,23 @@ from database import mongo_collection
 from utils.serializers import serialize_document
 
 class MongoService:
+    
+    @staticmethod
+    def health_check():
+            """
+            Simple MongoDB health check.
+            Returns True if the DB is reachable.
+            """
+            try:
+                # Ping command to check connection
+                mongo_collection.database.command("ping")
+                return {"status": "ok", "message": "MongoDB connection healthy"}
+            except ServerSelectionTimeoutError:
+                return {"status": "error", "message": "MongoDB unreachable"}
+            except ConfigurationError as e:
+                return {"status": "error", "message": f"MongoDB configuration error: {str(e)}"}
+            except Exception as e:
+                return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @staticmethod
     def list_all():

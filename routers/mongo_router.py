@@ -1,15 +1,18 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.params import Depends
+from auth_utils import get_current_user
 from services.mongo_service import MongoService
 
 router = APIRouter(
     prefix="/mongo",
-    tags=["MongoDB"]
+    tags=["MongoDB"],dependencies=[Depends(get_current_user)]
 )
 
 
 @router.get("/health")
 def health():
-    return {"status": "ok"}
+    return MongoService.health_check()
+
 
 
 @router.get("/")
