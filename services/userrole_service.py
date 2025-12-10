@@ -26,9 +26,6 @@ class UserRoleService:
 
     # ----------------- CREATE / ASSIGN BULK -----------------
     def update_users_for_role(self, role_id: int, updated_user_ids: List[UUID]) -> List[UserRole]:
-        """
-        Assigns users to a role and removes them from any other roles.
-        """
         results = []
 
         for user_id in updated_user_ids:
@@ -62,7 +59,8 @@ class UserRoleService:
     # ----------------- UPDATE -----------------
     def update_user_role(self, user_role_id: int, new_role_id: int) -> UserRole:
         assignment = self.get_user_role(user_role_id)
-        # Remove user from other roles
+
+        # Remove from other roles
         self.db.query(UserRole).filter(UserRole.user_id == assignment.user_id, UserRole.role_id != new_role_id).delete()
         self.db.commit()
 
@@ -88,18 +86,13 @@ class UserRoleService:
 
     # ----------------- SYNC -----------------
     def sync_roles_for_user(self, user_id: UUID, new_role_ids: Set[int]):
-        """
-        Synchronize roles for a user:
-        - Assign roles in new_role_ids not currently assigned
-        - Remove roles not in new_role_ids
-        """
         current_role_ids = self.get_roles_by_user(user_id)
 
         # Add new roles
         for role_id in new_role_ids - current_role_ids:
             self.assign_role_to_user(user_id, role_id)
 
-        # Remove roles no longer assigned
+        # Remove roles not in new_role_ids
         for role_id in current_role_ids - new_role_ids:
             self.unassign_role_from_user_by_role(user_id, role_id)
 
@@ -118,3 +111,12 @@ class UserRoleService:
                 role_users_map[email].append(role_name)
 
         return [{"email": email, "roles": roles} for email, roles in role_users_map.items()]
+
+    # ============================================================
+    # ⭐ NEW: FETCH VENDOR ROLE ID (NO HARDCODE) ⭐
+    # ============================================================
+    def get_vendor_role_id(self) -> int:
+        vendor = self.db.query(Role).filter(Role.name == "Vendor").first()
+        if not vendor:
+            raise ValueError("Vendor role not found in database.")
+        return vendor.id

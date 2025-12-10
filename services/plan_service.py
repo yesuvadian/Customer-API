@@ -94,3 +94,28 @@ class PlanService:
         db.delete(plan)
         db.commit()
         return plan
+
+    @classmethod
+    def get_basic_plan(cls, db: Session):
+        """
+        Returns the Basic plan automatically.
+        If not found, returns the first active plan.
+        """
+        # 1. Try to find BASIC plan by name
+        basic = db.query(Plan).filter(
+            Plan.planname.ilike("%basic%"), 
+            Plan.isactive == True
+        ).first()
+
+        if basic:
+            return basic
+
+        # 2. Fallback: first active plan
+        fallback = db.query(Plan).filter(Plan.isactive == True).first()
+        if fallback:
+            return fallback
+
+        raise HTTPException(
+            status_code=500,
+            detail="No active plan found — please create a Basic plan."
+        )
