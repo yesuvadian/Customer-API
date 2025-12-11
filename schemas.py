@@ -313,7 +313,7 @@ class UserAddressOut(BaseModel):
     is_primary: bool
     address_line1: str
     address_line2: Optional[str] = None
-    city_id: Optional[str] = None                         # ✅ Added
+    city_id: Optional[int] = None                         # ✅ Added
     state_id: Optional[int] = None
     country_id: Optional[int] = None
     postal_code: Optional[str] = None
