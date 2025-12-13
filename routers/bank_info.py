@@ -1,9 +1,10 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Form
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
+from models import User
 from schemas import CompanyBankInfoCreateSchema, CompanyBankInfoSchema, CompanyBankInfoUpdateSchema
 from services.companybankinfo_service import CompanyBankInfoService
 
@@ -34,21 +35,32 @@ def get_bank_info(bank_info_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank info not found")
     return bank_info
 
+from fastapi import Form
+
 @router.post("/", response_model=CompanyBankInfoSchema)
-def create_bank_info(data: CompanyBankInfoCreateSchema, db: Session = Depends(get_db)):
-    
-    company_id_str = get_current_user().id
-    
-    try:
-        company_id_uuid = UUID(company_id_str)
-    except ValueError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid Company ID format.")
-    
-    return CompanyBankInfoService.create_bank_info(
-        db,
-        company_id=company_id_uuid, 
-        data=data.dict() 
-    )
+def create_bank_info(
+    account_holder_name: str = Form(...),
+    account_number: str = Form(...),
+    ifsc: str = Form(...),
+    bank_name: str = Form(...),
+    branch_name: str = Form(""),   # FIXED
+    account_type_id: int = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+
+    company_id = UUID(str(current_user.id))
+
+    data = {
+        "account_holder_name": account_holder_name,
+        "bank_name": bank_name,
+        "branch_name": branch_name,
+        "account_number": account_number,
+        "ifsc": ifsc,
+        "account_type_detail_id": account_type_id
+    }
+
+    return CompanyBankInfoService.create_bank_info(db, company_id, data)
 
 @router.put("/{bank_info_id}", response_model=CompanyBankInfoSchema)
 def update_bank_info(bank_info_id: int, updates: CompanyBankInfoUpdateSchema, db: Session = Depends(get_db)):

@@ -65,8 +65,9 @@ def quick_register(payload: schemas.QuickRegister, db: Session = Depends(get_db)
         firstname=payload.firstname,
         lastname="",
         phone_number=payload.phone_number,
-        plan_id=basic_plan.id,        # default plan UUID
-        isactive=True
+        plan_id=basic_plan.id,        
+        isactive=True,
+        is_quick_registered=True      #  🔥 VERY IMPORTANT
     )
 
     # 4️⃣ Create user
@@ -80,6 +81,8 @@ def quick_register(payload: schemas.QuickRegister, db: Session = Depends(get_db)
         )
     )
     db.commit()
+
+    return user
 
     # 6️⃣ Assign product IDs
     CompanyProductService.bulk_assign(

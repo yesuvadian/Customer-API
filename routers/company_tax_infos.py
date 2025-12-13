@@ -23,17 +23,36 @@ def list_company_tax_infos(skip: int = 0, limit: int = 100, db: Session = Depend
     return service.get_company_tax_infos(db, skip=skip, limit=limit)
 
 
+from fastapi import Form
+from uuid import UUID
+from auth_utils import get_current_user
+
 @router.post("/", response_model=CompanyTaxInfoOut, status_code=status.HTTP_201_CREATED)
-def create_company_tax_info(tax_info: CompanyTaxInfoCreate, db: Session = Depends(get_db)):
-    """Create a new tax info record (generic)"""
+def create_tax_info_for_company(
+    pan: str = Form(...),
+    gstin: str = Form(None),
+    tan: str = Form(None),
+    financial_year: str = Form(None),
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    
+    """Vendor creates their own company tax info"""
+
+    # Convert user ID → UUID
+    try:
+        company_id_uuid = UUID(str(current_user.id))
+    except ValueError:
+        raise HTTPException(400, "Invalid company ID")
+
+    # Create tax info record
     return service.create_tax_info(
         db,
-        company_id=tax_info.company_id,
-        pan=tax_info.pan,
-        gstin=tax_info.gstin,
-        tan=tax_info.tan,
-        state_id=tax_info.state_id,
-        financial_year=tax_info.financial_year
+        company_id=company_id_uuid,
+        pan=pan,
+        gstin=gstin,
+        tan=tan,
+        financial_year=financial_year
     )
 
 

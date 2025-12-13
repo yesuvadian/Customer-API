@@ -119,6 +119,7 @@ class User(Base):
     firstname = Column(String)
     lastname = Column(String)
     phone_number = Column(String, nullable=False)
+    is_quick_registered = Column(Boolean, default=False)
     isactive = Column(Boolean, default=True)
     email_confirmed = Column(Boolean, default=False)
     phone_confirmed = Column(Boolean, default=False)
