@@ -82,7 +82,7 @@ def quick_register(payload: schemas.QuickRegister, db: Session = Depends(get_db)
     )
     db.commit()
 
-    return user
+    
 
     # 6️⃣ Assign product IDs
     CompanyProductService.bulk_assign(
