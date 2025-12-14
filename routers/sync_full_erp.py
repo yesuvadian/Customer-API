@@ -182,7 +182,7 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
 
         # ---------- INSERT ----------
         if insert_payload:
-            inserted_list = await ERPService.insert_data([insert_payload])
+            inserted_list = await ERPService.insert_data(insert_payload)
             rec = inserted_list[0]["ombasic"]
             omno = rec["omno"]
             ombasicid = rec["ombasicid"]
@@ -212,7 +212,7 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
 
         # ---------- UPDATE ----------
         if update_payload:
-            updated_list = await ERPService.update_data([update_payload])
+            updated_list = await ERPService.update_data(update_payload)
             rec = updated_list[0]["ombasic"]
             omno = rec["omno"]
 
