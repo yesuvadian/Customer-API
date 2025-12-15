@@ -25,6 +25,8 @@ class UserBase(BaseModel):
     firstname: Optional[str]
     lastname: Optional[str]
     phone_number: str
+    plan_id: Optional[UUID] = None   # ✅ ADD THIS
+
 
 class UserCreate(UserBase):
     password: str
@@ -192,6 +194,7 @@ class UserAddressUpdate(BaseModel):
     address_line2: Optional[str] = Field(None, max_length=255)
     postal_code: Optional[str] = Field(None, max_length=20)
     state_id: Optional[int] = None
+    city_id: Optional[int] = None
     country_id: Optional[int] = None
     modified_by: Optional[uuid.UUID] = None
 

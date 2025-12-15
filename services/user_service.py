@@ -67,6 +67,7 @@ class UserService(UTCDateTimeMixin):
             lastname=lastname,
             phone_number=user.phone_number,
             plan_id=user.plan_id,
+            is_quick_registered = getattr(user, "is_quick_registered", False),
             isactive=user.isactive,
             mts=cls._utc_now(),
             cts=cls._utc_now()

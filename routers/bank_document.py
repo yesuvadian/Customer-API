@@ -4,7 +4,8 @@ from fastapi import Response
 
 from auth_utils import get_current_user
 from database import get_db
-from schemas import CompanyBankDocumentSchema, CompanyBankInfoUpdateSchema
+from routers import bank_info
+from schemas import CompanyBankDocumentSchema, CompanyBankInfoUpdateSchema, User
 from services.companybankdocument_service import CompanyBankDocumentService
 
 
@@ -27,6 +28,7 @@ async def upload_bank_document(
     category_detail_id: int = Form(...),
     db: Session = Depends(get_db)
 ):
+    
     file_data = await file.read()
 
     return CompanyBankDocumentService.create_document(
