@@ -25,6 +25,8 @@ class UserBase(BaseModel):
     firstname: Optional[str]
     lastname: Optional[str]
     phone_number: str
+    plan_id: Optional[UUID] = None   # ✅ ADD THIS
+
 
 class UserCreate(UserBase):
     password: str
