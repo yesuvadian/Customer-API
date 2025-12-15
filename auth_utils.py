@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
-
+from fastapi import Depends, HTTPException, Request, status
 from database import get_db
 from models import Module, PasswordHistory, PasswordResetToken, Plan, Role, RoleModulePrivilege, User, UserRole, UserSecurity, UserSession
 from security_utils import get_password_hash, verify_password
@@ -376,28 +376,37 @@ def authenticate_user(db: Session, username: str, password: str, request=None):
 # ==============================
 # Get Current User
 # ==============================
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+from fastapi import Depends, HTTPException, Request, status
+
+def get_current_user(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    # Standard credentials exception used on decode/lookup failures
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    # Decode JWT
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id_str = payload.get("sub")
         if not user_id_str:
             raise credentials_exception
         user_id = uuid.UUID(user_id_str)
-    except (JWTError, ValueError):
+    except Exception:
         raise credentials_exception
 
+    # Get user
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise credentials_exception
 
+    # Allow everything else
     return user
-
-
 
 
 

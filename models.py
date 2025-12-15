@@ -19,6 +19,8 @@ from sqlalchemy.ext.declarative import declarative_base
 #Base = declarative_base()
 
 class AddressTypeEnum(PyEnum):
+    office = "office"
+    communication = "communication"
     registered = "registered"
     corporate = "corporate"
     billing = "billing"
@@ -26,6 +28,7 @@ class AddressTypeEnum(PyEnum):
     factory = "factory"
     warehouse = "warehouse"
     other = "other"
+
 
 class TaxStatusEnum(PyEnum):
     pending = "pending"
@@ -116,6 +119,7 @@ class User(Base):
     firstname = Column(String)
     lastname = Column(String)
     phone_number = Column(String, nullable=False)
+    is_quick_registered = Column(Boolean, default=False)
     isactive = Column(Boolean, default=True)
     email_confirmed = Column(Boolean, default=False)
     phone_confirmed = Column(Boolean, default=False)
@@ -722,9 +726,9 @@ class CompanyTaxInfo(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     company_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
-    pan = Column(String(10), unique=True, nullable=False)
-    gstin = Column(String(15), unique=True)
-    tan = Column(String(10), unique=True)
+    pan = Column(String(10), nullable=False)
+    gstin = Column(String(15), nullable=False)
+    tan = Column(String(10),  nullable=False)
     financial_year = Column(String(9))
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))

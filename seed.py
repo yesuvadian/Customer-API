@@ -27,7 +27,7 @@ def seed_users(session):
         {"first_name": "Auditor", "last_name": "User", "email": "auditor@relu.com",
          "phone_number": "6666666666", "password": "Auditor@123"},
         {"first_name": "Vendor", "last_name": "User", "email": "vendor@relu.com",
-         "phone_number": "6666666666", "password": "vendor@123"},
+         "phone_number": "5555555555", "password": "vendor@123"},
     ]
 
     for u in users_data:
