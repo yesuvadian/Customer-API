@@ -18,7 +18,6 @@ class UserDocumentService:
         division_id: UUID,
         document_name: str,
         category_detail_id: UUID,
-        # 🌟 NEW: Add company_product_id as an argument
         company_product_id: Optional[int] = None, 
         document_type: Optional[str] = None,
         document_url: Optional[str] = None,
@@ -29,7 +28,22 @@ class UserDocumentService:
         expiry_date: Optional[datetime] = None,
         uploaded_by: Optional[UUID] = None
     ) -> UserDocument:
-        
+        if category_detail_id is not None:
+            existing = (
+                self.db.query(UserDocument)
+                .filter(
+                    UserDocument.user_id == user_id,
+                    UserDocument.division_id == division_id,
+                    UserDocument.category_detail_id == category_detail_id,
+                    UserDocument.company_product_id == company_product_id    # 🌟 NEW: Also check company_product_id
+                )
+                .first()
+            )
+
+            if existing:
+                raise ValueError(
+                    "Document already uploaded for this category. Delete the existing one to upload again."
+                )
         uploaded_by = uploaded_by or user_id
         document = UserDocument(
             user_id=user_id,
@@ -41,7 +55,6 @@ class UserDocumentService:
             file_size=len(file_data) if file_data else None,
             content_type=content_type,
             category_detail_id=category_detail_id,
-            # 🌟 NEW: Assign the field
             company_product_id=company_product_id, 
             om_number=om_number,
             expiry_date=expiry_date,
@@ -161,3 +174,43 @@ class UserDocumentService:
         self.db.delete(doc)
         self.db.commit()
         return True
+    
+    def list_documents_by_filters(self, user_id: UUID, division_id: UUID, company_product_id: Optional[int]):
+        q = (
+            self.db.query(UserDocument)
+            .options(*self._eager_load_options())
+            .filter(UserDocument.user_id == user_id)
+            .filter(UserDocument.division_id == division_id)
+        )
+
+        if company_product_id is not None:
+            q = q.filter(UserDocument.company_product_id == company_product_id)
+
+        return q.order_by(UserDocument.cts.desc()).all()
+    def delete_by_filters(
+    self,
+    user_id: UUID,
+    division_id: UUID,
+    category_detail_id: int
+) -> int:
+
+        query = (
+            self.db.query(UserDocument)
+            .filter(UserDocument.user_id == user_id)
+            .filter(UserDocument.division_id == division_id)
+            .filter(UserDocument.category_detail_id == category_detail_id)
+        )
+
+        docs = query.all()
+
+        if not docs:
+            return 0
+
+        count = len(docs)
+
+        for doc in docs:
+            self.db.delete(doc)
+
+        self.db.commit()
+        return count
+

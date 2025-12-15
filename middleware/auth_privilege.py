@@ -3,10 +3,12 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User
 import auth_utils
-import traceback
-PUBLIC_ENDPOINTS = ["/token", "/docs", "/openapi.json", "/redoc", "/register/","/auth/", "/files/"]
 
-# Map HTTP methods to action names
+PUBLIC_ENDPOINTS = [
+    "/token", "/docs", "/openapi.json", "/redoc",
+    "/register/", "/auth/", "/files/"
+]
+
 METHOD_ACTION_MAP = {
     "GET": "can_view",
     "POST": "can_add",
@@ -20,51 +22,53 @@ async def auth_and_privilege_middleware(request: Request, call_next):
 
     # Allow OPTIONS and public endpoints
     if request.method == "OPTIONS" or any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
-        try:
-            return await call_next(request)
-        except Exception as e:
-            traceback.print_exc()
-            raise e
+        return await call_next(request)
 
     db: Session = SessionLocal()
     try:
-        # --- Extract Bearer token ---
+        # ---------------- TOKEN VALIDATION ----------------
         auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized: Missing or invalid token header",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise HTTPException(status_code=401, detail="Unauthorized: Missing or invalid token")
 
         token = auth_header.split(" ")[1]
         payload = auth_utils.decode_access_token(token)
         if not payload:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-        # --- Fetch user from DB ---
         user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Token missing user ID")
-
         user = db.query(User).filter_by(id=user_id).first()
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
 
-        # Attach user object to request
         request.state.user = user
 
-        # --- Privilege check ---
-        # Skip privilege check for KYC endpoint
+        # Skip privilege check for /kyc/**
         if path.startswith("/kyc/"):
             return await call_next(request)
 
-        path_parts = request.url.path.strip("/").split("/")
-        module_name = path_parts[0] if path_parts else None
+        # ---------------- MODULE NAME ----------------
+        parts = request.url.path.strip("/").split("/")
+        module_name = parts[0] if parts else None
+
+        # -------------------------------------------------------
+        # OPTION-1: Skip privilege check ONLY for /modules/**
+        # because these are used in UI role privilege screen
+        # -------------------------------------------------------
+        if module_name == "modules":
+            return await call_next(request)
+
+        # -------------------------------------------------------
+        # FIX: Skip privilege check for listing endpoints:
+        # Example: GET /products/?skip=0  (products list)
+        # Vendor should NOT be blocked for list APIs.
+        # -------------------------------------------------------
+        if request.method == "GET" and len(parts) == 1:
+            # /products/
+            return await call_next(request)
+        # -------------------------------------------------------
+
+        # Determine permission type for request
         endpoint_name = request.scope.get("endpoint").__name__ if request.scope.get("endpoint") else ""
         action = None
 
@@ -75,32 +79,34 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         else:
             action = METHOD_ACTION_MAP.get(request.method)
 
-        if module_name and action:
-            module = db.query(Module).filter_by(path=module_name).first()
-            if not module:
-                raise HTTPException(status_code=404, detail=f'Module "{module_name}" not registered')
+        # If no module or no action → skip
+        if not module_name or not action:
+            return await call_next(request)
 
-            user_roles = db.query(UserRole).filter_by(user_id=user.id).all()
-            if not user_roles:
-                raise HTTPException(status_code=403, detail="User has no assigned roles")
+        # ---------------- MODULE + PRIVILEGE CHECK ----------------
+        module = db.query(Module).filter_by(path=module_name).first()
+        if not module:
+            raise HTTPException(status_code=404, detail=f'Module "{module_name}" not registered')
 
-            role_ids = [r.role_id for r in user_roles]
+        user_roles = db.query(UserRole).filter_by(user_id=user.id).all()
+        if not user_roles:
+            raise HTTPException(status_code=403, detail="User has no assigned roles")
 
-            allowed = db.query(RoleModulePrivilege).filter(
-                RoleModulePrivilege.role_id.in_(role_ids),
-                RoleModulePrivilege.module_id == module.id,
-                getattr(RoleModulePrivilege, action) == True
-            ).first()
+        role_ids = [r.role_id for r in user_roles]
 
-            if not allowed:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Access denied for action '{action}' on module '{module_name}'"
-                )
+        allowed = db.query(RoleModulePrivilege).filter(
+            RoleModulePrivilege.role_id.in_(role_ids),
+            RoleModulePrivilege.module_id == module.id,
+            getattr(RoleModulePrivilege, action) == True
+        ).first()
 
-        # --- Request passes ---
-        response = await call_next(request)
-        return response
+        if not allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied for action '{action}' on module '{module_name}'"
+            )
+
+        return await call_next(request)
 
     finally:
         db.close()

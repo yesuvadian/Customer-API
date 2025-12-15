@@ -23,44 +23,53 @@ async def create_user_document(
     document_name: str = Form(...),
     document_type: str = Form(...),
     category_detail_id: Optional[int] = Form(None),
+    company_product_id: Optional[int] = Form(None), 
     om_number: Optional[str] = Form(None),
     expiry_date_str: Optional[str] = Form(None, alias="expiry_date"), 
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
     service = UserDocumentService(db)
+
+    # Read file
     contents = await file.read()
 
     # Convert expiry_date string to datetime object
     expiry_date_dt = None
     if expiry_date_str:
         try:
-            # 1. Strip any time or timezone data to get just the date part (YYYY-MM-DD)
-            date_part = expiry_date_str.split('T')[0] 
-            # 2. Parse the date string into a naive datetime object
+            date_part = expiry_date_str.split('T')[0]
             naive_dt = datetime.strptime(date_part, '%Y-%m-%d')
-            # 3. Now make the naive datetime object UTC aware
             expiry_date_dt = UTCDateTimeMixin._make_aware(naive_dt)
-        except Exception: # Catch any parsing or attribute error from the string/date conversion
+        except Exception:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="Invalid expiry_date format. Must be in YYYY-MM-DD format."
             )
-            
-    document = service.create_document(
-        user_id=user_id,
-        division_id=division_id,
-        document_name=document_name,
-        document_type=document_type,
-        document_url=None,
-        file_data=contents,
-        file_size=len(contents),
-        content_type=file.content_type,
-        category_detail_id=category_detail_id,
-        om_number=om_number,
-        expiry_date=expiry_date_dt # Pass the converted datetime object
-    )
-    return document
+
+    # -----------------------------
+    # 🔥 WRAP CREATE IN TRY/EXCEPT
+    # -----------------------------
+    try:
+        document = service.create_document(
+            user_id=user_id,
+            division_id=division_id,
+            document_name=document_name,
+            document_type=document_type,
+            document_url=None,
+            file_data=contents,
+            file_size=len(contents),
+            content_type=file.content_type,
+            category_detail_id=category_detail_id,
+            company_product_id=company_product_id, 
+            om_number=om_number,
+            expiry_date=expiry_date_dt
+        )
+        return document
+
+    except ValueError as e:
+        # Convert ValueError to HTTP 400
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ----------------- READ -----------------
@@ -84,12 +93,13 @@ def list_user_documents(skip: int = 0, limit: int = 100, db: Session = Depends(g
 @router.get("/user/{user_id}", response_model=List[UserDocumentResponse])
 def list_documents_by_user(
     user_id: UUID,
-    division_id: UUID = Query(...), # FIXED: Required for filtering by division
+    division_id: UUID = Query(...),
+    company_product_id: Optional[int] = Query(None),
     db: Session = Depends(get_db)
 ):
     service = UserDocumentService(db)
-    # This must call the new service method below
-    return service.list_documents_by_user_and_division(user_id, division_id)
+    return service.list_documents_by_filters(user_id, division_id, company_product_id)
+
 
 
 @router.get("/expired", response_model=List[UserDocumentResponse])
@@ -124,3 +134,23 @@ def delete_user_document(document_id: UUID, db: Session = Depends(get_db)):
         return {"message": "User document deleted successfully"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    
+@router.delete("/bulk/delete", response_model=dict)
+def delete_documents_by_filters(
+    user_id: UUID = Query(...),
+    division_id: UUID = Query(...),
+    category_detail_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    service = UserDocumentService(db)
+
+    deleted_count = service.delete_by_filters(
+        user_id=user_id,
+        division_id=division_id,
+        category_detail_id=category_detail_id
+    )
+
+    return {
+        "message": f"Deleted {deleted_count} document(s) successfully.",
+        "deleted_count": deleted_count
+    }

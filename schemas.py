@@ -313,7 +313,7 @@ class UserAddressOut(BaseModel):
     is_primary: bool
     address_line1: str
     address_line2: Optional[str] = None
-    city_id_id: Optional[str] = None                         # ✅ Added
+    city_id: Optional[int] = None                         # ✅ Added
     state_id: Optional[int] = None
     country_id: Optional[int] = None
     postal_code: Optional[str] = None
@@ -432,7 +432,27 @@ class CompanyProductSchema(BaseModel):
         allow_population_by_field_name = True
 
 
+from typing import List, Optional
+from pydantic import BaseModel
 
+class QuickRegister(BaseModel):
+    firstname: str
+    email: str
+    phone_number: str
+    product_ids: List[int] = []
+
+class QuickRegisterResponse(BaseModel):
+    id: UUID
+    firstname: str
+    email: str
+    phone_number: str
+    product_ids: List[int] = []
+
+    class Config:
+        orm_mode = True
+
+
+    
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -463,9 +483,15 @@ class UserRegistor(BaseModel):
     firstname: str
     lastname: str
     phone_number: str
-    isactive:bool
-    plan_id: UUID | None = None  # Add this field
 
+    # Added fields for Quick Register
+    plan_id: UUID | None = None    # Plan ID is an integer, not UUID
+    isactive: bool = True            # Keep only ONE isactive field
+
+    class Config:
+        from_attributes = True
+
+    
 class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
