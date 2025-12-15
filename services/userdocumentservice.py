@@ -34,7 +34,8 @@ class UserDocumentService:
                 .filter(
                     UserDocument.user_id == user_id,
                     UserDocument.division_id == division_id,
-                    UserDocument.category_detail_id == category_detail_id
+                    UserDocument.category_detail_id == category_detail_id,
+                    UserDocument.company_product_id == company_product_id    # 🌟 NEW: Also check company_product_id
                 )
                 .first()
             )
@@ -186,3 +187,30 @@ class UserDocumentService:
             q = q.filter(UserDocument.company_product_id == company_product_id)
 
         return q.order_by(UserDocument.cts.desc()).all()
+    def delete_by_filters(
+    self,
+    user_id: UUID,
+    division_id: UUID,
+    category_detail_id: int
+) -> int:
+
+        query = (
+            self.db.query(UserDocument)
+            .filter(UserDocument.user_id == user_id)
+            .filter(UserDocument.division_id == division_id)
+            .filter(UserDocument.category_detail_id == category_detail_id)
+        )
+
+        docs = query.all()
+
+        if not docs:
+            return 0
+
+        count = len(docs)
+
+        for doc in docs:
+            self.db.delete(doc)
+
+        self.db.commit()
+        return count
+
