@@ -134,3 +134,23 @@ def delete_user_document(document_id: UUID, db: Session = Depends(get_db)):
         return {"message": "User document deleted successfully"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    
+@router.delete("/bulk/delete", response_model=dict)
+def delete_documents_by_filters(
+    user_id: UUID = Query(...),
+    division_id: UUID = Query(...),
+    category_detail_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    service = UserDocumentService(db)
+
+    deleted_count = service.delete_by_filters(
+        user_id=user_id,
+        division_id=division_id,
+        category_detail_id=category_detail_id
+    )
+
+    return {
+        "message": f"Deleted {deleted_count} document(s) successfully.",
+        "deleted_count": deleted_count
+    }
