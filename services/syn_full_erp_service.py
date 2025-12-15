@@ -149,20 +149,20 @@ class ERPSyncService:
         update_payload = []
 
         for p in products:
+            sku = p.sku or ""
+            desc = p.description or ""
+
             data = {
                 "itemmaster": {
                     "subgroup": p.category_obj.id if p.category_obj else None,
                     "subgroup2": p.subcategory_obj.id if p.subcategory_obj else None,
-                    "itemid": p.sku,
-                    "itemdesc": p.description,
+                    "itemid": f"{sku}-{desc}",   # concatenated
+                    "itemdesc": desc,
                     "createdfrom": "APP",
-                    "maingroup":1
- 
-                    
+                    "maingroup": 1
                 }
             }
-
-            # -------- UPDATE case --------
+                # -------- UPDATE case --------
             if p.erp_external_id:
                 data["itemmaster"]["itemmasterid"] = p.erp_external_id
                 update_payload.append(data)
