@@ -140,6 +140,7 @@ def delete_documents_by_filters(
     user_id: UUID = Query(...),
     division_id: UUID = Query(...),
     category_detail_id: int = Query(...),
+    company_product_id: Optional[int] = Query(None),  # ✅ ADD THIS
     db: Session = Depends(get_db),
 ):
     service = UserDocumentService(db)
@@ -147,7 +148,8 @@ def delete_documents_by_filters(
     deleted_count = service.delete_by_filters(
         user_id=user_id,
         division_id=division_id,
-        category_detail_id=category_detail_id
+        category_detail_id=category_detail_id,
+        company_product_id=company_product_id  # ✅ PASS THIS
     )
 
     return {

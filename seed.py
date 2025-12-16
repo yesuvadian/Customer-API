@@ -27,7 +27,7 @@ def seed_users(session):
         {"first_name": "Auditor", "last_name": "User", "email": "auditor@relu.com",
          "phone_number": "6666666666", "password": "Auditor@123"},
         {"first_name": "Vendor", "last_name": "User", "email": "vendor@relu.com",
-         "phone_number": "6666666666", "password": "vendor@123"},
+         "phone_number": "5555555555", "password": "vendor@123"},
     ]
 
     for u in users_data:
@@ -240,10 +240,8 @@ def seed_modules(session):
 {"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
 {"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
 {"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
-
-{"name": "ERP Database", "description": "Check user pending KYC sections", "path": "mongo", "group_name": "ERP"},
-
-{"name": "Mongo Database", "description": "Check user pending KYC sections", "path": "erp", "group_name": "ERP"},
+{"name": "ERP Database","description": "Internal ERP DB access (backend only)","path": "erp_database","group_name": "ERP","is_active": False},
+{"name": "Mongo Database","description": "Internal Mongo DB access (backend only)", "path": "mongo_database", "group_name": "ERP", "is_active": False}
 
 
 
@@ -291,7 +289,7 @@ def seed_privileges(session, role_ids, module_ids):
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
     "Category Master", "Category Details", 
-    "Sync ERP Vendor", "ERP", "KYC Status","ERP Database","Mongo Database"        
+    "Sync ERP Vendor","KYC Status"      
     ]
 
 

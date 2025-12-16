@@ -93,3 +93,18 @@ def filter_users_by_product_details(
         skip=skip,
         limit=limit
     )
+
+@router.post("/complete_onboarding")
+def complete_onboarding(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    user = current_user   # already authenticated user
+
+    if not user.is_quick_registered:
+        return {"message": "Onboarding already completed"}
+
+    user.is_quick_registered = False
+    db.commit()
+
+    return {"message": "Onboarding completed successfully"}

@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
-
+from fastapi import Depends, HTTPException, Request, status
 from database import get_db
 from models import Module, PasswordHistory, PasswordResetToken, Plan, Role, RoleModulePrivilege, User, UserRole, UserSecurity, UserSession
 from security_utils import get_password_hash, verify_password
@@ -219,32 +219,59 @@ def login_user(db: Session, email: str, password: str):
         roles = db.query(Role).filter(Role.id.in_(role_ids)).all()
         role_names = [r.name for r in roles]
  
-        # Step 7: Privileges
-        privileges: Dict[str, Dict[str, bool]] = {}
-        module_map = {m.id: m.name for m in db.query(Module).all()}
+        # -------------------------------------------------------
+        # Step 7: Privileges (DO NOT filter by is_active)
+        # -------------------------------------------------------
+
+        modules_map = {
+            m.id: {
+                "name": m.name,
+                "is_active": m.is_active  # UI visibility ONLY
+            }
+            for m in db.query(Module).all()
+        }
+
+        filtered_privileges = {}
+
         raw_privs = db.query(RoleModulePrivilege).filter(
-            RoleModulePrivilege.role_id.in_(role_ids)
+            RoleModulePrivilege.role_id.in_(
+                [r.role_id for r in db.query(UserRole).filter_by(user_id=user.id)]
+            )
         ).all()
- 
+
         for priv in raw_privs:
-            mod_name = module_map.get(priv.module_id)
-            if not mod_name:
+            module_info = modules_map.get(priv.module_id)
+            if not module_info:
                 continue
- 
-            if mod_name not in privileges:
-                privileges[mod_name] = {
-                    "can_add": False,
+
+            mod_name = module_info["name"]
+
+            if mod_name not in filtered_privileges:
+                filtered_privileges[mod_name] = {
                     "can_view": False,
+                    "can_add": False,
                     "can_edit": False,
                     "can_delete": False,
                     "can_search": False,
                     "can_import": False,
-                    "can_export": False
+                    "can_export": False,
+                    "is_active": module_info["is_active"],  # 🔥 IMPORTANT
                 }
- 
-            for key in privileges[mod_name]:
-                privileges[mod_name][key] |= getattr(priv, key)
- 
+
+            for key in [
+                "can_view",
+                "can_add",
+                "can_edit",
+                "can_delete",
+                "can_search",
+                "can_import",
+                "can_export",
+            ]:
+                filtered_privileges[mod_name][key] |= getattr(priv, key)
+
+
+
+        
         # Step 8: Plan info
         plan = None
         if user.plan_id:
@@ -274,7 +301,8 @@ def login_user(db: Session, email: str, password: str):
                 "roles": role_names,
                 "plan": plan
             },
-            "privileges": privileges
+            "privileges": filtered_privileges
+
         }
  
     except HTTPException:
@@ -376,28 +404,37 @@ def authenticate_user(db: Session, username: str, password: str, request=None):
 # ==============================
 # Get Current User
 # ==============================
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+from fastapi import Depends, HTTPException, Request, status
+
+def get_current_user(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    # Standard credentials exception used on decode/lookup failures
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    # Decode JWT
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id_str = payload.get("sub")
         if not user_id_str:
             raise credentials_exception
         user_id = uuid.UUID(user_id_str)
-    except (JWTError, ValueError):
+    except Exception:
         raise credentials_exception
 
+    # Get user
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise credentials_exception
 
+    # Allow everything else
     return user
-
-
 
 
 
