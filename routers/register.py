@@ -43,8 +43,26 @@ ALLOWED_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 
 @router.post("/", response_model=schemas.User)
 def create_user(user: schemas.UserRegistor, db: Session = Depends(get_db)):
-    """Create a new user."""
-    return user_service_instance.create_user(db, user)
+    """Create a new user and assign Vendor role by default."""
+
+    # 1️⃣ Create user
+    new_user = user_service_instance.create_user(db, user)
+
+    # 2️⃣ Fetch Vendor role
+    vendor_role = db.query(Role).filter(Role.name == "Vendor").first()
+    if not vendor_role:
+        raise HTTPException(status_code=400, detail="Vendor role not found")
+
+    # 3️⃣ Assign Vendor role
+    db.add(
+        UserRole(
+            user_id=new_user.id,
+            role_id=vendor_role.id,
+        )
+    )
+    db.commit()
+
+    return new_user
 
 
 @router.post("/quick_register", response_model=schemas.QuickRegisterResponse)
