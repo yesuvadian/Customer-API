@@ -533,8 +533,7 @@ class ERPSyncService:
             user_doc = (
                 db.query(UserDocument)
                 .filter(
-                    UserDocument.product_id == product.id,
-                    UserDocument.company_id == company_id,
+                    UserDocument.user_id == company_id,
                     UserDocument.expiry_date.isnot(None)
                 )
                 .order_by(UserDocument.expiry_date.desc())
@@ -547,8 +546,9 @@ class ERPSyncService:
             block = {
                 "omdetail": {
                     "ombasicid": ombasic_id,
-                    "itemid": product.erp_external_id,
-                    "expdate": user_doc.expiry_date.strftime("%Y-%m-%d")
+                    "itemid": int(product.erp_external_id),
+                    "expdate": user_doc.expiry_date
+
                 }
             }
 

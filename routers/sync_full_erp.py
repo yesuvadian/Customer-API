@@ -118,7 +118,9 @@ async def sync_erp_products(db: Session = Depends(get_db)):
                 item = rec.get("itemmaster")
                 if item:
                     erp_id = item.get("itemmasterid")
-                    sku = item.get("itemid")
+                    erp_id = item.get("itemmasterid")
+                    raw_itemid = item.get("itemid")
+                    sku = raw_itemid.split("-")[0]  # FIX
 
                     product = db.query(Product).filter(Product.sku == sku).first()
                     if product:
@@ -174,80 +176,94 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
         insert_payload = payload.get("insert")
         update_payload = payload.get("update")
 
-        inserted = None
-        updated = None
-        omdetail_inserted = None
-        omdetail_updated = None
-        synced_doc_id = None
-        user_id = None
+        inserted = []
+        updated = []
+        omdetail_inserted = []
+        omdetail_updated = []
+        synced_doc_ids = []
 
-        # ---------- INSERT ----------
-        if insert_payload and len(insert_payload) > 0:
+        # ================== INSERT ==================
+        if insert_payload:
             inserted_list = await ERPService.insert_data(insert_payload)
 
-            # Safety check
-            if inserted_list and len(inserted_list) > 0 and "ombasic" in inserted_list[0]:
-                rec = inserted_list[0]["ombasic"]
+            for item in inserted_list:
+                if "ombasic" not in item:
+                    continue
+
+                rec = item["ombasic"]
                 omno = rec.get("omno")
                 ombasicid = rec.get("ombasicid")
 
-                if rec and omno and ombasicid:
-                    doc = db.query(UserDocument).filter(
-                        UserDocument.om_number == omno
-                    ).first()
+                doc = db.query(UserDocument).filter(
+                    UserDocument.om_number == omno
+                ).first()
 
-                    if doc:
-                        doc.erp_external_id = ombasicid
-                        doc.erp_sync_status = "completed"
-                        synced_doc_id = doc.id
-                        user_id = doc.user_id
+                if not doc:
+                    continue
 
-                    db.commit()
-                    inserted = rec
+                doc.erp_external_id = ombasicid
+                doc.erp_sync_status = "completed"
+                synced_doc_ids.append(doc.id)
+                user_id = doc.user_id
 
-                    # ---------- OMDTAIL ----------
-                    omdetail_inserted = ERPSyncService.build_omdetail(
-                        db=db,
-                        ombasic_id=ombasicid,
-                        company_id=user_id
-                    )
+                db.commit()
+                inserted.append(rec)
 
-                    if omdetail_inserted:
-                        await ERPService.insert_data(omdetail_inserted)
+                # -------- OMDTAIL INSERT (FOR EACH PRODUCT) --------
+                details = ERPSyncService.build_omdetail(
+                    db=db,
+                    ombasic_id=ombasicid,
+                    company_id=user_id
+                )
 
-        # ---------- UPDATE ----------
-        if update_payload and len(update_payload) > 0:
+                if details:
+                    import asyncio
+                    await asyncio.sleep(0.5)  # wait till ERP commits OMBASIC
+
+                    for detail in details:
+                        await ERPService.insert_data([detail])
+                        omdetail_inserted.append(detail)
+
+        # ================== UPDATE ==================
+        if update_payload:
             updated_list = await ERPService.update_data(update_payload)
 
-            # Safety check
-            if updated_list and len(updated_list) > 0 and "ombasic" in updated_list[0]:
-                rec = updated_list[0]["ombasic"]
+            for item in updated_list:
+                if "ombasic" not in item:
+                    continue
+
+                rec = item["ombasic"]
                 omno = rec.get("omno")
-                ombasicid = rec.get("ombasicid", None)
 
-                if rec and omno:
-                    doc = db.query(UserDocument).filter(
-                        UserDocument.om_number == omno
-                    ).first()
+                doc = db.query(UserDocument).filter(
+                    UserDocument.om_number == omno
+                ).first()
 
-                    if doc:
-                        doc.erp_sync_status = "completed"
-                        synced_doc_id = doc.id
-                        user_id = doc.user_id
-                        ombasicid = doc.erp_external_id  # Use existing ERP ID for OMDTAIL
+                if not doc:
+                    continue
 
-                    db.commit()
-                    updated = rec
+                doc.erp_sync_status = "completed"
+                synced_doc_ids.append(doc.id)
+                user_id = doc.user_id
+                ombasicid = doc.erp_external_id
 
-                    # ---------- OMDTAIL ----------
-                    omdetail_updated = ERPSyncService.build_omdetail(
-                        db=db,
-                        ombasic_id=ombasicid,
-                        company_id=user_id
-                    )
+                db.commit()
+                updated.append(rec)
 
-                    if omdetail_updated:
-                        await ERPService.update_data(omdetail_updated)
+                # -------- OMDTAIL UPDATE (FOR EACH PRODUCT) --------
+                details = ERPSyncService.build_omdetail(
+                    db=db,
+                    ombasic_id=ombasicid,
+                    company_id=user_id
+                )
+
+                if details:
+                    import asyncio
+                    await asyncio.sleep(0.5)
+
+                    for detail in details:
+                        await ERPService.update_data([detail])
+                        omdetail_updated.append(detail)
 
         return {
             "status": "success",
@@ -255,14 +271,13 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
             "ombasic_updated": updated,
             "omdetail_inserted": omdetail_inserted,
             "omdetail_updated": omdetail_updated,
-            "synced_document_id": synced_doc_id
+            "synced_document_ids": synced_doc_ids
         }
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 
 @router.post("/sync_erp_vendor_documents")
