@@ -69,28 +69,39 @@ class CompanyProductService:
 
 
 
+
+
     @classmethod
     def bulk_assign(cls, db: Session, company_id: str, product_ids: List[int]):
         try:
-            # 1️⃣ Delete existing mappings
+            # 1️⃣ Delete mappings NOT present in incoming list
             db.query(CompanyProduct).filter(
-                CompanyProduct.company_id == company_id
-            ).delete()
+                CompanyProduct.company_id == company_id,
+                ~CompanyProduct.product_id.in_(product_ids)
+            ).delete(synchronize_session=False)
 
-            # 2️⃣ Add new mappings
-            assigned = []
+            # 2️⃣ Get existing product mappings
+            existing_ids = {
+                pid for (pid,) in db.query(CompanyProduct.product_id)
+                .filter(CompanyProduct.company_id == company_id)
+                .all()
+            }
+
+            # 3️⃣ Add ONLY new product mappings
+            new_mappings = []
             for pid in product_ids:
-                cp = CompanyProduct(
-                    company_id=company_id,
-                    product_id=pid,
-                    price=0.0
-                )
-                db.add(cp)
-                assigned.append(cp)
+                if pid not in existing_ids:
+                    cp = CompanyProduct(
+                        company_id=company_id,
+                        product_id=pid,
+                        price=0.0
+                    )
+                    db.add(cp)
+                    new_mappings.append(cp)
 
-            # ✅ Commit once at the end
+            # 4️⃣ Commit once
             db.commit()
-            return assigned
+            return new_mappings
 
         except Exception as e:
             db.rollback()
