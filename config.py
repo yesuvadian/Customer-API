@@ -117,3 +117,19 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", EMAIL_USER or "noreply@example.com")
 # FILE UPLOAD LIMITS
 # ==============================
 MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 500))
+# ==============================
+# ZOHO BOOKS CONFIGURATION
+# ==============================
+
+ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
+ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")
+ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
+ZOHO_ORG_ID = os.getenv("ZOHO_ORG_ID")
+
+# India DC (books.zohosecure.in → zohoapis.in)
+ZOHO_API_BASE = os.getenv("ZOHO_API_BASE", "https://www.zohoapis.in")
+ZOHO_ACCOUNTS_BASE = os.getenv("ZOHO_ACCOUNTS_BASE", "https://accounts.zoho.in")
+
+# Safety check (fail fast in startup)
+if not all([ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ORG_ID]):
+    raise RuntimeError("Zoho Books environment variables are not fully configured")
