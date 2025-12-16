@@ -38,4 +38,4 @@ class ZohoContactService:
             )
 
         # Return the first matching contact
-        return contacts[0]["contact_id"]
+        return contacts[0]
