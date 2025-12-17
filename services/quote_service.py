@@ -21,7 +21,8 @@ class QuoteService:
         # -------------------------------------------------
         contact_id = payload.contact_id
         if "@" in contact_id:
-            contact_id = self.contact_service.get_contact_id_by_email(contact_id)
+            contact = self.contact_service.get_contact_id_by_email(contact_id)
+            contact_id = contact["contact_id"]
 
         # -------------------------------------------------
         # Build line items with tax exemption and rate from Zoho item
@@ -118,7 +119,7 @@ class QuoteService:
         if recipients:
             email_payload = {
                 "to_mail_ids": recipients,
-                "subject": f"Quote {estimate['estimate_number']} from {org_response.json()['organization']['name']}",
+                "subject": f"Request for Quote {estimate['estimate_number']} from {contact['contact_name']}",
                 "body": "Please find attached your quote."
             }
             email_response = requests.post(
