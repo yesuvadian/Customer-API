@@ -118,7 +118,6 @@ async def sync_erp_products(db: Session = Depends(get_db)):
                 item = rec.get("itemmaster")
                 if item:
                     erp_id = item.get("itemmasterid")
-                    erp_id = item.get("itemmasterid")
                     raw_itemid = item.get("itemid")
                     sku = raw_itemid.split("-")[0]  # FIX
 

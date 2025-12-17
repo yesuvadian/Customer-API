@@ -1,10 +1,13 @@
 import asyncpg
 from config import POSTGRES_CONFIG
-
+from datetime import datetime
 
 class ERPService:
     pool = None
-    STARTING_ID = 2025000000001
+    
+
+    STARTING_ID = int(f"{datetime.utcnow().year}{datetime.utcnow().month:02d}0000001")
+
 
     # ============================================
     # INIT POOL
