@@ -1,13 +1,27 @@
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File, status
+import os
+from dotenv import load_dotenv
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    UploadFile,
+    File,
+    Form,
+    status,
+    Response
+)
 from sqlalchemy.orm import Session
-from fastapi import Response
 
 from auth_utils import get_current_user
 from database import get_db
-from routers import bank_info
-from schemas import CompanyBankDocumentSchema, CompanyBankInfoUpdateSchema, User
 from services.companybankdocument_service import CompanyBankDocumentService
 
+# -----------------------------------------------------
+# ENV
+# -----------------------------------------------------
+load_dotenv()
+MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 500))
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_KB * 1024
 
 router = APIRouter(
     prefix="/bank_documents",
@@ -15,47 +29,91 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)]
 )
 
-@router.get("/{bank_info_id}", response_model=list[CompanyBankDocumentSchema])
+service = CompanyBankDocumentService()
+
+
+# =====================================================
+# GET ALL DOCUMENTS FOR BANK INFO
+# =====================================================
+@router.get("/{bank_info_id}")
 def list_bank_documents(bank_info_id: int, db: Session = Depends(get_db)):
-    return CompanyBankDocumentService.get_documents_by_bank_info(db, bank_info_id)
+    docs = service.get_documents_by_bank_info(db, bank_info_id)
 
-# In bank_document.py
+    return [
+        {
+            "id": d.id,
+            "company_bank_info_id": d.company_bank_info_id,
+            "category_detail_id": d.category_detail_id,
+            "file_name": d.file_name,
+            "file_type": d.file_type,
+            "cts": d.cts,
+            "mts": d.mts,
 
-@router.post("/", response_model=CompanyBankDocumentSchema)
+            # ✅ SAME STRUCTURE AS TAX
+            "document_type_detail": (
+                {
+                    "id": d.category_detail.id,
+                    "name": d.category_detail.name,
+                }
+                if d.category_detail
+                else None
+            ),
+        }
+        for d in docs
+    ]
+
+
+# =====================================================
+# UPLOAD BANK DOCUMENT (ONE PER CATEGORY)
+# =====================================================
+@router.post("/", status_code=status.HTTP_201_CREATED)
 async def upload_bank_document(
     bank_info_id: int = Form(...),
+    category_detail_id: int = Form(...),  # REQUIRED
     file: UploadFile = File(...),
-    category_detail_id: int = Form(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    
-    file_data = await file.read()
+    try:
+        # ✅ SAFE READ (Excel compatible)
+        file_data = await file.read()
 
-    return CompanyBankDocumentService.create_document(
-        db,
-        bank_info_id=bank_info_id,
-        file_name=file.filename,
-        file_data=file_data,
-        file_type=file.content_type,
-        # CHANGE: Passed the new argument with the correct name
-        category_detail_id=category_detail_id
-    )
+        # ✅ FILE SIZE CHECK (same as TAX)
+        if len(file_data) > MAX_FILE_SIZE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Max size allowed: {MAX_FILE_SIZE_KB} KB"
+            )
 
-@router.put("/{document_id}", response_model=CompanyBankDocumentSchema)
-async def update_bank_document(
-    document_id: int,
-    # CHANGE: Receive updates as a Pydantic schema object in the request body
-    updates: CompanyBankInfoUpdateSchema, 
-    db: Session = Depends(get_db)
-):
-    return CompanyBankDocumentService.update_document(
-        db,
-        document_id,
-        # CHANGE: Convert the schema to a dictionary, excluding fields the user didn't set
-        updates.dict(exclude_unset=True)
-    )
+        doc = service.create_document(
+            db=db,
+            bank_info_id=bank_info_id,
+            category_detail_id=category_detail_id,
+            file_name=file.filename,
+            file_data=file_data,
+            file_type=file.content_type,
+        )
 
+        return {
+            "id": doc.id,
+            "company_bank_info_id": doc.company_bank_info_id,
+            "category_detail_id": doc.category_detail_id,
+            "file_name": doc.file_name,
+            "file_type": doc.file_type,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload bank document: {e}"
+        )
+
+
+# =====================================================
+# DELETE DOCUMENT
+# =====================================================
 @router.delete("/{document_id}", status_code=204)
 def delete_bank_document(document_id: int, db: Session = Depends(get_db)):
-    CompanyBankDocumentService.delete_document(db, document_id)
+    service.delete_document(db, document_id)
     return Response(status_code=204)

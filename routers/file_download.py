@@ -16,23 +16,24 @@ router = APIRouter(
 
 @router.get("/{document_id}")
 def download_file(document_id: str, db: Session = Depends(get_db)):
-    
-    # Try User Document
+
+    # 1️⃣ Try User Document (UUID)
     try:
         uuid_id = UUID(document_id)
         doc = UserDocumentService(db).get_document(uuid_id)
-        return _stream_doc(doc)
+        if doc:
+            return _stream_doc(doc)
     except ValueError:
         pass
 
-    # 2️⃣ Try INT (Bank Documents)
+    # 2️⃣ Try Bank Documents (INT)
     if document_id.isdigit():
         doc = CompanyBankDocumentService.get_document(db, int(document_id))
         if doc:
             return _stream_doc(doc)
 
-        # 3️⃣ Try Tax Documents
-        doc = CompanyTaxDocumentService(db).get_document(int(document_id))
+        # 3️⃣ Try Tax Documents (INT)
+        doc = CompanyTaxDocumentService.get_document(db, int(document_id))
         if doc:
             return _stream_doc(doc)
 

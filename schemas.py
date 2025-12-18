@@ -256,24 +256,26 @@ class CompanyBankDocumentBase(BaseModel):
 
 
 class CompanyBankDocumentSchema(BaseModel):
-    """
-    Response model. Does not include raw binary file_data; include file_url/download_url instead.
-    """
     id: int
     company_bank_info_id: int
+
+    category_detail_id: int | None = None   # 🔥 ADD THIS LINE
+
     file_name: str
     file_type: Optional[str] = None
-    file_url: Optional[str] = None         # Public or S3 URL to the file (if applicable)
-    download_url: Optional[str] = None     # Signed URL for downloads (if applicable)
+    file_url: Optional[str] = None
+    download_url: Optional[str] = None
     is_verified: Optional[bool] = None
-    verified_by: Optional[str] = None      # UUID as str
+    verified_by: Optional[str] = None
     verified_at: Optional[datetime] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+
     document_type_detail: Optional['CategoryDetailsResponse'] = None
 
     class Config:
         orm_mode = True
+
 
 
 class CompanyBankInfoBase(BaseModel):
