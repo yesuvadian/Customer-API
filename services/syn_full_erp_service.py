@@ -83,7 +83,6 @@ class ERPSyncService:
                 "natureofbusiness": None,
                 "status": None,
                 "activeyn": "YES" if user.isactive else "NO",
-                "activeyesorno": "YES" if user.isactive else "NO",
                 "tdspartyyn": "NO",
                 "typeofded": None,
                 "add1": primary_address.address_line1 if primary_address else None,
@@ -181,7 +180,16 @@ class ERPSyncService:
 
     @classmethod
     def build_ombasic_json(cls, db: Session):
+        """
+        Build ombasic JSON similar to branchmast JSON structure.
+        - Include only documents with erp_sync_status='pending'
+        - Skip users who already have any completed ombasic record
+        - If doc.erp_external_id → UPDATE payload
+        - If doc.erp_external_id is NULL → INSERT payload
+        - Only include valid docs (omno & expiry_date)
+        """
 
+        # Fetch all pending docs
         docs = db.query(UserDocument).filter(
             UserDocument.erp_sync_status == "pending"
         ).all()
@@ -191,46 +199,73 @@ class ERPSyncService:
 
         insert_payload = []
         update_payload = []
+        processed_users = set()
 
         for doc in docs:
             user = doc.user
             if not user:
                 continue
 
-            # Validate OM
-            if not doc.om_number or not doc.expiry_date:
+            # ⛔ Skip if user has ANY completed OM sync earlier
+            has_completed = db.query(UserDocument).filter(
+                UserDocument.user_id == user.id,
+                UserDocument.erp_sync_status == "completed"
+            ).first()
+
+            if has_completed:
                 continue
 
-            if not user.erp_external_id:
+            # ⛔ If user already included in this batch → skip
+            if user.id in processed_users:
+                continue
+
+            # ❌ Invalid doc → keep as pending, do not include in payload
+            if not doc.om_number or not doc.expiry_date:
+                doc.erp_sync_status = "pending"
                 continue
 
             division = doc.division
+            # Skip if user ERP ID is missing
+            if not user.erp_external_id:
+                continue
+
+            # Skip if division ERP ID is missing
             if not division or not division.erp_external_id:
                 continue
+
+            efffromdate = date.today()
+
+           
+            
 
             data = {
                 "ombasic": {
                     "partyid": int(user.erp_external_id),
                     "branchid": int(division.erp_external_id),
                     "omno": doc.om_number,
-                    "omdate": date.today()
+                    "omdate": efffromdate
                 }
             }
 
-            # UPDATE
+            # ---------------- UPDATE CASE ----------------
             if doc.erp_external_id:
                 data["ombasic"]["ombasicid"] = doc.erp_external_id
                 update_payload.append(data)
 
-            # INSERT
+            # ---------------- INSERT CASE ----------------
             else:
+                # No ombasicid — ERP will generate new one
                 insert_payload.append(data)
+
+            processed_users.add(user.id)
+            doc.erp_sync_status = "completed"
+
+        db.commit()
 
         return {
             "insert": insert_payload,
             "update": update_payload
         }
-
 
 
     @classmethod

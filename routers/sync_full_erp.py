@@ -165,15 +165,14 @@ async def sync_erp_products(db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# ---------------- New endpoint ----------------
 @router.get("/sync_ombasic")
 async def sync_erp_ombasic(db: Session = Depends(get_db)):
     try:
         await ERPService.init_pool()
 
         payload = ERPSyncService.build_ombasic_json(db)
-        insert_payload = payload.get("insert")
-        update_payload = payload.get("update")
+        insert_payload = payload.get("insert", [])
+        update_payload = payload.get("update", [])
 
         inserted = []
         updated = []
@@ -200,6 +199,7 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
                 if not doc:
                     continue
 
+                # Save ERP ID
                 doc.erp_external_id = ombasicid
                 doc.erp_sync_status = "completed"
                 synced_doc_ids.append(doc.id)
@@ -208,7 +208,7 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
                 db.commit()
                 inserted.append(rec)
 
-                # -------- OMDTAIL INSERT (FOR EACH PRODUCT) --------
+                # -------- OMDDETAIL INSERT (BATCH) --------
                 details = ERPSyncService.build_omdetail(
                     db=db,
                     ombasic_id=ombasicid,
@@ -217,11 +217,10 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
 
                 if details:
                     import asyncio
-                    await asyncio.sleep(0.5)  # wait till ERP commits OMBASIC
+                    await asyncio.sleep(0.5)  # allow ERP to commit OMBASIC
 
-                    for detail in details:
-                        await ERPService.insert_data([detail])
-                        omdetail_inserted.append(detail)
+                    result = await ERPService.insert_data(details)
+                    omdetail_inserted.extend(result)
 
         # ================== UPDATE ==================
         if update_payload:
@@ -249,7 +248,7 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
                 db.commit()
                 updated.append(rec)
 
-                # -------- OMDTAIL UPDATE (FOR EACH PRODUCT) --------
+                # -------- OMDDETAIL UPDATE (BATCH) --------
                 details = ERPSyncService.build_omdetail(
                     db=db,
                     ombasic_id=ombasicid,
@@ -260,9 +259,8 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
                     import asyncio
                     await asyncio.sleep(0.5)
 
-                    for detail in details:
-                        await ERPService.update_data([detail])
-                        omdetail_updated.append(detail)
+                    result = await ERPService.update_data(details)
+                    omdetail_updated.extend(result)
 
         return {
             "status": "success",
@@ -277,6 +275,7 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 
 @router.post("/sync_erp_vendor_documents")
@@ -377,6 +376,3 @@ async def sync_erp_branchmast(db: Session = Depends(get_db)):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-
