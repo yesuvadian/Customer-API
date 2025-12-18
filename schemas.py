@@ -28,6 +28,16 @@ class UserBase(BaseModel):
     plan_id: Optional[UUID] = None   # ✅ ADD THIS
 
 
+
+class QuoteItem(BaseModel):
+    item_id: str
+    quantity: int
+
+class RequestQuote(BaseModel):
+    contact_id: str
+    items: List[QuoteItem]
+    notes: Optional[str] = None
+
 class UserCreate(UserBase):
     password: str
 

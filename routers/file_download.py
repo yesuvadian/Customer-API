@@ -5,8 +5,8 @@ from database import get_db
 from uuid import UUID
 
 from services.userdocumentservice import UserDocumentService
-# from services.bankdocumentservice import BankDocumentService
-# from services.taxdocumentservice import TaxDocumentService
+from services.companybankdocument_service import CompanyBankDocumentService
+from services.company_tax_document_service import CompanyTaxDocumentService
 
 router = APIRouter(
     prefix="/files",
@@ -15,40 +15,51 @@ router = APIRouter(
 )
 
 @router.get("/{document_id}")
-def download_file(document_id: UUID, db: Session = Depends(get_db)):
+def download_file(document_id: str, db: Session = Depends(get_db)):
     
     # Try User Document
     try:
-        doc = UserDocumentService(db).get_document(document_id)
+        uuid_id = UUID(document_id)
+        doc = UserDocumentService(db).get_document(uuid_id)
         return _stream_doc(doc)
-    except:
+    except ValueError:
         pass
 
-    # # Try Bank Document
-    # try:
-    #     doc = BankDocumentService(db).get_document(document_id)
-    #     return _stream_doc(doc)
-    # except:
-    #     pass
+    # 2️⃣ Try INT (Bank Documents)
+    if document_id.isdigit():
+        doc = CompanyBankDocumentService.get_document(db, int(document_id))
+        if doc:
+            return _stream_doc(doc)
 
-    # # Try Tax Document
-    # try:
-    #     doc = TaxDocumentService(db).get_document(document_id)
-    #     return _stream_doc(doc)
-    # except:
-    #     pass
+        # 3️⃣ Try Tax Documents
+        doc = CompanyTaxDocumentService(db).get_document(int(document_id))
+        if doc:
+            return _stream_doc(doc)
 
     raise HTTPException(404, "Document not found")
 
 
 def _stream_doc(doc):
-    # If stored in DB
+    # Detect content type safely
+    content_type = (
+        getattr(doc, "content_type", None)
+        or getattr(doc, "file_type", None)
+        or "application/octet-stream"
+    )
+
+    file_name = (
+        getattr(doc, "document_name", None)
+        or getattr(doc, "file_name", None)
+        or "file"
+    )
+
+    # If stored in DB (byte data)
     if getattr(doc, "file_data", None):
         return StreamingResponse(
             iter([doc.file_data]),
-            media_type=doc.content_type or "application/octet-stream",
+            media_type=content_type,
             headers={
-                "Content-Disposition": f"inline; filename={doc.document_name}"
+                "Content-Disposition": f'inline; filename="{file_name}"'
             }
         )
 
@@ -56,8 +67,9 @@ def _stream_doc(doc):
     if getattr(doc, "document_url", None):
         return FileResponse(
             doc.document_url,
-            media_type=doc.content_type or "application/octet-stream",
-            filename=doc.document_name
+            media_type=content_type,
+            filename=file_name
         )
 
-    raise HTTPException(404, "File missing")
+    raise HTTPException(status_code=404, detail="File missing")
+

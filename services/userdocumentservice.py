@@ -185,13 +185,15 @@ class UserDocumentService:
 
         if company_product_id is not None:
             q = q.filter(UserDocument.company_product_id == company_product_id)
+            
 
         return q.order_by(UserDocument.cts.desc()).all()
     def delete_by_filters(
     self,
     user_id: UUID,
     division_id: UUID,
-    category_detail_id: int
+    category_detail_id: int,
+    company_product_id: Optional[int] = None
 ) -> int:
 
         query = (
@@ -201,16 +203,18 @@ class UserDocumentService:
             .filter(UserDocument.category_detail_id == category_detail_id)
         )
 
-        docs = query.all()
+        if company_product_id is not None:
+            query = query.filter(
+                UserDocument.company_product_id == company_product_id
+            )
 
+        docs = query.all()
         if not docs:
             return 0
-
-        count = len(docs)
 
         for doc in docs:
             self.db.delete(doc)
 
         self.db.commit()
-        return count
+        return len(docs)
 

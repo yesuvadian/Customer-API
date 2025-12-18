@@ -23,6 +23,7 @@ from routers import (
     mongo_router,
     plan,
     products,
+    quotes,
     register,
     role,
     role_module_privileges,
@@ -40,7 +41,8 @@ from routers import (
     company_tax_documents,
     category_master,
     category_details,
-    cities
+    cities,
+    zoho_items
 )
 from routers.kyc_router import router as kyc_router
 
@@ -132,6 +134,8 @@ app.include_router(kyc_router)
 app.include_router(file_download_router)
 app.include_router(erp_router.router)
 app.include_router(mongo_router.router)
+app.include_router(quotes.router)
+app.include_router(zoho_items.router)
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")
 # async def startup_event():
