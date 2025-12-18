@@ -789,10 +789,6 @@ class CompanyTaxDocument(Base):
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    document_type_detail = relationship(
-        "CategoryDetails",
-        lazy="joined"
-    )
     # inside CompanyBankDocument class (after modified_at)
     erp_sync_status = Column(String(10), default="pending")
     erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
