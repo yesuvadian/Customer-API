@@ -10,6 +10,8 @@ class QuoteService:
         self.org_id = config.ZOHO_ORG_ID
         self.contact_service = ZohoContactService()
 
+    from config import ZOHO_SENT_EMAIL
+
     def create_draft_quote(self, access_token: str, payload):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
@@ -51,8 +53,8 @@ class QuoteService:
                 "quantity": item.quantity,
                 "rate": item_data.get("rate", 0),
                 "name": item_data.get("name", ""),
-                "tax_id": "",                     # always blank for draft quotes
-                "tax_exemption_code": "NON"       # always exempt
+                "tax_id": "",
+                "tax_exemption_code": "NON"
             })
 
         body = {
@@ -85,82 +87,43 @@ class QuoteService:
             )
 
         data = response.json()
-        # Zoho Books returns "estimate" not "quote"
         if "estimate" not in data:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Zoho response missing estimate object"
             )
-        estimate = data["estimate"]
-            # -------------------------------------------------
-        # Fetch org email
-        # -------------------------------------------------
-        org_response = requests.get(
-            f"{self.base_url}/organizations/{self.org_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-        org_email = org_response.json()["organization"]["email"]
 
-        # -------------------------------------------------
-        # Collect creator + org email
-        # -------------------------------------------------
-        recipients = []
-        for person in estimate.get("contact_persons_associated", []):
-            if person.get("contact_person_email"):
-                recipients.append(person["contact_person_email"])
-        if org_email:
-            recipients.append(org_email)
+        # simply return draft estimate
+        return data["estimate"]
 
-        # -------------------------------------------------
-        # Send estimate email
-        # -------------------------------------------------
-        if recipients:
-            email_payload = {
-                "to_mail_ids": recipients,
-                "subject": f"Request for Quote {estimate['estimate_number']} from {contact['contact_name']}",
-                "body": "Please find attached your quote."
+    def send_estimate_email(self, access_token: str, estimate_id: str, customer_id: str):
+            headers = {
+                "Authorization": f"Zoho-oauthtoken {access_token}",
+                "Content-Type": "application/json"
             }
-            email_response = requests.post(
-                f"{self.base_url}/estimates/{estimate['estimate_id']}/email",
+
+            # Fetch customer to get email IDs
+            customer_response = requests.get(
+                f"{self.base_url}/customers/{customer_id}",
                 headers=headers,
-                json=email_payload,
                 params={"organization_id": self.org_id},
                 timeout=15
             )
-            if email_response.status_code not in (200, 201):
-                # fallback: return draft estimate if email fails
-                return estimate
-        return estimate
-    def send_estimate_email(self, access_token: str, estimate_id: str, customer_id: str):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Content-Type": "application/json"
-        }
+            customer_data = customer_response.json().get("customer", {})
+            emails = [p["contact_person_email"] for p in customer_data.get("contact_persons", []) if p.get("contact_person_email")]
 
-        # Fetch customer to get email IDs
-        customer_response = requests.get(
-            f"{self.base_url}/customers/{customer_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-        customer_data = customer_response.json().get("customer", {})
-        emails = [p["contact_person_email"] for p in customer_data.get("contact_persons", []) if p.get("contact_person_email")]
+            payload = {
+                "to_mail_ids": emails,
+                "subject": "Your Quote from Our Company",
+                "body": "Please find attached your draft quote."
+            }
 
-        payload = {
-            "to_mail_ids": emails,
-            "subject": "Your Quote from Our Company",
-            "body": "Please find attached your draft quote."
-        }
+            response = requests.post(
+                f"{self.base_url}/estimates/{estimate_id}/email",
+                headers=headers,
+                json=payload,
+                params={"organization_id": self.org_id},
+                timeout=15
+            )
 
-        response = requests.post(
-            f"{self.base_url}/estimates/{estimate_id}/email",
-            headers=headers,
-            json=payload,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        return response.json()
+            return response.json()
