@@ -67,14 +67,15 @@ def get_company_documents(company_id: UUID, db: Session = Depends(get_db)):
             "mts": d.mts,
 
             # ✅ THIS FIXES YOUR ISSUE
-            "document_type_detail": (
-                {
-                    "id": d.document_type_detail.id,
-                    "name": d.document_type_detail.name,
-                }
-                if d.document_type_detail
-                else None
-            ),
+                    "document_type_detail": (
+                        {
+                            "id": d.category_detail.id,
+                            "name": d.category_detail.name,
+                        }
+                        if d.category_detail
+                        else None
+                    ),
+
         }
         for d in docs
     ]
