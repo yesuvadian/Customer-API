@@ -19,3 +19,5 @@ requests
 pandas
 asyncpg
 pymongo==3.13.0
+python-magic
+python-magic-bin

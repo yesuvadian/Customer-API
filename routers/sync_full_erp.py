@@ -118,7 +118,8 @@ async def sync_erp_products(db: Session = Depends(get_db)):
                 item = rec.get("itemmaster")
                 if item:
                     erp_id = item.get("itemmasterid")
-                    sku = item.get("itemid")
+                    raw_itemid = item.get("itemid")
+                    sku = raw_itemid.split("-")[0]  # FIX
 
                     product = db.query(Product).filter(Product.sku == sku).first()
                     if product:
@@ -164,78 +165,102 @@ async def sync_erp_products(db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# ---------------- New endpoint ----------------
 @router.get("/sync_ombasic")
 async def sync_erp_ombasic(db: Session = Depends(get_db)):
     try:
         await ERPService.init_pool()
 
         payload = ERPSyncService.build_ombasic_json(db)
-        insert_payload = payload.get("insert")
-        update_payload = payload.get("update")
+        insert_payload = payload.get("insert", [])
+        update_payload = payload.get("update", [])
 
-        inserted = None
-        updated = None
-        omdetail_inserted = None
-        omdetail_updated = None
-        synced_doc_id = None
+        inserted = []
+        updated = []
+        omdetail_inserted = []
+        omdetail_updated = []
+        synced_doc_ids = []
 
-        # ---------- INSERT ----------
+        # ================== INSERT ==================
         if insert_payload:
             inserted_list = await ERPService.insert_data(insert_payload)
-            rec = inserted_list[0]["ombasic"]
-            omno = rec["omno"]
-            ombasicid = rec["ombasicid"]
 
-            doc = db.query(UserDocument).filter(
-                UserDocument.om_number == omno
-            ).first()
+            for item in inserted_list:
+                if "ombasic" not in item:
+                    continue
 
-            if doc:
+                rec = item["ombasic"]
+                omno = rec.get("omno")
+                ombasicid = rec.get("ombasicid")
+
+                doc = db.query(UserDocument).filter(
+                    UserDocument.om_number == omno
+                ).first()
+
+                if not doc:
+                    continue
+
+                # Save ERP ID
                 doc.erp_external_id = ombasicid
                 doc.erp_sync_status = "completed"
-                synced_doc_id = doc.id
+                synced_doc_ids.append(doc.id)
                 user_id = doc.user_id
 
-            db.commit()
-            inserted = rec
+                db.commit()
+                inserted.append(rec)
 
-            # ---------- OMDTAIL ----------
-            omdetail_inserted = ERPSyncService.build_omdetail(
-                db=db,
-                ombasic_id=ombasicid,
-                company_id=user_id
-            )
+                # -------- OMDDETAIL INSERT (BATCH) --------
+                details = ERPSyncService.build_omdetail(
+                    db=db,
+                    ombasic_id=ombasicid,
+                    company_id=user_id
+                )
 
-            # Send directly without wrapping
-            await ERPService.insert_data(omdetail_inserted)
+                if details:
+                    import asyncio
+                    await asyncio.sleep(0.5)  # allow ERP to commit OMBASIC
 
-        # ---------- UPDATE ----------
+                    result = await ERPService.insert_data(details)
+                    omdetail_inserted.extend(result)
+
+        # ================== UPDATE ==================
         if update_payload:
             updated_list = await ERPService.update_data(update_payload)
-            rec = updated_list[0]["ombasic"]
-            omno = rec["omno"]
 
-            doc = db.query(UserDocument).filter(
-                UserDocument.om_number == omno
-            ).first()
+            for item in updated_list:
+                if "ombasic" not in item:
+                    continue
 
-            if doc:
+                rec = item["ombasic"]
+                omno = rec.get("omno")
+
+                doc = db.query(UserDocument).filter(
+                    UserDocument.om_number == omno
+                ).first()
+
+                if not doc:
+                    continue
+
                 doc.erp_sync_status = "completed"
-                synced_doc_id = doc.id
+                synced_doc_ids.append(doc.id)
                 user_id = doc.user_id
+                ombasicid = doc.erp_external_id
 
-            db.commit()
-            updated = rec
+                db.commit()
+                updated.append(rec)
 
-            # ---------- OMDTAIL ----------
-            omdetail_updated = ERPSyncService.build_omdetail(
-                db=db,
-                ombasic_id=doc.erp_external_id,
-                company_id=user_id
-            )
+                # -------- OMDDETAIL UPDATE (BATCH) --------
+                details = ERPSyncService.build_omdetail(
+                    db=db,
+                    ombasic_id=ombasicid,
+                    company_id=user_id
+                )
 
-            await ERPService.update_data(omdetail_updated)
+                if details:
+                    import asyncio
+                    await asyncio.sleep(0.5)
+
+                    result = await ERPService.update_data(details)
+                    omdetail_updated.extend(result)
 
         return {
             "status": "success",
@@ -243,14 +268,13 @@ async def sync_erp_ombasic(db: Session = Depends(get_db)):
             "ombasic_updated": updated,
             "omdetail_inserted": omdetail_inserted,
             "omdetail_updated": omdetail_updated,
-            "synced_document_id": synced_doc_id
+            "synced_document_ids": synced_doc_ids
         }
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 
 
@@ -352,6 +376,3 @@ async def sync_erp_branchmast(db: Session = Depends(get_db)):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-

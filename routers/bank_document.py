@@ -55,7 +55,7 @@ def list_bank_documents(bank_info_id: int, db: Session = Depends(get_db)):
                     "id": d.category_detail.id,
                     "name": d.category_detail.name,
                 }
-                if d.category_detail
+                if d.category_detail_id
                 else None
             ),
         }
