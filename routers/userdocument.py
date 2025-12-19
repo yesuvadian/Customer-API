@@ -9,6 +9,8 @@ from datetime import datetime,timezone
 from schemas import UserDocumentCreate, UserDocumentResponse, UserDocumentUpdate
 from services.userdocumentservice import UserDocumentService
 from utils.common_service import UTCDateTimeMixin
+import magic
+import mimetypes
 
 router = APIRouter(
     prefix="/user_documents",
@@ -34,7 +36,14 @@ async def create_user_document(
     # Read file
     contents = await file.read()
 
-    # Convert expiry_date string to datetime object
+    # 🔥 Detect MIME type from actual content
+    try:
+        detected_content_type = magic.from_buffer(contents, mime=True)
+    except Exception:
+        detected_content_type, _ = mimetypes.guess_type(file.filename)
+        detected_content_type = detected_content_type or "application/octet-stream"
+
+    # Convert expiry_date
     expiry_date_dt = None
     if expiry_date_str:
         try:
@@ -47,9 +56,6 @@ async def create_user_document(
                 detail="Invalid expiry_date format. Must be in YYYY-MM-DD format."
             )
 
-    # -----------------------------
-    # 🔥 WRAP CREATE IN TRY/EXCEPT
-    # -----------------------------
     try:
         document = service.create_document(
             user_id=user_id,
@@ -59,17 +65,17 @@ async def create_user_document(
             document_url=None,
             file_data=contents,
             file_size=len(contents),
-            content_type=file.content_type,
+            content_type=detected_content_type,  # ✅ FIXED
             category_detail_id=category_detail_id,
-            company_product_id=company_product_id, 
+            company_product_id=company_product_id,
             om_number=om_number,
             expiry_date=expiry_date_dt
         )
         return document
 
     except ValueError as e:
-        # Convert ValueError to HTTP 400
         raise HTTPException(status_code=400, detail=str(e))
+
 
 
 # ----------------- READ -----------------

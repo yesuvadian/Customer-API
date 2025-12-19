@@ -104,7 +104,8 @@ class ERPSyncService:
                 "versionid": str(user.id),
                 "projectid": "AVPPC_HESCOM",
                 "rolename": "LICENSE_ROLE",
-                "partycat":  "SUPPLIER"
+                "partycat":  "SUPPLIER",
+                "createdfrom": "APP"
             }
 
             data = {"partymast": partymast}
@@ -149,20 +150,20 @@ class ERPSyncService:
         update_payload = []
 
         for p in products:
+            sku = p.sku or ""
+            desc = p.description or ""
+
             data = {
                 "itemmaster": {
                     "subgroup": p.category_obj.id if p.category_obj else None,
                     "subgroup2": p.subcategory_obj.id if p.subcategory_obj else None,
-                    "itemid": p.sku,
-                    "itemdesc": p.description,
+                    "itemid": f"{sku}-{desc}",   # concatenated
+                    "itemdesc": desc,
                     "createdfrom": "APP",
-                    "maingroup":1
- 
-                    
+                    "maingroup": 1
                 }
             }
-
-            # -------- UPDATE case --------
+                # -------- UPDATE case --------
             if p.erp_external_id:
                 data["itemmaster"]["itemmasterid"] = p.erp_external_id
                 update_payload.append(data)
@@ -224,16 +225,25 @@ class ERPSyncService:
                 continue
 
             division = doc.division
+            # Skip if user ERP ID is missing
+            if not user.erp_external_id:
+                continue
+
+            # Skip if division ERP ID is missing
+            if not division or not division.erp_external_id:
+                continue
+
             efffromdate = date.today()
-            efftodate = doc.expiry_date.date()
+
+           
+            
 
             data = {
                 "ombasic": {
-                    "partyid": user.erp_external_id,
-                    "branchid": division.erp_external_id if division else None,
+                    "partyid": int(user.erp_external_id),
+                    "branchid": int(division.erp_external_id),
                     "omno": doc.om_number,
-                    "efffromdate": efffromdate.strftime("%Y-%m-%d"),
-                    "efftodate": efftodate.strftime("%Y-%m-%d")
+                    "omdate": efffromdate
                 }
             }
 
@@ -501,11 +511,13 @@ class ERPSyncService:
     @classmethod
     def build_omdetail(cls, db: Session, ombasic_id: str, company_id: UUID):
         """
-        Returns a list of key-value pairs exactly in the repeated JSON format required:
-        
-        "omdetail": { ... },
-        "omdetail": { ... }
+        Returns repeated JSON blocks in the exact format:
+        [
+            {"omdetail": {...}},
+            {"omdetail": {...}}
+        ]
         """
+
         company_products = (
             db.query(CompanyProduct)
             .filter(CompanyProduct.company_id == company_id)
@@ -519,15 +531,29 @@ class ERPSyncService:
             if not product or not product.erp_external_id:
                 continue
 
-            block = (
-                '"omdetail": {\n'
-                f'  "ombasicid": "{ombasic_id}",\n'
-                f'  "itemid": "{product.erp_external_id}"\n'
-                '}'
+            user_doc = (
+                db.query(UserDocument)
+                .filter(
+                    UserDocument.user_id == company_id,
+                    UserDocument.expiry_date.isnot(None)
+                )
+                .order_by(UserDocument.expiry_date.desc())
+                .first()
             )
+
+            if not user_doc:
+                continue
+
+            block = {
+                "omdetail": {
+                    "ombasicid": ombasic_id,
+                    "itemid": int(product.erp_external_id),
+                    "expdate": user_doc.expiry_date
+
+                }
+            }
 
             output_blocks.append(block)
 
-        # Join with commas EXACTLY like your format
-        return ",\n\n".join(output_blocks)
-
+        # Return **after** processing all products
+        return output_blocks
