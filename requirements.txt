@@ -19,3 +19,4 @@ requests
 pandas
 asyncpg
 pymongo==3.13.0
+PyJWT
