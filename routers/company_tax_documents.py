@@ -72,7 +72,7 @@ def get_company_documents(company_id: UUID, db: Session = Depends(get_db)):
                             "id": d.category_detail.id,
                             "name": d.category_detail.name,
                         }
-                        if d.category_detail
+                        if d.category_detail_id
                         else None
                     ),
 
