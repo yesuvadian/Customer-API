@@ -258,10 +258,13 @@ class CompanyBankDocument(Base):
         foreign_keys=[company_bank_info_id]
     )
 
-    document_type_detail = relationship(
-        "CategoryDetails",
-        foreign_keys=[category_detail_id]
-    )
+    category_detail = relationship(
+    "CategoryDetails",
+    back_populates="bank_document_types",
+    foreign_keys=[category_detail_id],
+    lazy="joined"
+)
+
     
 
 class CompanyBankInfo(Base):
@@ -896,10 +899,11 @@ class CategoryDetails(Base):
     )
 
     bank_document_types = relationship(
-        "CompanyBankDocument",
-        foreign_keys="[CompanyBankDocument.category_detail_id]",
-        back_populates="document_type_detail"
-    )
+    "CompanyBankDocument",
+    foreign_keys="[CompanyBankDocument.category_detail_id]",
+    back_populates="category_detail"
+)
+
     tax_document_types = relationship(
     "CompanyTaxDocument",
     foreign_keys="[CompanyTaxDocument.category_detail_id]",

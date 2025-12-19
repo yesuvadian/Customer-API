@@ -135,3 +135,22 @@ ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
 ZOHO_OAUTH_TOKEN_URL = f"{ZOHO_ACCOUNTS_BASE}/oauth/v2/token"
 if not all([ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ORG_ID]):
     raise RuntimeError("Zoho Books environment variables are not fully configured")
+
+# ==============================
+# ZOHO EMAIL SETTINGS
+# ==============================
+ 
+ZOHO_SENT_EMAIL = os.getenv(
+    "ZOHO_SENT_EMAIL",
+    FROM_EMAIL  # fallback to default sender
+)
+
+if APP_ENV == "production":
+    if not all([
+        ZOHO_CLIENT_ID,
+        ZOHO_CLIENT_SECRET,
+        ZOHO_REFRESH_TOKEN,
+        ZOHO_ORG_ID,
+        ZOHO_SENT_EMAIL,
+    ]):
+        raise RuntimeError("Zoho Books environment variables are not fully configured")
