@@ -42,6 +42,7 @@ from routers import (
     category_master,
     category_details,
     cities,
+    zoho_auth,
     zoho_items
 )
 from routers.kyc_router import router as kyc_router
@@ -136,6 +137,7 @@ app.include_router(erp_router.router)
 app.include_router(mongo_router.router)
 app.include_router(quotes.router)
 app.include_router(zoho_items.router)
+app.include_router(zoho_auth.router)
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")
 # async def startup_event():
