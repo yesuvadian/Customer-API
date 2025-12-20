@@ -174,22 +174,32 @@ class QuoteService:
         return response.json().get("estimate", {})
     
     def update_quote_status(self, access_token: str, estimate_id: str, action: str):
-            headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
 
-            response = requests.put(
-                f"{self.base_url}/estimates/{estimate_id}/status/{action}",
-                headers=headers,
-                params={"organization_id": self.org_id},
-                timeout=15
+        response = requests.post(
+            f"{self.base_url}/estimates/{estimate_id}/status/{action}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        data = response.json()
+
+        if response.status_code != 200 or data.get("code") != 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to mark quote as {action}",
+                    "zoho_response": data
+                }
             )
 
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={"message": f"Failed to mark quote as {action}", "zoho_response": response.json()}
-                )
+        return {
+            "message": data.get("message", "Status updated"),
+            "estimate_id": estimate_id,
+            "status": action
+        }
 
-            return response.json()["estimate"]
     def get_quote_pdf(self, access_token: str, estimate_id: str):
             headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
             params = {
@@ -215,3 +225,111 @@ class QuoteService:
                 )
 
             return response.content  # raw PDF bytes
+    # -----------------------------
+    # Add Comment
+    # -----------------------------
+    def add_comment(self, access_token: str, estimate_id: str, description: str):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {"description": description}
+
+        response = requests.post(
+            f"{self.base_url}/estimates/{estimate_id}/comments",
+            headers=headers,
+            json=payload,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Failed to add comment",
+                    "zoho_response": response.json()
+                }
+            )
+
+        return response.json()
+    # -----------------------------
+    # Update Comment
+    # -----------------------------
+    def update_comment(self, access_token: str, estimate_id: str, comment_id: str, description: str):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {"description": description}
+
+        response = requests.put(
+            f"{self.base_url}/estimates/{estimate_id}/comments/{comment_id}",
+            headers=headers,
+            json=payload,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to update comment {comment_id}",
+                    "zoho_response": response.json()
+                }
+            )
+
+        return response.json()
+    # -----------------------------
+    # Delete Comment
+    # -----------------------------
+    def delete_comment(self, access_token: str, estimate_id: str, comment_id: str):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        response = requests.delete(
+            f"{self.base_url}/estimates/{estimate_id}/comments/{comment_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to delete comment {comment_id}",
+                    "zoho_response": response.json()
+                }
+            )
+
+        return {"message": "Comment deleted successfully"}
+    # -----------------------------
+    # List Comments
+    # -----------------------------
+    def get_comments(self, access_token: str, estimate_id: str):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        response = requests.get(
+            f"{self.base_url}/estimates/{estimate_id}/comments",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to fetch comments for estimate {estimate_id}",
+                    "zoho_response": response.json()
+                }
+            )
+
+        return response.json().get("comments", [])

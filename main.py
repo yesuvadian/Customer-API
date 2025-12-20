@@ -147,7 +147,6 @@ app.include_router(invoices.router)
 app.include_router(payments.router)
 app.include_router(contacts.router)
 app.include_router(retainerinvoices.router)
-app.include_router(products.router)
 app.include_router(sales_orders.router)
 
 

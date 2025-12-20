@@ -80,7 +80,7 @@ def review_quote(estimate_id: str, payload: zohoschemas.ReviewQuote, current_use
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reviewing quote: {str(e)}")
 
-    return schemas.QuoteResponse(
+    return zohoschemas.QuoteResponse(
         message="Quote reviewed successfully",
         estimate_id=updated["estimate_id"],
         estimate_number=updated["estimate_number"],
@@ -106,7 +106,7 @@ def approve_quote(estimate_id: str, payload: zohoschemas.ApproveQuote, current_u
         )   
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in customer approval: {str(e)}")    
-    return schemas.QuoteResponse(
+    return zohoschemas.QuoteResponse(
         message="Quote approval recorded successfully", 
         estimate_id=result["estimate_id"],
         estimate_number=result["estimate_number"],  
@@ -161,7 +161,7 @@ def accept_quote(estimate_id: str, current_user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error accepting quote: {str(e)}")
 
-    return schemas.QuoteResponse(
+    return zohoschemas.QuoteResponse(
         message="Quote accepted successfully",
         estimate_id=result["estimate_id"],
         estimate_number=result["estimate_number"],
@@ -183,3 +183,81 @@ def get_quote_pdf(estimate_id: str, current_user=Depends(get_current_user)):
 
     # Return raw PDF stream with correct headers
     return Response(content=pdf_bytes, media_type="application/pdf")
+@router.post("/{estimate_id}/comments", status_code=status.HTTP_201_CREATED)
+def add_comment(
+    estimate_id: str,
+    payload: zohoschemas.CommentCreate,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+    try:
+        created = quote_service.add_comment(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            description=payload.description,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error adding comment: {str(e)}"
+        )
+    return created
+
+# -----------------------------
+# Update Comment
+# -----------------------------
+@router.put("/{estimate_id}/comments/{comment_id}", status_code=status.HTTP_200_OK)
+def update_comment(
+    estimate_id: str,
+    comment_id: str,
+    payload: zohoschemas.CommentUpdate,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+    try:
+        updated = quote_service.update_comment(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            comment_id=comment_id,
+            description=payload.description,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error updating comment: {str(e)}"
+        )
+    return updated
+# -----------------------------
+# Delete Comment
+# -----------------------------
+@router.delete("/{estimate_id}/comments/{comment_id}", status_code=status.HTTP_200_OK)
+def delete_comment(
+    estimate_id: str,
+    comment_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+    try:
+        result = quote_service.delete_comment(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            comment_id=comment_id,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error deleting comment: {str(e)}"
+        )
+    return {"message": "Comment deleted"}
+@router.get("/{estimate_id}/comments", status_code=status.HTTP_200_OK)
+def list_comments(estimate_id: str, current_user=Depends(get_current_user)):
+    """
+    List All Comments for a Quote (Customer)
+    """
+    access_token = get_zoho_access_token()
+    try:
+        comments = quote_service.get_comments(access_token, estimate_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching comments: {str(e)}"
+        )
+    
+    return {"comments": comments}

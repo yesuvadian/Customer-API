@@ -299,3 +299,13 @@ class ContactResponse(BaseModel):
     company_name: Optional[str]
     is_portal_enabled: bool
     message: Optional[str] = None
+
+
+
+    
+
+class CommentCreate(BaseModel):
+    description: str
+
+class CommentUpdate(BaseModel):
+    description: str
