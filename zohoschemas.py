@@ -1,0 +1,301 @@
+from pydantic import BaseModel, Field
+from typing import List, Optional
+# -----------------------------
+# Quote Item
+# -----------------------------
+class QuoteItem(BaseModel):
+    item_id: str = Field(..., description="Zoho Books item_id")
+    quantity: int = Field(..., gt=0, description="Quantity requested")
+
+# -----------------------------
+# Request Quote (customer)
+# -----------------------------
+class RequestQuote(BaseModel):
+    contact_id: str = Field(
+        ...,
+        description="Zoho contact_id or customer email. If email is provided, service resolves to contact_id."
+    )
+    items: List[QuoteItem] = Field(..., description="List of items in the quote")
+    notes: Optional[str] = Field(None, description="Optional notes from customer")
+
+# -----------------------------
+# ERP Review Quote
+# -----------------------------
+class ReviewQuote(BaseModel):
+    contact_id: str = Field(..., description="Zoho contact_id or email of customer")
+    status: str = Field(
+        ...,
+        #regex="^(approved|rejected)$",
+        description="ERP review status: approved or rejected"
+    )
+    notes: Optional[str] = Field(None, description="ERP reviewer notes")
+
+# -----------------------------
+# Customer Approval Quote
+# -----------------------------
+class ApproveQuote(BaseModel):
+    status: str = Field(
+        ...,
+        #regex="^(accepted|declined)$",
+        description="Customer decision: accepted or declined"
+    )
+    notes: Optional[str] = Field(None, description="Customer notes or feedback")
+
+# -----------------------------
+# Quote Response (generic)
+# -----------------------------
+class QuoteResponse(BaseModel):
+    estimate_id: str
+    estimate_number: str
+    status: str
+    message: Optional[str] = None
+
+
+
+# -----------------------------
+# Sales Order Item
+# -----------------------------
+class SalesOrderItem(BaseModel):
+    item_id: str = Field(..., description="Zoho Books item_id")
+    quantity: int = Field(..., gt=0, description="Quantity requested")
+
+# -----------------------------
+# Request Sales Order (customer)
+# -----------------------------
+class RequestSalesOrder(BaseModel):
+    contact_id: str = Field(
+        ...,
+        description="Zoho contact_id or customer email. If email is provided, service resolves to contact_id."
+    )
+    items: List[SalesOrderItem] = Field(..., description="List of items in the sales order")
+    notes: Optional[str] = Field(None, description="Optional notes from customer")
+
+# -----------------------------
+# ERP Review Sales Order
+# -----------------------------
+class ReviewSalesOrder(BaseModel):
+    contact_id: str = Field(..., description="Zoho contact_id or email of customer")
+    status: str = Field(
+        ...,
+        #regex="^(approved|rejected)$",
+        description="ERP review status: approved or rejected"
+    )
+    notes: Optional[str] = Field(None, description="ERP reviewer notes")
+
+# -----------------------------
+# Customer Approval Sales Order
+# -----------------------------
+class ApproveSalesOrder(BaseModel):
+    status: str = Field(
+        ...,
+        #regex="^(accepted|declined)$",
+        description="Customer decision: accepted or declined"
+    )
+    notes: Optional[str] = Field(None, description="Customer notes or feedback")
+
+# -----------------------------
+# Sales Order Response (generic)
+# -----------------------------
+class SalesOrderResponse(BaseModel):
+    salesorder_id: str
+    salesorder_number: str
+    status: str
+    message: Optional[str] = None
+
+
+
+
+# -----------------------------
+# Invoice Item
+# -----------------------------
+class InvoiceItem(BaseModel):
+    item_id: str = Field(..., description="Zoho Books item_id")
+    quantity: int = Field(..., gt=0, description="Quantity requested")
+
+# -----------------------------
+# Request Invoice (customer)
+# -----------------------------
+class RequestInvoice(BaseModel):
+    contact_id: str = Field(
+        ...,
+        description="Zoho contact_id or customer email. If email is provided, service resolves to contact_id."
+    )
+    items: List[InvoiceItem] = Field(..., description="List of items in the invoice")
+    notes: Optional[str] = Field(None, description="Optional notes from customer")
+
+# -----------------------------
+# ERP Review Invoice
+# -----------------------------
+class ReviewInvoice(BaseModel):
+    contact_id: str = Field(..., description="Zoho contact_id or email of customer")
+    status: str = Field(
+        ...,
+        #regex="^(approved|rejected)$",
+        description="ERP review status: approved or rejected"
+    )
+    notes: Optional[str] = Field(None, description="ERP reviewer notes")
+
+# -----------------------------
+# Customer Approval Invoice
+# -----------------------------
+class ApproveInvoice(BaseModel):
+    status: str = Field(
+        ...,
+        #regex="^(accepted|declined)$",
+        description="Customer decision: accepted or declined"
+    )
+    notes: Optional[str] = Field(None, description="Customer notes or feedback")
+
+# -----------------------------
+# Invoice Response (generic)
+# -----------------------------
+class InvoiceResponse(BaseModel):
+    invoice_id: str
+    invoice_number: str
+    status: str
+    message: Optional[str] = None
+
+
+
+# -----------------------------
+# Retainer Invoice Item
+# -----------------------------
+class RetainerInvoiceItem(BaseModel):
+    item_id: str = Field(..., description="Zoho Books item_id")
+    quantity: int = Field(..., gt=0, description="Quantity requested")
+
+# -----------------------------
+# Request Retainer Invoice (customer)
+# -----------------------------
+class RequestRetainerInvoice(BaseModel):
+    contact_id: str = Field(
+        ...,
+        description="Zoho contact_id or customer email. If email is provided, service resolves to contact_id."
+    )
+    items: List[RetainerInvoiceItem] = Field(..., description="List of items in the retainer invoice")
+    notes: Optional[str] = Field(None, description="Optional notes from customer")
+
+# -----------------------------
+# ERP Review Retainer Invoice
+# -----------------------------
+class ReviewRetainerInvoice(BaseModel):
+    contact_id: str = Field(..., description="Zoho contact_id or email of customer")
+    status: str = Field(
+        ...,
+        #regex="^(approved|rejected)$",
+        description="ERP review status: approved or rejected"
+    )
+    notes: Optional[str] = Field(None, description="ERP reviewer notes")
+
+# -----------------------------
+# Customer Approval Retainer Invoice
+# -----------------------------
+class ApproveRetainerInvoice(BaseModel):
+    status: str = Field(
+        ...,
+        #regex="^(accepted|declined)$",
+        description="Customer decision: accepted or declined"
+    )
+    notes: Optional[str] = Field(None, description="Customer notes or feedback")
+
+# -----------------------------
+# Retainer Invoice Response (generic)
+# -----------------------------
+class RetainerInvoiceResponse(BaseModel):
+    retainerinvoice_id: str
+    retainerinvoice_number: str
+    status: str
+    message: Optional[str] = None
+from pydantic import BaseModel, Field
+from typing import Optional
+
+# -----------------------------
+# Request Customer Payment
+# -----------------------------
+class RequestPayment(BaseModel):
+    contact_id: str = Field(
+        ...,
+        description="Zoho contact_id or customer email. If email is provided, service resolves to contact_id."
+    )
+    invoice_id: str = Field(..., description="Invoice ID against which payment is made")
+    amount: float = Field(..., gt=0, description="Payment amount")
+    payment_mode: str = Field(..., description="Payment mode e.g. Cash, BankTransfer, CreditCard")
+    reference_number: Optional[str] = Field(None, description="Transaction reference number")
+    notes: Optional[str] = Field(None, description="Optional notes for payment")
+
+# -----------------------------
+# ERP Review Payment
+# -----------------------------
+class ReviewPayment(BaseModel):
+    contact_id: str = Field(..., description="Zoho contact_id or email of customer")
+    status: str = Field(
+        ...,
+        #regex="^(approved|rejected)$",
+        description="ERP review status: approved or rejected"
+    )
+    notes: Optional[str] = Field(None, description="ERP reviewer notes")
+
+# -----------------------------
+# Customer Approval Payment
+# -----------------------------
+class ApprovePayment(BaseModel):
+    status: str = Field(
+        ...,
+        #regex="^(accepted|declined)$",
+        description="Customer decision: accepted or declined"
+    )
+    notes: Optional[str] = Field(None, description="Customer notes or feedback")
+
+# -----------------------------
+# Payment Response (generic)
+# -----------------------------
+class PaymentResponse(BaseModel):
+    payment_id: str
+    payment_number: str
+    status: str
+    message: Optional[str] = None
+
+
+
+class ContactTag(BaseModel):
+    tag_id: int
+    tag_option_id: int
+
+class Address(BaseModel):
+    attention: Optional[str]
+    address: Optional[str]
+    street2: Optional[str]
+    state_code: Optional[str]
+    city: Optional[str]
+    state: Optional[str]
+    zip: Optional[int]
+    country: Optional[str]
+    fax: Optional[str]
+    phone: Optional[str]
+
+class CreateContact(BaseModel):
+    contact_name: str
+    company_name: Optional[str]
+    website: Optional[str]
+    language_code: Optional[str]
+    contact_type: str = "customer"
+    customer_sub_type: Optional[str] = "business"
+    credit_limit: Optional[float]
+    pricebook_id: Optional[int]
+    contact_number: Optional[str]
+    ignore_auto_number_generation: bool = False
+    tags: Optional[List[ContactTag]]
+    is_portal_enabled: bool = False
+    currency_id: Optional[int]
+    payment_terms: Optional[int]
+    payment_terms_label: Optional[str]
+    notes: Optional[str]
+    billing_address: Optional[Address]
+    shipping_address: Optional[Address]
+
+class ContactResponse(BaseModel):
+    contact_id: str
+    contact_name: str
+    company_name: Optional[str]
+    is_portal_enabled: bool
+    message: Optional[str] = None
