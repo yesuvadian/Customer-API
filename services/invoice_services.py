@@ -157,3 +157,107 @@ class InvoiceService:
             )
 
         return response.content  # raw PDF bytes
+    # ----------------------------------------------
+    # GET COMMENTS FOR INVOICE
+    # ----------------------------------------------
+    def get_invoice_comments(self, access_token: str, invoice_id: str):
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+        resp = requests.get(
+            f"{self.base_url}/invoices/{invoice_id}/comments",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Failed to fetch invoice comments",
+                    "zoho_response": resp.json()
+                }
+            )
+
+        return resp.json().get("comments", [])
+
+
+    # ----------------------------------------------
+    # ADD NEW COMMENT
+    # ----------------------------------------------
+    def add_invoice_comment(self, access_token: str, invoice_id: str, payload: dict):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "content-type": "application/json"
+        }
+
+        resp = requests.post(
+            f"{self.base_url}/invoices/{invoice_id}/comments",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            json=payload,
+            timeout=15
+        )
+
+        if resp.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Failed to add invoice comment",
+                    "zoho_response": resp.json()
+                }
+            )
+
+        return resp.json()
+
+
+    # ----------------------------------------------
+    # UPDATE A COMMENT
+    # ----------------------------------------------
+    def update_invoice_comment(self, access_token: str, invoice_id: str, comment_id: str, payload: dict):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "content-type": "application/json"
+        }
+
+        resp = requests.put(
+            f"{self.base_url}/invoices/{invoice_id}/comments/{comment_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            json=payload,
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Failed to update invoice comment",
+                    "zoho_response": resp.json()
+                }
+            )
+
+        return resp.json()
+
+
+    # ----------------------------------------------
+    # DELETE A COMMENT
+    # ----------------------------------------------
+    def delete_invoice_comment(self, access_token: str, invoice_id: str, comment_id: str):
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+        resp = requests.delete(
+            f"{self.base_url}/invoices/{invoice_id}/comments/{comment_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Failed to delete invoice comment",
+                    "zoho_response": resp.json()
+                }
+            )

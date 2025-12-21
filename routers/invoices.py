@@ -134,3 +134,64 @@ def get_invoice_pdf(invoice_id: str, current_user=Depends(get_current_user)):
 
     # Return raw PDF stream with correct headers
     return Response(content=pdf_bytes, media_type="application/pdf")
+# =====================================================
+# GET ALL COMMENTS FOR INVOICE
+# =====================================================
+@router.get("/{invoice_id}/comments", status_code=status.HTTP_200_OK)
+def get_invoice_comments(invoice_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+    try:
+        comments = invoice_service.get_invoice_comments(access_token, invoice_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching invoice comments: {str(e)}")
+    return {"comments": comments}
+
+
+# =====================================================
+# ADD NEW COMMENT
+# =====================================================
+@router.post("/{invoice_id}/comments", status_code=status.HTTP_201_CREATED)
+def add_invoice_comment(
+    invoice_id: str,
+    payload: dict = Body(...),
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+    try:
+        created = invoice_service.add_invoice_comment(access_token, invoice_id, payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error adding comment: {str(e)}")
+    return {"message": "Comment added", "comment": created}
+
+
+# =====================================================
+# UPDATE A COMMENT
+# =====================================================
+@router.put("/{invoice_id}/comments/{comment_id}", status_code=status.HTTP_200_OK)
+def update_invoice_comment(
+    invoice_id: str,
+    comment_id: str,
+    payload: dict = Body(...),
+    current_user=Depends(get_current_user),
+):
+    access_token = get_zoho_access_token()
+    try:
+        updated = invoice_service.update_invoice_comment(
+            access_token, invoice_id, comment_id, payload
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating comment: {str(e)}")
+    return {"message": "Comment updated", "comment": updated}
+
+
+# =====================================================
+# DELETE A COMMENT
+# =====================================================
+@router.delete("/{invoice_id}/comments/{comment_id}", status_code=status.HTTP_200_OK)
+def delete_invoice_comment(invoice_id: str, comment_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+    try:
+        invoice_service.delete_invoice_comment(access_token, invoice_id, comment_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting comment: {str(e)}")
+    return {"message": "Comment deleted"}
