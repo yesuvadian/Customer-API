@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, Response, status, HTTPException
 from auth_utils import get_current_user
 import schemas
 from services.sales_order_service import SalesOrderService
@@ -119,3 +119,110 @@ def get_order(salesorder_id: str, current_user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Error fetching sales order details: {str(e)}")
 
     return order
+
+
+# ------------------------------------
+# COMMENTS: ADD
+# ------------------------------------
+@router.post("/{salesorder_id}/comments", status_code=status.HTTP_201_CREATED)
+def add_comment(salesorder_id: str, payload: dict, current_user=Depends(get_current_user)):
+    """
+    Add a comment to a Sales Order
+    """
+    access_token = get_zoho_access_token()
+    
+    description = payload.get("description", "")
+    show_to_client = payload.get("show_comment_to_clients", True)
+    
+    try:
+        result = sales_order_service.add_comment(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            description=description,
+            show_to_client=show_to_client
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error adding comment: {str(e)}")
+
+    return result
+# ------------------------------------
+# COMMENTS: UPDATE
+# ------------------------------------
+@router.put("/{salesorder_id}/comments/{comment_id}", status_code=status.HTTP_200_OK)
+def update_comment(salesorder_id: str, comment_id: str, payload: dict, current_user=Depends(get_current_user)):
+    """
+    Update an existing comment
+    """
+    access_token = get_zoho_access_token()
+    desc = payload.get("description", "")
+
+    try:
+        result = sales_order_service.update_comment(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            comment_id=comment_id,
+            description=desc
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating comment: {str(e)}")
+
+    return result
+# ------------------------------------
+# COMMENTS: DELETE
+# ------------------------------------
+@router.delete("/{salesorder_id}/comments/{comment_id}", status_code=status.HTTP_200_OK)
+def delete_comment(salesorder_id: str, comment_id: str, current_user=Depends(get_current_user)):
+    """
+    Delete a comment from Sales Order
+    """
+    access_token = get_zoho_access_token()
+
+    try:
+        result = sales_order_service.delete_comment(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            comment_id=comment_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting comment: {str(e)}")
+
+    return result
+# ------------------------------------
+# COMMENTS: LIST
+# ------------------------------------
+@router.get("/{salesorder_id}/comments", status_code=status.HTTP_200_OK)
+def get_comments(salesorder_id: str, current_user=Depends(get_current_user)):
+    """
+    Get all comments for a Sales Order
+    """
+    access_token = get_zoho_access_token()
+
+    try:
+        comments = sales_order_service.get_comments(
+            access_token=access_token,
+            salesorder_id=salesorder_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching comments: {str(e)}")
+
+    return {"comments": comments}
+@router.get("/{salesorder_id}/pdf", status_code=status.HTTP_200_OK)
+def get_order_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
+    """
+    Get Sales Order PDF
+    """
+    access_token = get_zoho_access_token()
+    try:
+        pdf_bytes = sales_order_service.get_order_pdf(
+            access_token=access_token,
+            salesorder_id=salesorder_id
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching sales order PDF: {str(e)}"
+        )
+
+    return Response(content=pdf_bytes, media_type="application/pdf")

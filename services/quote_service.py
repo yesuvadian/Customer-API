@@ -99,7 +99,15 @@ class QuoteService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"message": "Failed to fetch quotes", "zoho_response": response.json()}
             )
-        return response.json().get("estimates", [])
+        estimates = response.json().get("estimates", {})
+
+         # ❌ EXCLUDE draft quotes
+        quotes = [
+            q for q in estimates 
+            if q.get("status", "").lower() != "draft"
+        ]
+
+        return quotes
 
     # -----------------------------
     # Get Quote Details
@@ -114,12 +122,19 @@ class QuoteService:
             params={"organization_id": self.org_id, "customer_id": contact_id},
             timeout=15
         )
+
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"message": f"Failed to fetch quote {estimate_id}", "zoho_response": response.json()}
             )
-        return response.json().get("estimate", {})
+
+        estimate = response.json().get("estimate", {})
+
+        
+
+        return estimate
+
 
     # -----------------------------
     # ERP Review Quote
