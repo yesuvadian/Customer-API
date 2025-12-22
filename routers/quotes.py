@@ -35,7 +35,7 @@ def request_quote(payload: zohoschemas.RequestQuote, current_user=Depends(get_cu
             detail=f"Unexpected error while creating quote: {str(e)}"
         )
 
-    return schemas.QuoteResponse(
+    return zohoschemas.QuoteResponse(
         message="Quote request submitted successfully",
         estimate_id=estimate["estimate_id"],
         estimate_number=estimate["estimate_number"],

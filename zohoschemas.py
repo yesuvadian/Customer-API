@@ -273,6 +273,26 @@ class Address(BaseModel):
     fax: Optional[str]
     phone: Optional[str]
 
+class ContactCommunicationPreference(BaseModel):
+    is_sms_enabled: Optional[bool] = False
+    is_whatsapp_enabled: Optional[bool] = False
+
+
+class ContactPerson(BaseModel):
+    salutation: Optional[str]
+    first_name: str
+    last_name: Optional[str]
+    email: Optional[str]
+    phone: Optional[str]
+    mobile: Optional[str]
+    designation: Optional[str]
+    department: Optional[str]
+    skype: Optional[str]
+    is_primary_contact: Optional[bool] = False
+    communication_preference: Optional[ContactCommunicationPreference]
+    enable_portal: Optional[bool] = False
+
+
 class CreateContact(BaseModel):
     contact_name: str
     company_name: Optional[str]
@@ -292,6 +312,7 @@ class CreateContact(BaseModel):
     notes: Optional[str]
     billing_address: Optional[Address]
     shipping_address: Optional[Address]
+    contact_persons: Optional[List[ContactPerson]]
 
 class ContactResponse(BaseModel):
     contact_id: str

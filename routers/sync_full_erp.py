@@ -106,45 +106,63 @@ async def sync_erp_products(db: Session = Depends(get_db)):
 
         insert_result = []
         update_result = []
-
         synced_product_ids = []
 
-        # ---------- INSERT ----------
+        # ------------------ INSERT ------------------
         if insert_payload:
             insert_result = await ERPService.insert_data(insert_payload)
 
-            # Save returned erp_external_id into Product table
             for rec in insert_result:
                 item = rec.get("itemmaster")
-                if item:
-                    erp_id = item.get("itemmasterid")
-                    raw_itemid = item.get("itemid")
-                    sku = raw_itemid.split("-")[0]  # FIX
+                if not item:
+                    continue
 
-                    product = db.query(Product).filter(Product.sku == sku).first()
-                    if product:
-                        product.erp_external_id = erp_id
-                        synced_product_ids.append(product.id)
-                        db.add(product)
+                erp_id = item.get("itemmasterid")
+                sku = item.get("sku")       # ✅ Correct mapping
+
+                if not sku or not erp_id:
+                    continue
+
+                product = (
+                    db.query(Product)
+                    .filter(Product.sku == sku)
+                    .first()
+                )
+
+                if product:
+                    product.erp_external_id = erp_id
+                    synced_product_ids.append(product.id)
 
             db.commit()
 
-        # ---------- UPDATE ----------
+        # ------------------ UPDATE ------------------
         if update_payload:
             update_result = await ERPService.update_data(update_payload)
 
-            # Track updated products
             for rec in update_result:
                 item = rec.get("itemmaster")
-                if item:
-                    sku = item.get("itemid")
-                    product = db.query(Product).filter(Product.sku == sku).first()
-                    if product:
-                        synced_product_ids.append(product.id)
+                if not item:
+                    continue
 
-        # ---------- MARK ERP SYNC COMPLETED ----------
+                sku = item.get("sku")      # ✅ Correct mapping
+
+                if not sku:
+                    continue
+
+                product = (
+                    db.query(Product)
+                    .filter(Product.sku == sku)
+                    .first()
+                )
+
+                if product:
+                    synced_product_ids.append(product.id)
+
+        # ----------- MARK SYNC COMPLETED ------------
         if synced_product_ids:
-            db.query(Product).filter(Product.id.in_(synced_product_ids)).update(
+            db.query(Product).filter(
+                Product.id.in_(synced_product_ids)
+            ).update(
                 {"erp_sync_status": "completed"},
                 synchronize_session=False
             )
@@ -158,11 +176,18 @@ async def sync_erp_products(db: Session = Depends(get_db)):
 
     except HTTPException as e:
         if e.status_code == status.HTTP_404_NOT_FOUND:
-            return []
+            return {
+                "status": "success",
+                "message": "No pending products to sync",
+                "inserted": [],
+                "updated": []
+            }
         raise e
 
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+
 
 
 @router.get("/sync_ombasic")
