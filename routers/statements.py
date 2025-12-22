@@ -12,25 +12,22 @@ router = APIRouter(
 
 statement_service = StatementService()
 
-@router.post("/{contact_id}/email", status_code=status.HTTP_200_OK)
+@router.post("/email", status_code=status.HTTP_200_OK)
 def email_statement(
-    contact_id: str,
-    organization_id: str = Query(...),
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
     current_user=Depends(get_current_user)
 ):
     """
-    Sends Customer Statement Email (Zoho Books)
-    If start_date and end_date not provided → current month is used.
+    Sends Customer Statement Email.
+    Uses current_user.email as the customer identifier.
     """
     access_token = get_zoho_access_token()
 
     try:
         result = statement_service.email_customer_statement(
             access_token=access_token,
-            contact_id=contact_id,
-            #organization_id=organization_id,
+            contact_id=current_user.email,
             start_date=start_date,
             end_date=end_date
         )
@@ -41,6 +38,26 @@ def email_statement(
             status_code=500,
             detail=f"Error emailing statement: {str(e)}"
         )
+@router.get("/email/history", status_code=status.HTTP_200_OK)
+def get_statement_email_history(current_user=Depends(get_current_user)):
+    """
+    Returns statement email history for current_user.email
+    """
+    access_token = get_zoho_access_token()
+
+    try:
+        history = statement_service.get_statement_email_history(
+            access_token,
+            current_user.email
+        )
+        return {"history": history}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching statement email history: {str(e)}"
+        )
+
 
 
 @router.get("/{contact_id}/email", status_code=status.HTTP_200_OK)
@@ -51,7 +68,7 @@ def get_statement_email_history(contact_id: str, current_user=Depends(get_curren
     """
     access_token = get_zoho_access_token()
     try:
-        history = statement_service.get_statement_email_history(access_token, contact_id)
+        history = statement_service.get_statement_email_history(access_token, current_user.email)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching statement email history: {str(e)}")
     return {"history": history}
@@ -60,29 +77,26 @@ def get_statement_email_history(contact_id: str, current_user=Depends(get_curren
 def email_statement_pdf(contact_id: str, current_user=Depends(get_current_user)):
     access_token = get_zoho_access_token()
     try:
-        result = statement_service.email_customer_statement(access_token, contact_id)
+        result = statement_service.email_customer_statement(access_token, current_user.email)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error emailing statement PDF: {str(e)}")
     return {"message": "Statement emailed successfully", "result": result}
-@router.get("/{contact_id}/pdf", status_code=200)
+@router.get("/pdf", status_code=200)
 def get_statement_pdf(
-    contact_id: str,
-    #organization_id: str = Query(...),
-    start_date: str | None = None,
-    end_date: str | None = None,
-    current_user = Depends(get_current_user)
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    current_user=Depends(get_current_user),
 ):
     """
-    Returns Customer Statement PDF (binary stream).
-    Viewable in browser or downloadable.
+    Returns Customer Statement PDF (inline browser preview).
+    Uses current_user.email as contact ID.
     """
     access_token = get_zoho_access_token()
 
     try:
         pdf_bytes = statement_service.get_statement_pdf(
             access_token=access_token,
-            contact_id=contact_id,
-            #organization_id=organization_id,
+            contact_id=current_user.email,
             start_date=start_date,
             end_date=end_date
         )
@@ -91,9 +105,13 @@ def get_statement_pdf(
             content=pdf_bytes,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f"inline; filename=statement_{contact_id}.pdf"
+                "Content-Disposition": f"inline; filename=statement_{current_user.email}.pdf"
             }
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unable to fetch PDF: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to fetch PDF: {str(e)}"
+        )
+
