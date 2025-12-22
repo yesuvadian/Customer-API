@@ -127,3 +127,113 @@ def get_retainer_invoice_pdf(retainerinvoice_id: str, current_user=Depends(get_c
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching retainer invoice PDF: {str(e)}")
     return Response(content=pdf_bytes, media_type="application/pdf")
+# -----------------------------
+# LIST COMMENTS
+# -----------------------------
+@router.get("/{retainerinvoice_id}/comments", status_code=status.HTTP_200_OK)
+def list_retainer_invoice_comments(retainerinvoice_id: str, current_user=Depends(get_current_user)):
+    """
+    Get list of comments for a Retainer Invoice
+    """
+    access_token = get_zoho_access_token()
+    try:
+        comments = retainer_invoice_service.list_comments(
+            access_token,
+            retainerinvoice_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching comments: {str(e)}")
+
+    return {"comments": comments}
+
+
+# -----------------------------
+# ADD COMMENT
+# -----------------------------
+@router.post("/{retainerinvoice_id}/comments", status_code=status.HTTP_201_CREATED)
+def add_retainer_invoice_comment(
+    retainerinvoice_id: str,
+    payload: dict,
+    current_user=Depends(get_current_user)
+):
+    """
+    Add a comment to Retainer Invoice
+    """
+    access_token = get_zoho_access_token()
+
+    # Enrich payload with customer context if needed
+    payload.setdefault(
+        "message",
+        f"Comment by {current_user.email}"
+    )
+
+    try:
+        comment = retainer_invoice_service.add_comment(
+            access_token,
+            retainerinvoice_id,
+            payload
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error adding comment: {str(e)}")
+
+    return {
+        "message": "Comment added successfully",
+        "comment": comment
+    }
+
+
+# -----------------------------
+# UPDATE COMMENT
+# -----------------------------
+@router.put("/{retainerinvoice_id}/comments/{comment_id}", status_code=status.HTTP_200_OK)
+def update_retainer_invoice_comment(
+    retainerinvoice_id: str,
+    comment_id: str,
+    payload: dict,
+    current_user=Depends(get_current_user)
+):
+    """
+    Update an existing comment in a Retainer Invoice
+    """
+    access_token = get_zoho_access_token()
+
+    try:
+        updated = retainer_invoice_service.update_comment(
+            access_token,
+            retainerinvoice_id,
+            comment_id,
+            payload
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating comment: {str(e)}")
+
+    return {
+        "message": "Comment updated successfully",
+        "comment": updated
+    }
+
+
+# -----------------------------
+# DELETE COMMENT
+# -----------------------------
+@router.delete("/{retainerinvoice_id}/comments/{comment_id}", status_code=status.HTTP_200_OK)
+def delete_retainer_invoice_comment(
+    retainerinvoice_id: str,
+    comment_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    Delete a comment from Retainer Invoice
+    """
+    access_token = get_zoho_access_token()
+
+    try:
+        deleted = retainer_invoice_service.delete_comment(
+            access_token,
+            retainerinvoice_id,
+            comment_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting comment: {str(e)}")
+
+    return {"message": "Comment deleted successfully"}

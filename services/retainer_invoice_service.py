@@ -193,3 +193,105 @@ class RetainerInvoiceService:
                                 detail={"message": "Failed to fetch retainer invoice PDF",
                                         "zoho_response": response.json()})
         return response.content
+    # -----------------------------
+    # Get Retainer Invoice Comments
+    # -----------------------------
+    def list_comments(self, access_token: str, retainerinvoice_id: str):
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+        response = requests.get(
+            f"{self.base_url}/retainerinvoices/{retainerinvoice_id}/comments",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to get comments for retainer invoice {retainerinvoice_id}",
+                    "zoho_response": response.json()
+                }
+            )
+        return response.json().get("comments", [])
+
+
+    # -----------------------------
+    # Add Comment
+    # -----------------------------
+    def add_comment(self, access_token: str, retainerinvoice_id: str, payload: dict):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(
+            f"{self.base_url}/retainerinvoices/{retainerinvoice_id}/comments",
+            headers=headers,
+            json=payload,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to create comment for retainer invoice {retainerinvoice_id}",
+                    "zoho_response": response.json()
+                }
+            )
+        return response.json().get("comment", {})
+
+
+    # -----------------------------
+    # Update Comment
+    # -----------------------------
+    def update_comment(self, access_token: str, retainerinvoice_id: str, comment_id: str, payload: dict):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.put(
+            f"{self.base_url}/retainerinvoices/{retainerinvoice_id}/comments/{comment_id}",
+            headers=headers,
+            json=payload,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to update comment {comment_id}",
+                    "zoho_response": response.json()
+                }
+            )
+        return response.json().get("comment", {})
+
+
+    # -----------------------------
+    # Delete Comment
+    # -----------------------------
+    def delete_comment(self, access_token: str, retainerinvoice_id: str, comment_id: str):
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+        response = requests.delete(
+            f"{self.base_url}/retainerinvoices/{retainerinvoice_id}/comments/{comment_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to delete comment {comment_id}",
+                    "zoho_response": response.json()
+                }
+            )
+        return {"message": "Comment deleted successfully"}

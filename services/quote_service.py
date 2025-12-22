@@ -211,6 +211,7 @@ class QuoteService:
 
         return {
             "message": data.get("message", "Status updated"),
+            "estimate_number": data.get("estimate", {}).get("estimate_number", ""),
             "estimate_id": estimate_id,
             "status": action
         }
