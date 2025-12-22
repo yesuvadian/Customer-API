@@ -32,6 +32,7 @@ from routers import (
     role,
     role_module_privileges,
     sales_orders,
+    statements,
     subcategories,
     sync_full_erp,
     token,
@@ -150,6 +151,7 @@ app.include_router(contacts.router)
 app.include_router(retainerinvoices.router)
 app.include_router(sales_orders.router)
 app.include_router(zoho_dashboard.router)
+app.include_router(statements.router)
 
 
 # Optional: enable auto-create database tables at startup
