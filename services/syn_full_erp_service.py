@@ -159,6 +159,7 @@ class ERPSyncService:
                     "subgroup2": p.subcategory_obj.id if p.subcategory_obj else None,
                     "itemid": f"{sku}-{desc}",   # concatenated
                     "itemdesc": desc,
+                    "sku": sku,
                     "createdfrom": "APP",
                     "maingroup": 1
                 }
