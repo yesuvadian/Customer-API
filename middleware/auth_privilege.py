@@ -1,4 +1,4 @@
-from fastapi import Request, HTTPException, status
+from fastapi import Request, HTTPException
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User
@@ -6,7 +6,7 @@ import auth_utils
 
 PUBLIC_ENDPOINTS = [
     "/token", "/docs", "/openapi.json", "/redoc",
-    "/register/", "/auth/", "/files/","/zohoquotes","/zohoitems"
+    "/register/", "/auth/", "/files/",
 ]
 
 METHOD_ACTION_MAP = {
@@ -18,16 +18,37 @@ METHOD_ACTION_MAP = {
 
 
 async def auth_and_privilege_middleware(request: Request, call_next):
-    path = request.url.path
+    path = request.url.path.lower()
 
-    # Allow OPTIONS and public endpoints
-    if request.method == "OPTIONS" or any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
+    # -------------------------------------------------------
+    # 1. Allow OPTIONS (CORS preflight)
+    # -------------------------------------------------------
+    if request.method == "OPTIONS":
         return await call_next(request)
 
+    # -------------------------------------------------------
+    # 2. Allow all Zoho webhooks / APIs as public
+    #    Example:
+    #    /zoho/token, /zoho/items, /zohoquotes, /zohoanything
+    # -------------------------------------------------------
+    if path.startswith("/zoho"):
+        return await call_next(request)
+
+    # -------------------------------------------------------
+    # 3. Allow other public endpoints
+    # -------------------------------------------------------
+    if any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
+        return await call_next(request)
+
+    # -------------------------------------------------------
+    # 4. DB session for privileged checks
+    # -------------------------------------------------------
     db: Session = SessionLocal()
     try:
         # ---------------- TOKEN VALIDATION ----------------
-        auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+        auth_header = request.headers.get("Authorization") \
+            or request.headers.get("authorization")
+
         if not auth_header or not auth_header.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Unauthorized: Missing or invalid token")
 
@@ -43,35 +64,39 @@ async def auth_and_privilege_middleware(request: Request, call_next):
 
         request.state.user = user
 
+        # -------------------------------------------------------
         # Skip privilege check for /kyc/**
+        # -------------------------------------------------------
         if path.startswith("/kyc/"):
             return await call_next(request)
 
-        # ---------------- MODULE NAME ----------------
+        # -------------------------------------------------------
+        # Extract module name from URL
+        # -------------------------------------------------------
         parts = request.url.path.strip("/").split("/")
         module_name = parts[0] if parts else None
 
         # -------------------------------------------------------
-        # OPTION-1: Skip privilege check ONLY for /modules/**
-        # because these are used in UI role privilege screen
+        # Skip privilege check for /modules/**
+        # used for role privileges screen in UI
         # -------------------------------------------------------
         if module_name == "modules":
             return await call_next(request)
 
         # -------------------------------------------------------
-        # FIX: Skip privilege check for listing endpoints:
-        # Example: GET /products/?skip=0  (products list)
-        # Vendor should NOT be blocked for list APIs.
+        # Allow list endpoints such as:
+        # GET /products/ (listing)
         # -------------------------------------------------------
         if request.method == "GET" and len(parts) == 1:
-            # /products/
             return await call_next(request)
+
         # -------------------------------------------------------
+        # Determine privilege action
+        # -------------------------------------------------------
+        endpoint_name = request.scope.get("endpoint").__name__ \
+            if request.scope.get("endpoint") else ""
 
-        # Determine permission type for request
-        endpoint_name = request.scope.get("endpoint").__name__ if request.scope.get("endpoint") else ""
         action = None
-
         if "search" in endpoint_name:
             action = "can_search"
         elif "export" in endpoint_name:
@@ -79,7 +104,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         else:
             action = METHOD_ACTION_MAP.get(request.method)
 
-        # If no module or no action → skip
+        # If module name or action undefined, skip checks
         if not module_name or not action:
             return await call_next(request)
 

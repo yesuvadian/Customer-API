@@ -16,17 +16,22 @@ from routers import (
     company_product_certificates,
     company_product_supply_references,
     company_products,
+    contacts,
     dashboard,
     divisions,
     erp_router,
+    invoices,
     module,
     mongo_router,
+    payments,
     plan,
     products,
     quotes,
     register,
+    retainerinvoices,
     role,
     role_module_privileges,
+    sales_orders,
     subcategories,
     sync_full_erp,
     token,
@@ -42,6 +47,8 @@ from routers import (
     category_master,
     category_details,
     cities,
+    zoho_auth,
+    zoho_dashboard,
     zoho_items
 )
 from routers.kyc_router import router as kyc_router
@@ -136,6 +143,15 @@ app.include_router(erp_router.router)
 app.include_router(mongo_router.router)
 app.include_router(quotes.router)
 app.include_router(zoho_items.router)
+app.include_router(zoho_auth.router)
+app.include_router(invoices.router)
+app.include_router(payments.router)
+app.include_router(contacts.router)
+app.include_router(retainerinvoices.router)
+app.include_router(sales_orders.router)
+app.include_router(zoho_dashboard.router)
+
+
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")
 # async def startup_event():
