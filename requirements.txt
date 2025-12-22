@@ -14,10 +14,9 @@ pyotp
 python-dotenv==1.0.1
 pytest
 httpx
-dotenv
 requests
 pandas
 asyncpg
 pymongo==3.13.0
-python-magic
-python-magic-bin
+python-magic-bin==0.4.14
+PyJWT

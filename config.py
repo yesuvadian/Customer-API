@@ -11,7 +11,7 @@ APP_NAME = os.getenv("APP_NAME", "Relu-Vendor-API")
 APP_ENV = os.getenv("APP_ENV", os.getenv("ENV", "development"))
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
-
+CALLBACK_URL =  os.getenv("CALLBACK_URL")
 # ==============================
 # DATABASE CONFIGURATION
 # ==============================
@@ -122,28 +122,29 @@ MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 500))
 # ==============================
 
 ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
-ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")
+ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")    
 ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
 ZOHO_ORG_ID = os.getenv("ZOHO_ORG_ID")
 
 # India DC (books.zohosecure.in → zohoapis.in)
 ZOHO_API_BASE = os.getenv("ZOHO_API_BASE", "https://www.zohoapis.in")
 ZOHO_ACCOUNTS_BASE = os.getenv("ZOHO_ACCOUNTS_BASE", "https://accounts.zoho.in")
+ZOHO_SENT_EMAIL=os.getenv("ZOHO_SENT_EMAIL", False)
+# Safety check (fail fast in startup)
+ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
+ZOHO_OAUTH_TOKEN_URL = f"{ZOHO_ACCOUNTS_BASE}/oauth/v2/token"
+if not all([ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ORG_ID]):
+    raise RuntimeError("Zoho Books environment variables are not fully configured")
 
 # ==============================
-
 # ZOHO EMAIL SETTINGS
-
 # ==============================
  
 ZOHO_SENT_EMAIL = os.getenv(
-
     "ZOHO_SENT_EMAIL",
-
     FROM_EMAIL  # fallback to default sender
-
 )
- 
+
 if APP_ENV == "production":
     if not all([
         ZOHO_CLIENT_ID,
@@ -153,6 +154,3 @@ if APP_ENV == "production":
         ZOHO_SENT_EMAIL,
     ]):
         raise RuntimeError("Zoho Books environment variables are not fully configured")
-
- 
- 

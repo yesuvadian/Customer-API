@@ -4,57 +4,103 @@ from datetime import datetime
 
 class ERPService:
     pool = None
-    
+    ERP_AVAILABLE = True
 
     STARTING_ID = int(f"{datetime.utcnow().year}{datetime.utcnow().month:02d}0000001")
 
 
-    # ============================================
-    # INIT POOL
-    # ============================================
-
+    # ==================================================
+    # SAFE INIT POOL (Never crashes)
+    # ==================================================
     @classmethod
     async def init_pool(cls):
-        if cls.pool is None:
-            cls.pool = await asyncpg.create_pool(**POSTGRES_CONFIG)
+        """
+        Backward compatible — but NOT safe.
+        Used only if ERP_AVAILABLE is True.
+        """
+        if not cls.ERP_AVAILABLE:
+            return False
 
-    # ============================================
-    # HEALTH CHECK
-    # ============================================
+        if cls.pool is not None:
+            return True
+
+        cls.pool = await asyncpg.create_pool(**POSTGRES_CONFIG)
+        return True
+
 
     @classmethod
+    async def safe_init_pool(cls):
+        """
+        New safe initializer:
+        - never raises exception
+        - returns True if connected
+        - returns False if failed
+        """
+        if not cls.ERP_AVAILABLE:
+            return False
+
+        if cls.pool is not None:
+            return True
+
+        try:
+            cls.pool = await asyncpg.create_pool(**POSTGRES_CONFIG)
+            print("✅ ERP PostgreSQL Pool initialized.")
+            return True
+
+        except Exception as e:
+            print(f"⚠️ ERP PostgreSQL unavailable: {e}")
+            cls.pool = None
+            cls.ERP_AVAILABLE = False
+            return False
+
+
+    # ==================================================
+    # HEALTH CHECK
+    # ==================================================
+    @classmethod
     async def health(cls):
+        if not cls.ERP_AVAILABLE or cls.pool is None:
+            return {"status": "error", "message": "ERP database unavailable"}
+
         try:
             async with cls.pool.acquire() as conn:
                 ping = await conn.fetchval("SELECT 1")
-            return {"status": "success", "message": "PostgreSQL healthy", "data": {"ping": ping}}
-
+            return {
+                "status": "success",
+                "message": "PostgreSQL healthy",
+                "data": {"ping": ping}
+            }
         except Exception as e:
+            cls.pool = None
+            cls.ERP_AVAILABLE = False
             return {"status": "error", "message": str(e)}
 
-    # ============================================
-    # UTILITY: process row data
-    # ============================================
 
+    # ==================================================
+    # UTILITY: process row data
+    # ==================================================
     @staticmethod
     def process_row_data(row: dict, id_fields: list):
-        """Convert dict → SQL insert columns & values."""
         cols = []
         vals = []
-
         for k, v in row.items():
             cols.append(f'"{k}"')
             vals.append(v)
-
         return cols, vals
 
-    # ============================================
-    # INSERT LOGIC
-    # ============================================
 
+    # ==================================================
+    # INSERT LOGIC (unchanged)
+    # ==================================================
     @classmethod
     async def insert_data(cls, payload: list):
+        if not await cls.safe_init_pool():
+            raise Exception("ERP unavailable")
 
+        # ... your original insert code unchanged ...
+        # (keep everything exactly as you pasted)
+
+        # PASTE EVERYTHING FROM HERE DOWN
         first_item = payload[0]
         table_names = list(first_item.keys())
 
@@ -83,9 +129,6 @@ class ERPService:
                 id_to_index = {}
                 results = [{} for _ in payload]
 
-                # ------------------------------------------------
-                # BUILD INSERT PAYLOAD
-                # ------------------------------------------------
                 for idx, item in enumerate(payload):
                     generated_id = next_id
                     next_id += 1
@@ -110,9 +153,6 @@ class ERPService:
                         if cols:
                             all_inserts[table_name].append((cols, vals))
 
-                # ------------------------------------------------
-                # EXECUTE BULK INSERTS
-                # ------------------------------------------------
                 for table_name in table_order:
                     grouped = {}
 
@@ -146,13 +186,16 @@ class ERPService:
 
         return results
 
-    # ============================================
-    # UPDATE LOGIC
-    # ============================================
 
+    # ==================================================
+    # UPDATE LOGIC (unchanged)
+    # ==================================================
     @classmethod
     async def update_data(cls, payload: list):
+        if not await cls.safe_init_pool():
+            raise Exception("ERP unavailable")
 
+        # keep all your original update logic EXACTLY as-is...
         first_item = payload[0]
         table_names = list(first_item.keys())
 
@@ -181,9 +224,6 @@ class ERPService:
                     if not exists:
                         raise Exception(f"Record {record_id} not found")
 
-                    # ------------------------
-                    # UPDATE TABLES
-                    # ------------------------
                     for table_name in table_order:
                         if table_name not in item:
                             continue
@@ -208,7 +248,6 @@ class ERPService:
                             c_name = c.replace('"', '')
                             if c_name in id_fields:
                                 continue
-
                             set_parts.append(f"{c}=${p}")
                             params.append(v)
                             p += 1

@@ -31,7 +31,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "your_super_secret_key_here")
 ALGORITHM = "HS256"
 RESET_TOKEN_EXPIRE_MINUTES=int(os.getenv("RESET_TOKEN_EXPIRE_MINUTES", 300))
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-BASE_URL=os.getenv("BASE_URL", "http://localhost:59685")
+#BASE_URL=os.getenv("BASE_URL", "http://localhost:59685")
 
 # ==============================
 # Token Utilities
