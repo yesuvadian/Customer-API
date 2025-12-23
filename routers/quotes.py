@@ -141,7 +141,7 @@ def decline_quote(estimate_id: str, current_user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error declining quote: {str(e)}")
 
-    return schemas.QuoteResponse(
+    return zohoschemas.QuoteResponse(
         message="Quote declined successfully",
         estimate_id=result["estimate_id"],
         estimate_number=result["estimate_number"],
