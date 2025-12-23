@@ -100,7 +100,7 @@ class RetainerInvoiceService:
                     "zoho_response": response.json()
                 }
             )
-        return response.json().get("retainer_invoices", [])
+        return response.json().get("retainerinvoices", [])
 
     # -----------------------------
     # Get Retainer Invoice Details
@@ -123,7 +123,7 @@ class RetainerInvoiceService:
                     "zoho_response": response.json()
                 }
             )
-        return response.json().get("retainer_invoice", {})
+        return response.json().get("retainerinvoice", {})
 
     # -----------------------------
     # ERP Review Retainer Invoice
@@ -181,7 +181,7 @@ class RetainerInvoiceService:
                     "zoho_response": response.json()
                 }
             )
-        return response.json().get("retainer_invoice", {})
+        return response.json().get("retainerinvoice", {})
     
     def get_retainer_invoice_pdf(self, access_token: str, retainerinvoice_id: str):
         headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
