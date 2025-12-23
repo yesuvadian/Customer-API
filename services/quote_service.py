@@ -1,7 +1,9 @@
+import re
 import requests
 from fastapi import HTTPException, status
 import config
 from services.zoho_contact_service import ZohoContactService
+from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta, strip_comment_meta
 
 class QuoteService:
     def __init__(self):
@@ -244,13 +246,24 @@ class QuoteService:
     # -----------------------------
     # Add Comment
     # -----------------------------
-    def add_comment(self, access_token: str, estimate_id: str, description: str):
+    def add_comment(
+    self,
+    access_token: str,
+    estimate_id: str,
+    description: str,
+    email: str | None = None
+):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
             "Content-Type": "application/json"
         }
 
-        payload = {"description": description}
+        # ONE call – everything handled internally
+        meta_block = build_comment_meta(email=email)
+
+        payload = {
+            "description": meta_block + description
+        }
 
         response = requests.post(
             f"{self.base_url}/estimates/{estimate_id}/comments",
@@ -270,6 +283,8 @@ class QuoteService:
             )
 
         return response.json()
+
+
     # -----------------------------
     # Update Comment
     # -----------------------------
@@ -348,4 +363,69 @@ class QuoteService:
                 }
             )
 
-        return response.json().get("comments", [])
+        comments = response.json().get("comments", [])
+        result = []
+
+        for c in comments:
+            meta = extract_comment_meta(c.get("description", ""))
+
+            result.append({
+                "comment_id": c.get("comment_id", ""),
+                "estimate_id": c.get("estimate_id", ""),
+                "description": strip_comment_meta(c.get("description", "")),
+                "commented_by": meta.get("customer_name", c.get("commented_by", "")),
+                "commented_by_id": meta.get("customer_id", c.get("commented_by_id", "")),
+                "comment_type": meta.get("comment_type", c.get("comment_type", "")),
+                "date": c.get("date", ""),
+                "date_description": c.get("date_description", ""),
+                "time": c.get("time", ""),
+                "comments_html_format": c.get("comments_html_format", "")
+            })
+
+        return result
+
+
+# -----------------------------
+# Comment Meta Utilities
+# -----------------------------
+    def _build_comment_meta(self, meta: dict) -> str:
+        """
+        Build metadata block to embed in comment description
+        """
+        if not meta:
+            return ""
+
+        lines = "\n".join(f"{k}={v}" for k, v in meta.items())
+        return f"[CUSTOM_META]\n{lines}\n[/CUSTOM_META]\n\n"
+
+
+    def _extract_comment_meta(self, description: str) -> dict:
+        """
+        Extract metadata from comment description
+        """
+        if not description:
+            return {}
+
+        match = re.search(r"\[CUSTOM_META\](.*?)\[/CUSTOM_META\]", description, re.S)
+        if not match:
+            return {}
+
+        meta_lines = match.group(1).strip().split("\n")
+        return {
+            k.strip(): v.strip()
+            for line in meta_lines
+            if "=" in line
+            for k, v in [line.split("=", 1)]
+        }
+
+
+    def _strip_comment_meta(self, description: str) -> str:
+        """
+        Remove metadata block from description for UI
+        """
+        return re.sub(
+            r"\[CUSTOM_META\].*?\[/CUSTOM_META\]\s*",
+            "",
+            description or "",
+            flags=re.S
+        ).strip()

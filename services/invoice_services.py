@@ -2,6 +2,7 @@ import requests
 from fastapi import HTTPException, status
 import config
 from services.zoho_contact_service import ZohoContactService
+from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta
 
 class InvoiceService:
     def __init__(self):
@@ -179,16 +180,49 @@ class InvoiceService:
                 }
             )
 
-        return resp.json().get("comments", [])
+        comments = resp.json().get("comments", [])
+        result = []
+
+        for c in comments:
+            meta = extract_comment_meta(c.get("description", ""))
+
+            result.append({
+                "comment_id": c.get("comment_id", ""),
+                "invoice_id": invoice_id,
+                "description": strip_comment_meta(c.get("description", "")),
+                "commented_by": meta.get("customer_name", c.get("commented_by", "")),
+                "commented_by_id": meta.get("customer_id", c.get("commented_by_id", "")),
+                "comment_type": meta.get("comment_type", c.get("comment_type", "")),
+                "date": c.get("date", ""),
+                "date_description": c.get("date_description", ""),
+                "time": c.get("time", ""),
+                "comments_html_format": c.get("comments_html_format", "")
+            })
+
+        return result
+
 
 
     # ----------------------------------------------
     # ADD NEW COMMENT
     # ----------------------------------------------
-    def add_invoice_comment(self, access_token: str, invoice_id: str, payload: dict):
+    def add_invoice_comment(
+    self,
+    access_token: str,
+    invoice_id: str,
+    description: str,
+    email: str | None = None
+):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
-            "content-type": "application/json"
+            "Content-Type": "application/json"
+        }
+
+        # Centralized meta handling (email → contact → meta)
+        meta_block = build_comment_meta(email=email)
+
+        payload = {
+            "description": meta_block + description
         }
 
         resp = requests.post(
@@ -209,6 +243,7 @@ class InvoiceService:
             )
 
         return resp.json()
+
 
 
     # ----------------------------------------------

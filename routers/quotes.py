@@ -195,6 +195,7 @@ def add_comment(
             access_token=access_token,
             estimate_id=estimate_id,
             description=payload.description,
+            email=current_user.email
         )
     except Exception as e:
         raise HTTPException(

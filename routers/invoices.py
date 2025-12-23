@@ -157,11 +157,31 @@ def add_invoice_comment(
     current_user=Depends(get_current_user)
 ):
     access_token = get_zoho_access_token()
+
+    description = payload.get("description")
+    if not description:
+        raise HTTPException(
+            status_code=400,
+            detail="description is required"
+        )
+
     try:
-        created = invoice_service.add_invoice_comment(access_token, invoice_id, payload)
+        created = invoice_service.add_invoice_comment(
+            access_token=access_token,
+            invoice_id=invoice_id,
+            description=description,
+            email=current_user.email
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error adding comment: {str(e)}")
-    return {"message": "Comment added", "comment": created}
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error adding comment: {str(e)}"
+        )
+
+    return {
+        "message": "Comment added",
+        "comment": created
+    }
 
 
 # =====================================================
