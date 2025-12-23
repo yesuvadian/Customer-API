@@ -20,7 +20,6 @@ class ZohoDashboardService:
             )
 
             if response.status_code != 200:
-                # Log but don't kill dashboard
                 print(f"[WARN] {path} returned {response.status_code}: {response.text}")
                 return []
 
@@ -45,6 +44,13 @@ class ZohoDashboardService:
     def get_payments(self, contact_id: str):
         return self._safe_list("/customerpayments", contact_id, "customerpayments")
 
+    def get_retainer_invoices(self, contact_id: str):
+        return self._safe_list(
+            "/retainerinvoices",
+            contact_id,
+            "retainerinvoices"
+        )
+
     # ----------- MAIN SUMMARY BUILDER ------------
 
     def build_dashboard_summary(self, contact_id: str) -> dict:
@@ -53,58 +59,89 @@ class ZohoDashboardService:
         invoices = self.get_invoices(contact_id)
         sales_orders = self.get_sales_orders(contact_id)
         payments = self.get_payments(contact_id)
+        retainers = self.get_retainer_invoices(contact_id)
 
-        # QUOTES SUMMARY
+        # -------- QUOTES SUMMARY --------
         pending_quotes = len([
             q for q in quotes
-            if q.get("status", "").lower() in ["sent"]
+            if q.get("status", "").lower() == "sent"
         ])
-        total_estimates_amount = sum(float(q.get("total", 0) or 0) for q in quotes)
+        total_estimates_amount = sum(
+            float(q.get("total", 0) or 0) for q in quotes
+        )
         total_estimates_count = len(quotes)
 
-        # INVOICES SUMMARY
-        total_invoices_amount = sum(float(i.get("total", 0) or 0) for i in invoices)
+        # -------- INVOICES SUMMARY --------
+        total_invoices_amount = sum(
+            float(i.get("total", 0) or 0) for i in invoices
+        )
         total_invoices_count = len(invoices)
 
-        outstanding = [i for i in invoices if float(i.get("balance", 0) or 0) > 0]
-        outstanding_balance = sum(float(i.get("balance", 0) or 0) for i in outstanding)
+        outstanding = [
+            i for i in invoices
+            if float(i.get("balance", 0) or 0) > 0
+        ]
+        outstanding_balance = sum(
+            float(i.get("balance", 0) or 0) for i in outstanding
+        )
         outstanding_count = len(outstanding)
 
-        unused_credits = sum(float(i.get("credits_applied", 0) or 0) for i in invoices)
+        unused_credits = sum(
+            float(i.get("credits_applied", 0) or 0) for i in invoices
+        )
 
-        # SALES ORDERS SUMMARY
+        # -------- AVAILABLE RETAINERS (CORRECT) --------
+        active_retainers = [
+            r for r in retainers
+            if r.get("status", "").lower() not in ("cancelled", "void")
+            and float(r.get("total", 0) or 0) > 0
+        ]
+
+        available_retainers = sum(
+            float(r.get("total", 0) or 0) for r in active_retainers
+        )
+        available_retainer_count = len(active_retainers)
+
+        # -------- SALES ORDERS SUMMARY --------
         open_so = len([o for o in sales_orders if o.get("status", "").lower() == "open"])
         packed_so = len([o for o in sales_orders if o.get("status", "").lower() == "packed"])
         shipped_so = len([o for o in sales_orders if o.get("status", "").lower() == "shipped"])
         draft_so = len([o for o in sales_orders if o.get("status", "").lower() == "draft"])
 
-        # LAST PAYMENT
+        # -------- LAST PAYMENT --------
         payments_sorted = sorted(
-            payments, key=lambda x: x.get("date", ""), reverse=True
+            payments,
+            key=lambda x: x.get("date", ""),
+            reverse=True
         )
         last_payment = payments_sorted[0] if payments_sorted else None
 
         return {
+            # Estimates
             "total_estimates_amount": total_estimates_amount,
             "total_estimates_count": total_estimates_count,
+            "pending_quotes": pending_quotes,
 
+            # Invoices
             "total_invoices_amount": total_invoices_amount,
             "total_invoices_count": total_invoices_count,
-
             "outstanding_invoice_balance": outstanding_balance,
             "outstanding_invoice_count": outstanding_count,
-
             "unused_credits": unused_credits,
 
+            # Available Retainers ✅
+            "available_retainers": available_retainers,
+            "available_retainer_count": available_retainer_count,
+
+            # Sales Orders
             "open_sales_orders": open_so,
             "packed_sales_orders": packed_so,
             "shipped_sales_orders": shipped_so,
             "draft_sales_orders": draft_so,
 
-            "pending_quotes": pending_quotes,
-
+            # Payments
             "last_payment_amount": last_payment.get("amount") if last_payment else None,
-            "last_payment_date": last_payment.get("date") if last_payment else None
+            "last_payment_date": last_payment.get("date") if last_payment else None,
         }
 
 
