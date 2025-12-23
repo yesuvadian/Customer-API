@@ -369,13 +369,18 @@ class QuoteService:
         for c in comments:
             meta = extract_comment_meta(c.get("description", ""))
 
+            # 🔴 EXCLUDE SYSTEM COMMENTS
+            comment_type = meta.get("comment_type", c.get("comment_type", ""))
+            if comment_type == "system":
+                continue
+
             result.append({
                 "comment_id": c.get("comment_id", ""),
                 "estimate_id": c.get("estimate_id", ""),
                 "description": strip_comment_meta(c.get("description", "")),
                 "commented_by": meta.get("customer_name", c.get("commented_by", "")),
                 "commented_by_id": meta.get("customer_id", c.get("commented_by_id", "")),
-                "comment_type": meta.get("comment_type", c.get("comment_type", "")),
+                "comment_type": comment_type,
                 "date": c.get("date", ""),
                 "date_description": c.get("date_description", ""),
                 "time": c.get("time", ""),
@@ -383,6 +388,7 @@ class QuoteService:
             })
 
         return result
+
 
 
 # -----------------------------
