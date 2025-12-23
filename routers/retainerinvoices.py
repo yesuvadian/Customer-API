@@ -161,25 +161,31 @@ def add_retainer_invoice_comment(
     """
     access_token = get_zoho_access_token()
 
-    # Enrich payload with customer context if needed
-    payload.setdefault(
-        "message",
-        f"Comment by {current_user.email}"
-    )
+    description = payload.get("description")
+    if not description:
+        raise HTTPException(
+            status_code=400,
+            detail="description is required"
+        )
 
     try:
         comment = retainer_invoice_service.add_comment(
-            access_token,
-            retainerinvoice_id,
-            payload
+            access_token=access_token,
+            retainerinvoice_id=retainerinvoice_id,
+            description=description,
+            email=current_user.email
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error adding comment: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error adding comment: {str(e)}"
+        )
 
     return {
         "message": "Comment added successfully",
         "comment": comment
     }
+
 
 
 # -----------------------------

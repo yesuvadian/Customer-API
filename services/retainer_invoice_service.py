@@ -2,6 +2,7 @@ import requests
 from fastapi import HTTPException, status
 import config
 from services.zoho_contact_service import ZohoContactService
+from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta
 
 
 class RetainerInvoiceService:
@@ -214,22 +215,55 @@ class RetainerInvoiceService:
                     "zoho_response": response.json()
                 }
             )
-        return response.json().get("comments", [])
+
+        comments = response.json().get("comments", [])
+        result = []
+
+        for c in comments:
+            meta = extract_comment_meta(c.get("description", ""))
+
+            result.append({
+                "comment_id": c.get("comment_id", ""),
+                "retainerinvoice_id": retainerinvoice_id,
+                "description": strip_comment_meta(c.get("description", "")),
+                "commented_by": meta.get("customer_name", c.get("commented_by", "")),
+                "commented_by_id": meta.get("customer_id", c.get("commented_by_id", "")),
+                "comment_type": meta.get("comment_type", c.get("comment_type", "")),
+                "date": c.get("date", ""),
+                "date_description": c.get("date_description", ""),
+                "time": c.get("time", ""),
+                "comments_html_format": c.get("comments_html_format", "")
+            })
+
+        return result
+
 
 
     # -----------------------------
     # Add Comment
     # -----------------------------
-    def add_comment(self, access_token: str, retainerinvoice_id: str, payload: dict):
+    def add_comment(
+    self,
+    access_token: str,
+    retainerinvoice_id: str,
+    description: str,
+    email: str | None = None
+):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
             "Content-Type": "application/json"
         }
 
+        meta_block = build_comment_meta(email=email)
+
+        body = {
+            "description": meta_block + description
+        }
+
         response = requests.post(
             f"{self.base_url}/retainerinvoices/{retainerinvoice_id}/comments",
             headers=headers,
-            json=payload,
+            json=body,
             params={"organization_id": self.org_id},
             timeout=15
         )
@@ -242,7 +276,9 @@ class RetainerInvoiceService:
                     "zoho_response": response.json()
                 }
             )
-        return response.json().get("comment", {})
+
+        return response.json()
+
 
 
     # -----------------------------

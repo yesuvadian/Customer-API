@@ -2,6 +2,7 @@ import requests
 from fastapi import HTTPException, status
 import config
 from services.zoho_contact_service import ZohoContactService
+from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta
 
 class SalesOrderService:
     def __init__(self):
@@ -193,19 +194,55 @@ class SalesOrderService:
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "Failed to fetch comments", "zoho_response": response.json()}
+                detail={
+                    "message": "Failed to fetch comments",
+                    "zoho_response": response.json()
+                }
             )
 
-        return response.json().get("comments", [])
+        comments = response.json().get("comments", [])
+        result = []
+
+        for c in comments:
+            meta = extract_comment_meta(c.get("description", ""))
+
+            result.append({
+                "comment_id": c.get("comment_id", ""),
+                "salesorder_id": salesorder_id,
+                "description": strip_comment_meta(c.get("description", "")),
+                "commented_by": meta.get("customer_name", c.get("commented_by", "")),
+                "commented_by_id": meta.get("customer_id", c.get("commented_by_id", "")),
+                "comment_type": meta.get("comment_type", c.get("comment_type", "")),
+                "date": c.get("date", ""),
+                "date_description": c.get("date_description", ""),
+                "time": c.get("time", ""),
+                "comments_html_format": c.get("comments_html_format", "")
+            })
+
+        return result
+
 
     # -----------------------------
     # Add Comment (POST)
     # -----------------------------
-    def add_comment(self, access_token: str, salesorder_id: str, description: str, show_to_client=True):
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}", "Content-Type": "application/json"}
+    def add_comment(
+    self,
+    access_token: str,
+    salesorder_id: str,
+    description: str,
+    email: str | None = None,
+    show_to_client: bool = True
+):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        # Centralized meta handling
+        meta_block = build_comment_meta(email=email)
 
         body = {
-            "description": description,
+            "description": meta_block + description,
             "show_comment_to_clients": show_to_client
         }
 
@@ -220,10 +257,14 @@ class SalesOrderService:
         if response.status_code not in (200, 201):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "Failed to add comment", "zoho_response": response.json()}
+                detail={
+                    "message": "Failed to add comment",
+                    "zoho_response": response.json()
+                }
             )
 
         return response.json()
+
 
     # -----------------------------
     # Update Comment (PUT)

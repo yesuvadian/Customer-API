@@ -139,7 +139,8 @@ def add_comment(salesorder_id: str, payload: dict, current_user=Depends(get_curr
             access_token=access_token,
             salesorder_id=salesorder_id,
             description=description,
-            show_to_client=show_to_client
+            show_to_client=show_to_client,
+            email=current_user.email
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error adding comment: {str(e)}")
