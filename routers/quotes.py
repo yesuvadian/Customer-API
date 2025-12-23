@@ -138,6 +138,12 @@ def decline_quote(estimate_id: str, current_user=Depends(get_current_user)):
     access_token = get_zoho_access_token()
     try:
         result = quote_service.update_quote_status(access_token, estimate_id, "declined")
+        quote_service.add_comment(
+            access_token=access_token,  
+            estimate_id=estimate_id,
+            description="Quote declined by customer.",
+           # show_to_client=True,
+            email=current_user.email)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error declining quote: {str(e)}")
 
@@ -158,6 +164,12 @@ def accept_quote(estimate_id: str, current_user=Depends(get_current_user)):
     access_token = get_zoho_access_token()
     try:
         result = quote_service.update_quote_status(access_token, estimate_id, "accepted")
+        quote_service.add_comment(
+            access_token=access_token,  
+            estimate_id=estimate_id,
+            description="Quote accepted by customer.",
+           # show_to_client=True,
+            email=current_user.email)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error accepting quote: {str(e)}")
 
