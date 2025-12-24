@@ -258,20 +258,20 @@ class PaymentResponse(BaseModel):
 
 
 class ContactTag(BaseModel):
-    tag_id: int
-    tag_option_id: int
+    tag_id: Optional[int] = None
+    tag_option_id: Optional[int] = None
 
 class Address(BaseModel):
-    attention: Optional[str]
-    address: Optional[str]
-    street2: Optional[str]
-    state_code: Optional[str]
-    city: Optional[str]
-    state: Optional[str]
-    zip: Optional[int]
-    country: Optional[str]
-    fax: Optional[str]
-    phone: Optional[str]
+    attention: Optional[str] = None
+    address: str
+    street2: Optional[str] = None
+    city: str
+    state: Optional[str] = None
+    state_code: Optional[str] = None
+    zip: Optional[int] = None
+    country: str
+    fax: Optional[str] = None
+    phone: Optional[str] = None
 
 class ContactCommunicationPreference(BaseModel):
     is_sms_enabled: Optional[bool] = False
@@ -279,41 +279,41 @@ class ContactCommunicationPreference(BaseModel):
 
 
 class ContactPerson(BaseModel):
-    salutation: Optional[str]
+    salutation: Optional[str] = None
     first_name: str
-    last_name: Optional[str]
-    email: Optional[str]
-    phone: Optional[str]
-    mobile: Optional[str]
-    designation: Optional[str]
-    department: Optional[str]
-    skype: Optional[str]
+    last_name: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+    mobile: Optional[str] = None
+    designation: Optional[str] = None
+    department: Optional[str] = None
+    skype: Optional[str] = None
     is_primary_contact: Optional[bool] = False
-    communication_preference: Optional[ContactCommunicationPreference]
+    communication_preference: Optional[ContactCommunicationPreference] = None
     enable_portal: Optional[bool] = False
 
 
 class CreateContact(BaseModel):
     contact_name: str
-    company_name: Optional[str]
-    website: Optional[str]
-    language_code: Optional[str]
+    company_name: Optional[str] = None
+    website: Optional[str] = None
+    language_code: Optional[str] = "en"
     contact_type: str = "customer"
     customer_sub_type: Optional[str] = "business"
-    credit_limit: Optional[float]
-    pricebook_id: Optional[int]
-    contact_number: Optional[str]
-    ignore_auto_number_generation: bool = False
-    tags: Optional[List[ContactTag]]
-    is_portal_enabled: bool = False
-    currency_id: Optional[int]
-    payment_terms: Optional[int]
-    payment_terms_label: Optional[str]
-    notes: Optional[str]
-    billing_address: Optional[Address]
-    shipping_address: Optional[Address]
-    contact_persons: Optional[List[ContactPerson]]
-
+    credit_limit: Optional[int] = None
+    pricebook_id: Optional[int] = None
+    contact_number: Optional[str] = None
+    ignore_auto_number_generation: Optional[bool] = False
+    tags: Optional[List[ContactTag]] = None
+    is_portal_enabled: Optional[bool] = False
+    currency_id: Optional[int] = None
+    payment_terms: Optional[int] = None
+    payment_terms_label: Optional[str] = None
+    notes: Optional[str] = None
+    billing_address: Optional[Address] = None
+    shipping_address: Optional[Address] = None
+    contact_persons: Optional[List[ContactPerson]] = None
+    
 class ContactResponse(BaseModel):
     contact_id: str
     contact_name: str

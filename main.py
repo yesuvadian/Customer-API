@@ -50,7 +50,8 @@ from routers import (
     cities,
     zoho_auth,
     zoho_dashboard,
-    zoho_items
+    zoho_items,
+    zoho_register,
 )
 from routers.kyc_router import router as kyc_router
 
@@ -153,6 +154,7 @@ app.include_router(sales_orders.router)
 app.include_router(zoho_dashboard.router)
 app.include_router(statements.router)
 
+app.include_router(zoho_register.router)
 
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")

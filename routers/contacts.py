@@ -8,14 +8,14 @@ import zohoschemas
 router = APIRouter(
     prefix="/zohocontacts",
     tags=["Contacts"],
-    dependencies=[Depends(get_current_user)]
+    # dependencies=[Depends(get_current_user)]
 )
 
 contact_service = ContactService()
 
 
 @router.post("/", response_model=zohoschemas.ContactResponse, status_code=status.HTTP_201_CREATED)
-def create_contact(payload: zohoschemas.CreateContact, current_user=Depends(get_current_user)):
+def create_contact(payload: zohoschemas.CreateContact):
     """
     Create Zoho Contact:
     - Creates a new contact in Zoho Books with portal disabled
