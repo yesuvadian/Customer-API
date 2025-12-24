@@ -205,7 +205,9 @@ class SalesOrderService:
 
         for c in comments:
             meta = extract_comment_meta(c.get("description", ""))
-
+            description = c.get("description", "")
+            if "[CUSTOM_META]" not in description:
+                continue  
             result.append({
                 "comment_id": c.get("comment_id", ""),
                 "salesorder_id": salesorder_id,
