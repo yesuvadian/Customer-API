@@ -69,6 +69,8 @@ class UserService(UTCDateTimeMixin):
             plan_id=user.plan_id,
             is_quick_registered = getattr(user, "is_quick_registered", False),
             isactive=user.isactive,
+            zoho_erp_id=getattr(user, "zoho_erp_id", None),
+            usertype=getattr(user, "usertype", None),
             mts=cls._utc_now(),
             cts=cls._utc_now()
         )

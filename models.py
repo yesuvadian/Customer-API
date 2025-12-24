@@ -134,6 +134,8 @@ class User(Base):
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
         # ✅ Nullable usertype
     usertype = Column(String(50), nullable=True)
+      # ✅ NEW COLUMN
+    zoho_erp_id = Column(String(255), nullable=True)
     # ✅ Plan FK
     plan_id = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
 

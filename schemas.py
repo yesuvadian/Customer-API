@@ -44,6 +44,11 @@ class UserCreate(UserBase):
 class User(UserBase):
     id: UUID
     isactive: bool
+    
+    # ✅ NEW FIELD (nullable)
+    usertype: Optional[str] = None
+     # ✅ NEW FIELD
+    zoho_erp_id: Optional[str] = None
     email_confirmed: bool
     phone_confirmed: bool
     cts: datetime
@@ -493,15 +498,18 @@ class ModuleResponse(ModuleBase):
         orm_mode = True
 
 class UserRegistor(BaseModel):
-    email: str
+    email: EmailStr
     password: str
     firstname: str
     lastname: str
     phone_number: str
 
-    # Added fields for Quick Register
-    plan_id: UUID | None = None    # Plan ID is an integer, not UUID
-    isactive: bool = True            # Keep only ONE isactive field
+    plan_id: UUID | None = None
+    isactive: bool = True
+
+    # ✅ ADD THESE
+    usertype: str | None = None
+    zoho_erp_id: str | None = None
 
     class Config:
         from_attributes = True
