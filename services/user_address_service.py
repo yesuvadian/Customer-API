@@ -17,51 +17,22 @@ class UserAddressService(UTCDateTimeMixin):
     aligned with the latest Address model.
     """
 
-    # --------------------------
-    # CREATE
-    # --------------------------
     @classmethod
     def create_user_address(cls, db: Session, address_data):
-        """
-        Create a new user address.
-        """
-
-        # ✅ Validate associated user exists
+        # ✅ Validate user
         user = db.query(User).filter(User.id == address_data.user_id).first()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise HTTPException(status_code=404, detail="User not found")
 
-        # ✅ Validate address_type enum
-        if address_data.address_type not in AddressTypeEnum.__members__:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid address_type"
-            )
+        # ✅ Validate enum
+        if address_data.address_type not in [e.value for e in AddressTypeEnum]:
+            raise HTTPException(status_code=400, detail="Invalid address_type")
 
-        # ✅ Ensure single primary for each type per user
-        if address_data.is_primary:
-            existing_primary = (
-                db.query(UserAddress)
-                .filter(
-                    UserAddress.user_id == address_data.user_id,
-                    UserAddress.address_type == address_data.address_type,
-                    UserAddress.is_primary.is_(True)
-                )
-                .first()
-            )
-            if existing_primary:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Primary address already exists for this type"
-                )
-
+        # ---------------- INSERT ADDRESS ----------------
         new_addr = UserAddress(
             user_id=address_data.user_id,
             address_type=address_data.address_type,
-            is_primary=address_data.is_primary or False,
+            is_primary=False,   # temporary
             address_line1=address_data.address_line1,
             address_line2=address_data.address_line2,
             city_id=address_data.city_id,
@@ -76,9 +47,37 @@ class UserAddressService(UTCDateTimeMixin):
         )
 
         db.add(new_addr)
+        db.flush()  # make it visible
+
+        # ---------------- PRIMARY ENFORCEMENT ----------------
+        addresses = db.query(UserAddress).filter(
+            UserAddress.user_id == address_data.user_id
+        ).all()
+
+        for addr in addresses:
+            addr.is_primary = False
+
+        office_addr = next(
+            (a for a in addresses if a.address_type == AddressTypeEnum.office.value),
+            None
+        )
+
+        if office_addr:
+            office_addr.is_primary = True
+        else:
+            comm_addr = next(
+                (a for a in addresses if a.address_type == AddressTypeEnum.communication.value),
+                None
+            )
+            if comm_addr:
+                comm_addr.is_primary = True
+
+        # ---------------------------------------------------
+
         db.commit()
         db.refresh(new_addr)
         return new_addr
+
 
     # --------------------------
     # READ
@@ -115,43 +114,46 @@ class UserAddressService(UTCDateTimeMixin):
             .first()
         )
 
-    # --------------------------
-    # UPDATE
-    # --------------------------
     @classmethod
     def update_user_address(cls, db: Session, address_id: int, updates: dict):
         address = cls.get_user_address(db, address_id)
 
-        # ✅ If changing type, validate enum
+        # ✅ Validate enum
         if "address_type" in updates:
-            if updates["address_type"] not in AddressTypeEnum.__members__:
+            if updates["address_type"] not in [e.value for e in AddressTypeEnum]:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid address_type"
                 )
 
-        # ✅ Enforce single primary address per type per user
-        if updates.get("is_primary"):
-            existing_primary = (
-                db.query(UserAddress)
-                .filter(
-                    UserAddress.user_id == address.user_id,
-                    UserAddress.address_type == address.address_type,
-                    UserAddress.is_primary.is_(True),
-                    UserAddress.id != address_id,
-                )
-                .first()
-            )
-            if existing_primary:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Another primary address already exists"
-                )
-
-        # ✅ Apply only attribute fields existing in model
+        # ✅ Apply updates FIRST
         for key, value in updates.items():
             if hasattr(address, key):
                 setattr(address, key, value)
+
+        # ================= PRIMARY RULE =================
+
+        existing_addresses = db.query(UserAddress).filter(
+            UserAddress.user_id == address.user_id
+        ).all()
+
+        # Reset all
+        for addr in existing_addresses:
+            addr.is_primary = False
+
+        # Office ALWAYS wins
+        office_addr = next(
+            (a for a in existing_addresses if a.address_type == AddressTypeEnum.office.value),
+            None
+        )
+
+        if office_addr:
+            office_addr.is_primary = True
+        else:
+            if address.address_type == AddressTypeEnum.communication.value:
+                address.is_primary = True
+
+        # =================================================
 
         address.mts = cls._utc_now()
         db.commit()
