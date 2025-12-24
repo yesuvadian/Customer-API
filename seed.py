@@ -157,7 +157,6 @@ def seed_category_details(session, master_ids):
         {"master_name": "Bank Document Types", "name": "CANCELLED_CHEQUE", "description": "Cancelled Cheque"},
         {"master_name": "Bank Document Types", "name": "BANK_STATEMENT", "description": "Bank Statement"},
         {"master_name": "Bank Document Types", "name": "PASSBOOK", "description": "Passbook"},
-        {"master_name": "Bank Document Types", "name": "OTHER", "description": "Other Bank Document"},
     ]
   
 
