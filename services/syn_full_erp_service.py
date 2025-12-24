@@ -644,3 +644,4 @@ class ERPSyncService:
  
         # Return **after** processing all products
         return output_blocks
+    
