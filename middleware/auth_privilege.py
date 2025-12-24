@@ -18,8 +18,8 @@ METHOD_ACTION_MAP = {
 
 
 async def auth_and_privilege_middleware(request: Request, call_next):
-    path = request.url.path.lower()
-
+    raw_path = request.url.path.lower()
+    path = raw_path[4:] if raw_path.startswith("/api/") else raw_path
     # -------------------------------------------------------
     # 1. Allow OPTIONS (CORS preflight)
     # -------------------------------------------------------

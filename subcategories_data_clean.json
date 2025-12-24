@@ -255,18 +255,8 @@
         "name": "GI Structures",
         "category": "Mounting Structures"
     },
-    {
-        "name": "MS Structures",
-        "category": "H Frames"
-    },
-    {
-        "name": "GI Structures",
-        "category": "H Frames"
-    },
-    {
-        "name": "MS Structures",
-        "category": "Platforms"
-    },
+    
+    
     {
         "name": "FRP Components",
         "category": "Platforms"
@@ -291,10 +281,7 @@
         "name": "Operating Rods",
         "category": "GOS Components"
     },
-    {
-        "name": "Conventional",
-        "category": "DOLO"
-    },
+    
     {
         "name": "REC Specification",
         "category": "DOLO"
@@ -471,10 +458,7 @@
         "name": "Eye Protection",
         "category": "Safety Equipment"
     },
-    {
-        "name": "Three Phase",
-        "category": "Energy Meters"
-    },
+
     {
         "name": "Copper Transformer CSS",
         "category": "Compact Substations"
@@ -483,10 +467,7 @@
         "name": "Hume Pipes",
         "category": "Civil Materials"
     },
-    {
-        "name": "Clamps",
-        "category": "Covered Conductor Accessories"
-    },
+
     {
         "name": "Street Light Cable",
         "category": "AB Cable"
@@ -611,10 +592,7 @@
         "name": "Control Transformer",
         "category": "Transformers"
     },
-    {
-        "name": "Metering Boxes",
-        "category": "Metering Accessories"
-    },
+
     {
         "name": "MCCB",
         "category": "Switchgear"
@@ -670,10 +648,6 @@
     {
         "name": "LT CT",
         "category": "CTs"
-    },
-    {
-        "name": "Testers",
-        "category": "Tools & Instruments"
     },
     {
         "name": "Accessories",
@@ -755,10 +729,7 @@
         "name": "Copper Scrap",
         "category": "Scrap"
     },
-    {
-        "name": "Porcelain Type",
-        "category": "LT Feeder Pillar"
-    },
+
     {
         "name": "OFC",
         "category": "Optical Fibre Cable"
@@ -843,10 +814,7 @@
         "name": "Single Phase",
         "category": "Energy Meters"
     },
-    {
-        "name": "Single Phase",
-        "category": "Distribution Boxes"
-    },
+
     {
         "name": "GSM Modem",
         "category": "Communication Equipment"
@@ -875,10 +843,7 @@
         "name": "Cable Lugs",
         "category": "Lugs & Cable Accessories"
     },
-    {
-        "name": "HT AB Cable",
-        "category": "Cable Jointing Kits"
-    },
+
     {
         "name": "Structural Steel",
         "category": "Fabrication"
@@ -907,14 +872,7 @@
         "name": "Fault Passage Indicator",
         "category": "Protection Devices"
     },
-    {
-        "name": "LT Kits",
-        "category": "Cable Jointing Kits"
-    },
-    {
-        "name": "Metering Boxes",
-        "category": "Street Lighting"
-    },
+
     {
         "name": "Sign Boards",
         "category": "Safety Equipment"
