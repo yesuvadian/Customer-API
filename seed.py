@@ -141,11 +141,14 @@ def seed_category_details(session, master_ids):
         {"master_name": "Company Documents", "name": "List of Testing Equipment's", "description": "Inventory of quality control and measurement equipment."},
         {"master_name": "Company Documents", "name": "Employee Count", "description": "Official report on the total number of employees."},
         {"master_name": "Company Documents", "name": "Lists of Clients", "description": "Reference list of major and relevant clients."},
-        {"master_name": "Company Documents", "name": "ISO 9001:2015 & ISO 14001:2015 certificate", "description": "Current ISO quality and environmental management certificates."},
+        {"master_name": "Company Documents", "name": "ISO certificate", "description": "Current ISO quality and environmental management certificates."},
         {"master_name": "Company Documents", "name": "Bank Financial Capability", "description": "Bank statement or certificate proving financial stability/capability."},
         {"master_name": "Company Documents", "name": "Audit Report", "description": "Latest external financial audit report."},
         {"master_name": "Company Documents", "name": "Profit and Loss", "description": "Most recent Profit and Loss (Income) Statement."},
-        {"master_name": "Company Documents", "name": "3 years cash flow statement", "description": "Cash flow statements for the last three financial years."},
+        {"master_name": "Company Documents", "name": "cash flow statement", "description": "Cash flow statements for the last three financial years."},
+        {"master_name": "Company Documents", "name": "Purchase Order Copy","description": "Copies of finalized and authorized purchase orders issued to vendors."},
+        {"master_name": "Company Documents", "name": "Certificate of Incorporation","description": "Official Certificate of Incorporation issued by the Registrar of Companies."},
+        {"master_name": "Company Documents", "name": "Performance Certificate","description": "Performance certificates issued by clients or authorities demonstrating successful project execution."},
         
         {"master_name": "Tax Documents", "name": "GST Certificate", "description": "GST Certificate."},
         {"master_name": "Tax Documents", "name": "Pan Card", "description": "Pan Card."},
@@ -240,8 +243,8 @@ def seed_modules(session):
 {"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
 {"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
 {"name": "ERP Database","description": "Internal ERP DB access (backend only)","path": "erp_database","group_name": "ERP","is_active": False},
-{"name": "Mongo Database","description": "Internal Mongo DB access (backend only)", "path": "mongo_database", "group_name": "ERP", "is_active": False}
-
+{"name": "Mongo Database","description": "Internal Mongo DB access (backend only)", "path": "mongo_database", "group_name": "ERP", "is_active": False},
+{"name": "zohocontacts", "description": "Manage Zoho Contacts", "path": "zohocontacts", "group_name": "CRM"}
 
 
     ]
@@ -288,7 +291,7 @@ def seed_privileges(session, role_ids, module_ids):
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
     "Category Master", "Category Details", 
-    "Sync ERP Vendor","KYC Status"      
+    "Sync ERP Vendor","KYC Status" , "zohocontacts"      
     ]
 
 
@@ -314,7 +317,7 @@ def seed_privileges(session, role_ids, module_ids):
         "Divisions", "User Documents",
         "Company Product Certificates", "Company Product Supply References",
         "Category Master", "Category Details",
-        "Sync ERP Vendor", "KYC Status"
+        "Sync ERP Vendor", "KYC Status", "zohocontacts"
     ]
 
     # -------------------------------------------------------

@@ -6,7 +6,7 @@ import auth_utils
 
 PUBLIC_ENDPOINTS = [
     "/token", "/docs", "/openapi.json", "/redoc",
-    "/register/", "/auth/", "/files/",
+    "/register/", "/auth/", "/files/", "/zoho_register/", "/zohocontacts/"
 ]
 
 METHOD_ACTION_MAP = {

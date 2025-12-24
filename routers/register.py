@@ -5,6 +5,7 @@ import httpx
 from models import User, UserRole
 from services import city_service, userrole_service
 from sqlalchemy.orm import Session
+from services.contact_service import ContactService
 from services.plan_service import PlanService
 from auth_utils import get_registration_user
 from config import MAX_FILE_SIZE_KB, NOMINATIM_URL
@@ -27,7 +28,9 @@ from utils.email_service import EmailService
 from services.plan_service import PlanService
 from services.userrole_service import UserRoleService
 from models import Role, UserRole
-
+import zohoschemas
+from services.zoho_auth_service import get_zoho_access_token
+from auth_utils import get_current_user
 
 
 
@@ -39,6 +42,7 @@ countryservice = CountryService()
 stateservice = StateService()
 taxservice = CompanyTaxService()
 taxdocumentservice = CompanyTaxDocumentService()
+contact_service = ContactService()
 ALLOWED_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 
 @router.post("/", response_model=schemas.User)
@@ -118,7 +122,27 @@ def quick_register(payload: schemas.QuickRegister, db: Session = Depends(get_db)
         product_ids=payload.product_ids
     )
 
+@router.post("/zohocontacts", response_model=zohoschemas.ContactResponse, status_code=status.HTTP_201_CREATED)
+def create_contact(payload: zohoschemas.CreateContact, current_user=Depends(get_current_user)):
+    """
+    Create Zoho Contact:
+    - Creates a new contact in Zoho Books with portal disabled
+    """
+    access_token = get_zoho_access_token()
+    try:
+        contact = contact_service.create_contact(access_token, payload)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating contact: {str(e)}")
 
+    return zohoschemas.ContactResponse(
+        message="Contact created successfully",
+        contact_id=contact["contact_id"],
+        contact_name=contact["contact_name"],
+        company_name=contact.get("company_name", ""),
+        is_portal_enabled=contact.get("is_portal_enabled", False)
+    )
 
 @router.get("/countries", response_model=list[schemas.CountryOut])
 def list_allcountries(skip: int = 0, limit: int = 100, search: str = None, db: Session = Depends(get_db)):
