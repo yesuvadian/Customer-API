@@ -530,3 +530,7 @@ async def complete_registration(
         raise
     except Exception as e:
         raise HTTPException(500, f"Registration failed: {str(e)}")
+@router.get("/plans", response_model=List[schemas.PlanOut])
+def get_regplans(skip: int = 0, limit: int = 100, search: str | None = None, db: Session = Depends(get_db)):
+    """Get all active plans"""
+    return PlanService.get_plans(db, skip=skip, limit=limit, search=search, active_only=True)
