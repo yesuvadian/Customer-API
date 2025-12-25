@@ -19,7 +19,7 @@ router = APIRouter(prefix="/plans", tags=["Plans"],dependencies=[Depends(get_cur
 # ------------------------------
 # GET /plans
 # ------------------------------
-@router.get("/", response_model=List[PlanOut])
+@router.get("", response_model=List[PlanOut])
 def get_active_plans(skip: int = 0, limit: int = 100, search: str | None = None, db: Session = Depends(get_db)):
     """Get all active plans"""
     return PlanService.get_plans(db, skip=skip, limit=limit, search=search, active_only=True)
@@ -34,7 +34,7 @@ def get_plan(plan_id: UUID, db: Session = Depends(get_db)):
 # ------------------------------
 # POST /plans
 # ------------------------------
-@router.post("/", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
 def create_plan(plan: PlanCreate, db: Session = Depends(get_db)):
     return PlanService.create_plan(
         db,

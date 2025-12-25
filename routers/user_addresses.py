@@ -19,7 +19,7 @@ address_service = UserAddressService()
 # --------------------------
 # CREATE
 # --------------------------
-@router.post("/", response_model=UserAddressOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=UserAddressOut, status_code=status.HTTP_201_CREATED)
 def create_address(address: UserAddressCreate, db: Session = Depends(get_db)):
     return address_service.create_user_address(db, address)
 
