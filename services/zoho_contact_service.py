@@ -1,11 +1,12 @@
 from fastapi import HTTPException, status
+from routers import module
 from services.zoho_client import zoho_request
 import config
 
 
 class ZohoContactService:
 
-    def get_contact_id_by_email(self, email: str) -> str:
+    def get_contact_id_by_email(self, email: str, mobile: str) -> str:
         """
         Fetch Zoho Books contact_id using customer email
         """
@@ -15,7 +16,8 @@ class ZohoContactService:
             path="/contacts",
             params={
                 "organization_id": config.ZOHO_ORG_ID,
-                "email": email
+                "email": email,
+                "mobile": mobile
             }
         )
 

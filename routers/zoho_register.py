@@ -19,11 +19,15 @@ contact_service = ContactService()
 # ------------------------------------------------------------------
 # STEP 0: SHARED VALIDATION (Reused from register.py)
 # ------------------------------------------------------------------
-
 @router.get("/check-email")
-def check_zoho_email(email: str = Query(...), db: Session = Depends(get_db)):
-    """Check if email is already taken before starting Zoho registration."""
-    exists = user_service_instance.is_email_exists(db, email)
+def check_email_exists(email: str = Query(...), db: Session = Depends(get_db)):
+    exists = contact_service.is_email_exists(db, email)
+    return {"exists": exists}
+
+
+@router.get("/check-mobile")
+def check_mobile_exists(mobile: str = Query(...), db: Session = Depends(get_db)):
+    exists = contact_service.is_Mobile_exists(db, mobile)
     return {"exists": exists}
 
 # ------------------------------------------------------------------
