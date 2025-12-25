@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 from typing import List, Optional
 # -----------------------------
 # Quote Item
@@ -282,9 +282,11 @@ class ContactPerson(BaseModel):
     salutation: Optional[str] = None
     first_name: str
     last_name: Optional[str] = None
-    email: str
-    phone: Optional[str] = None
-    mobile: Optional[str] = None
+    email: EmailStr
+    phone_number: str | None = None
+    email_confirmed: bool = False 
+    mobile_confirmed: bool = False
+    mobile: str
     designation: Optional[str] = None
     department: Optional[str] = None
     skype: Optional[str] = None
@@ -313,6 +315,19 @@ class CreateContact(BaseModel):
     billing_address: Optional[Address] = None
     shipping_address: Optional[Address] = None
     contact_persons: Optional[List[ContactPerson]] = None
+
+    # @model_validator(mode='after')
+    # def check_unique_contacts(self) -> 'CreateContact':
+    #     if self.contact_persons:
+    #         emails = [p.email for p in self.contact_persons]
+    #         mobiles = [p.mobile for p in self.contact_persons if p.mobile]
+
+    #         if len(emails) != len(set(emails)):
+    #             raise ValueError("Duplicate emails found in contact list")
+    #         if len(mobiles) != len(set(mobiles)):
+    #             raise ValueError("Duplicate mobile numbers found in contact list")
+    #     return self
+
     
 class ContactResponse(BaseModel):
     contact_id: str
