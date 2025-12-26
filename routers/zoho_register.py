@@ -21,13 +21,13 @@ contact_service = ContactService()
 # ------------------------------------------------------------------
 @router.get("/check-email")
 def check_email_exists(email: str = Query(...), db: Session = Depends(get_db)):
-    exists = contact_service.is_email_exists(db, email)
+    exists = user_service_instance.is_email_exists(db, email)
     return {"exists": exists}
 
 
 @router.get("/check-mobile")
 def check_mobile_exists(mobile: str = Query(...), db: Session = Depends(get_db)):
-    exists = contact_service.is_Mobile_exists(db, mobile)
+    exists = user_service_instance.is_phone_exists(db, mobile)
     return {"exists": exists}
 
 # ------------------------------------------------------------------
