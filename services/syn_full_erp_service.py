@@ -182,7 +182,9 @@ class ERPSyncService:
                 "projectid": "AVPPC_HESCOM",
                 "rolename": "LICENSE_ROLE",
                 "partycat": "SUPPLIER",
-                "createdfrom": "APP"
+                "createdfrom": "APP",
+                "partystatus":"PENDING",
+                "is_cancelled":"F"
             }
  
             data = {"partymast": partymast}
@@ -241,7 +243,8 @@ class ERPSyncService:
                     "itemdesc": desc,
                     "sku": sku,
                     "createdfrom": "APP",
-                    "maingroup": 1
+                    "maingroup": 1,
+                    "is_cancelled":"F"
                 }
             }
                 # -------- UPDATE case --------
@@ -324,7 +327,8 @@ class ERPSyncService:
                     "partyid": int(user.erp_external_id),
                     "branchid": int(division.erp_external_id),
                     "omno": doc.om_number,
-                    "omdate": efffromdate
+                    "omdate": efffromdate,
+                    "is_cancelled":"F"
                 }
             }
  
