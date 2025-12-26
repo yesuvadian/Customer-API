@@ -6,7 +6,7 @@ import config
 
 class ZohoContactService:
 
-    def get_contact_id_by_email(self, email: str, mobile: str) -> str:
+    def get_contact_id_by_email(self, email: str) -> str:
         """
         Fetch Zoho Books contact_id using customer email
         """
@@ -17,7 +17,7 @@ class ZohoContactService:
             params={
                 "organization_id": config.ZOHO_ORG_ID,
                 "email": email,
-                "mobile": mobile
+               
             }
         )
 
