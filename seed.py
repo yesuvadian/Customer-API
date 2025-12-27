@@ -28,6 +28,9 @@ def seed_users(session):
          "phone_number": "6666666666", "password": "Auditor@123"},
         {"first_name": "Vendor", "last_name": "User", "email": "vendor@relu.com",
          "phone_number": "5555555555", "password": "vendor@123"},
+                # ✅ ERP SERVICE USER
+        {"first_name": "ERP", "last_name": "Service", "email": "erp_bot@relu.com",
+         "phone_number": "4444444444", "password": "ErpBot@123"}
     ]
 
     for u in users_data:
@@ -56,6 +59,8 @@ def seed_roles(session):
         {"name": "Operator", "description": "Can scan and submit inventory"},
         {"name": "Auditor", "description": "Can view scan history and audit trails"},
         {"name": "Vendor", "description": "Can have access over products"},
+         # ✅ ERP SERVICE ROLE
+        {"name": "ERP_SERVICE", "description": "Automated ERP sync service"}
     ]
 
     role_ids = {}
@@ -404,6 +409,24 @@ def seed_privileges(session, role_ids, module_ids):
     # MERGE vendor privileges into main privilege list
     # -------------------------------------------------------
     privileges_data.extend(vendor_privileges)
+        # -------------------------------------------------------
+    # ⭐ ERP SERVICE PRIVILEGES (FULL ERP ACCESS ONLY)
+    # -------------------------------------------------------
+    erp_service_privileges = [
+        {
+            "role": "ERP_SERVICE",
+            "module": "Sync ERP Vendor",
+            "can_view": True,
+            "can_add": True,
+            "can_edit": True,
+            "can_delete": False,
+            "can_search": False,
+            "can_import": False,
+            "can_export": False
+        }
+    ]
+
+    privileges_data.extend(erp_service_privileges)
 
     # -------------------------------------------------------
     # INSERT PRIVILEGES INTO DATABASE
@@ -443,7 +466,9 @@ def seed_user_roles(session, role_ids):
         {"email": "viewer@relu.com", "role": "Viewer"},
         {"email": "operator@relu.com", "role": "Operator"},
         {"email": "auditor@relu.com", "role": "Auditor"},
-        {"email": "vendor@relu.com", "role": "Vendor"}
+        {"email": "vendor@relu.com", "role": "Vendor"},
+          # ✅ ERP SERVICE USER ROLE
+        {"email": "erp_bot@relu.com", "role": "ERP_SERVICE"}
     ]
 
     for ur in user_roles_data:
