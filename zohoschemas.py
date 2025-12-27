@@ -1,4 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from datetime import date
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import List, Optional
 # -----------------------------
 # Quote Item
@@ -212,16 +213,57 @@ from typing import Optional
 # -----------------------------
 # Request Customer Payment
 # -----------------------------
+class InvoicePayment(BaseModel):
+    invoice_id: str = Field(
+        ...,
+        description="Invoice ID to which the payment is applied"
+    )
+    amount_applied: float = Field(
+        ...,
+        gt=0,
+        description="Amount applied to this invoice"
+    )
+
+
 class RequestPayment(BaseModel):
     contact_id: str = Field(
         ...,
         description="Zoho contact_id or customer email. If email is provided, service resolves to contact_id."
     )
-    invoice_id: str = Field(..., description="Invoice ID against which payment is made")
-    amount: float = Field(..., gt=0, description="Payment amount")
-    payment_mode: str = Field(..., description="Payment mode e.g. Cash, BankTransfer, CreditCard")
-    reference_number: Optional[str] = Field(None, description="Transaction reference number")
-    notes: Optional[str] = Field(None, description="Optional notes for payment")
+    amount: float = Field(
+        ...,
+        gt=0,
+        description="Total payment amount"
+    )
+    payment_mode: str = Field(
+        ...,
+        description="Payment mode e.g. Cash, BankTransfer, CreditCard"
+    )
+    payment_date: date = Field(
+        default_factory=date.today,
+        description="Payment date (YYYY-MM-DD)"
+    )
+    invoices: List[InvoicePayment] = Field(
+        ...,
+        description="Invoices against which payment is applied"
+    )
+    reference_number: Optional[str] = Field(
+        None,
+        description="Transaction reference number"
+    )
+    description: Optional[str] = Field(
+        None,
+        description="Optional notes for payment"
+    )
+
+    @field_validator("invoices")
+    @classmethod
+    def validate_invoice_amounts(cls, invoices, info):
+        total_applied = sum(i.amount_applied for i in invoices)
+        amount = info.data.get("amount")
+        if amount is not None and total_applied > amount:
+            raise ValueError("Total invoice amounts cannot exceed payment amount")
+        return invoices
 
 # -----------------------------
 # ERP Review Payment

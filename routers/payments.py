@@ -28,11 +28,11 @@ def create_payment(payload: zohoschemas.RequestPayment, current_user=Depends(get
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error while creating payment: {str(e)}")
 
-    return schemas.PaymentResponse(
+    return zohoschemas.PaymentResponse(
         message="Payment created successfully",
         payment_id=payment["payment_id"],
         payment_number=payment["payment_number"],
-        status=payment["status"]
+        status=payment["payment_status"]
     )
 
 

@@ -1,3 +1,4 @@
+from decimal import ROUND_HALF_UP, Decimal
 import requests
 from fastapi import HTTPException, status
 import config
@@ -19,16 +20,30 @@ class PaymentService:
     # Create Customer Payment
     # -----------------------------
     def create_payment(self, access_token: str, payload):
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}", "Content-Type": "application/json"}
-        contact_id = self._resolve_contact_id(payload.contact_id)
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        # Resolve email → contact_id if needed
+        customer_id = self._resolve_contact_id(payload.contact_id)
 
         body = {
-            "customer_id": contact_id,
-            "invoice_id": payload.invoice_id,
-            "amount": payload.amount,
+            "customer_id": customer_id,
             "payment_mode": payload.payment_mode,
+            "amount": str(
+        Decimal(payload.amount).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
+    ),
+            "date": payload.payment_date.isoformat(),
             "reference_number": payload.reference_number,
-            "notes": payload.notes or "Payment recorded from customer portal"
+            "description": payload.description or "Payment recorded from customer portal",
+            "invoices": [
+                {
+                    "invoice_id": invoice.invoice_id,
+                    "amount_applied": invoice.amount_applied
+                }
+                for invoice in payload.invoices
+            ]
         }
 
         response = requests.post(
@@ -38,12 +53,18 @@ class PaymentService:
             params={"organization_id": self.org_id},
             timeout=15
         )
-        if response.status_code != 201:
+
+        if response.status_code not in (200, 201):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "Failed to create customer payment", "zoho_response": response.json()}
+                detail={
+                    "message": "Failed to create customer payment",
+                    "zoho_response": response.json()
+                }
             )
+
         return response.json()["payment"]
+
 
     # -----------------------------
     # List Payments for Customer
