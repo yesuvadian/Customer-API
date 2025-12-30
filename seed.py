@@ -538,7 +538,7 @@ def seed_divisions(session):
     Seeds default divisions that can be used for approval and user document uploads.
     """
     divisions_data = [
-        {"division_name": "HESCOM", "code": "HESCOM","is_active": True, "description": "Handles IT, software, and digital infrastructure", "erp_external_id": 1758544460722},
+        {"division_name": "UTILITY", "code": "UTILITY","is_active": True, "description": "Handles IT, software, and digital infrastructure", "erp_external_id": 1758544460722},
     ]
 
     for d in divisions_data:
