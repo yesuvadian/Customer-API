@@ -411,6 +411,34 @@ class PlanOut(BaseModel):
     class Config:
         orm_mode = True
 
+
+class ProductCreateSchema(BaseModel):
+    name: str
+    sku: str
+    category_id: Optional[int] = None
+    subcategory_id: Optional[int] = None
+    description: Optional[str] = None
+
+    hsn_code: Optional[str] = None
+    gst_percentage: Optional[float] = None
+    material_code: Optional[str] = None
+    selling_price: Optional[float] = None
+    cost_price: Optional[float] = None
+
+
+class ProductUpdateSchema(BaseModel):
+    name: Optional[str] = None
+    sku: Optional[str] = None
+    category_id: Optional[int] = None
+    subcategory_id: Optional[int] = None
+    description: Optional[str] = None
+
+    hsn_code: Optional[str] = None
+    gst_percentage: Optional[float] = None
+    material_code: Optional[str] = None
+    selling_price: Optional[float] = None
+    cost_price: Optional[float] = None
+
 class CompanyAssignedProductSchema(BaseModel):
     company_product_id: int
     product_id: int
@@ -425,6 +453,10 @@ class CompanyAssignedProductSchema(BaseModel):
 
 class IdList(BaseModel):
     ids: List[int]
+from pydantic import BaseModel
+from datetime import datetime
+from uuid import UUID
+
 class ProductSchema(BaseModel):
     id: int
     name: str
@@ -433,20 +465,22 @@ class ProductSchema(BaseModel):
     subcategory_id: int | None = None
     description: str | None = None
 
-    # Newly added fields
-    hsn_code: str | None = None          # Alpha numeric
-    gst_percentage: float | None = None  # Double
-    material_code: str | None = None     # Alpha numeric
-    selling_price: float | None = None   # Double
-    cost_price: float | None = None      # Double
+    hsn_code: str | None = None
+    gst_percentage: float | None = None
+    material_code: str | None = None
+    selling_price: float | None = None
+    cost_price: float | None = None
 
-    created_by: str | None = None
-    modified_by: str | None = None
+    # ✅ FIX IS HERE
+    created_by: UUID | None = None
+    modified_by: UUID | None = None
+
     cts: datetime | None = None
     mts: datetime | None = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True  # REQUIRED for SQLAlchemy (Pydantic v2)
+
 class CompanyProductSchema(BaseModel):
     id: int
     company_id: str

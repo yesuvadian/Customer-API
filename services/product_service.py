@@ -1,23 +1,32 @@
 from datetime import datetime
+from uuid import UUID
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+
 from models import Product
 
 
 class ProductService:
 
+    # ================================
+    # GET SINGLE PRODUCT
+    # ================================
     @classmethod
     def get_product(cls, db: Session, product_id: int):
         return db.query(Product).filter(Product.id == product_id).first()
 
+    # ================================
+    # LIST PRODUCTS
+    # ================================
     @classmethod
     def get_products(
         cls,
         db: Session,
         skip: int = 0,
         limit: int = 600,
-        search: str | None = None
+        search: str | None = None,
     ):
         query = db.query(Product)
 
@@ -34,6 +43,9 @@ class ProductService:
 
         return query.offset(skip).limit(limit).all()
 
+    # ================================
+    # CREATE PRODUCT
+    # ================================
     @classmethod
     def create_product(
         cls,
@@ -44,30 +56,46 @@ class ProductService:
         subcategory_id: int | None = None,
         description: str | None = None,
 
-        # 🔹 Newly added fields
         hsn_code: str | None = None,
         gst_percentage: float | None = None,
         material_code: str | None = None,
         selling_price: float | None = None,
         cost_price: float | None = None,
 
-        created_by: str | None = None,
-        modified_by: str | None = None,
-        cts: datetime | None = None,
-        mts: datetime | None = None,
+        created_by: UUID | None = None,
+        modified_by: UUID | None = None,
     ):
-        # 🔥 Duplicate name check
+        # 🔒 Duplicate name check
         if db.query(Product).filter(Product.name == name).first():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"error": "name_duplicate", "message": "Product name already exists"}
+                detail={"error": "name_duplicate", "message": "Product name already exists"},
             )
 
-        # 🔥 Duplicate SKU check
+        # 🔒 Duplicate SKU check
         if db.query(Product).filter(Product.sku == sku).first():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"error": "sku_duplicate", "message": "SKU already exists"}
+                detail={"error": "sku_duplicate", "message": "SKU already exists"},
+            )
+
+        # 🔒 Validation
+        if gst_percentage is not None and not (0 <= gst_percentage <= 100):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="GST percentage must be between 0 and 100",
+            )
+
+        if selling_price is not None and selling_price < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Selling price cannot be negative",
+            )
+
+        if cost_price is not None and cost_price < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cost price cannot be negative",
             )
 
         product = Product(
@@ -85,8 +113,6 @@ class ProductService:
 
             created_by=created_by,
             modified_by=modified_by,
-            cts=cts,
-            mts=mts,
         )
 
         db.add(product)
@@ -94,16 +120,24 @@ class ProductService:
         db.refresh(product)
         return product
 
+    # ================================
+    # UPDATE PRODUCT
+    # ================================
     @classmethod
     def update_product(cls, db: Session, product_id: int, updates: dict):
         product = cls.get_product(db, product_id)
         if not product:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Product not found"
+                detail="Product not found",
             )
 
-        # 🔥 Duplicate NAME check
+        # 🔒 Prevent immutable updates
+        forbidden_fields = {"id", "cts"}
+        for field in forbidden_fields:
+            updates.pop(field, None)
+
+        # 🔒 Duplicate name check
         if "name" in updates:
             if (
                 db.query(Product)
@@ -112,10 +146,10 @@ class ProductService:
             ):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Product name already exists"
+                    detail="Product name already exists",
                 )
 
-        # 🔥 Duplicate SKU check
+        # 🔒 Duplicate SKU check
         if "sku" in updates:
             if (
                 db.query(Product)
@@ -124,16 +158,29 @@ class ProductService:
             ):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="SKU already exists"
+                    detail="SKU already exists",
+                )
+
+        # 🔒 Validation
+        if "gst_percentage" in updates:
+            gst = updates["gst_percentage"]
+            if gst is not None and not (0 <= gst <= 100):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="GST percentage must be between 0 and 100",
                 )
 
         for key, value in updates.items():
-            setattr(product, key, value)
+            if hasattr(product, key):
+                setattr(product, key, value)
 
         db.commit()
         db.refresh(product)
         return product
 
+    # ================================
+    # DELETE PRODUCT
+    # ================================
     @classmethod
     def delete_product(cls, db: Session, product_id: int):
         product = cls.get_product(db, product_id)
@@ -142,6 +189,9 @@ class ProductService:
             db.commit()
         return product
 
+    # ================================
+    # GET PRODUCTS BY IDS
+    # ================================
     @staticmethod
     def get_products_by_ids(db: Session, ids: list[int]):
         return db.query(Product).filter(Product.id.in_(ids)).all()

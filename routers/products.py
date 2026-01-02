@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 from services.product_service import ProductService
-from schemas import IdList, ProductSchema  # <-- Pydantic schema
+from schemas import IdList, ProductCreateSchema, ProductSchema  # <-- Pydantic schema
 
 router = APIRouter(prefix="/products", tags=["products"],dependencies=[Depends(get_current_user)])
 
@@ -21,18 +21,25 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=ProductSchema)
 def create_product(
-    name: str,
-    sku: str,
-    category_id: int | None = None,
-    subcategory_id: int | None = None,
-    description: str | None = None,
-    created_by: str | None = None,
-    modified_by:str | None = None,
-    cts: datetime | None = None,
-    mts: datetime | None = None,
-    db: Session = Depends(get_db)
+    payload: ProductCreateSchema,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
-    return ProductService.create_product(db, name, sku, category_id, subcategory_id, description, created_by,modified_by,cts,mts)
+    return ProductService.create_product(
+        db=db,
+        name=payload.name,
+        sku=payload.sku,
+        category_id=payload.category_id,
+        subcategory_id=payload.subcategory_id,
+        description=payload.description,
+        hsn_code=payload.hsn_code,
+        gst_percentage=payload.gst_percentage,
+        material_code=payload.material_code,
+        selling_price=payload.selling_price,
+        cost_price=payload.cost_price,
+        created_by=current_user.id,     # ✅ UUID
+        modified_by=current_user.id,    # ✅ UUID
+    )
 
 @router.put("/{product_id}", response_model=ProductSchema)
 def update_product(product_id: int, updates: dict, db: Session = Depends(get_db)):
