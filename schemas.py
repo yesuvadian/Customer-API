@@ -432,14 +432,21 @@ class ProductSchema(BaseModel):
     category_id: int | None = None
     subcategory_id: int | None = None
     description: str | None = None
+
+    # Newly added fields
+    hsn_code: str | None = None          # Alpha numeric
+    gst_percentage: float | None = None  # Double
+    material_code: str | None = None     # Alpha numeric
+    selling_price: float | None = None   # Double
+    cost_price: float | None = None      # Double
+
     created_by: str | None = None
     modified_by: str | None = None
     cts: datetime | None = None
     mts: datetime | None = None
-    
 
     class Config:
-        orm_mode = True  # allows SQLAlchemy model instances to be returned
+        orm_mode = True
 class CompanyProductSchema(BaseModel):
     id: int
     company_id: str
@@ -496,6 +503,11 @@ class ModuleResponse(ModuleBase):
 
     class Config:
         orm_mode = True
+
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
 
 class UserRegistor(BaseModel):
     email: EmailStr
