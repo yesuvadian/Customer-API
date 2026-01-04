@@ -418,7 +418,8 @@ class ProductCreateSchema(BaseModel):
     category_id: Optional[int] = None
     subcategory_id: Optional[int] = None
     description: Optional[str] = None
-
+      # ✅ FIX: reference GST slab, not percentage
+    gst_slab_id: Optional[int] = None
     hsn_code: Optional[str] = None
     gst_percentage: Optional[float] = None
     material_code: Optional[str] = None
@@ -426,18 +427,7 @@ class ProductCreateSchema(BaseModel):
     cost_price: Optional[float] = None
 
 
-class ProductUpdateSchema(BaseModel):
-    name: Optional[str] = None
-    sku: Optional[str] = None
-    category_id: Optional[int] = None
-    subcategory_id: Optional[int] = None
-    description: Optional[str] = None
 
-    hsn_code: Optional[str] = None
-    gst_percentage: Optional[float] = None
-    material_code: Optional[str] = None
-    selling_price: Optional[float] = None
-    cost_price: Optional[float] = None
 
 class CompanyAssignedProductSchema(BaseModel):
     company_product_id: int
@@ -453,33 +443,50 @@ class CompanyAssignedProductSchema(BaseModel):
 
 class IdList(BaseModel):
     ids: List[int]
-from pydantic import BaseModel
-from datetime import datetime
-from uuid import UUID
+
+
+
+
+
+class ProductUpdateSchema(BaseModel):
+    name: Optional[str] = None
+    sku: Optional[str] = None
+    category_id: Optional[int] = None
+    subcategory_id: Optional[int] = None
+    description: Optional[str] = None
+
+    hsn_code: Optional[str] = None
+    gst_slab_id: Optional[int] = None   # ✅ REPLACED
+    material_code: Optional[str] = None
+    selling_price: Optional[float] = None
+    cost_price: Optional[float] = None
+
+
 
 class ProductSchema(BaseModel):
     id: int
     name: str
     sku: str
+
     category_id: int | None = None
     subcategory_id: int | None = None
     description: str | None = None
 
     hsn_code: str | None = None
-    gst_percentage: float | None = None
+    gst_slab_id: int | None = None     # ✅ REPLACED
     material_code: str | None = None
     selling_price: float | None = None
     cost_price: float | None = None
 
-    # ✅ FIX IS HERE
+    # Audit
     created_by: UUID | None = None
     modified_by: UUID | None = None
-
     cts: datetime | None = None
     mts: datetime | None = None
 
     class Config:
-        from_attributes = True  # REQUIRED for SQLAlchemy (Pydantic v2)
+        from_attributes = True  # Pydantic v2
+
 
 class CompanyProductSchema(BaseModel):
     id: int

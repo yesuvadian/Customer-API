@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from models import Product
+from models import Product, CategoryDetails
 
 
 class ProductService:
@@ -57,7 +57,7 @@ class ProductService:
         description: str | None = None,
 
         hsn_code: str | None = None,
-        gst_percentage: float | None = None,
+        gst_slab_id: int | None = None,   # ✅ FIXED
         material_code: str | None = None,
         selling_price: float | None = None,
         cost_price: float | None = None,
@@ -79,13 +79,23 @@ class ProductService:
                 detail={"error": "sku_duplicate", "message": "SKU already exists"},
             )
 
-        # 🔒 Validation
-        if gst_percentage is not None and not (0 <= gst_percentage <= 100):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="GST percentage must be between 0 and 100",
+        # 🔒 GST slab validation
+        if gst_slab_id is not None:
+            gst_slab = (
+                db.query(CategoryDetails)
+                .filter(
+                    CategoryDetails.id == gst_slab_id,
+                    CategoryDetails.is_active == True
+                )
+                .first()
             )
+            if not gst_slab:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid GST slab selected",
+                )
 
+        # 🔒 Price validations
         if selling_price is not None and selling_price < 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -106,7 +116,7 @@ class ProductService:
             subcategory_id=subcategory_id,
 
             hsn_code=hsn_code,
-            gst_percentage=gst_percentage,
+            gst_slab_id=gst_slab_id,   # ✅ FIXED
             material_code=material_code,
             selling_price=selling_price,
             cost_price=cost_price,
@@ -161,15 +171,23 @@ class ProductService:
                     detail="SKU already exists",
                 )
 
-        # 🔒 Validation
-        if "gst_percentage" in updates:
-            gst = updates["gst_percentage"]
-            if gst is not None and not (0 <= gst <= 100):
+        # 🔒 GST slab validation
+        if "gst_slab_id" in updates and updates["gst_slab_id"] is not None:
+            gst_slab = (
+                db.query(CategoryDetails)
+                .filter(
+                    CategoryDetails.id == updates["gst_slab_id"],
+                    CategoryDetails.is_active == True
+                )
+                .first()
+            )
+            if not gst_slab:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="GST percentage must be between 0 and 100",
+                    detail="Invalid GST slab selected",
                 )
 
+        # 🔒 Apply updates
         for key, value in updates.items():
             if hasattr(product, key):
                 setattr(product, key, value)

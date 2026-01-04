@@ -14,7 +14,7 @@ import uuid
 from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
+
 
 #Base = declarative_base()
 
@@ -490,105 +490,12 @@ class RoleModulePrivilege(Base):
 
     
 
-# ------------------------------
-# ProductCategory Model
-# ------------------------------
-class ProductCategory(Base):
-    __tablename__ = "product_categories"
-    __table_args__ = {"schema": "public"}
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), unique=True, nullable=False)
-    description = Column(String(255))
-    is_active = Column(Boolean, default=True)
-
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    cts = Column(DateTime(timezone=True), server_default=func.now())
-    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    created_user = relationship("User", foreign_keys=[created_by])
-    modified_user = relationship("User", foreign_keys=[modified_by])
-    
-    erp_sync_status = Column(String(10), default="pending")
-    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
-    erp_error_message = Column(Text, nullable=True)
-    erp_external_id = Column(String(255), nullable=True)
-
-    subcategories = relationship("ProductSubCategory", back_populates="category", cascade="all, delete")
-    products = relationship("Product", back_populates="category_obj")
 
 
-# ------------------------------
-# ProductSubCategory Model
-# ------------------------------
-class ProductSubCategory(Base):
-    __tablename__ = "product_subcategories"
-    __table_args__ = (
-        UniqueConstraint("category_id", "name", name="uq_category_subcategory"),
-        {"schema": "public"},
-    )
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    category_id = Column(Integer, ForeignKey("public.product_categories.id", ondelete="CASCADE"))
-    name = Column(String(100), nullable=False)
-    description = Column(String(255))
-    is_active = Column(Boolean, default=True)
-    
-    erp_sync_status = Column(String(10), default="pending")
-    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
-    erp_error_message = Column(Text, nullable=True)
-    erp_external_id = Column(String(255), nullable=True)
-
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    cts = Column(DateTime(timezone=True), server_default=func.now())
-    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    category = relationship("ProductCategory", back_populates="subcategories")
-    created_user = relationship("User", foreign_keys=[created_by])
-    modified_user = relationship("User", foreign_keys=[modified_by])
-    products = relationship("Product", back_populates="subcategory_obj")
 
 
-# ------------------------------
-# Product Model (Updated)
-# ------------------------------
-class Product(Base):
-    __tablename__ = "products"
-    __table_args__ = {"schema": "public"}
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(255), nullable=False)
-    category_id = Column(Integer, ForeignKey("public.product_categories.id", ondelete="SET NULL"))
-    subcategory_id = Column(Integer, ForeignKey("public.product_subcategories.id", ondelete="SET NULL"))
-    sku = Column(String(50), unique=True, nullable=False)
-    description = Column(String(255))
-    is_active = Column(Boolean, default=True)
 
-    # 🔹 Newly added fields
-    hsn_code = Column(String(50), nullable=True)        # Alpha numeric
-    gst_percentage = Column(Float, nullable=True)      # Double
-    material_code = Column(String(50), nullable=True)  # Alpha numeric
-    selling_price = Column(Float, nullable=True)       # Double
-    cost_price = Column(Float, nullable=True)          # Double
-
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
-    cts = Column(DateTime(timezone=True), server_default=func.now())
-    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    created_user = relationship("User", foreign_keys=[created_by])
-    modified_user = relationship("User", foreign_keys=[modified_by])
-
-    erp_sync_status = Column(String(10), default="pending")     # pending | success | failed
-    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
-    erp_error_message = Column(Text, nullable=True)
-    erp_external_id = Column(String(255), nullable=True)
-
-    category_obj = relationship("ProductCategory", back_populates="products")
-    subcategory_obj = relationship("ProductSubCategory", back_populates="products")
-    companies = relationship("CompanyProduct", back_populates="product", cascade="all, delete")
 
 
 # ------------------------------
@@ -876,26 +783,24 @@ class CategoryDetails(Base):
     __table_args__ = {"schema": "public"}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    category_master_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
+    category_master_id = Column(
+        Integer,
+        ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"),
+        nullable=False
+    )
 
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
 
-    # Audit Columns
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    # ✅ Many-to-One: Detail → Master
-    master = relationship(
-        "CategoryMaster",
-        back_populates="details",
-        foreign_keys=[category_master_id]
-    )
+    # Relationships
+    master = relationship("CategoryMaster", back_populates="details", foreign_keys=[category_master_id])
 
-    # ✅ One-to-Many: Detail → UserDocuments
     user_documents = relationship(
         "UserDocument",
         back_populates="categorydetails",
@@ -910,18 +815,131 @@ class CategoryDetails(Base):
     )
 
     bank_document_types = relationship(
-    "CompanyBankDocument",
-    foreign_keys="[CompanyBankDocument.category_detail_id]",
-    back_populates="category_detail"
-)
+        "CompanyBankDocument",
+        foreign_keys="[CompanyBankDocument.category_detail_id]",
+        back_populates="category_detail"
+    )
 
     tax_document_types = relationship(
-    "CompanyTaxDocument",
-    foreign_keys="[CompanyTaxDocument.category_detail_id]",
-    back_populates="category_detail",
-    cascade="all, delete-orphan"
+        "CompanyTaxDocument",
+        foreign_keys="[CompanyTaxDocument.category_detail_id]",
+        back_populates="category_detail",
+        cascade="all, delete-orphan"
+    )
+
+    # ✅ Reverse relationship to Product
+    products = relationship("Product", back_populates="gst_slab")
+
+class Product(Base):
+    __tablename__ = "products"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+
+    category_id = Column(Integer, ForeignKey("public.product_categories.id", ondelete="SET NULL"))
+    subcategory_id = Column(Integer, ForeignKey("public.product_subcategories.id", ondelete="SET NULL"))
+
+    sku = Column(String(50), unique=True, nullable=False)
+    description = Column(String(255))
+    is_active = Column(Boolean, default=True)
+
+    # 🔹 Business fields
+    hsn_code = Column(String(50), nullable=True)
+
+    gst_slab_id = Column(
+    Integer,
+    ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"),
+    nullable=True
 )
 
+    gst_slab = relationship("CategoryDetails", back_populates="products")
+
+    material_code = Column(String(50), nullable=True)
+    selling_price = Column(Float, nullable=True)
+    cost_price = Column(Float, nullable=True)
+
+    # 🔹 Audit fields
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # 🔹 ERP fields
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
+
+    # 🔹 Relationships
+    created_user = relationship("User", foreign_keys=[created_by])
+    modified_user = relationship("User", foreign_keys=[modified_by])
+
+    category_obj = relationship("ProductCategory", back_populates="products")
+    subcategory_obj = relationship("ProductSubCategory", back_populates="products")
+    companies = relationship("CompanyProduct", back_populates="product", cascade="all, delete")
+
+  
+    
+# ------------------------------
+# ProductCategory Model
+# ------------------------------
+class ProductCategory(Base):
+    __tablename__ = "product_categories"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), unique=True, nullable=False)
+    description = Column(String(255))
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    created_user = relationship("User", foreign_keys=[created_by])
+    modified_user = relationship("User", foreign_keys=[modified_by])
+    
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
+
+    subcategories = relationship("ProductSubCategory", back_populates="category", cascade="all, delete")
+    products = relationship("Product", back_populates="category_obj")
+
+
+# ------------------------------
+# ProductSubCategory Model
+# ------------------------------
+class ProductSubCategory(Base):
+    __tablename__ = "product_subcategories"
+    __table_args__ = (
+        UniqueConstraint("category_id", "name", name="uq_category_subcategory"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category_id = Column(Integer, ForeignKey("public.product_categories.id", ondelete="CASCADE"))
+    name = Column(String(100), nullable=False)
+    description = Column(String(255))
+    is_active = Column(Boolean, default=True)
+    
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    erp_error_message = Column(Text, nullable=True)
+    erp_external_id = Column(String(255), nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    category = relationship("ProductCategory", back_populates="subcategories")
+    created_user = relationship("User", foreign_keys=[created_by])
+    modified_user = relationship("User", foreign_keys=[modified_by])
+    products = relationship("Product", back_populates="subcategory_obj")
 
 class UserDocument(Base):
     __tablename__ = "user_documents"
