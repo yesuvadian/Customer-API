@@ -88,7 +88,33 @@ class ERPService:
             vals.append(v)
         return cols, vals
 
+    @classmethod
+    async def insert_item_with_tax(cls, items: list):
+        """
+        Inserts itemmaster + itemtax in ONE transaction.
+        items = [
+            {
+                "itemmaster": {...},
+                "itemtax": {...}
+            }
+        ]
+        """
+        if not items:
+            return []
 
+        # 🔒 Validation
+        for idx, item in enumerate(items):
+            if "itemmaster" not in item:
+                raise ValueError(f"itemmaster missing at index {idx}")
+
+            if "itemtax" in item:
+                if "igstper" not in item["itemtax"]:
+                    raise ValueError("GST % missing")
+                if "hsncode" not in item["itemtax"]:
+                    raise ValueError("HSN Code missing")
+
+        # 🚀 Delegate to generic insert
+        return await cls.insert_data(items)
     # ==================================================
     # INSERT LOGIC (unchanged)
     # ==================================================

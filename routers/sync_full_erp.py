@@ -110,7 +110,7 @@ async def sync_erp_products(db: Session = Depends(get_db)):
 
         # ------------------ INSERT ------------------
         if insert_payload:
-            insert_result = await ERPService.insert_data(insert_payload)
+            insert_result = await ERPService.insert_item_with_tax(insert_payload)
 
             for rec in insert_result:
                 item = rec.get("itemmaster")
