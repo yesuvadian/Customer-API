@@ -214,23 +214,22 @@ class ERPSyncService:
         Extract GST % from a CategoryDetails object.
         Returns 0.0 if gst_slab_obj is None or name is invalid.
         """
-        if not gst_slab_obj or not gst_slab_obj.name:
+        if not gst_slab_obj:
             return 0.0
         try:
-            return float(gst_slab_obj.name)
+            return float(gst_slab_obj)
         except ValueError:
             return 0.0
 
 
 
-
+    
     
     @classmethod
-    def build_itemmaster_json(cls, db: Session):
+    async def build_itemmaster_json(cls, db: Session):
         from sqlalchemy.orm import joinedload
         from sqlalchemy import or_
         
-        # Fetch products pending for ERP sync, eager load gst_slab relationship
         products = db.query(Product).options(joinedload(Product.gst_slab)).filter(
             or_(
                 Product.erp_sync_status == "pending",
@@ -239,10 +238,7 @@ class ERPSyncService:
         ).all()
 
         if not products:
-            raise HTTPException(
-                status_code=404,
-                detail="No pending products to sync"
-            )
+            raise HTTPException(status_code=404, detail="No pending products to sync")
 
         insert_payload = []
         update_payload = []
@@ -270,9 +266,12 @@ class ERPSyncService:
             gst_name = p.gst_slab.name if p.gst_slab else None
             igst_per = cls.extract_gst_percentage(gst_name)
 
+            # ⚡ Await async HSN ID
+            hsn_id = await ERPService.get_or_create_hsncode_id(p.hsn_code, p.description)
+
             itemtax = {
                 "igstper": igst_per,
-                "hsncode": cls.safe_int(p.hsn_code)
+                "hsncode": hsn_id
             }
 
             # ---------------- UPDATE ----------------
