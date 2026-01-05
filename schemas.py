@@ -571,8 +571,8 @@ class UserRegistor(BaseModel):
 class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
-    first_name: str
-    last_name: str
+    firstname: Optional[str] = None
+    last_name: Optional[str] = None
     phone_number: str | None = None
     is_active: bool
     email_confirmed: bool
