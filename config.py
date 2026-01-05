@@ -12,6 +12,7 @@ APP_ENV = os.getenv("APP_ENV", os.getenv("ENV", "development"))
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 CALLBACK_URL =  os.getenv("CALLBACK_URL")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")  # ✅ ADD THIS
 # ==============================
 # DATABASE CONFIGURATION
 # ==============================
