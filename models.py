@@ -841,7 +841,7 @@ class Product(Base):
     subcategory_id = Column(Integer, ForeignKey("public.product_subcategories.id", ondelete="SET NULL"))
 
     sku = Column(String(50), unique=True, nullable=False)
-    description = Column(String(255))
+    description = Column(String(50000))
     is_active = Column(Boolean, default=True)
 
     # 🔹 Business fields
