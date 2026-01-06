@@ -169,7 +169,8 @@ class ERPSyncService:
                 # -------- Tax --------
                 "panno": tax_info.pan if tax_info else None,
                 "gstno": tax_info.gstin if tax_info else None,
- 
+                "gstnumsuf": tax_info.gstin[-3:] if tax_info and tax_info.gstin else None,
+
                 # -------- Bank --------
                 "acno": bank_info.account_number if bank_info else None,
                 "bname": bank_info.bank_name if bank_info else None,
