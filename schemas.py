@@ -571,19 +571,24 @@ class UserRegistor(BaseModel):
 class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
-    firstname: Optional[str] = None
-    lastname: Optional[str] = None
-    phone_number: str | None = None
+
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone_number: Optional[str] = None
+
     is_active: bool
     email_confirmed: bool
     phone_confirmed: bool
-    cts: datetime  # created timestamp
-    mts: datetime  # modified timestamp
+
+    cts: datetime
+    mts: datetime
+
     roles: list[str]
-    plan: Optional[UserPlanResponse] = None  # ✅ added plan here
+    plan: Optional[UserPlanResponse] = None
 
     class Config:
-        orm_mode = True  # allows Pydantic to read from SQLAlchemy models
+        from_attributes = True
+
 
 
     
