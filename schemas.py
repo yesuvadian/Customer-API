@@ -572,7 +572,7 @@ class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
     firstname: Optional[str] = None
-    last_name: Optional[str] = None
+    lastname: Optional[str] = None
     phone_number: str | None = None
     is_active: bool
     email_confirmed: bool

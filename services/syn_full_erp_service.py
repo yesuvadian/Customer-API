@@ -18,7 +18,12 @@ from services.erp_service import ERPService
 from services.mongo_service import MongoService
  
 class ERPSyncService:
- 
+    
+    def safe_int(val):
+            try:
+                return int(val) if val is not None else None
+            except (TypeError, ValueError):
+                return None
     @classmethod
     def build_party_json(cls, db: Session):
         """
@@ -28,11 +33,7 @@ class ERPSyncService:
         - Else → INSERT payload
         """
  
-        def safe_int(val):
-            try:
-                return int(val) if val is not None else None
-            except (TypeError, ValueError):
-                return None
+        
  
         # Fetch users pending ERP sync
         users = db.query(User).filter(
@@ -162,9 +163,9 @@ class ERPSyncService:
                 "add1": primary_address.address_line1,
                 "add2": primary_address.address_line2 or "",
                 "add3": "",
-                "city": safe_int(primary_address.city.erp_external_id),
-                "bcs_state": safe_int(primary_address.state.erp_external_id),
-                "country": safe_int(primary_address.country.erp_external_id),
+                "city": cls.safe_int(primary_address.city.erp_external_id),
+                "bcs_state": cls.safe_int(primary_address.state.erp_external_id),
+                "country": cls.safe_int(primary_address.country.erp_external_id),
  
                 # -------- Tax --------
                 "panno": tax_info.pan if tax_info else None,
@@ -184,7 +185,8 @@ class ERPSyncService:
                 "partycat": "SUPPLIER",
                 "createdfrom": "APP",
                 "partystatus":"PENDING",
-                "is_cancelled":"F"
+                "is_cancelled":"F",
+                "approvalstatus": "APPROVED"
             }
  
             data = {"partymast": partymast}
@@ -206,62 +208,91 @@ class ERPSyncService:
  
  
    
+
+    def extract_gst_percentage(gst_slab_obj) -> float:
+        """
+        Extract GST % from a CategoryDetails object.
+        Returns 0.0 if gst_slab_obj is None or name is invalid.
+        """
+        if not gst_slab_obj:
+            return 0.0
+        try:
+            return float(gst_slab_obj)
+        except ValueError:
+            return 0.0
+
+
+
+    
+    
     @classmethod
-    def build_itemmaster_json(cls, db: Session):
-        """
-        Build itemmaster JSON payload for ERP.
-        - Only include products with erp_sync_status = 'pending'
-        - If product has erp_external_id → UPDATE payload
-        - Else → INSERT payload
-        """
- 
-      # Fetch products that need syncing (pending or NULL)
-        products = db.query(Product).filter(
+    async def build_itemmaster_json(cls, db: Session):
+        from sqlalchemy.orm import joinedload
+        from sqlalchemy import or_
+        
+        products = db.query(Product).options(joinedload(Product.gst_slab)).filter(
             or_(
                 Product.erp_sync_status == "pending",
                 Product.erp_sync_status.is_(None)
             )
         ).all()
+
         if not products:
-            raise HTTPException(
-                status_code=404,
-                detail="No pending products to sync"
-            )
- 
+            raise HTTPException(status_code=404, detail="No pending products to sync")
+
         insert_payload = []
         update_payload = []
- 
+
         for p in products:
             sku = p.sku or ""
             desc = p.description or ""
- 
-            data = {
-                "itemmaster": {
-                    "subgroup": p.category_obj.id if p.category_obj else None,
-                    "subgroup2": p.subcategory_obj.id if p.subcategory_obj else None,
-                    "itemid": f"{sku}-{desc}",   # concatenated
-                    "itemdesc": desc,
-                    "sku": sku,
-                    "createdfrom": "APP",
-                    "maingroup": 1,
-                    "is_cancelled":"F"
-                }
+
+            # ---------------- ITEMMASTER ----------------
+            itemmaster = {
+                "subgroup": p.category_obj.id if p.category_obj else None,
+                "subgroup2": p.subcategory_obj.id if p.subcategory_obj else None,
+                "itemid": f"{sku}-{desc}",
+                "itemdesc": desc,
+                "sku": sku,
+                "sellingrate": p.selling_price,
+                "purchaserate": p.cost_price,
+                "itemcode": p.material_code,
+                "createdfrom": "APP",
+                "maingroup": 1,
+                "is_cancelled": "F"
             }
-                # -------- UPDATE case --------
+
+            # ---------------- ITEMTAX ----------------
+            gst_name = p.gst_slab.name if p.gst_slab else None
+            igst_per = cls.extract_gst_percentage(gst_name)
+
+            # ⚡ Await async HSN ID
+            hsn_id = await ERPService.get_or_create_hsncode_id(p.hsn_code, p.description)
+
+            itemtax = {
+                "igstper": igst_per,
+                "hsncode": hsn_id
+            }
+
+            # ---------------- UPDATE ----------------
             if p.erp_external_id:
-                data["itemmaster"]["itemmasterid"] = p.erp_external_id
-                update_payload.append(data)
- 
-            # -------- INSERT case --------
+                itemmaster["itemmasterid"] = p.erp_external_id
+                update_payload.append({
+                    "itemmaster": itemmaster,
+                    "itemtax": itemtax
+                })
             else:
-                # For insert, do not send ERP ID
-                insert_payload.append(data)
- 
+                insert_payload.append({
+                    "itemmaster": itemmaster,
+                    "itemtax": itemtax
+                })
+
         return {
             "insert": insert_payload,
             "update": update_payload
         }
- 
+
+
     @classmethod
     def build_ombasic_json(cls, db: Session):
         """
