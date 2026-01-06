@@ -26,6 +26,53 @@ class ERPService:
 
         cls.pool = await asyncpg.create_pool(**POSTGRES_CONFIG)
         return True
+    @classmethod
+    async def get_or_create_hsncode_id(cls, hsn_code: str, hsndesc: str = None) -> int:
+        """
+        Get or create HSN code in ERP.
+        If exists, returns hsncodesid.
+        If not, generates a new ID, inserts, and returns it.
+        """
+        if not hsn_code:
+            raise ValueError("hsn_code is required")
+
+        if not await cls.safe_init_pool():
+            raise Exception("ERP unavailable")
+
+        hsndesc = hsndesc or hsn_code
+
+        async with cls.pool.acquire() as conn:
+            async with conn.transaction():
+                # Check if already exists
+                result = await conn.fetchrow(
+                    'SELECT "hsncodesid" FROM "hsncodes" WHERE "hsncode"=$1',
+                    hsn_code
+                )
+                if result:
+                    return result["hsncodesid"]
+
+                # Generate unique ID
+                # Using STARTING_ID as base; could also have separate sequence for HSN if desired
+                #prefix = str(cls.STARTING_ID)[:4]
+                max_id = await conn.fetchval(
+                    f'''
+                    SELECT MAX(CAST("hsncodesid" AS BIGINT))
+                    FROM "hsncodes"
+                    WHERE "hsncodesid" IS NOT NULL
+                  
+                    '''
+                )
+                next_id = max_id + 1 if max_id else cls.STARTING_ID
+
+                # Insert new record
+                await conn.execute(
+                    'INSERT INTO "hsncodes" ("hsncodesid", "hsncode", "hsndesc", "activeyn") VALUES ($1, $2, $3, "YES")',
+                    next_id,
+                    hsn_code,
+                    hsndesc,
+                    activeyn
+                )
+                return next_id
 
 
     @classmethod
@@ -88,7 +135,33 @@ class ERPService:
             vals.append(v)
         return cols, vals
 
+    @classmethod
+    async def insert_item_with_tax(cls, items: list):
+        """
+        Inserts itemmaster + itemtax in ONE transaction.
+        items = [
+            {
+                "itemmaster": {...},
+                "itemtax": {...}
+            }
+        ]
+        """
+        if not items:
+            return []
 
+        # 🔒 Validation
+        for idx, item in enumerate(items):
+            if "itemmaster" not in item:
+                raise ValueError(f"itemmaster missing at index {idx}")
+
+            if "itemtax" in item:
+                if "igstper" not in item["itemtax"]:
+                    raise ValueError("GST % missing")
+                if "hsncode" not in item["itemtax"]:
+                    raise ValueError("HSN Code missing")
+
+        # 🚀 Delegate to generic insert
+        return await cls.insert_data(items)
     # ==================================================
     # INSERT LOGIC (unchanged)
     # ==================================================

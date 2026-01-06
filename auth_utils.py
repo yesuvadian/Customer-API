@@ -287,6 +287,7 @@ def login_user(db: Session, email: str, password: str):
         # Step 9: Login success
         return {
             "access_token": create_access_token({"sub": str(user.id)}),
+            "refresh_token": create_refresh_token(str(user.id)),
             "user": {
                 "id": str(user.id),
                 "email": user.email,

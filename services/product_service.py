@@ -78,6 +78,14 @@ class ProductService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"error": "sku_duplicate", "message": "SKU already exists"},
             )
+        # 🔒 Duplicate Material Code check
+        if material_code is not None:
+            if db.query(Product).filter(Product.material_code == material_code).first():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"error": "material_code_duplicate", "message": "Material code already exists"},
+                )    
+
 
         # 🔒 GST slab validation
         if gst_slab_id is not None:
@@ -169,6 +177,17 @@ class ProductService:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="SKU already exists",
+                )
+        # 🔒 Duplicate material_code check
+        if "material_code" in updates and updates["material_code"] is not None:
+            if (
+                db.query(Product)
+                .filter(Product.material_code == updates["material_code"], Product.id != product_id)
+                .first()
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Material code already exists",
                 )
 
         # 🔒 GST slab validation

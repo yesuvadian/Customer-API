@@ -594,6 +594,7 @@ class UserResponse(BaseModel):
     
 class LoginResponse(BaseModel):
     access_token: str
+    refresh_token: str
     user: UserResponse
     privileges: Dict[str, Dict[str, bool]]
 

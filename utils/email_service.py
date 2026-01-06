@@ -67,7 +67,7 @@ class EmailService:
             </a>
             <p>This link will expire in {self.reset_token_expiry} seconds.</p>
         """
-        self.send_email(to_email, "VAP-Action Required: Password Reset", body)
+        self.send_email_starttls(to_email, "Congniwatt-Action Required: Password Reset", body)
 
     def send_totp(self, to_email: str, otp: str):
         body = f"""
@@ -79,4 +79,59 @@ class EmailService:
         <p>This code will expire in {self.totp_interval} seconds. Do not share it with anyone.</p>
         <p>If you did not request this, please ignore this message.</p>
         """
-        self.send_email(to_email, "VAP: Your OTP Code", body)
+        self.send_email_starttls(to_email, "Congniwatt: Your OTP Code", body)
+    def send_email_starttls(self, to_email: str, subject: str, body_html: str):
+        """
+        Send email using STARTTLS (Office 365 compatible).
+        Use this when SMTP_SSL fails on port 587.
+        """
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg.set_content(body_html, subtype="html")
+
+        server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+        try:
+            server.ehlo()
+            server.starttls()   # 🔑 REQUIRED for Office 365
+            server.set_debuglevel(1)
+            server.ehlo()
+            server.login(self.username, self.password)
+            server.send_message(msg)
+        finally:
+            server.quit()
+    def send_attachment_email_starttls(
+        self,
+        to_email: str,
+        subject: str,
+        body_html: str,
+        attachment_content: bytes,
+        filename: str,
+        mime_type: str = "application/octet-stream"
+    ):
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg.set_content(body_html, subtype="html")
+
+        maintype, subtype = mime_type.split("/")
+        msg.add_attachment(
+            attachment_content,
+            maintype=maintype,
+            subtype=subtype,
+            filename=filename
+        )
+
+        server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+        try:
+            server.ehlo()
+            server.starttls()
+            server.set_debuglevel(1)
+
+            server.ehlo()
+            server.login(self.username, self.password)
+            server.send_message(msg)
+        finally:
+            server.quit()
