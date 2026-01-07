@@ -66,11 +66,15 @@ class ERPService:
 
                 # Insert new record
                 await conn.execute(
-                    'INSERT INTO "hsncodes" ("hsncodesid", "hsncode", "hsndesc", "activeyn") VALUES ($1, $2, $3, "YES")',
+                   '''
+                   INSERT INTO "hsncodes"
+                   ("hsncodesid", "hsncode", "hsndesc", "activeyn")
+                   VALUES ($1, $2, $3, 'YES')
+                   ''',
+
                     next_id,
                     hsn_code,
-                    hsndesc,
-                    activeyn
+                    hsndesc
                 )
                 return next_id
 

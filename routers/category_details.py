@@ -48,7 +48,11 @@ def get_details_by_master_name(
 # ---------------------------
 # CREATE CATEGORY DETAIL
 # ---------------------------
-@router.post("/details", response_model=CategoryDetailsResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/details",
+    response_model=CategoryDetailsResponse,
+    status_code=status.HTTP_201_CREATED
+)
 def create_category_detail(
     detail: CategoryDetailsCreate,
     db: Session = Depends(get_db),
@@ -60,8 +64,10 @@ def create_category_detail(
         master_id=detail.category_master_id,
         name=detail.name,
         description=detail.description,
+        is_active=detail.is_active,   # ✅ ADD
         created_by=current_user.id
     )
+
 
 # ---------------------------
 # LIST CATEGORY DETAILS

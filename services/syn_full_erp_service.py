@@ -9,7 +9,7 @@ from datetime import date
 from fastapi import HTTPException, status
 from config import POSTGRES_CONFIG
 from models import (
-    CategoryDetails, CategoryMaster, CompanyProduct, Product, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
+    CategoryDetails, CategoryMaster, CompanyProduct, Product, ProductCategory, ProductSubCategory, User, UserAddress, UserDocument, UserRole, CompanyBankInfo,
     CompanyTaxInfo, CompanyBankDocument, CompanyTaxDocument
 )
 from models import UserDocument
@@ -680,4 +680,116 @@ class ERPSyncService:
  
         # Return **after** processing all products
         return output_blocks
+    
+    # =====================================
+    # BUILD IGDETAIL JSON (PARENT CATEGORY)
+    # =====================================
+    @classmethod
+    def build_igdetail_json(cls, db: Session):
+        """
+        Build IGDETAIL payload
+        - Only for NEW categories
+        - Already synced categories are skipped
+        """
+
+        categories = db.query(ProductCategory).filter(
+            ProductCategory.erp_sync_status == "pending",
+            ProductCategory.is_active == True
+        ).all()
+
+        # ✅ DO NOT THROW ERROR
+        if not categories:
+            return {
+                "insert": [],
+                "update": []
+            }
+
+        insert_payload = []
+        update_payload = []
+
+        for cat in categories:
+            data = {
+                "igdetail": {
+                    "igbasicid": 1,
+                    "subgroup": cat.name,
+                    "maingroup": "RAW MATERIALS",
+                    "mgcode": "RM"
+                }
+            }
+
+            # -------- UPDATE --------
+            if cat.erp_external_id:
+                data["igdetail"]["igdetailid"] = int(cat.erp_external_id)
+                update_payload.append(data)
+
+            # -------- INSERT --------
+            else:
+                insert_payload.append(data)
+
+        return {
+            "insert": insert_payload,
+            "update": update_payload
+        }
+
+    # =====================================
+    # BUILD IGSDETAIL (FOR NEW CATEGORY)
+    # =====================================
+    @classmethod
+    def build_igsdetail_json(cls, db: Session, igdetail_id: int, category_id: int):
+        """
+        Build IGSDETAIL for newly created category
+        """
+
+        subcategories = db.query(ProductSubCategory).filter(
+            ProductSubCategory.category_id == category_id,
+            ProductSubCategory.is_active == True,
+            ProductSubCategory.erp_sync_status == "pending"
+        ).all()
+
+        blocks = []
+
+        for sub in subcategories:
+            blocks.append({
+                "igsdetail": {
+                    "igbasicid": 1,
+                    "igdetailid": igdetail_id,
+                    "subgroup2": sub.name
+                }
+            })
+
+        return blocks
+
+    # =====================================
+    # BUILD IGSDETAIL ONLY (EXISTING CATEGORY)
+    # =====================================
+    @classmethod
+    def build_igsdetail_only(cls, db: Session):
+        """
+        Build IGSDETAIL payload for NEW subcategories
+        under already synced categories
+        """
+
+        subcategories = (
+            db.query(ProductSubCategory)
+            .join(ProductCategory)
+            .filter(
+                ProductSubCategory.erp_sync_status == "pending",
+                ProductSubCategory.is_active == True,
+                ProductCategory.erp_external_id.isnot(None)
+            )
+            .all()
+        )
+
+        payload = []
+
+        for sub in subcategories:
+            payload.append({
+                "igsdetail": {
+                    "igbasicid": 1,
+                    "igdetailid": int(sub.category.erp_external_id),
+                    "subgroup2": sub.name
+                }
+            })
+
+        return payload
     

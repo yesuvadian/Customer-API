@@ -6,7 +6,7 @@ from services.erp_service import ERPService
 from services.syn_full_erp_service import  ERPSyncService
 from fastapi import Query
 
-from models import Division, Product, User, UserDocument
+from models import Division, Product, ProductCategory, ProductSubCategory, User, UserDocument
 
 router = APIRouter(prefix="/erp", tags=["ERP Sync"],dependencies=[Depends(get_current_user)])
 
@@ -397,6 +397,125 @@ async def sync_erp_branchmast(db: Session = Depends(get_db)):
             "status": "success",
             "inserted": insert_result,
             "updated": update_result
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+@router.get("/sync_igdetail")
+async def sync_erp_igdetail(db: Session = Depends(get_db)):
+    try:
+        await ERPService.init_pool()
+
+        igdetail_inserted = []
+        igdetail_updated = []
+        igsdetail_inserted = []
+
+        # ================= IGDETAIL =================
+        payload = ERPSyncService.build_igdetail_json(db)
+        insert_payload = payload["insert"]
+        update_payload = payload["update"]
+
+        # -------- INSERT IGDETAIL --------
+        if insert_payload:
+            inserted = await ERPService.insert_data(insert_payload)
+
+            for item in inserted:
+                rec = item.get("igdetail")
+                if not rec:
+                    continue
+
+                subgroup = rec["subgroup"]
+                igdetailid = rec["igdetailid"]
+
+                category = db.query(ProductCategory).filter(
+                    ProductCategory.name == subgroup
+                ).first()
+
+                if not category:
+                    continue
+
+                category.erp_external_id = igdetailid
+                category.erp_sync_status = "completed"
+                db.commit()
+
+                igdetail_inserted.append(rec)
+
+                # -------- IGSDETAIL (NEW CATEGORY) --------
+                details = ERPSyncService.build_igsdetail_json(
+                    db=db,
+                    igdetail_id=igdetailid,
+                    category_id=category.id
+                )
+
+                if details:
+                    import asyncio
+                    await asyncio.sleep(0.5)
+
+                    result = await ERPService.insert_data(details)
+
+                    for res in result:
+                        igs = res.get("igsdetail")
+                        if not igs:
+                            continue
+
+                        sub = db.query(ProductSubCategory).filter(
+                            ProductSubCategory.name == igs["subgroup2"],
+                            ProductSubCategory.category_id == category.id
+                        ).first()
+
+                        if sub:
+                            sub.erp_external_id = igs["igsdetailid"]
+                            sub.erp_sync_status = "completed"
+                            db.commit()
+
+                    igsdetail_inserted.extend(result)
+
+        # -------- UPDATE IGDETAIL --------
+        if update_payload:
+            updated = await ERPService.update_data(update_payload)
+
+            for item in updated:
+                rec = item.get("igdetail")
+                if not rec:
+                    continue
+
+                category = db.query(ProductCategory).filter(
+                    ProductCategory.name == rec["subgroup"]
+                ).first()
+
+                if category:
+                    category.erp_sync_status = "completed"
+                    db.commit()
+                    igdetail_updated.append(rec)
+
+        # ================= IGSDETAIL ONLY (EXISTING CATEGORY) =================
+        igs_only_payload = ERPSyncService.build_igsdetail_only(db)
+
+        if igs_only_payload:
+            result = await ERPService.insert_data(igs_only_payload)
+
+            for item in result:
+                igs = item.get("igsdetail")
+                if not igs:
+                    continue
+
+                sub = db.query(ProductSubCategory).filter(
+                    ProductSubCategory.name == igs["subgroup2"]
+                ).first()
+
+                if sub:
+                    sub.erp_external_id = igs["igsdetailid"]
+                    sub.erp_sync_status = "completed"
+                    db.commit()
+
+            igsdetail_inserted.extend(result)
+
+        return {
+            "status": "success",
+            "igdetail_inserted": igdetail_inserted,
+            "igdetail_updated": igdetail_updated,
+            "igsdetail_inserted": igsdetail_inserted
         }
 
     except Exception as e:

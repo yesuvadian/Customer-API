@@ -296,7 +296,10 @@ class PaymentResponse(BaseModel):
     payment_number: str
     status: str
     message: Optional[str] = None
-
+class RequestQuoteEnquiry(BaseModel):
+    contact_id: str
+    enquiry_description: str
+    notes: str | None = None
 
 
 class ContactTag(BaseModel):

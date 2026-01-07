@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, Response, status, HTTPException
+from typing import List
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status, HTTPException
 from auth_utils import get_current_user
 import schemas
 from services.quote_service import QuoteService
@@ -40,6 +41,83 @@ def request_quote(payload: zohoschemas.RequestQuote, current_user=Depends(get_cu
         estimate_id=estimate["estimate_id"],
         estimate_number=estimate["estimate_number"],
         status=estimate["status"]
+    )
+@router.post(
+    "/{estimate_id}/attachment",
+    status_code=status.HTTP_201_CREATED
+)
+def upload_quote_attachment(
+    estimate_id: str,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user)
+):
+    """
+    Upload attachment to a Zoho Books Estimate (Quote)
+    """
+    access_token = get_zoho_access_token()
+
+    try:
+        result = quote_service.upload_attachment(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            file=file,
+            uploaded_by=current_user.email
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error uploading attachment: {str(e)}"
+        )
+
+    return {
+        "message": "Attachment uploaded successfully",
+        "file_name": file.filename,
+        "estimate_id": estimate_id
+    }
+@router.post(
+    "/enquiry",
+    response_model=zohoschemas.QuoteResponse,
+    status_code=status.HTTP_201_CREATED
+)
+def request_quote_with_attachments(
+    contact_id: str = Form(...),
+    enquiry_description: str = Form(...),
+    notes: str | None = Form(None),
+    files: List[UploadFile] = File([]),
+    current_user=Depends(get_current_user)
+):
+    """
+    Create enquiry draft quote + upload attachments
+    """
+    access_token = get_zoho_access_token()
+
+    try:
+        # 1️⃣ Create enquiry quote
+        payload = zohoschemas.RequestQuoteEnquiry(
+            contact_id=contact_id,
+            enquiry_description=enquiry_description,
+            notes=notes
+        )
+
+        estimate = quote_service.create_draft_quote_enquiry(
+            access_token=access_token,
+            payload=payload
+        )
+
+        estimate_id = estimate["estimate_id"]
+      
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to submit quote enquiry: {str(e)}"
+        )
+
+    return zohoschemas.QuoteResponse(
+        message="Quote enquiry submitted successfully",
+        estimate_id=estimate_id,
+        estimate_number=estimate.get("estimate_number", ""),
+        status=estimate.get("status", "draft")
     )
 
 # -----------------------------

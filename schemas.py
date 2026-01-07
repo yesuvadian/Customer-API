@@ -884,16 +884,17 @@ class UserDocumentResponse(UserDocumentBase):
 class CategoryMasterBase(BaseModel):
     name: str
     description: Optional[str] = None
-    is_active: Optional[bool] = True
+    is_active: bool = True        # ✅ FIXED (not Optional)
+
 
 class CategoryMasterCreate(CategoryMasterBase):
     created_by: Optional[UUID] = None
 
+
 class CategoryMasterUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    is_active: Optional[bool] = None
-    modified_by: Optional[UUID] = None
+    is_active: bool | None = None   # ✅ allows omission, not null
 
 class CategoryMasterResponse(CategoryMasterBase):
     id: int
@@ -912,8 +913,9 @@ class CategoryMasterResponse(CategoryMasterBase):
 class CategoryDetailsBase(BaseModel):
     name: str
     description: Optional[str] = None
-    is_active: Optional[bool] = True
+    is_active: bool = True          # ✅ FIXED
     category_master_id: int
+
 
 class CategoryDetailsCreate(CategoryDetailsBase):
     created_by: Optional[UUID] = None
