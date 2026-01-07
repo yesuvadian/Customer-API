@@ -197,8 +197,16 @@ class VerifyOTPRequest(BaseModel):
     phone: str | None = None
     otp: str
 
+from typing import Optional
+
 @router.get("/detailsbyname/{master_name}", response_model=List[schemas.CategoryDetailsResponse])
-def get_details_by_master_name(master_name: str, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def get_details_by_master_name(
+    master_name: str,
+    skip: int = 0,
+    limit: int = 100,
+    is_active: Optional[bool] = None,   # ✅ ADD
+    db: Session = Depends(get_db)
+):
     
     categoryDetailsService = category_details_service.CategoryDetailsService()
 
@@ -206,7 +214,8 @@ def get_details_by_master_name(master_name: str, skip: int = 0, limit: int = 100
         db=db,
         master_name=master_name,
         skip=skip,
-        limit=limit
+        limit=limit,
+        is_active=is_active              # ✅ PASS
     )
 
     # Safety: ensure it's always a list
@@ -220,6 +229,7 @@ def get_details_by_master_name(master_name: str, skip: int = 0, limit: int = 100
         )
 
     return details
+
 
 
 @router.get("/cities", response_model=list[schemas.CityOut])

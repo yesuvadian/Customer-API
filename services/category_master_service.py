@@ -12,12 +12,39 @@ class CategoryMasterService:
         return db.query(CategoryMaster).filter(CategoryMaster.id == category_id).first()
 
     @classmethod
-    def get_master_categories(cls, db: Session, skip: int = 0, limit: int = 100, search: str | None = None):
-        """Fetch master categories with optional search and pagination."""
+    def get_master_categories(
+        cls,
+        db: Session,
+        skip: int = 0,
+        limit: int = 100,
+        search: str | None = None,
+        is_active: bool | None = None
+    ):
+        """
+        Fetch master categories
+        - is_active = None → ALL categories
+        - is_active = True → only active
+        - is_active = False → only inactive
+        """
+
         query = db.query(CategoryMaster)
+
+        # 🔍 Search filter
         if search:
             query = query.filter(CategoryMaster.name.ilike(f"%{search}%"))
-        return query.order_by(desc(CategoryMaster.id)).offset(skip).limit(limit).all()
+
+        # ✅ Apply filter ONLY when value is provided
+        if is_active is not None:
+            query = query.filter(CategoryMaster.is_active == is_active)
+
+        return (
+            query
+            .order_by(desc(CategoryMaster.id))
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
 
     @classmethod
     def create_master_category(
