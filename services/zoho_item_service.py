@@ -6,15 +6,16 @@ from services.zoho_client import zoho_request
 class ZohoItemService:
 
     def get_items(
-        self,
-        page: int = 1,
-        per_page: int = 200,
-        search_text: str | None = None
-    ):
+    self,
+    page: int = 1,
+    per_page: int = 200,
+    search_text: str | None = None,
+):
         params = {
             "organization_id": config.ZOHO_ORG_ID,
             "page": page,
-            "per_page": per_page
+            "per_page": per_page,
+            "filter_by": "Status.Active",  # applied directly
         }
 
         if search_text:
@@ -36,6 +37,7 @@ class ZohoItemService:
             )
 
         return response.json()
+
 
     def get_taxes(self):
         """
