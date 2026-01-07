@@ -41,30 +41,56 @@ class CategoryDetailsService:
         )
 
     @classmethod
-    def create_category_detail(cls, db: Session, master_id: int, name: str, description: str | None = None, created_by: UUID | None = None):
+    def create_category_detail(
+        cls,
+        db: Session,
+        master_id: int,
+        name: str,
+        description: str | None = None,
+        is_active: bool = True,              # ✅ ADD
+        created_by: UUID | None = None
+    ):
         """Create a new Category Detail under a Master Category"""
-        master_exists = db.query(CategoryMaster).filter(CategoryMaster.id == master_id).first()
-        if not master_exists:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category Master ID not found")
 
-        existing = db.query(CategoryDetails).filter(
-            CategoryDetails.name == name,
-            CategoryDetails.category_master_id == master_id
-        ).first()
+        master_exists = (
+            db.query(CategoryMaster)
+            .filter(CategoryMaster.id == master_id)
+            .first()
+        )
+        if not master_exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Category Master ID not found"
+            )
+
+        existing = (
+            db.query(CategoryDetails)
+            .filter(
+                CategoryDetails.name == name,
+                CategoryDetails.category_master_id == master_id
+            )
+            .first()
+        )
         if existing:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category Detail with this name already exists")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Category Detail with this name already exists"
+            )
 
         detail = CategoryDetails(
             category_master_id=master_id,
             name=name,
             description=description,
+            is_active=is_active,              # ✅ ADD
             created_by=created_by,
             modified_by=created_by
         )
+
         db.add(detail)
         db.commit()
         db.refresh(detail)
         return detail
+
 
     @classmethod
     def update_category_detail(cls, db: Session, detail_id: int, updates: dict):

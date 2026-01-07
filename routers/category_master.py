@@ -36,6 +36,7 @@ def create_category_master(
         db=db,
         name=category.name,
         description=category.description,
+        is_active=category.is_active,   # ✅ ADD
         created_by=current_user.id
     )
 
