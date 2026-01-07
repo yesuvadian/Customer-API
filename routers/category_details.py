@@ -68,25 +68,26 @@ def create_category_detail(
         created_by=current_user.id
     )
 
-
 # ---------------------------
 # LIST CATEGORY DETAILS
 # ---------------------------
 @router.get("/details", response_model=List[CategoryDetailsResponse])
 def list_category_details(
-    skip: int = 0, 
-    limit: int = 100, 
+    skip: int = 0,
+    limit: int = 100,
     search: Optional[str] = None,
     master_id: Optional[int] = None,
+    is_active: Optional[bool] = None,   # ✅ ADD
     db: Session = Depends(get_db)
 ):
-    """List Category Details. Optional filter by Master ID"""
+    """List Category Details. Optional filter by Master ID & is_active"""
     return CategoryDetailsService.get_category_details(
-        db=db, 
-        skip=skip, 
-        limit=limit, 
+        db=db,
+        skip=skip,
+        limit=limit,
         search=search,
-        master_id=master_id
+        master_id=master_id,
+        is_active=is_active               # ✅ PASS
     )
 
 # ---------------------------
