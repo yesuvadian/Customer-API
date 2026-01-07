@@ -833,9 +833,9 @@ def run_seed():
         seed_privileges(session, role_ids, module_ids)
         seed_user_roles(session, role_ids)
         seed_plans(session)
-        category_ids = seed_product_categories(session)
-        subcategory_ids = seed_product_subcategories(session, category_ids)
-        seed_products(session, category_ids, subcategory_ids)
+        #category_ids = seed_product_categories(session)
+        #subcategory_ids = seed_product_subcategories(session, category_ids)
+        #seed_products(session, category_ids, subcategory_ids)
             # Geography
         seed_country_india
         india = seed_india_country(session)

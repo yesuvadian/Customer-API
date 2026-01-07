@@ -1,6 +1,6 @@
 import re
 import requests
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 import config
 from services.zoho_contact_service import ZohoContactService
 from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta, strip_comment_meta
@@ -19,6 +19,118 @@ class QuoteService:
             contact = self.contact_service.get_contact_id_by_email(contact_id)
             return contact["contact_id"]
         return contact_id
+        # -----------------------------
+    # Upload Attachment to Quote
+    # -----------------------------
+    def upload_attachment(
+        self,
+        access_token: str,
+        estimate_id: str,
+        file: UploadFile,
+        uploaded_by: str | None = None
+    ):
+        """
+        Upload an attachment to a Zoho Books Estimate
+        """
+
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        files = {
+            "attachment": (
+                file.filename,
+                file.file,
+                file.content_type or "application/octet-stream"
+            )
+        }
+
+        response = requests.post(
+            f"{self.base_url}/estimates/{estimate_id}/attachment",
+            headers=headers,
+            files=files,
+            params={"organization_id": self.org_id},
+            timeout=30
+        )
+
+        if response.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Failed to upload attachment",
+                    "zoho_response": response.json()
+                }
+            )
+
+        # Optional: add audit comment
+        if uploaded_by:
+            try:
+                self.add_comment(
+                    access_token=access_token,
+                    estimate_id=estimate_id,
+                    description=f"Attachment uploaded: {file.filename}",
+                    email=uploaded_by
+                )
+            except Exception:
+                pass  # attachment succeeded, comment is optional
+
+        return response.json()
+        # -----------------------------
+    # Create Draft Quote (Enquiry – No Items)
+    # -----------------------------
+    def create_draft_quote_enquiry(self, access_token: str, payload):
+        """
+        Create a draft quote as an enquiry:
+        - No predefined items
+        - Uses a dummy line item
+        - Attachments are uploaded separately
+        """
+
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        contact_id = self._resolve_contact_id(payload.contact_id)
+
+        # Single dummy line item (Zoho requires at least one)
+        line_items = [
+            {
+                "name": "Enquiry Request",
+                "quantity": 1,
+                "rate": 0,
+                "description": payload.enquiry_description
+                if hasattr(payload, "enquiry_description")
+                else "Customer enquiry submitted from portal",
+                "tax_exemption_code": "NON"
+            }
+        ]
+
+        body = {
+            "customer_id": contact_id,
+            "line_items": line_items,
+            "notes": payload.notes or "Quote enquiry submitted from customer portal",
+            "status": "draft"
+        }
+
+        response = requests.post(
+            f"{self.base_url}/estimates",
+            headers=headers,
+            json=body,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 201:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Failed to create enquiry draft quote",
+                    "zoho_response": response.json()
+                }
+            )
+
+        return response.json()["estimate"]
 
     # -----------------------------
     # Create Draft Quote
