@@ -102,18 +102,19 @@ def seed_plans(session):
     session.commit()
     print("✅ Plans seeded successfully.")
 def seed_category_master(session):
-    """Seeds the CategoryMaster table with ONLY the 'Company Documents' category."""
-    
+    """Seeds the CategoryMaster table with required categories."""
+
     category_master_data = [
         {"name": "Company Documents", "description": "Mandatory compliance, technical, and financial documentation."},
-        {"name": "Tax Documents", "description": "Mandatory compliance, technical, and financial documentation."},
+        {"name": "Tax Documents", "description": "Statutory tax-related compliance documents."},
         {"name": "Bank Account Types", "description": "Dropdown values for company bank account types (e.g., savings, current, salary)."},
         {"name": "Bank Document Types", "description": "Dropdown values for required company bank documents (e.g., cancelled cheque, bank statement)."},
+        {"name": "GST Slabs", "description": "GST percentage slabs applicable to goods and services in India."},
     ]
 
     master_ids = {}
+
     for c in category_master_data:
-        # Check if it already exists
         existing = session.query(CategoryMaster).filter_by(name=c["name"]).first()
         if not existing:
             master = CategoryMaster(
@@ -125,19 +126,19 @@ def seed_category_master(session):
             session.flush()
             master_ids[c["name"]] = master.id
         else:
-            # Update existing if needed
             existing.description = c["description"]
             existing.is_active = True
             master_ids[c["name"]] = existing.id
-            
+
     session.commit()
-    print("✅ Category Master 'Company Documents' seeded successfully.")
+    print("✅ Category Master seeded successfully.")
     return master_ids
+
 def seed_category_details(session, master_ids):
-    """Seeds the CategoryDetails table ONLY for the 'Company Documents' master."""
-    
+    """Seeds the CategoryDetails table for all masters."""
+
     category_details_data = [
-        # Company Documents Details
+        # ---------------- Company Documents ----------------
         {"master_name": "Company Documents", "name": "Quality Manual", "description": "Document outlining the organization's quality management system."},
         {"master_name": "Company Documents", "name": "Manufacturing Capability", "description": "Documentation detailing production capacity and infrastructure."},
         {"master_name": "Company Documents", "name": "Technical Specifications", "description": "Detailed engineering and product specifications."},
@@ -147,59 +148,61 @@ def seed_category_details(session, master_ids):
         {"master_name": "Company Documents", "name": "Employee Count", "description": "Official report on the total number of employees."},
         {"master_name": "Company Documents", "name": "Lists of Clients", "description": "Reference list of major and relevant clients."},
         {"master_name": "Company Documents", "name": "ISO certificate", "description": "Current ISO quality and environmental management certificates."},
-        {"master_name": "Company Documents", "name": "Bank Financial Capability", "description": "Bank statement or certificate proving financial stability/capability."},
+        {"master_name": "Company Documents", "name": "Bank Financial Capability", "description": "Bank statement or certificate proving financial stability."},
         {"master_name": "Company Documents", "name": "Audit Report", "description": "Latest external financial audit report."},
-        {"master_name": "Company Documents", "name": "Profit and Loss", "description": "Most recent Profit and Loss (Income) Statement."},
-        {"master_name": "Company Documents", "name": "cash flow statement", "description": "Cash flow statements for the last three financial years."},
-        {"master_name": "Company Documents", "name": "Purchase Order Copy","description": "Copies of finalized and authorized purchase orders issued to vendors."},
-        {"master_name": "Company Documents", "name": "Certificate of Incorporation","description": "Official Certificate of Incorporation issued by the Registrar of Companies."},
-        {"master_name": "Company Documents", "name": "Performance Certificate","description": "Performance certificates issued by clients or authorities demonstrating successful project execution."},
-        
-        {"master_name": "Tax Documents", "name": "GST Certificate", "description": "GST Certificate."},
-        {"master_name": "Tax Documents", "name": "Pan Card", "description": "Pan Card."},
+        {"master_name": "Company Documents", "name": "Profit and Loss", "description": "Most recent Profit and Loss Statement."},
+        {"master_name": "Company Documents", "name": "Cash Flow Statement", "description": "Cash flow statements for the last three financial years."},
+        {"master_name": "Company Documents", "name": "Purchase Order Copy", "description": "Authorized purchase orders issued to vendors."},
+        {"master_name": "Company Documents", "name": "Certificate of Incorporation", "description": "Official Certificate of Incorporation issued by ROC."},
+        {"master_name": "Company Documents", "name": "Performance Certificate", "description": "Certificates proving successful project execution."},
 
-        {"master_name": "Bank Account Types", "name": "savings", "description": "Savings Account"},
-        {"master_name": "Bank Account Types", "name": "current", "description": "Current Account"},
-        {"master_name": "Bank Account Types", "name": "salary", "description": "Salary Account"},
+        # ---------------- Tax Documents ----------------
+        {"master_name": "Tax Documents", "name": "GST Certificate", "description": "GST registration certificate."},
+        {"master_name": "Tax Documents", "name": "PAN Card", "description": "Permanent Account Number card."},
 
+        # ---------------- Bank Account Types ----------------
+        {"master_name": "Bank Account Types", "name": "SAVINGS", "description": "Savings Account"},
+        {"master_name": "Bank Account Types", "name": "CURRENT", "description": "Current Account"},
+        {"master_name": "Bank Account Types", "name": "SALARY", "description": "Salary Account"},
+
+        # ---------------- Bank Document Types ----------------
         {"master_name": "Bank Document Types", "name": "CANCELLED_CHEQUE", "description": "Cancelled Cheque"},
         {"master_name": "Bank Document Types", "name": "BANK_STATEMENT", "description": "Bank Statement"},
         {"master_name": "Bank Document Types", "name": "PASSBOOK", "description": "Passbook"},
+
+        # ---------------- GST Slabs ----------------
+        {"master_name": "GST Slabs", "name": "0", "description": "0% GST (Nil-rated goods and services)"},
+        {"master_name": "GST Slabs", "name": "5", "description": "5% GST slab"},
+        {"master_name": "GST Slabs", "name": "12", "description": "12% GST slab"},
+        {"master_name": "GST Slabs", "name": "18", "description": "18% GST slab"},
+        {"master_name": "GST Slabs", "name": "28", "description": "28% GST slab"},
     ]
-  
 
     for d in category_details_data:
-        master_name = d["master_name"]
-        detail_name = d["name"]
-        master_id = master_ids.get(master_name)
-        
+        master_id = master_ids.get(d["master_name"])
         if not master_id:
-            # This should not happen if master_ids comes from the updated seed_category_master
-            print(f"⚠️ Master category not found for detail: {detail_name} (Master: {master_name})")
+            print(f"⚠️ Master not found: {d['master_name']}")
             continue
 
         existing = session.query(CategoryDetails).filter_by(
-            name=detail_name,
-            category_master_id=master_id 
+            name=d["name"],
+            category_master_id=master_id
         ).first()
-        
-        description = d["description"]
-        
+
         if not existing:
-            detail = CategoryDetails(
-                name=detail_name,
-                description=description,
+            session.add(CategoryDetails(
+                name=d["name"],
+                description=d["description"],
                 category_master_id=master_id,
                 is_active=True
-            )
-            session.add(detail)
+            ))
         else:
-            existing.description = description
+            existing.description = d["description"]
             existing.is_active = True
-            existing.category_master_id = master_id 
-            
+
     session.commit()
-    print("✅ Category Details for 'Company Documents' seeded successfully.")
+    print("✅ Category Details seeded successfully.")
+
 def seed_country_india(session):
     existing = session.query(Country).filter_by(name="INDIA").first()
     if not existing:
