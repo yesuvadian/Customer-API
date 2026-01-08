@@ -13,32 +13,75 @@ class CategoryDetailsService:
         return db.query(CategoryDetails).filter(CategoryDetails.id == detail_id).first()
 
     @classmethod
-    def get_category_details(cls, db: Session, skip: int = 0, limit: int = 100, search: str | None = None, master_id: int | None = None):
-        """Fetch multiple Category Details with optional search and master filter"""
+    def get_category_details(
+        cls,
+        db: Session,
+        skip: int = 0,
+        limit: int = 100,
+        search: str | None = None,
+        master_id: int | None = None,
+        is_active: bool | None = None    # ✅ ADD
+    ):
+        """
+        Fetch Category Details
+        - is_active = None → ALL
+        - is_active = True → only active
+        - is_active = False → only inactive
+        """
+
         query = db.query(CategoryDetails)
-        
-        if master_id:
+
+        # 🔗 Filter by master
+        if master_id is not None:
             query = query.filter(CategoryDetails.category_master_id == master_id)
 
+        # 🔍 Search filter
         if search:
             query = query.filter(CategoryDetails.name.ilike(f"%{search}%"))
-            
-        return query.offset(skip).limit(limit).all()
 
-    @classmethod
-    def get_category_details_by_master_name(cls, db: Session, master_name: str, skip: int = 0, limit: int = 100):
-        """Fetch Category Details by Master Category name"""
-        master = db.query(CategoryMaster).filter(CategoryMaster.name == master_name).first()
-        if not master:
-            return []
+        # ✅ Active / Inactive filter (ONLY if provided)
+        if is_active is not None:
+            query = query.filter(CategoryDetails.is_active == is_active)
 
         return (
-            db.query(CategoryDetails)
-            .filter(CategoryDetails.category_master_id == master.id)
+            query
+            .order_by(desc(CategoryDetails.id))
             .offset(skip)
             .limit(limit)
             .all()
         )
+
+
+    @classmethod
+    def get_category_details_by_master_name(
+        cls,
+        db: Session,
+        master_name: str,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: bool | None = None   # ✅ ADD
+    ):
+        """Fetch Category Details by Master Category name"""
+
+        master = db.query(CategoryMaster).filter(CategoryMaster.name == master_name).first()
+        if not master:
+            return []
+
+        query = db.query(CategoryDetails).filter(
+            CategoryDetails.category_master_id == master.id
+        )
+
+        # ✅ Apply active/inactive filter ONLY if provided
+        if is_active is not None:
+            query = query.filter(CategoryDetails.is_active == is_active)
+
+        return (
+            query
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
 
     @classmethod
     def create_category_detail(

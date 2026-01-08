@@ -43,6 +43,8 @@ def create_category_master(
 # ============================================================
 # LIST MASTER CATEGORIES
 # ============================================================
+from typing import Optional, List
+
 @router.get(
     "/masters",
     response_model=List[CategoryMasterResponse]
@@ -51,13 +53,15 @@ def list_category_masters(
     skip: int = 0,
     limit: int = 100,
     search: Optional[str] = None,
+    is_active: Optional[bool] = None,   # ✅ ADD THIS
     db: Session = Depends(get_db)
 ):
     return CategoryMasterService.get_master_categories(
         db=db,
         skip=skip,
         limit=limit,
-        search=search
+        search=search,
+        is_active=is_active              # ✅ PASS IT
     )
 
 # ============================================================
