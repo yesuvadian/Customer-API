@@ -224,7 +224,11 @@ class ERPSyncService:
 
 
 
-    
+    def erp_str(val: str, max_len: int):
+        if not val:
+            return None
+        return val.strip()[:max_len]
+
     
     @classmethod
     async def build_itemmaster_json(cls, db: Session):
@@ -246,14 +250,14 @@ class ERPSyncService:
 
         for p in products:
             sku = p.sku or ""
-            desc = p.description or ""
+            desc = f"{p.name}-{p.material_code}" if p.name and p.material_code else ""
 
             # ---------------- ITEMMASTER ----------------
             itemmaster = {
                 "subgroup": p.category_obj.id if p.category_obj else None,
                 "subgroup2": p.subcategory_obj.id if p.subcategory_obj else None,
                 "itemid": f"{sku}-{desc}",
-                "itemdesc": desc,
+                "itemdesc": cls.erp_str(desc,400),
                 "sku": sku,
                 "sellingrate": p.selling_price,
                 "purchaserate": p.cost_price,
