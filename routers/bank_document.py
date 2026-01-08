@@ -20,7 +20,7 @@ from services.companybankdocument_service import CompanyBankDocumentService
 # ENV
 # -----------------------------------------------------
 load_dotenv()
-MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 500))
+MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 10000))
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_KB * 1024
 
 router = APIRouter(
@@ -81,7 +81,7 @@ async def upload_bank_document(
         if len(file_data) > MAX_FILE_SIZE_BYTES:
             raise HTTPException(
                 status_code=400,
-                detail=f"File too large. Max size allowed: {MAX_FILE_SIZE_KB} KB"
+                detail=f"File too large. Max size allowed: {MAX_FILE_SIZE_KB} MB"
             )
 
         doc = service.create_document(
