@@ -117,7 +117,7 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", EMAIL_USER or "noreply@example.com")
 # ==============================
 # FILE UPLOAD LIMITS
 # ==============================
-MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 500))
+MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 10000))
 # ==============================
 # ZOHO BOOKS CONFIGURATION
 # ==============================

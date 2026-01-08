@@ -18,7 +18,7 @@ from services.company_tax_document_service import CompanyTaxDocumentService
 
 # Load env
 load_dotenv()
-MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 500))
+MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 10000))
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_KB * 1024
 
 router = APIRouter(
@@ -99,7 +99,7 @@ def upload_company_document(
         if len(file_data) > MAX_FILE_SIZE_BYTES:
             raise HTTPException(
                 400,
-                f"File too large. Max size allowed: {MAX_FILE_SIZE_KB} KB"
+                f"File too large. Max size allowed: {MAX_FILE_SIZE_KB} MB"
             )
 
         doc = service.create_document_for_company(
