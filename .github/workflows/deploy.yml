@@ -1,0 +1,27 @@
+name: Deploy Customer API (PROD)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, prod, procurement, api]
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy FastAPI
+        run: |
+          cd "$DEPLOY_DIR"
+
+          if [ ! -d "venv" ]; then
+            python3 -m venv venv
+          fi
+
+          source venv/bin/activate
+          pip install -r requirements.txt
+
+          sudo systemctl restart $SERVICE_NAME
