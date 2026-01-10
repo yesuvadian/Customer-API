@@ -1,20 +1,25 @@
-name: Deploy Customer API (PROD)
+name: Deploy Customer API (DEV)
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
   workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, prod, procurement, api]
-    environment: production
+    runs-on: [self-hosted, dev, procurement, api]
+    environment: development
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy FastAPI
+      - name: Deploy FastAPI (DEV)
         run: |
+          set -e
+
+          echo "Deploying Customer API (DEV)"
+
+          rsync -av --delete ./ "$DEPLOY_DIR/"
           cd "$DEPLOY_DIR"
 
           if [ ! -d "venv" ]; then
@@ -22,6 +27,13 @@ jobs:
           fi
 
           source venv/bin/activate
+          pip install --upgrade pip
           pip install -r requirements.txt
 
-          sudo systemctl restart $SERVICE_NAME
+          # validate app before restart
+          python - <<EOF
+          from app.main import app
+          print("FastAPI import OK")
+          EOF
+
+          sudo systemctl restart "$SERVICE_NAME"
