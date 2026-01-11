@@ -19,7 +19,22 @@ jobs:
 
           echo "Deploying Customer API (DEV)"
 
-          rsync -av --delete ./ "$DEPLOY_DIR/"
+          echo "Workspace: $GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+
+          # SAFETY CHECK: ensure repo root
+          if [ ! -f "requirements.txt" ]; then
+            echo "ERROR: requirements.txt not found. Wrong directory."
+            exit 1
+          fi
+
+          # SAFE rsync (never from ./)
+          rsync -av --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'venv' \
+            "$GITHUB_WORKSPACE/" "$DEPLOY_DIR/"
+
           cd "$DEPLOY_DIR"
 
           if [ ! -d "venv" ]; then
@@ -30,10 +45,10 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-          # validate app before restart
+          # Validate app before restart
           python - <<EOF
           from app.main import app
           print("FastAPI import OK")
           EOF
 
-          sudo systemctl restart "$SERVICE_NAME"
+            sudo systemctl restart "$SERVICE_NAME"
