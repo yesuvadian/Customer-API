@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, dev, procurement, api]
+    runs-on: [self-hosted]
     environment: development
 
     steps:
