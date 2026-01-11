@@ -9,7 +9,9 @@ jobs:
   deploy:
     runs-on: [self-hosted]
     environment: development
-
+    env:
+      DEPLOY_DIR: /apps/customer/api
+      SERVICE_NAME: customer-api
     steps:
       - uses: actions/checkout@v4
 
