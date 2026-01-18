@@ -342,29 +342,34 @@ class ContactPerson(BaseModel):
 
 
 
+
+
 class CreateContact(BaseModel):
-    # Basic details
+    # Required
     contact_name: str
+
+    # Basic info
     company_name: Optional[str] = None
     website: Optional[str] = None
     language_code: Optional[str] = "en"
     contact_type: str = "customer"
     customer_sub_type: Optional[str] = "business"
 
-    # GST (India - API correct fields)
+    # GST (India - correct)
     gst_treatment: Optional[str] = None
+    # business_gst | business_none | consumer | overseas
+
     gst_no: Optional[str] = None
-    place_of_contact: Optional[str] = None  # <-- correct
-    is_taxable: Optional[bool] = True        # <-- correct
+    place_of_contact: Optional[str] = None  # State code (KA, MH, etc.)
 
     # Financials
-    credit_limit: Optional[int] = None
     currency_id: Optional[int] = None
+    credit_limit: Optional[int] = None
     payment_terms: Optional[int] = None
     payment_terms_label: Optional[str] = None
     pricebook_id: Optional[int] = None
 
-    # Metadata
+    # Misc
     contact_number: Optional[str] = None
     ignore_auto_number_generation: Optional[bool] = False
     notes: Optional[str] = None
@@ -380,31 +385,13 @@ class CreateContact(BaseModel):
 
     @root_validator
     def validate_gst_fields(cls, values):
-        gst_treatment = values.get("gst_treatment")
-
-        if gst_treatment in {
-            "registered_business_regular",
-            "registered_business_composition"
-        }:
+        if values.get("gst_treatment") == "business_gst":
             if not values.get("gst_no"):
-                raise ValueError("gst_no is mandatory for GST registered contacts")
+                raise ValueError("gst_no is mandatory for business_gst")
             if not values.get("place_of_contact"):
-                raise ValueError("place_of_contact is mandatory for GST registered contacts")
-
+                raise ValueError("place_of_contact is mandatory for business_gst")
         return values
 
-
-    # @model_validator(mode='after')
-    # def check_unique_contacts(self) -> 'CreateContact':
-    #     if self.contact_persons:
-    #         emails = [p.email for p in self.contact_persons]
-    #         mobiles = [p.mobile for p in self.contact_persons if p.mobile]
-
-    #         if len(emails) != len(set(emails)):
-    #             raise ValueError("Duplicate emails found in contact list")
-    #         if len(mobiles) != len(set(mobiles)):
-    #             raise ValueError("Duplicate mobile numbers found in contact list")
-    #     return self
 
     
 class ContactResponse(BaseModel):
