@@ -1,5 +1,5 @@
 from datetime import date
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator, root_validator
 from typing import List, Optional
 # -----------------------------
 # Quote Item
@@ -340,26 +340,59 @@ class ContactPerson(BaseModel):
     enable_portal: Optional[bool] = False
 
 
+
+
 class CreateContact(BaseModel):
+    # Basic details
     contact_name: str
     company_name: Optional[str] = None
     website: Optional[str] = None
     language_code: Optional[str] = "en"
     contact_type: str = "customer"
     customer_sub_type: Optional[str] = "business"
+
+    # GST (India - API correct fields)
+    gst_treatment: Optional[str] = None
+    gst_no: Optional[str] = None
+    place_of_contact: Optional[str] = None  # <-- correct
+    is_taxable: Optional[bool] = True        # <-- correct
+
+    # Financials
     credit_limit: Optional[int] = None
-    pricebook_id: Optional[int] = None
-    contact_number: Optional[str] = None
-    ignore_auto_number_generation: Optional[bool] = False
-    tags: Optional[List[ContactTag]] = None
-    is_portal_enabled: Optional[bool] = False
     currency_id: Optional[int] = None
     payment_terms: Optional[int] = None
     payment_terms_label: Optional[str] = None
+    pricebook_id: Optional[int] = None
+
+    # Metadata
+    contact_number: Optional[str] = None
+    ignore_auto_number_generation: Optional[bool] = False
     notes: Optional[str] = None
+    tags: Optional[List[ContactTag]] = None
+    is_portal_enabled: Optional[bool] = False
+
+    # Addresses
     billing_address: Optional[Address] = None
     shipping_address: Optional[Address] = None
+
+    # Contact persons
     contact_persons: Optional[List[ContactPerson]] = None
+
+    @root_validator
+    def validate_gst_fields(cls, values):
+        gst_treatment = values.get("gst_treatment")
+
+        if gst_treatment in {
+            "registered_business_regular",
+            "registered_business_composition"
+        }:
+            if not values.get("gst_no"):
+                raise ValueError("gst_no is mandatory for GST registered contacts")
+            if not values.get("place_of_contact"):
+                raise ValueError("place_of_contact is mandatory for GST registered contacts")
+
+        return values
+
 
     # @model_validator(mode='after')
     # def check_unique_contacts(self) -> 'CreateContact':

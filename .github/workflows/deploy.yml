@@ -7,50 +7,42 @@ on:
 
 jobs:
   deploy:
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, dev, procurement, api]
     environment: development
+
     env:
       DEPLOY_DIR: /apps/customer/api
       SERVICE_NAME: customer-api
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Deploy FastAPI (DEV)
         run: |
-          set -e
+          set -euo pipefail
 
           echo "Deploying Customer API (DEV)"
-
-          echo "Workspace: $GITHUB_WORKSPACE"
           cd "$GITHUB_WORKSPACE"
 
-          # SAFETY CHECK: ensure repo root
           if [ ! -f "requirements.txt" ]; then
-            echo "ERROR: requirements.txt not found. Wrong directory."
+            echo "ERROR: requirements.txt not found"
             exit 1
           fi
 
-          # SAFE rsync (never from ./)
           rsync -av --delete \
             --exclude '.git' \
             --exclude '.github' \
             --exclude 'venv' \
             "$GITHUB_WORKSPACE/" "$DEPLOY_DIR/"
 
-          cd "$DEPLOY_DIR"
+          /usr/local/python3.13/bin/python3.13 -m venv "$DEPLOY_DIR/venv"
 
-          if [ ! -d "venv" ]; then
-            python3 -m venv venv
-          fi
+          "$DEPLOY_DIR/venv/bin/python" -m pip install --upgrade pip
+          "$DEPLOY_DIR/venv/bin/python" -m pip install -r "$DEPLOY_DIR/requirements.txt"
 
-          source venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-          # Validate app before restart
-          python - <<EOF
+          "$DEPLOY_DIR/venv/bin/python" - <<EOF
           from app.main import app
           print("FastAPI import OK")
           EOF
 
-            sudo systemctl restart "$SERVICE_NAME"
+          sudo systemctl restart "$SERVICE_NAME"
