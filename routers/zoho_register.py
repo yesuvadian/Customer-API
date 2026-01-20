@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from services.zoho_user_sync_service import ZohoUserSyncService
 import zohoschemas
 from database import get_db
 from auth_utils import get_current_user
@@ -55,3 +56,37 @@ def create_contact(payload: zohoschemas.CreateContact):
         company_name=contact.get("company_name", ""),
         is_portal_enabled=contact.get("is_portal_enabled", False)
     )
+
+@router.post(
+    "/sync-customers",
+    status_code=status.HTTP_200_OK,
+    summary="Sync Zoho customer contacts to users table"
+)
+def sync_zoho_customers(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)  # 🔐 keep it protected
+):
+    """
+    Sync Zoho Contacts (contact_type=customer) into public.users
+
+    - Creates new users if not exists
+    - Updates existing users by zoho_erp_id
+    - Sets default password for new users
+    - Tracks sync status
+    """
+
+    try:
+        access_token = get_zoho_access_token()
+        sync_service = ZohoUserSyncService(db, access_token)
+        result = sync_service.sync_customers()
+
+        return {
+            "message": "Zoho customers synced successfully",
+            "result": result
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Zoho user sync failed: {str(e)}"
+        )

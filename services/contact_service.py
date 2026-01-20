@@ -13,7 +13,45 @@ class ContactService:
             "Authorization": f"Zoho-oauthtoken {access_token}",
             "Content-Type": "application/json"
         }
+    def get_all_customers(self, access_token: str):
+        all_contacts = []
+        page = 1
 
+        while True:
+            data = self.fetch_customers(access_token, page=page)
+            all_contacts.extend(data.get("contacts", []))
+
+            page_context = data.get("page_context", {})
+            if not page_context.get("has_more_page"):
+                break
+
+            page += 1
+
+        return all_contacts
+
+    def fetch_customers(self, access_token: str, page: int = 1, per_page: int = 200):
+        response = requests.get(
+            f"{self.base_url}/contacts",
+            headers=self._get_headers(access_token),
+            params={
+                "organization_id": self.org_id,
+                "contact_type": "customer",
+                "page": page,
+                "per_page": per_page
+            },
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Failed to fetch Zoho customers",
+                    "zoho_response": response.json()
+                }
+            )
+
+        return response.json()
    
     def create_contact(self, access_token: str, payload):
         # 1. Validation Logic
