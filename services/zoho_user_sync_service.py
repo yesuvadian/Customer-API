@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from models import Role, User, UserRole
 from security_utils import get_password_hash
 from services.contact_service import ContactService
+from utils.email_service import EmailService
+from utils.email_template_loader import render_welcome_email
 
 
 # -------------------------------------------------
@@ -23,6 +25,8 @@ class ZohoUserSyncService:
         self.access_token = access_token
         self.contact_service = ContactService()
         self._viewer_role_id = None
+        self.email_service = EmailService()  # ✅ instantiate ONCE
+
     # -------------------------------------------------
     # Mapper
     # -------------------------------------------------
@@ -53,6 +57,10 @@ class ZohoUserSyncService:
             })
 
         return data
+
+    # -------------------------------------------------
+    # Role lookup
+    # -------------------------------------------------
     def _get_viewer_role_id(self) -> int:
         if self._viewer_role_id:
             return self._viewer_role_id
@@ -68,25 +76,21 @@ class ZohoUserSyncService:
 
         self._viewer_role_id = role.id
         return role.id
+
     # -------------------------------------------------
     # Upsert logic
     # -------------------------------------------------
-
-
-
     def _upsert_user(self, contact: dict):
         """
         Returns:
             (user, action)
-            action ∈ {"created", "updated", "no_change"} or (None, None) if skipped
+            action ∈ {"created", "updated", "no_change"} or (None, None)
         """
 
         zoho_id = contact["contact_id"]
         emails = self._extract_emails(contact)
 
-        # -------------------------------------------------
         # 1️⃣ Match by Zoho ERP ID
-        # -------------------------------------------------
         user = (
             self.db.query(User)
             .filter(
@@ -98,7 +102,6 @@ class ZohoUserSyncService:
 
         if user:
             changed = False
-
             user_data = self._map_zoho_contact(contact, is_new=False)
 
             # ❌ NEVER overwrite email
@@ -109,9 +112,9 @@ class ZohoUserSyncService:
                     setattr(user, field, value)
                     changed = True
 
-            # ✅ Status handling (preserve legacy success)
-            if user.erp_sync_status not in ("success", "complete"):
-                user.erp_sync_status = "complete"
+            # ✅ Preserve legacy success
+            if user.erp_sync_status not in ("success", "completed"):
+                user.erp_sync_status = "completed"
                 changed = True
 
             if changed:
@@ -121,9 +124,7 @@ class ZohoUserSyncService:
 
             return user, "no_change"
 
-        # -------------------------------------------------
-        # 2️⃣ Attach by email (single-user system)
-        # -------------------------------------------------
+        # 2️⃣ Attach by email
         if emails:
             user = (
                 self.db.query(User)
@@ -139,16 +140,14 @@ class ZohoUserSyncService:
             if user:
                 user.zoho_erp_id = zoho_id
 
-                if user.erp_sync_status not in ("success", "complete"):
-                    user.erp_sync_status = "complete"
+                if user.erp_sync_status not in ("success", "completed"):
+                    user.erp_sync_status = "completed"
 
                 user.erp_last_sync_at = datetime.utcnow()
                 user.erp_error_message = None
                 return user, "updated"
 
-        # -------------------------------------------------
         # 3️⃣ FINAL GUARD: never create if email exists
-        # -------------------------------------------------
         if emails:
             email_exists = (
                 self.db.query(User)
@@ -158,13 +157,11 @@ class ZohoUserSyncService:
             if email_exists:
                 return None, None
 
-        # -------------------------------------------------
         # 4️⃣ Safe create
-        # -------------------------------------------------
         user_data = self._map_zoho_contact(contact, is_new=True)
         user = User(**user_data)
         self.db.add(user)
-        self.db.flush()  # ensures user.id exists
+        self.db.flush()
 
         # ✅ Assign VIEWER role
         viewer_role_id = self._get_viewer_role_id()
@@ -178,7 +175,6 @@ class ZohoUserSyncService:
         )
 
         return user, "created"
-
 
     # -------------------------------------------------
     # Email extraction
@@ -202,22 +198,17 @@ class ZohoUserSyncService:
         updated = 0
         skipped = 0
         failed = 0
-
         processed_emails: set[str] = set()
 
         for contact in contacts:
             try:
                 emails = self._extract_emails(contact)
 
-                if not emails:
+                if not emails or any(e in processed_emails for e in emails):
                     skipped += 1
                     continue
 
-                if any(email in processed_emails for email in emails):
-                    skipped += 1
-                    continue
-
-                result, action = self._upsert_user(contact)
+                user, action = self._upsert_user(contact)
 
                 if action is None:
                     skipped += 1
@@ -226,10 +217,21 @@ class ZohoUserSyncService:
                 if action == "created":
                     inserted += 1
 
+                    body_html = render_welcome_email(
+                        name=f"{user.firstname or ''} {user.lastname or ''}".strip(),
+                        email=user.email
+                    )
+
+                    # ✅ Correct method call (instance)
+                    self.email_service.send_email_starttls(
+                        to_email=user.email,
+                        subject="Welcome to PowerXchange.ai",
+                        body_html=body_html
+                    )
+
                 elif action == "updated":
                     updated += 1
 
-                # mark emails as processed
                 for email in emails:
                     processed_emails.add(email)
 
@@ -242,11 +244,10 @@ class ZohoUserSyncService:
         return {
             "inserted": inserted,
             "updated": updated,
-            "synced": inserted,   # 👈 exactly what you want
+            "synced": inserted,
             "skipped": skipped,
             "failed": failed,
         }
-
 
     # -------------------------------------------------
     # Failure handler
