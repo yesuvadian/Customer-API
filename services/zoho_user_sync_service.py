@@ -24,7 +24,7 @@ class ZohoUserSyncService:
         self.contact_service = ContactService()
 
     # -------------------------------------------------
-    # Mapper (single, correct version)
+    # Mapper
     # -------------------------------------------------
     @staticmethod
     def _map_zoho_contact(contact: dict, is_new: bool) -> dict:
@@ -36,12 +36,14 @@ class ZohoUserSyncService:
             "phone_number": contact.get("mobile") or contact.get("phone"),
             "usertype": "customer",
             "isactive": True,
-            "erp_sync_status": "success",
             "erp_last_sync_at": datetime.utcnow(),
             "erp_error_message": None,
         }
 
-        # ✅ Set password ONLY for new users
+        # ✅ Only set status for NEW users
+        if is_new:
+            data["erp_sync_status"] = "completed"
+
         if is_new:
             data.update({
                 "password_hash": DEFAULT_PASSWORD_HASH,
@@ -74,11 +76,15 @@ class ZohoUserSyncService:
             for field, value in user_data.items():
                 setattr(user, field, value)
 
-            user.erp_sync_status = "success"
+            # ✅ Do NOT overwrite existing success
+            if user.erp_sync_status not in ("success", "completed"):
+                user.erp_sync_status = "completed"
+
             user.erp_last_sync_at = datetime.utcnow()
+            user.erp_error_message = None
             return user
 
-        # 2️⃣ Attach by email (single-user system)
+        # 2️⃣ Attach by email
         if emails:
             user = (
                 self.db.query(User)
@@ -93,12 +99,15 @@ class ZohoUserSyncService:
 
             if user:
                 user.zoho_erp_id = zoho_id
-                user.erp_sync_status = "success"
+
+                if user.erp_sync_status not in ("success", "completed"):
+                    user.erp_sync_status = "completed"
+
                 user.erp_last_sync_at = datetime.utcnow()
                 user.erp_error_message = None
                 return user
 
-        # 3️⃣ FINAL GUARD: never create if email exists (unique constraint)
+        # 3️⃣ FINAL GUARD: never create if email exists
         if emails:
             email_exists = (
                 self.db.query(User)
@@ -106,7 +115,6 @@ class ZohoUserSyncService:
                 .one_or_none()
             )
             if email_exists:
-                # Skip to avoid unique constraint violation
                 return None
 
         # 4️⃣ Safe create
@@ -115,7 +123,9 @@ class ZohoUserSyncService:
         self.db.add(user)
         return user
 
-
+    # -------------------------------------------------
+    # Email extraction
+    # -------------------------------------------------
     @staticmethod
     def _extract_emails(contact: dict) -> list[str]:
         emails = []
@@ -134,19 +144,16 @@ class ZohoUserSyncService:
         synced = 0
         skipped = 0
         failed = 0
-
         processed_emails: set[str] = set()
 
         for contact in contacts:
             try:
                 emails = self._extract_emails(contact)
 
-                # ❌ Skip if no email at all
                 if not emails:
                     skipped += 1
                     continue
 
-                # ❌ Skip duplicate Zoho contacts with same email
                 if any(email in processed_emails for email in emails):
                     skipped += 1
                     continue
@@ -156,7 +163,6 @@ class ZohoUserSyncService:
                     skipped += 1
                     continue
 
-                # ✅ Mark emails as processed
                 for email in emails:
                     processed_emails.add(email)
 
@@ -171,9 +177,8 @@ class ZohoUserSyncService:
         return {
             "synced": synced,
             "skipped": skipped,
-            "failed": failed
+            "failed": failed,
         }
-
 
     # -------------------------------------------------
     # Failure handler
@@ -184,5 +189,5 @@ class ZohoUserSyncService:
         ).update({
             "erp_sync_status": "failed",
             "erp_error_message": error,
-            "erp_last_sync_at": datetime.utcnow()
+            "erp_last_sync_at": datetime.utcnow(),
         })
