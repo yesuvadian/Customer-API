@@ -1,20 +1,42 @@
-name: Deploy Customer API (PROD)
+name: Deploy Customer API (DEV)
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
   workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, prod, procurement, api]
-    environment: production
-
+    runs-on: [self-hosted]
+    environment: development
+    env:
+      DEPLOY_DIR: /apps/customer/api
+      SERVICE_NAME: customer-api
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy FastAPI
+      - name: Deploy FastAPI (DEV)
         run: |
+          set -e
+
+          echo "Deploying Customer API (DEV)"
+
+          echo "Workspace: $GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+
+          # SAFETY CHECK: ensure repo root
+          if [ ! -f "requirements.txt" ]; then
+            echo "ERROR: requirements.txt not found. Wrong directory."
+            exit 1
+          fi
+
+          # SAFE rsync (never from ./)
+          rsync -av --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'venv' \
+            "$GITHUB_WORKSPACE/" "$DEPLOY_DIR/"
+
           cd "$DEPLOY_DIR"
 
           if [ ! -d "venv" ]; then
@@ -22,6 +44,13 @@ jobs:
           fi
 
           source venv/bin/activate
+          pip install --upgrade pip
           pip install -r requirements.txt
 
-          sudo systemctl restart $SERVICE_NAME
+          # Validate app before restart
+          python - <<EOF
+          from app.main import app
+          print("FastAPI import OK")
+          EOF
+
+            sudo systemctl restart "$SERVICE_NAME"
