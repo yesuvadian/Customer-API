@@ -17,7 +17,9 @@ class EmailService:
         self.username = EMAIL_USER
         self.password = EMAIL_PASS
         self.from_email =FROM_EMAIL
-
+        
+        # ✅ CC email (default to FROM_EMAIL)
+        self.cc_email = FROM_EMAIL
         # Use BASE_URL from .env with a fallback
         self.base_url = os.getenv("BASE_URL", "http://localhost:8000")
 
@@ -26,6 +28,9 @@ class EmailService:
 
         # Optional: Password reset expiry from .env
         self.reset_token_expiry = int(os.getenv("RESETPASSWORD_TOKEN_EXPIRE", 3600))  # default 1 hour
+    def _add_cc(self, msg: EmailMessage):
+            if self.cc_email:
+                msg["Cc"] = self.cc_email
     def send_attachment_email(
         self,
         to_email: str,
@@ -89,6 +94,7 @@ class EmailService:
         msg["Subject"] = subject
         msg["From"] = self.from_email
         msg["To"] = to_email
+        self._add_cc(msg)
         msg.set_content(body_html, subtype="html")
 
         server = smtplib.SMTP(self.smtp_server, self.smtp_port)
@@ -114,6 +120,7 @@ class EmailService:
         msg["Subject"] = subject
         msg["From"] = self.from_email
         msg["To"] = to_email
+        self._add_cc(msg)
         msg.set_content(body_html, subtype="html")
 
         maintype, subtype = mime_type.split("/")

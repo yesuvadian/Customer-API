@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from services.zoho_user_sync_service import ZohoUserSyncService
 import zohoschemas
-from database import get_db
+from database import SessionLocal, get_db
 from auth_utils import get_current_user
 from services.contact_service import ContactService
 from typing import List
-
+from fastapi import BackgroundTasks
 from services.zoho_auth_service import get_zoho_access_token
 
 # We reuse your existing UserService for email/phone checks
@@ -57,36 +57,27 @@ def create_contact(payload: zohoschemas.CreateContact):
         is_portal_enabled=contact.get("is_portal_enabled", False)
     )
 
-@router.post(
-    "/sync-customers",
-    status_code=status.HTTP_200_OK,
-    summary="Sync Zoho customer contacts to users table"
-)
+
+
+@router.post("/sync-customers")
 def sync_zoho_customers(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)  # 🔐 keep it protected
+    current_user=Depends(get_current_user)
 ):
-    """
-    Sync Zoho Contacts (contact_type=customer) into public.users
+    access_token = get_zoho_access_token()
 
-    - Creates new users if not exists
-    - Updates existing users by zoho_erp_id
-    - Sets default password for new users
-    - Tracks sync status
-    """
+    background_tasks.add_task(
+        run_customer_sync,
+        access_token
+    )
 
+    return {
+        "message": "Zoho customer sync started"
+    }
+def run_customer_sync(access_token: str):
+    db = SessionLocal()
     try:
-        access_token = get_zoho_access_token()
-        sync_service = ZohoUserSyncService(db, access_token)
-        result = sync_service.sync_customers()
-
-        return {
-            "message": "Zoho customers synced successfully",
-            "result": result
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Zoho user sync failed: {str(e)}"
-        )
+        ZohoUserSyncService(db, access_token).sync_customers()
+    finally:
+        db.close()
