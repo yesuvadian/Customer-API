@@ -293,8 +293,8 @@ def login_user(db: Session, email: str, password: str):
             "user": {
                 "id": str(user.id),
                 "email": user.email,
-                "first_name": user.firstname,
-                "last_name": user.lastname,
+                "firstname": user.firstname,
+                "lastname": user.lastname,
                 "phone_number": user.phone_number,
                 "is_active": user.isactive,
                 "email_confirmed": user.email_confirmed,
