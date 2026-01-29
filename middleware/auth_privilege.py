@@ -21,6 +21,10 @@ PUBLIC_ENDPOINTS = [
     "/zoho_register/",
     "/zohocontacts/",
 ]
+ZOHO_PREFIXES = (
+    "/zoho",
+    "/webhooks/zoho",
+)
 
 # --------------------------------------------------
 # HTTP method → privilege mapping
@@ -61,7 +65,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
     # --------------------------------------------------
     # 3. Allow Zoho webhooks
     # --------------------------------------------------
-    if path.startswith("/zoho"):
+    if path.startswith(ZOHO_PREFIXES):
         return await call_next(request)
 
     # --------------------------------------------------

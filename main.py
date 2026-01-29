@@ -48,6 +48,7 @@ from routers import (
     category_master,
     category_details,
     cities,
+    webhook_zoho,
     zoho_auth,
     zoho_dashboard,
     zoho_items,
@@ -155,6 +156,7 @@ app.include_router(zoho_dashboard.router)
 app.include_router(statements.router)
 
 app.include_router(zoho_register.router)
+app.include_router(webhook_zoho.router)
 
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")
