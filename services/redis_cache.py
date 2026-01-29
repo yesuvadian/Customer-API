@@ -22,14 +22,19 @@ class RedisCacheService:
         cls,
         key: str,
         value: Any,
-        ttl: int = 300
+        ttl: int | None = None
     ) -> bool:
         try:
             client = cls.get_client()
-            client.set(key, json.dumps(value), ex=ttl)
+            if ttl is None:
+                client.set(key, json.dumps(value))  # 🔥 NO EXPIRY
+            else:
+                client.set(key, json.dumps(value), ex=ttl)
             return True
-        except Exception:
+        except Exception as e:
+            print("[CACHE][SET ERROR]", e)
             return False
+
 
     @classmethod
     def get(cls, key: str) -> Optional[Any]:
@@ -54,18 +59,21 @@ class RedisCacheService:
 
     @classmethod
     def hset(
-        cls,
-        key: str,
-        mapping: dict,
-        ttl: int = 300
-    ) -> bool:
+    cls,
+    key: str,
+    mapping: dict,
+    ttl: int | None = None
+) -> bool:
         try:
             client = cls.get_client()
             client.hset(key, mapping=mapping)
-            client.expire(key, ttl)
+            if ttl is not None:
+                client.expire(key, ttl)
             return True
-        except Exception:
+        except Exception as e:
+            print("[CACHE][HSET ERROR]", e)
             return False
+
 
     @classmethod
     def hgetall(cls, key: str) -> dict:
