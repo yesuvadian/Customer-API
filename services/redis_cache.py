@@ -16,7 +16,22 @@ class RedisCacheService:
     # ------------------------------
     # BASIC KEY-VALUE
     # ------------------------------
-
+    @classmethod
+    def delete_pattern(cls, pattern: str) -> int:
+        """
+        Delete all keys matching a Redis glob-style pattern.
+        Returns number of deleted keys.
+        """
+        try:
+            client = cls.get_client()
+            deleted = 0
+            for key in client.scan_iter(match=pattern):
+                deleted += client.delete(key)
+            return deleted
+        except Exception as e:
+            print("[CACHE][DELETE_PATTERN ERROR]", e)
+            return 0
+        
     @classmethod
     def set(
         cls,
