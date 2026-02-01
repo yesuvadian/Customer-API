@@ -44,21 +44,20 @@ class ZohoItemService:
                 # This is your own backend route, not Zoho’s direct API
                 item["image_url"] = f"/zohoitems/{item['item_id']}/image"
 
-        return items
+        # ✅ Wrap in dict so client sees { "items": [...] }
+        return {"items": items}
 
     def get_item_image(self, item_id: str):
         """Proxy Zoho item image so frontend doesn’t need Zoho auth."""
         #zoho_url = f"{config.ZOHO_API_BASE}/{item_id}/image"
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {config.ZOHO_ACCESS_TOKEN}"
-        }
+      
         params = {"organization_id": config.ZOHO_ORG_ID}
 
         resp = zoho_request(
             method="GET",
             path=f"/items/{item_id}/image",
-            params=params,
-            headers=headers
+            params=params
+           # headers=headers
         )
 
         if resp.status_code != 200:
