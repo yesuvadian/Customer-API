@@ -16,6 +16,29 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")  # ✅ ADD THIS
 # ==============================
 # DATABASE CONFIGURATION
 # ==============================
+# ==============================
+# REDIS CONFIGURATION
+# ==============================
+# ==============================
+# CACHE SETTINGS
+# ==============================
+ZOHO_WEBHOOK_SECRET = os.getenv("ZOHO_WEBHOOK_SECRET", "default_zoho_webhook_secret")
+ZOHO_DASHBOARD_CACHE_TTL = int(
+    os.getenv("ZOHO_DASHBOARD_CACHE_TTL", 300)  # seconds (5 min)
+)
+
+REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_DB = int(os.getenv("REDIS_DB", 0))
+REDIS_SOCKET_TIMEOUT = int(os.getenv("REDIS_SOCKET_TIMEOUT", 5))
+
+REDIS_CONFIG = {
+    "host": REDIS_HOST,
+    "port": REDIS_PORT,
+    "db": REDIS_DB,
+    "socket_timeout": REDIS_SOCKET_TIMEOUT,
+    "decode_responses": True,
+}
 
 # ERP / EXTERNAL SERVICES
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")

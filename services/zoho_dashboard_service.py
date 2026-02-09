@@ -1,5 +1,6 @@
 from services.zoho_client import zoho_request
 import config
+from services.redis_cache import RedisCacheService as cache
 
 
 class ZohoDashboardService:
@@ -54,7 +55,14 @@ class ZohoDashboardService:
     # ----------- MAIN SUMMARY BUILDER ------------
 
     def build_dashboard_summary(self, contact_id: str) -> dict:
+        cache_key = f"zoho:dashboard:{contact_id}"
 
+        # 🔹 1. Try cache first
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        # 🔹 2. Fetch from Zoho
         quotes = self.get_quotes(contact_id)
         invoices = self.get_invoices(contact_id)
         sales_orders = self.get_sales_orders(contact_id)
@@ -90,7 +98,7 @@ class ZohoDashboardService:
             float(i.get("credits_applied", 0) or 0) for i in invoices
         )
 
-        # -------- AVAILABLE RETAINERS (CORRECT) --------
+        # -------- AVAILABLE RETAINERS --------
         active_retainers = [
             r for r in retainers
             if r.get("status", "").lower() not in ("cancelled", "void")
@@ -116,7 +124,7 @@ class ZohoDashboardService:
         )
         last_payment = payments_sorted[0] if payments_sorted else None
 
-        return {
+        summary = {
             # Estimates
             "total_estimates_amount": total_estimates_amount,
             "total_estimates_count": total_estimates_count,
@@ -129,7 +137,7 @@ class ZohoDashboardService:
             "outstanding_invoice_count": outstanding_count,
             "unused_credits": unused_credits,
 
-            # Available Retainers ✅
+            # Retainers
             "available_retainers": available_retainers,
             "available_retainer_count": available_retainer_count,
 
@@ -143,6 +151,11 @@ class ZohoDashboardService:
             "last_payment_amount": last_payment.get("amount") if last_payment else None,
             "last_payment_date": last_payment.get("date") if last_payment else None,
         }
+
+        # 🔹 3. Store in cache (NO TTL — webhook controlled)
+        cache.set(cache_key, summary)
+
+        return summary
 
 
 zoho_dashboard_service = ZohoDashboardService()
