@@ -299,6 +299,7 @@ def login_user(db: Session, email: str, password: str):
                 "is_active": user.isactive,
                 "email_confirmed": user.email_confirmed,
                 "phone_confirmed": user.phone_confirmed,
+                "usertype": user.usertype,
                 "cts": UTCDateTimeMixin._make_aware(user.cts),
                 "mts": UTCDateTimeMixin._make_aware(user.mts),
                 "roles": role_names,
