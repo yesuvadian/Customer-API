@@ -346,3 +346,76 @@ class QuoteService:
 
         self._invalidate_quote_caches(estimate_id=estimate_id)
         return {"message": "Comment deleted successfully"}
+    def get_quote_pdf(self, access_token: str, estimate_id: str):
+                headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+                params = {
+                    "organization_id": self.org_id,
+                    "print": "true",
+                    "accept": "pdf"
+                }
+
+                response = requests.get(
+                    f"{self.base_url}/estimates/{estimate_id}/pdf",
+                    headers=headers,
+                    params=params,
+                    timeout=30
+                )
+
+                if response.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "message": f"Failed to fetch PDF for estimate {estimate_id}",
+                            "zoho_response": response.json() if "application/json" in response.headers.get("Content-Type","") else None
+                        }
+                    )
+
+                return response.content  # raw PDF bytes
+    
+
+
+    def get_comments(self, access_token: str, estimate_id: str):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        response = requests.get(
+            f"{self.base_url}/estimates/{estimate_id}/comments",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to fetch comments for estimate {estimate_id}",
+                    "zoho_response": response.json()
+                }
+            )
+
+        comments = response.json().get("comments", [])
+        result = []
+
+        for c in comments:
+            meta = extract_comment_meta(c.get("description", ""))
+
+            description = c.get("description", "")
+            if "[CUSTOM_META]" not in description:
+                continue
+
+            result.append({
+                "comment_id": c.get("comment_id", ""),
+                "estimate_id": c.get("estimate_id", ""),
+                "description": strip_comment_meta(c.get("description", "")),
+                "commented_by": meta.get("customer_name", c.get("commented_by", "")),
+                "commented_by_id": meta.get("customer_id", c.get("commented_by_id", "")),
+                "comment_type": "client",
+                "date": c.get("date", ""),
+                "date_description": c.get("date_description", ""),
+                "time": c.get("time", ""),
+                "comments_html_format": c.get("comments_html_format", "")
+            })
+
+        return result
