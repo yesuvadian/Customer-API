@@ -181,6 +181,7 @@ def seed_category_master(session):
         {"name": "Bank Account Types", "description": "Dropdown values for company bank account types (e.g., savings, current, salary)."},
         {"name": "Bank Document Types", "description": "Dropdown values for required company bank documents (e.g., cancelled cheque, bank statement)."},
         {"name": "GST Slabs", "description": "GST percentage slabs applicable to goods and services in India."},
+        {"name": "Utility", "description": "Type of utility - Generation, Transmission, DISCOM."},
     ]
 
     master_ids = {}
@@ -247,6 +248,11 @@ def seed_category_details(session, master_ids):
         {"master_name": "GST Slabs", "name": "12", "description": "12% GST slab"},
         {"master_name": "GST Slabs", "name": "18", "description": "18% GST slab"},
         {"master_name": "GST Slabs", "name": "28", "description": "28% GST slab"},
+
+        # ---------------- Utility ----------------
+        {"master_name": "Utility", "name": "Generation", "description": "Power generation utility"},
+        {"master_name": "Utility", "name": "Transmission", "description": "Power transmission utility"},
+        {"master_name": "Utility", "name": "DISCOM", "description": "Distribution company utility"},
     ]
 
     for d in category_details_data:
