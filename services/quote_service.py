@@ -355,7 +355,7 @@ class QuoteService:
                 }
 
                 response = requests.get(
-                    f"{self.base_url}/estimates/{estimate_id}/pdf",
+                    f"{self.base_url}/estimates/{estimate_id}",
                     headers=headers,
                     params=params,
                     timeout=30
