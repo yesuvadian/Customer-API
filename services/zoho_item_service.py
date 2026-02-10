@@ -2,26 +2,43 @@ from fastapi import HTTPException, status, Response
 import config
 from services.zoho_client import zoho_request
 from services.redis_cache import RedisCacheService as cache
+from services.divisionservice import DivisionService
+from database import SessionLocal
 
 
 class ZohoItemService:
 
     # -----------------------------
-    # Get Items (CACHED)
+    # Get Items (CACHED + DIVISION-AWARE)
     # -----------------------------
     def get_items(
         self,
         page: int = 1,
         per_page: int = 200,
         search_text: str | None = None,
+        division: str | None = None,   # 👈 OPTIONAL FILTER
     ):
         search_key = search_text or "all"
-        cache_key = f"zoho:items:{page}:{per_page}:{search_key}"
+        division_key = division or "all"
+
+        cache_key = f"zoho:items:{page}:{per_page}:{search_key}:{division_key}"
 
         # 🔹 1. Try cache
         cached = cache.get(cache_key)
         if cached:
             return cached
+
+        # 🔹 2. Fetch valid divisions from DB
+        db = SessionLocal()
+        try:
+            division_service = DivisionService(db)
+            valid_divisions = {
+                d.division_name
+                for d in division_service.list_divisions()
+                if d.is_active
+            }
+        finally:
+            db.close()
 
         params = {
             "organization_id": config.ZOHO_ORG_ID,
@@ -48,32 +65,54 @@ class ZohoItemService:
                 }
             )
 
-        data = response.json()
-
-        # 🔹 2. Store in cache (no TTL)
-        cache.set(cache_key, data)
         items = response.json().get("items", [])
 
-        # Attach backend image URL for items with attachments
+        enriched_items = []
+
         for item in items:
+            # -----------------------------
+            # Attach backend image URL
+            # -----------------------------
             if item.get("has_attachment") and item.get("item_id"):
-                # This is your own backend route, not Zoho’s direct API
                 item["image_url"] = f"/zohoitems/{item['item_id']}/image"
 
-        # ✅ Wrap in dict so client sees { "items": [...] }
-        return {"items": items}
+            # -----------------------------
+            # Division normalization (DB-backed)
+            # -----------------------------
+            zoho_division = item.get("cf_division")
 
+            if zoho_division in valid_divisions:
+                item["division"] = zoho_division
+            else:
+                item["division"] = None  # invalid or missing division
+
+            # -----------------------------
+            # Optional division filter
+            # -----------------------------
+            if division and item["division"] != division:
+                continue
+
+            enriched_items.append(item)
+
+        result = {"items": enriched_items}
+
+        # 🔹 3. Store in cache (no TTL)
+        cache.set(cache_key, result)
+
+        return result
+
+    # -----------------------------
+    # Item Image Proxy
+    # -----------------------------
     def get_item_image(self, item_id: str):
         """Proxy Zoho item image so frontend doesn’t need Zoho auth."""
-        #zoho_url = f"{config.ZOHO_API_BASE}/{item_id}/image"
-      
+
         params = {"organization_id": config.ZOHO_ORG_ID}
 
         resp = zoho_request(
             method="GET",
             path=f"/items/{item_id}/image",
             params=params
-           # headers=headers
         )
 
         if resp.status_code != 200:
@@ -87,8 +126,6 @@ class ZohoItemService:
 
         return Response(content=resp.content, media_type="image/jpeg")
 
-        return data
-
     # -----------------------------
     # Get Taxes (CACHED)
     # -----------------------------
@@ -100,13 +137,6 @@ class ZohoItemService:
         if cached:
             return cached
 
-        params = {
-            "organization_id": config.ZOHO_ORG_ID
-        }
-        """
-        Fetch all taxes configured in Zoho Books.
-        Useful for retrieving tax_id values that must be used in quotes/invoices.
-        """
         params = {"organization_id": config.ZOHO_ORG_ID}
 
         response = zoho_request(
