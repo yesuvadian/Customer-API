@@ -3,6 +3,7 @@ from fastapi import HTTPException, status
 import config
 from services.zoho_contact_service import ZohoContactService
 from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta
+from services.redis_cache import RedisCacheService as cache
 
 class InvoiceService:
     def __init__(self):
@@ -59,42 +60,81 @@ class InvoiceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail={"message": "Failed to create invoice",
                                         "zoho_response": response.json()})
-        return response.json()["invoice"]
+        invoice = response.json()["invoice"]
+        self._invalidate_invoice_caches(contact_id, invoice["invoice_id"])
+        return invoice
+
+    
+    def _invalidate_invoice_caches(self, contact_id: str | None = None, invoice_id: str | None = None):
+        if contact_id:
+            cache.delete(f"zoho:invoices:{contact_id}")
+            cache.delete(f"zoho:dashboard:{contact_id}")
+        if invoice_id:
+            cache.delete(f"zoho:invoice:{invoice_id}")
+
 
     # -----------------------------
     # List Invoices for Customer
     # -----------------------------
     def list_invoices_for_customer(self, access_token: str, contact_id: str):
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
         contact_id = self._resolve_contact_id(contact_id)
+        cache_key = f"zoho:invoices:{contact_id}"
+
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
         response = requests.get(
             f"{self.base_url}/invoices",
             headers=headers,
             params={"organization_id": self.org_id, "customer_id": contact_id},
             timeout=15
         )
+
         if response.status_code != 200:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                detail={"message": "Failed to fetch invoices", "zoho_response": response.json()})
-        return response.json().get("invoices", [])
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": "Failed to fetch invoices", "zoho_response": response.json()}
+            )
+
+        invoices = response.json().get("invoices", [])
+        cache.set(cache_key, invoices)
+        return invoices
+
 
     # -----------------------------
     # Get Invoice Details
     # -----------------------------
     def get_invoice(self, access_token: str, invoice_id: str, contact_id: str):
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
         contact_id = self._resolve_contact_id(contact_id)
+        cache_key = f"zoho:invoice:{invoice_id}"
+
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
         response = requests.get(
             f"{self.base_url}/invoices/{invoice_id}",
             headers=headers,
             params={"organization_id": self.org_id, "customer_id": contact_id},
             timeout=15
         )
+
         if response.status_code != 200:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                detail={"message": f"Failed to fetch invoice {invoice_id}",
-                                        "zoho_response": response.json()})
-        return response.json().get("invoice", {})
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to fetch invoice {invoice_id}",
+                    "zoho_response": response.json()
+                }
+            )
+
+        invoice = response.json().get("invoice", {})
+        cache.set(cache_key, invoice)
+        return invoice
+
 
     # -----------------------------
     # ERP Review Invoice
@@ -110,10 +150,14 @@ class InvoiceService:
             params={"organization_id": self.org_id, "customer_id": contact_id},
             timeout=15
         )
+        
         if response.status_code != 200:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail={"message": "Failed to review invoice", "zoho_response": response.json()})
-        return response.json().get("invoice", {})
+        invoice = response.json()["invoice"]
+        self._invalidate_invoice_caches(contact_id, invoice["invoice_id"])
+        return invoice
+
 
     # -----------------------------
     # Customer Approval Invoice
@@ -132,7 +176,10 @@ class InvoiceService:
         if response.status_code != 200:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail={"message": "Failed to update invoice status", "zoho_response": response.json()})
-        return response.json().get("invoice", {})
+        invoice = response.json().get("invoice", {})
+        self._invalidate_invoice_caches(contact_id, invoice_id)
+        return invoice
+
     def get_invoice_pdf(self, access_token: str, invoice_id: str):
         headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
         params = {

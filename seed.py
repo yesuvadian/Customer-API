@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from datetime import datetime
+import uuid
 from database import VendorSessionLocal
 from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State,City, User, UserRole, Module ,City
 from security_utils import get_password_hash  # password hashing utils
@@ -17,6 +18,8 @@ def get_db_session():
 # ----------------- Seed Functions -----------------
 
 def seed_users(session):
+    COMMON_PASSWORD = "utility@123"
+    newly_created_user_ids = []
     users_data = [
         {"first_name": "Admin", "last_name": "User", "email": "admin@relu.com",
          "phone_number": "9999999999", "password": "Admin@123"},
@@ -30,26 +33,74 @@ def seed_users(session):
          "phone_number": "5555555555", "password": "vendor@123"},
                 # ✅ ERP SERVICE USER
         {"first_name": "ERP", "last_name": "Service", "email": "erp_bot@relu.com",
-         "phone_number": "4444444444", "password": "ErpBot@123"}
+         "phone_number": "4444444444", "password": "ErpBot@123"},
+          # ✅ SHEET USERS (NEW → customer)
+        {"first_name": "MVS", "last_name": "MANIAN", "email": "venkat@vmepl.com",
+         "phone_number": "9876543210", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "BMAZ NORTH", "email": "ceenz@bescom.co.in",
+         "phone_number": "+91-8277892599", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "BMAZ SOUTH", "email": "cebmaz@bescom.co.in",
+         "phone_number": "+91-9449045888", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "BRAZ", "email": "cebraz@bescom.co.in",
+         "phone_number": "+91-9448234567", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "CTAZ", "email": "cectaz@bescom.co.in",
+         "phone_number": "+91-9448461466", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "O&M ZONE HUBBALLI", "email": "ceomz.hubli@hescom.co.in",
+         "phone_number": "+91-9448277608", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "BELAGAVI ZONE", "email": "ceomzbgm@hescom.co.in",
+         "phone_number": "+91-9448370243", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "MANGALURU ZONE", "email": "ceemangaluru@mesco.in",
+         "phone_number": "+91-9448289424", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "SHIVAMOGGA ZONE", "email": "ceeshivamogga@mesco.in",
+         "phone_number": "+91-9480880565", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "MYSURU ZONE", "email": "ceez@cescmysore.org",
+         "phone_number": "+91-9448994722", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "HASSAN ZONE", "email": "ceehsnzone@cescmysore.org",
+         "phone_number": "+91-9448998099", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "GULBARGA ZONE", "email": "cegulbarga@gescom.in",
+         "phone_number": "+91-9448359005", "usertype": "customer"},
+
+        {"first_name": "CHIEF ENGINEER", "last_name": "BELLARY ZONE", "email": "cebellary@gescom.in",
+         "phone_number": "+91-9448359029", "usertype": "customer"},
     ]
 
     for u in users_data:
-        existing_user = session.query(User).filter_by(email=u["email"]).first()
-        if not existing_user:
-            user = User(
-                firstname=u["first_name"],
-                lastname=u["last_name"],
-                email=u["email"],
-                phone_number=u["phone_number"],
-                password_hash=get_password_hash(u["password"]),
-                isactive=1
-            )
-            session.add(user)
-        else:
-            existing_user.isactive = 1
-            existing_user.password_hash = get_password_hash(u["password"])
+        exists = session.query(User.id).filter_by(email=u["email"]).first()
+        if exists:
+            continue  # ❌ do nothing for existing users
+
+        user = User(
+            id=uuid.uuid4(),
+            firstname=u["first_name"],
+            lastname=u["last_name"],
+            email=u["email"],
+            phone_number=u["phone_number"],
+            password_hash=get_password_hash(COMMON_PASSWORD),
+            usertype=u.get("usertype", None),
+            isactive=True,
+            email_confirmed=True,
+            phone_confirmed=True
+        )
+        session.add(user)
+        session.flush()
+
+        # ⭐ Track newly inserted users ONLY
+        newly_created_user_ids.append(user.id)
+
     session.commit()
-    print("✅ Users seeded successfully.")
+    print("✅ New users seeded.")
+    return newly_created_user_ids
 
 
 def seed_roles(session):
@@ -77,6 +128,26 @@ def seed_roles(session):
     print("✅ Roles seeded successfully.")
     return role_ids
 
+def assign_viewer_role_to_new_users(session, new_user_ids, role_ids):
+    viewer_role_id = role_ids.get("Viewer")
+    if not viewer_role_id:
+        print("❌ Viewer role not found")
+        return
+
+    for user_id in new_user_ids:
+        exists = session.query(UserRole).filter_by(
+            user_id=user_id,
+            role_id=viewer_role_id
+        ).first()
+
+        if not exists:
+            session.add(UserRole(
+                user_id=user_id,
+                role_id=viewer_role_id
+            ))
+
+    session.commit()
+    print("✅ Viewer (Read-only) role assigned to new users.")
 
 def seed_plans(session):
     plans_data = [
@@ -828,10 +899,11 @@ def seed_cities(session, state_ids, filepath="city.json"):
 def run_seed():
     with get_db_session() as session:
         role_ids = seed_roles(session)
-        seed_users(session)
+        new_user_ids = seed_users(session)  # 👈 capture new users
         module_ids = seed_modules(session)
         seed_privileges(session, role_ids, module_ids)
         seed_user_roles(session, role_ids)
+        assign_viewer_role_to_new_users(session, new_user_ids, role_ids)
         seed_plans(session)
         #category_ids = seed_product_categories(session)
         #subcategory_ids = seed_product_subcategories(session, category_ids)
