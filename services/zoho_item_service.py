@@ -231,11 +231,11 @@ class ZohoItemService:
     # Get Items (CACHED)
     # -----------------------------
     def get_items(
-        self,
-        page: int = 1,
-        per_page: int = 200,
-        search_text: str | None = None,
-    ):
+    self,
+    page: int = 1,
+    per_page: int = 200,
+    search_text: str | None = None,
+):
         search_key = search_text or "all"
         cache_key = f"zoho:items:{page}:{per_page}:{search_key}"
 
@@ -249,6 +249,7 @@ class ZohoItemService:
             "per_page": per_page,
             "filter_by": "Status.Active",
         }
+
         if search_text:
             params["search_text"] = search_text
 
@@ -264,14 +265,22 @@ class ZohoItemService:
             )
 
         data = response.json()
-        cache.set(cache_key, data)
         items = data.get("items", [])
 
+        # ✅ FIXED LOGIC
         for item in items:
-            if item.get("has_attachment") and item.get("item_id"):
-                item["image_url"] = f"/zohoitems/{item['item_id']}/image"
+            item_id = item.get("item_id") or item.get("id")
 
-        return {"items": items}
+            if item.get("has_attachment") is True and item_id:
+                item["image_url"] = f"/zohoitems/{item_id}/image"
+
+        result = {"items": items}
+
+        # ✅ CACHE AFTER MODIFICATION
+        cache.set(cache_key, result)
+
+        return result
+
 
     # -----------------------------
     # Create Item + Bust Cache
