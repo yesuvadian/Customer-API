@@ -46,19 +46,27 @@ scp $ArchiveName ${Server}:${RemoteBasePath}/
 
 Write-Host "Extracting, updating .env and restarting service..."
 
-ssh $Server "
-cd $RemoteBasePath && \
-tar -xzf $ArchiveName -C api && \
-rm $ArchiveName && \
-sed -i 's|^DB_HOST=.*|DB_HOST=localhost|' $RemoteApiPath/.env && \
-sed -i 's|^DB_USER=.*|DB_USER=relu_user|' $RemoteApiPath/.env && \
-sed -i 's|^DB_PASSWORD=.*|DB_PASSWORD=StrongPassword123!|' $RemoteApiPath/.env && \
-sed -i 's|^DB_PORT=.*|DB_PORT=5432|' $RemoteApiPath/.env && \
-sed -i 's|^DB_NAME=.*|DB_NAME=Relu_Vendor2|' $RemoteApiPath/.env && \
-sed -i 's|^APP_NAME=.*|APP_NAME=Relu-Vendor-API|' $RemoteApiPath/.env && \
-sed -i 's|^BASE_URL=.*|BASE_URL=$BASE_URL|' $RemoteApiPath/.env && \
-systemctl restart customer-api
-"
+Write-Host "Extracting, updating .env and restarting service..."
+
+$remoteCommand = @"
+cd $RemoteBasePath &&
+tar -xzf $ArchiveName -C api &&
+rm $ArchiveName &&
+sed -i 's|^DB_HOST=.*|DB_HOST=localhost|' $RemoteApiPath/.env &&
+sed -i 's|^DB_USER=.*|DB_USER=relu_user|' $RemoteApiPath/.env &&
+sed -i 's|^DB_PASSWORD=.*|DB_PASSWORD=StrongPassword123!|' $RemoteApiPath/.env &&
+sed -i 's|^DB_PORT=.*|DB_PORT=5432|' $RemoteApiPath/.env &&
+sed -i 's|^DB_NAME=.*|DB_NAME=Relu_Vendor2|' $RemoteApiPath/.env &&
+sed -i 's|^APP_NAME=.*|APP_NAME=Relu-Vendor-API|' $RemoteApiPath/.env &&
+sed -i 's|^BASE_URL=.*|BASE_URL=$BASE_URL|' $RemoteApiPath/.env &&
+sudo /usr/bin/systemctl restart customer-api
+"@
+
+# Convert Windows CRLF to LF before sending
+$remoteCommand = $remoteCommand -replace "`r",""
+
+ssh $Server $remoteCommand
+
 
 Remove-Item $ArchiveName
 
