@@ -22,6 +22,23 @@ if ($Environment -eq "main") {
     }
 }
 
+# -------------------------------
+# 🔥 Branch Checkout (LOCAL)
+# -------------------------------
+Write-Host "Checking out branch: $Environment"
+
+git checkout $Environment
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Failed to checkout branch."
+    exit 1
+}
+
+git pull origin $Environment
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Failed to pull latest changes."
+    exit 1
+}
+
 # Set BASE_URL
 if ($Environment -eq "main") {
     $BASE_URL = "https://procurement.cogniwatt.com"
@@ -46,8 +63,6 @@ scp $ArchiveName ${Server}:${RemoteBasePath}/
 
 Write-Host "Extracting, updating .env and restarting service..."
 
-Write-Host "Extracting, updating .env and restarting service..."
-
 $remoteCommand = @"
 cd $RemoteBasePath &&
 tar -xzf $ArchiveName -C api &&
@@ -62,11 +77,10 @@ sed -i 's|^BASE_URL=.*|BASE_URL=$BASE_URL|' $RemoteApiPath/.env &&
 sudo /usr/bin/systemctl restart customer-api
 "@
 
-# Convert Windows CRLF to LF before sending
+# Remove Windows CRLF before sending
 $remoteCommand = $remoteCommand -replace "`r",""
 
 ssh $Server $remoteCommand
-
 
 Remove-Item $ArchiveName
 
