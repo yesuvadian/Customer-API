@@ -6,7 +6,6 @@ param(
 $Server = "erp@192.168.0.109"
 $RemoteBasePath = "/apps/customer"
 $RemoteApiPath = "/apps/customer/api"
-$EnvFile = "/apps/customer/api/.env"
 $ArchiveName = "api_deploy.tar.gz"
 
 Write-Host "====================================="
@@ -23,7 +22,7 @@ if ($Environment -eq "main") {
     }
 }
 
-# Set environment-specific BASE_URL
+# Set BASE_URL
 if ($Environment -eq "main") {
     $BASE_URL = "https://procurement.cogniwatt.com"
 }
@@ -47,22 +46,19 @@ scp $ArchiveName ${Server}:${RemoteBasePath}/
 
 Write-Host "Extracting, updating .env and restarting service..."
 
-ssh $Server @"
-cd $RemoteBasePath &&
-tar -xzf $ArchiveName -C api &&
-rm $ArchiveName &&
-
-# Update only selected .env values
-sed -i 's|^DB_HOST=.*|DB_HOST=localhost|' $EnvFile
-sed -i 's|^DB_USER=.*|DB_USER=relu_user|' $EnvFile
-sed -i 's|^DB_PASSWORD=.*|DB_PASSWORD=StrongPassword123!|' $EnvFile
-sed -i 's|^DB_PORT=.*|DB_PORT=5432|' $EnvFile
-sed -i 's|^DB_NAME=.*|DB_NAME=Relu_Vendor2|' $EnvFile
-sed -i 's|^APP_NAME=.*|APP_NAME=Relu-Vendor-API|' $EnvFile
-sed -i 's|^BASE_URL=.*|BASE_URL=$BASE_URL|' $EnvFile &&
-
-sudo systemctl restart customer-api
-"@
+ssh $Server "
+cd $RemoteBasePath && \
+tar -xzf $ArchiveName -C api && \
+rm $ArchiveName && \
+sed -i 's|^DB_HOST=.*|DB_HOST=localhost|' $RemoteApiPath/.env && \
+sed -i 's|^DB_USER=.*|DB_USER=relu_user|' $RemoteApiPath/.env && \
+sed -i 's|^DB_PASSWORD=.*|DB_PASSWORD=StrongPassword123!|' $RemoteApiPath/.env && \
+sed -i 's|^DB_PORT=.*|DB_PORT=5432|' $RemoteApiPath/.env && \
+sed -i 's|^DB_NAME=.*|DB_NAME=Relu_Vendor2|' $RemoteApiPath/.env && \
+sed -i 's|^APP_NAME=.*|APP_NAME=Relu-Vendor-API|' $RemoteApiPath/.env && \
+sed -i 's|^BASE_URL=.*|BASE_URL=$BASE_URL|' $RemoteApiPath/.env && \
+systemctl restart customer-api
+"
 
 Remove-Item $ArchiveName
 
