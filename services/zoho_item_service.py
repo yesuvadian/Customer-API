@@ -230,56 +230,57 @@ class ZohoItemService:
     # -----------------------------
     # Get Items (CACHED)
     # -----------------------------
-    def get_items(
-    self,
-    page: int = 1,
-    per_page: int = 200,
-    search_text: str | None = None,
-):
+    def get_items(self, search_text: str | None = None):
         search_key = search_text or "all"
-        cache_key = f"zoho:items:{page}:{per_page}:{search_key}"
+        cache_key = f"zoho:items:all:{search_key}"
 
         cached = cache.get(cache_key)
         if cached:
             return cached
 
-        params = {
-            "organization_id": config.ZOHO_ORG_ID,
-            "page": page,
-            "per_page": per_page,
-            "filter_by": "Status.Active",
-        }
+        all_items = []
+        page = 1
 
-        if search_text:
-            params["search_text"] = search_text
+        while True:
+            params = {
+                "organization_id": config.ZOHO_ORG_ID,
+                "page": page,
+                "per_page": 200,
+                "filter_by": "Status.Active",
+            }
 
-        response = zoho_request(method="GET", path="/items", params=params)
+            if search_text:
+                params["search_text"] = search_text
 
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to fetch items from Zoho Inventory",
-                    "zoho_response": response.json(),
-                },
-            )
+            response = zoho_request("GET", "/items", params=params)
 
-        data = response.json()
-        items = data.get("items", [])
+            if response.status_code != 200:
+                raise HTTPException(status_code=400, detail=response.json())
 
-        # ✅ FIXED LOGIC
-        for item in items:
-            item_id = item.get("item_id") or item.get("id")
+            data = response.json()
+            items = data.get("items", [])
+            all_items.extend(items)
 
-            if item.get("has_attachment") is True and item_id:
-                item["image_url"] = f"/zohoitems/{item_id}/image"
+            page_context = data.get("page_context", {})
 
-        result = {"items": items}
+            if not page_context.get("has_more_page"):
+                break
 
-        # ✅ CACHE AFTER MODIFICATION
+            page += 1
+        
+
+        # Sort alphabetically by name (case-insensitive)
+        # ✅ Safe alphabetical sort
+        all_items = sorted(
+        all_items,
+        key=lambda x: x.get("name", "").strip().lower()
+        )
+
+        result = {"items": all_items}
         cache.set(cache_key, result)
 
         return result
+
 
 
     # -----------------------------
