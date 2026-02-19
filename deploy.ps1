@@ -8,10 +8,13 @@ param(
 # ---------------------------------
 if ($Environment -eq "main") {
     $Server = "erp@192.168.0.105"
+    $ServiceName = "api-procurement"
 }
 else {
     $Server = "erp@192.168.0.109"
+    $ServiceName = "customer-api"
 }
+
 
 $RemoteBasePath = "/apps/customer"
 $RemoteApiPath = "/apps/customer/api"
@@ -85,7 +88,7 @@ sed -i 's|^DB_PORT=.*|DB_PORT=5432|' $RemoteApiPath/.env &&
 sed -i 's|^DB_NAME=.*|DB_NAME=Relu_Vendor2|' $RemoteApiPath/.env &&
 sed -i 's|^APP_NAME=.*|APP_NAME=Relu-Vendor-API|' $RemoteApiPath/.env &&
 sed -i 's|^BASE_URL=.*|BASE_URL=$BASE_URL|' $RemoteApiPath/.env &&
-sudo /usr/bin/systemctl restart customer-api
+sudo /usr/bin/systemctl restart $ServiceName
 "@
 
 # Remove Windows CRLF before sending
