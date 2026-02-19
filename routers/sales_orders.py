@@ -4,6 +4,7 @@ import schemas
 from services.sales_order_service import SalesOrderService
 from services.zoho_auth_service import get_zoho_access_token
 import zohoschemas
+from fastapi import UploadFile, File, Form
 
 router = APIRouter(
     prefix="/zohoorders",
@@ -36,6 +37,171 @@ def request_sales_order(payload: zohoschemas.RequestSalesOrder, current_user=Dep
         status=order["status"]
     )
 
+# =====================================================
+# UPLOAD GRN (Sales Order)
+# =====================================================
+@router.post("/{salesorder_id}/grn", status_code=status.HTTP_201_CREATED)
+def upload_grn(
+    salesorder_id: str,
+    cf_grn_number: str = Form(...),
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    try:
+        result = sales_order_service.upload_grn_attachment(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            cf_grn_number=cf_grn_number,
+            file=file,
+            uploaded_by=current_user.email
+        )
+    except HTTPException as e:
+        raise e  # preserve real status code
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error uploading GRN: {str(e)}"
+        )
+
+
+    return {
+        "message": "GRN uploaded successfully",
+        "salesorder_id": salesorder_id,
+        "cf_grn_number": cf_grn_number,
+        "file_name": file.filename
+    }
+
+# =====================================================
+# UPLOAD PO (Sales Order)
+# =====================================================
+@router.post("/{salesorder_id}/po", status_code=status.HTTP_201_CREATED)
+def upload_po(
+    salesorder_id: str,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    result = sales_order_service.upload_po_attachment(
+        access_token=access_token,
+        salesorder_id=salesorder_id,
+        file=file,
+        uploaded_by=current_user.email
+    )
+
+    return {
+        "message": "PO uploaded successfully",
+        "salesorder_id": salesorder_id,
+        "file_name": file.filename
+    }
+
+@router.put("/{salesorder_id}/po", status_code=status.HTTP_200_OK)
+def update_po(
+    salesorder_id: str,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    try:
+        sales_order_service.upload_po_attachment(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            file=file,
+            uploaded_by=current_user.email
+        )
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error updating PO: {str(e)}"
+        )
+
+    return {
+        "message": "PO updated successfully",
+        "salesorder_id": salesorder_id,
+        "file_name": file.filename
+    }
+
+@router.put("/{salesorder_id}/grn", status_code=status.HTTP_200_OK)
+def update_grn(
+    salesorder_id: str,
+    cf_grn_number: str = Form(...),
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    try:
+        sales_order_service.upload_grn_attachment(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            cf_grn_number=cf_grn_number,
+            file=file,
+            uploaded_by=current_user.email
+        )
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error updating GRN: {str(e)}"
+        )
+
+    return {
+        "message": "GRN updated successfully",
+        "salesorder_id": salesorder_id,
+        "cf_grn_number": cf_grn_number,
+        "file_name": file.filename
+    }
+
+@router.get("/{salesorder_id}/po/pdf")
+def get_po_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    pdf_bytes = sales_order_service.get_attachment_pdf_by_prefix(
+        access_token,
+        salesorder_id,
+        prefix="po_"
+    )
+
+    return Response(content=pdf_bytes, media_type="application/pdf")
+
+
+@router.get("/{salesorder_id}/grn/pdf")
+def get_grn_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    pdf_bytes = sales_order_service.get_attachment_pdf_by_prefix(
+        access_token,
+        salesorder_id,
+        prefix="grn_"
+    )
+
+    return Response(content=pdf_bytes, media_type="application/pdf")
+
+# =====================================================
+# GET GRN DATA (Number + File)
+# =====================================================
+@router.get("/{salesorder_id}/grn", status_code=status.HTTP_200_OK)
+def get_grn_data(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    try:
+        grn_data = sales_order_service.get_grn_data(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            contact_id=current_user.email
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching GRN: {str(e)}")
+
+    return grn_data
 
 @router.get("/my", status_code=status.HTTP_200_OK)
 def list_my_orders(current_user=Depends(get_current_user)):
@@ -120,6 +286,149 @@ def get_order(salesorder_id: str, current_user=Depends(get_current_user)):
 
     return order
 
+@router.get("/{salesorder_id}/attachments", status_code=status.HTTP_200_OK)
+def list_attachments(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    try:
+        order = sales_order_service.get_order(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            contact_id=current_user.email
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    documents = order.get("documents", [])
+
+    attachments = [
+        {
+            "attachment_id": doc.get("document_id"),
+            "file_name": doc.get("file_name"),
+            "file_type": doc.get("file_type"),
+            "file_size": doc.get("file_size"),
+            "uploaded_on": doc.get("uploaded_on"),
+        }
+        for doc in documents
+    ]
+
+    return {"attachments": attachments}
+
+@router.get("/{salesorder_id}/attachments/{attachment_id}")
+def download_attachment(
+    salesorder_id: str,
+    attachment_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    file_bytes = sales_order_service.download_attachment(
+        access_token,
+        salesorder_id,
+        attachment_id
+    )
+
+    return Response(content=file_bytes, media_type="application/octet-stream")
+
+@router.delete("/{salesorder_id}/po", status_code=status.HTTP_200_OK)
+def delete_po(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    try:
+        sales_order_service.delete_attachment_by_prefix(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            prefix="po_"
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting PO: {str(e)}"
+        )
+
+    return {"message": "PO deleted successfully"}
+
+@router.delete("/{salesorder_id}/grn", status_code=status.HTTP_200_OK)
+def delete_grn(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    try:
+        sales_order_service.delete_attachment_by_prefix(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            prefix="grn_"
+        )
+
+        # Optional: also clear GRN number
+        sales_order_service.update_grn_number_field(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            grn_number=""
+        )
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting GRN: {str(e)}"
+        )
+
+    return {"message": "GRN deleted successfully"}
+
+# =====================================================
+# DELETE ONLY GRN NUMBER
+# =====================================================
+@router.delete("/{salesorder_id}/grn/number", status_code=status.HTTP_200_OK)
+def delete_grn_number(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    try:
+        sales_order_service.update_grn_number_field(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            grn_number=""
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting GRN number: {str(e)}")
+
+    return {"message": "GRN number deleted successfully"}
+
+# =====================================================
+# DELETE ONLY GRN FILE
+# =====================================================
+@router.delete("/{salesorder_id}/grn/file", status_code=status.HTTP_200_OK)
+def delete_grn_file(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    try:
+        sales_order_service.delete_attachment_by_prefix(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            prefix="grn_"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting GRN file: {str(e)}")
+
+    return {"message": "GRN file deleted successfully"}
+
+@router.delete("/{salesorder_id}/attachments/{attachment_id}")
+def delete_attachment(
+    salesorder_id: str,
+    attachment_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    result = sales_order_service.delete_attachment(
+        access_token,
+        salesorder_id,
+        attachment_id
+    )
+
+    return result
 
 # ------------------------------------
 # COMMENTS: ADD
