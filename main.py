@@ -73,7 +73,13 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For testing; restrict to origins in production
+     allow_origins=[
+        "http://localhost:53232",
+        "http://127.0.0.1:53232",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "*"
+    ],  # For testing; restrict to origins in production
     allow_credentials=True,
     allow_methods=["*"],  # Crucial: allows GET, POST, PUT, DELETE
     allow_headers=["*"],  # Allows Authorization header for JWT

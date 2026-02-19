@@ -3,6 +3,15 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User
 import auth_utils
+from fastapi import Request
+
+async def auth_and_privilege_middleware(request: Request, call_next):
+
+    # ✅ Allow CORS preflight requests (VERY IMPORTANT)
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    # ---- existing auth logic below ----
 
 # --------------------------------------------------
 # Public endpoints (NO authentication required)
