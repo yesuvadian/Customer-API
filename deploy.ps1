@@ -3,10 +3,21 @@ param(
     [string]$Environment = "dev"
 )
 
-$Server = "erp@192.168.0.109"
+# ---------------------------------
+# Select server based on branch
+# ---------------------------------
+if ($Environment -eq "main") {
+    $Server = "erp@192.168.0.105"
+}
+else {
+    $Server = "erp@192.168.0.109"
+}
+
 $RemoteBasePath = "/apps/customer"
 $RemoteApiPath = "/apps/customer/api"
 $ArchiveName = "api_deploy.tar.gz"
+
+
 
 Write-Host "====================================="
 Write-Host "Starting FastAPI Deployment"
@@ -80,7 +91,8 @@ sudo /usr/bin/systemctl restart customer-api
 # Remove Windows CRLF before sending
 $remoteCommand = $remoteCommand -replace "`r",""
 
-ssh $Server $remoteCommand
+ssh -tt $Server $remoteCommand
+
 
 Remove-Item $ArchiveName
 
