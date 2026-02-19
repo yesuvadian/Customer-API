@@ -6,8 +6,9 @@ service = ZohoItemService()
 
 
 @router.get("/")
-def get_items(page: int = 1, per_page: int = 200, search_text: str | None = None):
-    return service.get_items(page=page, per_page=per_page, search_text=search_text)
+def get_items(search_text: str | None = None):
+    return service.get_items(search_text=search_text)
+
 
 
 @router.post("/", status_code=201)
