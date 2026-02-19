@@ -91,7 +91,8 @@ sudo /usr/bin/systemctl restart customer-api
 # Remove Windows CRLF before sending
 $remoteCommand = $remoteCommand -replace "`r",""
 
-ssh $Server $remoteCommand
+ssh -tt $Server $remoteCommand
+
 
 Remove-Item $ArchiveName
 
