@@ -267,6 +267,14 @@ class ZohoItemService:
                 break
 
             page += 1
+        
+
+        # Sort alphabetically by name (case-insensitive)
+        # ✅ Safe alphabetical sort
+        all_items = sorted(
+        all_items,
+        key=lambda x: x.get("name", "").strip().lower()
+        )
 
         result = {"items": all_items}
         cache.set(cache_key, result)
