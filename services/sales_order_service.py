@@ -1,6 +1,7 @@
 import requests
 from fastapi import HTTPException, status
 import config
+import base64
 from services.zoho_contact_service import ZohoContactService
 from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta
 from services.redis_cache import RedisCacheService as cache
@@ -851,3 +852,52 @@ class SalesOrderService:
 
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
         return {"message": "Comment deleted successfully"}
+
+    def get_vendor_shipment_details(
+        self,
+        access_token: str,
+        salesorder_id: str,
+        contact_id: str
+    ):
+        contact_id = self._resolve_contact_id(contact_id)
+
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        # 1️⃣ Fetch Sales Order
+        so_resp = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}",
+            headers=headers,
+            params={"organization_id": self.org_id, "customer_id": contact_id},
+            timeout=15
+        )
+
+        if so_resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="Sales order not found")
+
+        salesorder = so_resp.json().get("salesorder", {})
+
+        packages = salesorder.get("packages", [])
+
+        if not packages:
+            return {"message": "No shipment created for this Sales Order"}
+
+        # Get latest shipped package
+        shipped_package = None
+        for pkg in reversed(packages):
+            if pkg.get("status", "").lower() == "shipped":
+                shipped_package = pkg
+                break
+
+        if not shipped_package:
+            return {"message": "Sales Order not shipped yet"}
+
+        return {
+            "salesorder_id": salesorder_id,
+            "package_id": shipped_package.get("package_id"),
+            "shipment_date": shipped_package.get("shipment_date"),
+            "carrier": shipped_package.get("carrier"),
+            "tracking_number": shipped_package.get("tracking_number"),
+            "status": shipped_package.get("status")
+        }
