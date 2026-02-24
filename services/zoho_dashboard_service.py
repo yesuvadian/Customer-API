@@ -52,6 +52,34 @@ class ZohoDashboardService:
             "retainerinvoices"
         )
 
+    # ----------- SALES ORDER STATUS RESOLVER ------------
+
+    def _resolve_sales_order_status(self, o):
+        order_status = (o.get("order_status") or "").lower()
+        status = (o.get("status") or "").lower()
+        shipped_status = (o.get("shipped_status") or "").lower()
+
+        quantity_packed = float(o.get("quantity_packed", 0) or 0)
+        quantity_shipped = float(o.get("quantity_shipped", 0) or 0)
+        quantity_invoiced = float(o.get("quantity_invoiced", 0) or 0)
+
+        if order_status == "closed":
+            return "closed"
+
+        if quantity_invoiced > 0:
+            return "invoiced"
+
+        if quantity_shipped > 0 or shipped_status == "shipped":
+            return "shipped"
+
+        if quantity_packed > 0:
+            return "packed"
+
+        if status == "draft":
+            return "draft"
+
+        return "open"
+
     # ----------- MAIN SUMMARY BUILDER ------------
 
     def build_dashboard_summary(self, contact_id: str) -> dict:
@@ -74,24 +102,29 @@ class ZohoDashboardService:
             q for q in quotes
             if q.get("status", "").lower() == "sent"
         ])
+
         total_estimates_amount = sum(
             float(q.get("total", 0) or 0) for q in quotes
         )
+
         total_estimates_count = len(quotes)
 
         # -------- INVOICES SUMMARY --------
         total_invoices_amount = sum(
             float(i.get("total", 0) or 0) for i in invoices
         )
+
         total_invoices_count = len(invoices)
 
         outstanding = [
             i for i in invoices
             if float(i.get("balance", 0) or 0) > 0
         ]
+
         outstanding_balance = sum(
             float(i.get("balance", 0) or 0) for i in outstanding
         )
+
         outstanding_count = len(outstanding)
 
         unused_credits = sum(
@@ -108,13 +141,26 @@ class ZohoDashboardService:
         available_retainers = sum(
             float(r.get("total", 0) or 0) for r in active_retainers
         )
+
         available_retainer_count = len(active_retainers)
 
         # -------- SALES ORDERS SUMMARY --------
-        open_so = len([o for o in sales_orders if o.get("status", "").lower() == "open"])
-        packed_so = len([o for o in sales_orders if o.get("status", "").lower() == "packed"])
-        shipped_so = len([o for o in sales_orders if o.get("status", "").lower() == "shipped"])
-        draft_so = len([o for o in sales_orders if o.get("status", "").lower() == "draft"])
+        open_so = 0
+        packed_so = 0
+        shipped_so = 0
+        draft_so = 0
+
+        for o in sales_orders:
+            resolved = self._resolve_sales_order_status(o)
+
+            if resolved == "open":
+                open_so += 1
+            elif resolved == "packed":
+                packed_so += 1
+            elif resolved == "shipped":
+                shipped_so += 1
+            elif resolved == "draft":
+                draft_so += 1
 
         # -------- LAST PAYMENT --------
         payments_sorted = sorted(
@@ -122,6 +168,7 @@ class ZohoDashboardService:
             key=lambda x: x.get("date", ""),
             reverse=True
         )
+
         last_payment = payments_sorted[0] if payments_sorted else None
 
         summary = {
@@ -152,7 +199,7 @@ class ZohoDashboardService:
             "last_payment_date": last_payment.get("date") if last_payment else None,
         }
 
-        # 🔹 3. Store in cache (NO TTL — webhook controlled)
+        # 🔹 3. Store in cache
         cache.set(cache_key, summary)
 
         return summary
