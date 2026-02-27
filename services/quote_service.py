@@ -298,7 +298,7 @@ class QuoteService:
     # -------------------------------------------------
     def add_comment(self, access_token: str, estimate_id: str, description: str, email: str | None = None):
         headers = {"Authorization": f"Zoho-oauthtoken {access_token}", "Content-Type": "application/json"}
-        payload = {"description": build_comment_meta(email) + description}
+        payload = {"description": build_comment_meta(email=email) + description}
 
         response = requests.post(
             f"{self.base_url}/estimates/{estimate_id}/comments",
