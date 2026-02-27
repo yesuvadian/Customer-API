@@ -69,15 +69,6 @@ class SalesOrderService:
                 }
             )
 
-        if uploaded_by:
-            self.add_comment(
-                access_token=access_token,
-                salesorder_id=salesorder_id,
-                description=f"PO Uploaded\nFile: {file.filename}",
-                email=uploaded_by,
-                show_to_client=True
-            )
-
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
         return data
@@ -143,37 +134,6 @@ class SalesOrderService:
                     "zoho_response": data
                 }
             )
-
-        # 2️⃣ Add comment
-        if uploaded_by:
-            meta_block = build_comment_meta(email=uploaded_by)
-
-            comment_payload = {
-                "description": (
-                    meta_block +
-                    f"GRN Uploaded\n"
-                    f"GRN Number: {cf_grn_number}\n"
-                    f"File: {file.filename}"
-                ),
-                "show_comment_to_clients": True
-            }
-
-            comment_response = requests.post(
-                f"{self.base_url}/salesorders/{salesorder_id}/comments",
-                headers={
-                    "Authorization": f"Zoho-oauthtoken {access_token}",
-                    "Content-Type": "application/json"
-                },
-                params={"organization_id": self.org_id},
-                json=comment_payload,
-                timeout=15
-            )
-
-            if comment_response.status_code not in (200, 201):
-                raise HTTPException(
-                    status_code=400,
-                    detail="GRN uploaded but comment failed"
-                )
 
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
@@ -865,39 +825,63 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # 1️⃣ Fetch Sales Order
+        # 1️⃣ First verify sales order exists
         so_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
-            params={"organization_id": self.org_id, "customer_id": contact_id},
+            params={"organization_id": self.org_id},
             timeout=15
         )
 
         if so_resp.status_code != 200:
-            raise HTTPException(status_code=400, detail="Sales order not found")
+            raise HTTPException(status_code=400, detail=so_resp.text)
 
         salesorder = so_resp.json().get("salesorder", {})
 
-        packages = salesorder.get("packages", [])
+        # Security check
+        if salesorder.get("customer_id") != contact_id:
+            raise HTTPException(status_code=403, detail="Unauthorized access")
 
-        if not packages:
+        # 2️⃣ Fetch packages separately
+        pkg_resp = requests.get(
+            f"{self.base_url}/packages",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if pkg_resp.status_code != 200:
+            raise HTTPException(status_code=400, detail=pkg_resp.text)
+
+        all_packages = pkg_resp.json().get("packages", [])
+
+        # 3️⃣ Filter packages for this salesorder
+        related_packages = [
+            p for p in all_packages
+            if p.get("salesorder_id") == salesorder_id
+        ]
+
+        if not related_packages:
             return {"message": "No shipment created for this Sales Order"}
 
-        # Get latest shipped package
-        shipped_package = None
-        for pkg in reversed(packages):
-            if pkg.get("status", "").lower() == "shipped":
-                shipped_package = pkg
-                break
+        # 4️⃣ Filter shipped
+        valid_status = ["shipped", "delivered", "partially_shipped"]
 
-        if not shipped_package:
+        shipped_packages = [
+            p for p in related_packages
+            if p.get("status", "").lower() in valid_status
+        ]
+
+        if not shipped_packages:
             return {"message": "Sales Order not shipped yet"}
+
+        latest_package = shipped_packages[-1]
 
         return {
             "salesorder_id": salesorder_id,
-            "package_id": shipped_package.get("package_id"),
-            "shipment_date": shipped_package.get("shipment_date"),
-            "carrier": shipped_package.get("carrier"),
-            "tracking_number": shipped_package.get("tracking_number"),
-            "status": shipped_package.get("status")
+            "package_id": latest_package.get("package_id"),
+            "shipment_date": latest_package.get("shipment_date"),
+            "carrier": latest_package.get("carrier"),
+            "tracking_number": latest_package.get("tracking_number"),
+            "status": latest_package.get("status")
         }
