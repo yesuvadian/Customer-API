@@ -55,6 +55,7 @@ from routers import (
     zoho_register,
 )
 from routers.kyc_router import router as kyc_router
+from routers.customer_care import router as customer_care_router
 
 # Optional: create all database tables (uncomment if needed)
 # Base.metadata.create_all(bind=engine)
@@ -163,6 +164,7 @@ app.include_router(statements.router)
 
 app.include_router(zoho_register.router)
 app.include_router(webhook_zoho.router)
+app.include_router(customer_care_router)
 
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")

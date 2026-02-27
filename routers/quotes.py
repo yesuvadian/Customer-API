@@ -228,7 +228,7 @@ def decline_quote(estimate_id: str, current_user=Depends(get_current_user)):
     return zohoschemas.QuoteResponse(
         message="Quote declined successfully",
         estimate_id=result["estimate_id"],
-        estimate_number=result["estimate_number"],
+        estimate_number=result["estimate_id"],
         status=result["status"]
     )
 
@@ -254,7 +254,7 @@ def accept_quote(estimate_id: str, current_user=Depends(get_current_user)):
     return zohoschemas.QuoteResponse(
         message="Quote accepted successfully",
         estimate_id=result["estimate_id"],
-        estimate_number=result["estimate_number"],
+        estimate_number=result["estimate_id"],
         status=result["status"]
     )
 @router.get("/{estimate_id}/pdf", status_code=status.HTTP_200_OK)

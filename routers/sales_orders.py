@@ -536,3 +536,16 @@ def get_order_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
         )
 
     return Response(content=pdf_bytes, media_type="application/pdf")
+
+@router.get("/{salesorder_id}/vendor-shipment")
+def get_vendor_shipment_details(
+    salesorder_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    return sales_order_service.get_vendor_shipment_details(
+        access_token=access_token,
+        salesorder_id=salesorder_id,
+        contact_id=current_user.email
+    )
