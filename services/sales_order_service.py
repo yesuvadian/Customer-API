@@ -135,10 +135,40 @@ class SalesOrderService:
                 }
             )
 
+        # 2️⃣ Add comment
+        if uploaded_by:
+            meta_block = build_comment_meta(email=uploaded_by)
+
+            comment_payload = {
+                "description": (
+                    meta_block +
+                    f"GRN Uploaded\n"
+                    f"GRN Number: {cf_grn_number}\n"
+                    f"File: {file.filename}"
+                ),
+                "show_comment_to_clients": True
+            }
+
+            comment_response = requests.post(
+                f"{self.base_url}/salesorders/{salesorder_id}/comments",
+                headers={
+                    "Authorization": f"Zoho-oauthtoken {access_token}",
+                    "Content-Type": "application/json"
+                },
+                params={"organization_id": self.org_id},
+                json=comment_payload,
+                timeout=15
+            )
+
+            if comment_response.status_code not in (200, 201):
+                raise HTTPException(
+                    status_code=400,
+                    detail="GRN uploaded but comment failed"
+                )
+
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
         return data
-
 
     def update_grn_number_field(
     self,
