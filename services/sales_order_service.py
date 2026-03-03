@@ -14,6 +14,15 @@ class SalesOrderService:
         self.org_id = config.ZOHO_ORG_ID
         self.contact_service = ZohoContactService()
 
+    def _build_filename(self, salesorder: dict, file: UploadFile, doc_type: str) -> str:
+        salesorder_number = salesorder.get("salesorder_number", "")
+
+        clean_number = salesorder_number.lower().replace("-", "_")
+
+        extension = file.filename.split(".")[-1] if "." in file.filename else "pdf"
+
+        return f"{clean_number}_{doc_type}.{extension}"
+
     def upload_po_attachment(
         self,
         access_token: str,
@@ -33,7 +42,11 @@ class SalesOrderService:
 
         file.file.seek(0)
 
-        new_filename = f"po_{file.filename}"
+        new_filename = self._build_filename(
+            salesorder=salesorder,
+            file=file,
+            doc_type="po"
+        )
 
         files = {
             "attachment": (
@@ -102,9 +115,15 @@ class SalesOrderService:
 
         file.file.seek(0)
 
+        new_filename = self._build_filename(
+            salesorder=salesorder,
+            file=file,
+            doc_type="grn"
+        )
+
         files = {
             "attachment": (
-                f"grn_{file.filename}",
+                new_filename,
                 file.file,
                 file.content_type or "application/pdf"
             )
@@ -169,6 +188,103 @@ class SalesOrderService:
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
         return data
+    
+    def update_grn_attachment(
+        self,
+        access_token: str,
+        salesorder_id: str,
+        cf_grn_number: str,
+        file: UploadFile,
+        uploaded_by: str | None = None
+    ):
+
+        # 1️⃣ Fetch order
+        salesorder = self._get_order_status(access_token, salesorder_id)
+
+        # 2️⃣ Validate GRN rules
+        self._validate_status_for_grn(salesorder)
+
+        # 3️⃣ Delete old GRN file (if exists)
+        try:
+            self.delete_attachment_by_prefix(
+                access_token=access_token,
+                salesorder_id=salesorder_id,
+                prefix="_grn"
+            )
+        except HTTPException:
+            # Ignore if no file exists
+            pass
+
+        # 4️⃣ Update GRN number
+        self.update_grn_number_field(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            grn_number=cf_grn_number
+        )
+
+        # 5️⃣ Upload new file
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        file.file.seek(0)
+
+        new_filename = self._build_filename(
+            salesorder=salesorder,
+            file=file,
+            doc_type="grn"
+        )
+
+        files = {
+            "attachment": (
+                new_filename,
+                file.file,
+                file.content_type or "application/pdf"
+            )
+        }
+
+        response = requests.post(
+            f"{self.base_url}/salesorders/{salesorder_id}/attachment",
+            headers=headers,
+            files=files,
+            params={"organization_id": self.org_id},
+            timeout=30
+        )
+
+        if response.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to upload updated GRN file"
+            )
+
+        # 6️⃣ Add update comment
+        if uploaded_by:
+            meta_block = build_comment_meta(email=uploaded_by)
+
+            comment_payload = {
+                "description": (
+                    meta_block +
+                    f"GRN Updated\n"
+                    f"New GRN Number: {cf_grn_number}\n"
+                    f"File: {file.filename}"
+                ),
+                "show_comment_to_clients": True
+            }
+
+            requests.post(
+                f"{self.base_url}/salesorders/{salesorder_id}/comments",
+                headers={
+                    "Authorization": f"Zoho-oauthtoken {access_token}",
+                    "Content-Type": "application/json"
+                },
+                params={"organization_id": self.org_id},
+                json=comment_payload,
+                timeout=15
+            )
+
+        self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
+
+        return {"message": "GRN updated successfully"}
 
     def update_grn_number_field(
     self,
@@ -246,7 +362,7 @@ class SalesOrderService:
         documents = salesorder.get("documents", [])
 
         for doc in reversed(documents):
-            if doc.get("file_name", "").startswith("grn_"):
+            if "_grn" in doc.get("file_name", ""):
                 grn_attachment = {
                     "attachment_id": doc.get("document_id"),
                     "file_name": doc.get("file_name"),
@@ -306,8 +422,10 @@ class SalesOrderService:
             )
 
         # Check if at least one package is shipped
+        valid_status = ["shipped", "delivered", "partially_shipped", "fulfilled"]
+
         is_shipped = any(
-            p.get("status", "").lower() == "shipped"
+            p.get("status", "").lower() in valid_status
             for p in packages
         )
 
@@ -327,7 +445,7 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # Step 1: Fetch sales order to get document list
+        # Step 1: Fetch sales order
         response = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
@@ -343,26 +461,37 @@ class SalesOrderService:
 
         document_id = None
 
-        for doc in reversed(documents):  # latest first
+        for doc in reversed(documents):
             filename = doc.get("file_name", "")
-            if filename.startswith(prefix):
+            if prefix in filename:
                 document_id = doc.get("document_id")
                 break
 
         if not document_id:
-            return b""
+            raise HTTPException(
+                status_code=404,
+                detail=f"No attachment found with prefix '{prefix}'"
+            )
 
-        # Step 2: Download attachment
+        # Step 2: Download file
         file_response = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}/attachment/{document_id}",
+            f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
             headers=headers,
             params={"organization_id": self.org_id},
             timeout=30
         )
 
         if file_response.status_code != 200:
-            return b""
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to download attachment from Zoho"
+            )
 
+        if not file_response.content:
+            raise HTTPException(
+                status_code=404,
+                detail="Attachment file is empty"
+            )
 
         return file_response.content
     
@@ -420,7 +549,7 @@ class SalesOrderService:
         # 2️⃣ Find latest file with prefix
         for doc in reversed(documents):  # latest first
             filename = doc.get("file_name", "")
-            if filename.startswith(prefix):
+            if prefix in filename:
                 document_id = doc.get("document_id")
                 break
 
@@ -577,7 +706,6 @@ class SalesOrderService:
         params={
             "organization_id": self.org_id,
             "customer_id": contact_id,
-            "include": "custom_fields",
             "include": "custom_fields"
         },
         timeout=15
