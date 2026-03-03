@@ -137,7 +137,7 @@ def update_grn(
     access_token = get_zoho_access_token()
 
     try:
-        sales_order_service.upload_grn_attachment(
+        sales_order_service.update_grn_attachment(
             access_token=access_token,
             salesorder_id=salesorder_id,
             cf_grn_number=cf_grn_number,
@@ -167,7 +167,7 @@ def get_po_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
     pdf_bytes = sales_order_service.get_attachment_pdf_by_prefix(
         access_token,
         salesorder_id,
-        prefix="po_"
+        prefix="_po"
     )
 
     return Response(content=pdf_bytes, media_type="application/pdf")
@@ -180,7 +180,7 @@ def get_grn_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
     pdf_bytes = sales_order_service.get_attachment_pdf_by_prefix(
         access_token,
         salesorder_id,
-        prefix="grn_"
+        prefix="_grn"
     )
 
     return Response(content=pdf_bytes, media_type="application/pdf")
@@ -338,7 +338,7 @@ def delete_po(salesorder_id: str, current_user=Depends(get_current_user)):
         sales_order_service.delete_attachment_by_prefix(
             access_token=access_token,
             salesorder_id=salesorder_id,
-            prefix="po_"
+            prefix="_po"
         )
     except HTTPException as e:
         raise e
@@ -358,7 +358,7 @@ def delete_grn(salesorder_id: str, current_user=Depends(get_current_user)):
         sales_order_service.delete_attachment_by_prefix(
             access_token=access_token,
             salesorder_id=salesorder_id,
-            prefix="grn_"
+            prefix="_grn"
         )
 
         # Optional: also clear GRN number
@@ -407,7 +407,7 @@ def delete_grn_file(salesorder_id: str, current_user=Depends(get_current_user)):
         sales_order_service.delete_attachment_by_prefix(
             access_token=access_token,
             salesorder_id=salesorder_id,
-            prefix="grn_"
+            prefix="_grn"
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting GRN file: {str(e)}")
