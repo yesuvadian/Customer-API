@@ -915,3 +915,82 @@ class SalesOrderService:
             "tracking_number": latest_package.get("tracking_number"),
             "status": latest_package.get("status")
         }
+    
+    def get_supplier_details(
+        self,
+        access_token: str,
+        salesorder_id: str
+    ):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+ 
+        # 1️⃣ Fetch Sales Order
+        response = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+ 
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to fetch sales order"
+            )
+ 
+        salesorder = response.json().get("salesorder", {})
+ 
+        # 2️⃣ Extract supplier custom field
+        supplier_id = None
+ 
+        for field in salesorder.get("custom_fields", []):
+            if field.get("api_name") == "cf_supplier":
+                supplier_id = field.get("value")
+                break
+ 
+        if not supplier_id:
+            raise HTTPException(
+                status_code=404,
+                detail="Supplier not set on this Sales Order"
+            )
+ 
+        # 3️⃣ Fetch supplier contact details
+        supplier_resp = requests.get(
+            f"{self.base_url}/contacts/{supplier_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+ 
+        if supplier_resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to fetch supplier details"
+            )
+ 
+        supplier = supplier_resp.json().get("contact", {})
+
+        # 🔍 DEBUG: print full supplier to inspect field names
+        print("🔍 RAW SUPPLIER DATA:", supplier_resp.json())
+
+        billing = supplier.get("billing_address", {})
+        address_parts = [
+            billing.get("address"),
+            billing.get("street2"),
+            billing.get("city"),
+            billing.get("state"),
+            billing.get("zip"),
+            billing.get("country"),
+        ]
+        address = ", ".join(part for part in address_parts if part)
+
+        return {
+            "supplier_id": supplier.get("contact_id"),
+            "supplier_name": supplier.get("contact_name"),
+            "email": supplier.get("email"),
+            "phone": supplier.get("phone"),
+            "mobile": supplier.get("mobile"),
+            "company_name": supplier.get("company_name"),
+            "address": address
+        }
