@@ -916,6 +916,60 @@ class SalesOrderService:
             "status": latest_package.get("status")
         }
     
+    # -------------------------------------------------
+    # Get E-Way Bill PDF from Sales Order
+    # -------------------------------------------------
+    def get_eway_bill_pdf(self, access_token: str, salesorder_id: str) -> bytes:
+        """
+        Returns the E-Way Bill PDF bytes uploaded against this sales order.
+        Searches for any attachment whose filename contains 'eway_bill'.
+        """
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+        # Fetch sales order to get document list
+        response = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=404, detail="Sales order not found")
+
+        salesorder = response.json().get("salesorder", {})
+        documents = salesorder.get("documents", [])
+
+        # Find latest file whose name contains 'eway_bill'
+        document_id = None
+        for doc in reversed(documents):
+            filename = doc.get("file_name", "").lower()
+            if "eway_bill" in filename:
+                document_id = doc.get("document_id")
+                break
+
+        if not document_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="E-Way Bill not found for this Sales Order"
+            )
+
+        # Download the file
+        file_response = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=30
+        )
+
+        if file_response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Failed to download E-Way Bill"
+            )
+
+        return file_response.content
+
     def get_supplier_details(
         self,
         access_token: str,

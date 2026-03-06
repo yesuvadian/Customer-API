@@ -550,6 +550,30 @@ def get_vendor_shipment_details(
         contact_id=current_user.email
     )
 
+@router.get("/{salesorder_id}/eway-bill", status_code=status.HTTP_200_OK)
+def get_eway_bill(salesorder_id: str, current_user=Depends(get_current_user)):
+    """
+    Get E-Way Bill PDF for a Sales Order.
+    The file is uploaded from the Purchase Order page by the supplier.
+    """
+    access_token = get_zoho_access_token()
+
+    try:
+        pdf_bytes = sales_order_service.get_eway_bill_pdf(
+            access_token=access_token,
+            salesorder_id=salesorder_id
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching E-Way Bill: {str(e)}"
+        )
+
+    return Response(content=pdf_bytes, media_type="application/pdf")
+
+
 @router.get("/{salesorder_id}/supplier", status_code=status.HTTP_200_OK)
 def get_supplier(
     salesorder_id: str,
