@@ -349,3 +349,56 @@ class InvoiceService:
                     "zoho_response": resp.json()
                 }
             )
+        
+
+    def get_invoice_attachments(self, access_token: str, invoice_id: str):
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+        resp = requests.get(
+            f"{self.base_url}/invoices/{invoice_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to fetch invoice"
+            )
+
+        invoice = resp.json().get("invoice", {})
+        documents = invoice.get("documents", [])
+
+        return [
+            {
+                "attachment_id": doc.get("document_id"),
+                "file_name": doc.get("file_name"),
+                "file_type": doc.get("file_type"),
+                "file_size": doc.get("file_size")
+            }
+            for doc in documents
+        ]
+    
+    def download_invoice_attachment(
+        self,
+        access_token: str,
+        invoice_id: str,
+        attachment_id: str
+    ):
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+        resp = requests.get(
+            f"{self.base_url}/invoices/{invoice_id}/documents/{attachment_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=30
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to download attachment"
+            )
+
+        return resp.content

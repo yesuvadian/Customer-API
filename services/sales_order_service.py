@@ -1043,3 +1043,416 @@ class SalesOrderService:
             "tracking_number": latest_package.get("tracking_number"),
             "status": latest_package.get("status")
         }
+    
+    def get_supplier_details(
+        self,
+        access_token: str,
+        salesorder_id: str
+    ):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        # 1️⃣ Fetch Sales Order
+        response = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to fetch sales order"
+            )
+
+        salesorder = response.json().get("salesorder", {})
+
+        # 2️⃣ Extract supplier custom field
+        supplier_id = None
+
+        for field in salesorder.get("custom_fields", []):
+            if field.get("api_name") == "cf_supplier":
+                supplier_id = field.get("value")
+                break
+
+        if not supplier_id:
+            raise HTTPException(
+                status_code=404,
+                detail="Supplier not set on this Sales Order"
+            )
+
+        # 3️⃣ Fetch supplier contact details
+        supplier_resp = requests.get(
+            f"{self.base_url}/contacts/{supplier_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if supplier_resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to fetch supplier details"
+            )
+
+        supplier = supplier_resp.json().get("contact", {})
+
+        return {
+            "supplier_id": supplier.get("contact_id"),
+            "supplier_name": supplier.get("contact_name"),
+            "email": supplier.get("email"),
+            "phone": supplier.get("phone"),
+            "mobile": supplier.get("mobile"),
+            "company_name": supplier.get("company_name")
+        }
+    
+    def create_po_with_grn(
+        self,
+        access_token: str,
+        salesorder_id: str,
+        created_by: str | None = None
+    ):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        # -------------------------------------------------
+        # 1️⃣ Get Sales Order
+        # -------------------------------------------------
+        so_resp = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if so_resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="Unable to fetch sales order")
+
+        salesorder = so_resp.json().get("salesorder", {})
+
+        # -------------------------------------------------
+        # CHECK IF PURCHASE ORDER ALREADY EXISTS
+        # -------------------------------------------------
+        salesorder_number = salesorder.get("salesorder_number")
+
+        existing_po = self._find_po_by_salesorder(
+            access_token,
+            salesorder_number
+        )
+
+        # If PO exists → update attachment instead of creating new one
+        if existing_po:
+            po_id = existing_po.get("purchaseorder_id")
+
+            return self._update_po_attachment(
+                access_token=access_token,
+                po_id=po_id,
+                salesorder=salesorder,
+                salesorder_id=salesorder_id
+            )
+
+        # -------------------------------------------------
+        # 2️⃣ Extract Vendor
+        # -------------------------------------------------
+        vendor_id = None
+
+        for field in salesorder.get("custom_fields", []):
+            if field.get("api_name") == "cf_supplier":
+                vendor_id = field.get("value")
+                break
+
+        if not vendor_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Supplier not set on this Sales Order"
+            )
+
+        # -------------------------------------------------
+        # 3️⃣ Prepare PO items
+        # -------------------------------------------------
+        po_items = []
+
+        for item in salesorder.get("line_items", []):
+            po_items.append({
+                "item_id": item.get("item_id"),
+                "rate": item.get("rate"),
+                "quantity": item.get("quantity"),
+                "name": item.get("name"),
+                "tax_exemption_code": "NON"
+            })
+
+        if not po_items:
+            raise HTTPException(
+                status_code=400,
+                detail="Sales Order has no line items"
+            )
+
+        # -------------------------------------------------
+        # 4️⃣ Create Purchase Order
+        # -------------------------------------------------
+        po_resp = requests.post(
+            f"{self.base_url}/purchaseorders",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            json={
+                "vendor_id": vendor_id,
+                "reference_number": salesorder.get("salesorder_number"),
+                "line_items": po_items,
+                "notes": f"Created from Sales Order {salesorder.get('salesorder_number')}"
+            },
+            timeout=15
+        )
+
+        if po_resp.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to create purchase order"
+            )
+
+        purchaseorder = po_resp.json().get("purchaseorder", {})
+        po_id = purchaseorder.get("purchaseorder_id")
+
+        # -------------------------------------------------
+        # 5️⃣ Mark PO issued
+        # -------------------------------------------------
+        issue_resp = requests.post(
+            f"{self.base_url}/purchaseorders/{po_id}/status/issued",
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if issue_resp.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to mark PO issued"
+            )
+
+        # -------------------------------------------------
+        # 6️⃣ Find PO attachment in Sales Order
+        # -------------------------------------------------
+        documents = salesorder.get("documents", [])
+
+        po_document = None
+
+        for doc in reversed(documents):
+            if "_po" in doc.get("file_name", ""):
+                po_document = doc
+                break
+
+        if not po_document:
+            raise HTTPException(
+                status_code=404,
+                detail="No PO attachment found on Sales Order"
+            )
+
+        document_id = po_document.get("document_id")
+        file_name = po_document.get("file_name")
+
+        # -------------------------------------------------
+        # 7️⃣ Download attachment
+        # -------------------------------------------------
+        file_resp = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            params={"organization_id": self.org_id},
+            timeout=30
+        )
+
+        if file_resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to download PO attachment"
+            )
+
+        file_bytes = file_resp.content
+
+        # -------------------------------------------------
+        # 8️⃣ Attach to Purchase Order
+        # -------------------------------------------------
+        files = {
+            "attachment": (
+                file_name,
+                file_bytes,
+                "application/pdf"
+            )
+        }
+
+        upload_resp = requests.post(
+            f"{self.base_url}/purchaseorders/{po_id}/attachment",
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            params={"organization_id": self.org_id},
+            files=files,
+            timeout=30
+        )
+
+        if upload_resp.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to attach PO document to Purchase Order"
+            )
+
+        return {
+            "message": "Purchase Order created with user uploaded PO attachment",
+            "purchaseorder_id": po_id
+        }
+    
+    def _find_po_by_salesorder(self, access_token: str, salesorder_number: str):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        resp = requests.get(
+            f"{self.base_url}/purchaseorders",
+            headers=headers,
+            params={
+                "organization_id": self.org_id,
+                "reference_number": salesorder_number
+            },
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to search purchase orders"
+            )
+
+        purchaseorders = resp.json().get("purchaseorders", [])
+
+        if purchaseorders:
+            return purchaseorders[0]
+
+        return None
+    
+    def _update_po_attachment(
+        self,
+        access_token: str,
+        po_id: str,
+        salesorder: dict,
+        salesorder_id: str
+    ):
+
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        # -------------------------------------------------
+        # 1️⃣ Delete existing attachments from PO
+        # -------------------------------------------------
+        self._delete_po_attachments(access_token, po_id)
+
+        # -------------------------------------------------
+        # 2️⃣ Find PO file in Sales Order
+        # -------------------------------------------------
+        documents = salesorder.get("documents", [])
+
+        po_document = None
+
+        for doc in reversed(documents):
+            if "_po" in doc.get("file_name", ""):
+                po_document = doc
+                break
+
+        if not po_document:
+            raise HTTPException(
+                status_code=404,
+                detail="PO attachment not found on Sales Order"
+            )
+
+        document_id = po_document.get("document_id")
+        file_name = po_document.get("file_name")
+
+        # -------------------------------------------------
+        # 3️⃣ Download file from Sales Order
+        # -------------------------------------------------
+        file_resp = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=30
+        )
+
+        if file_resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to download updated PO attachment"
+            )
+
+        # -------------------------------------------------
+        # 4️⃣ Upload to Purchase Order
+        # -------------------------------------------------
+        files = {
+            "attachment": (
+                file_name,
+                file_resp.content,
+                "application/pdf"
+            )
+        }
+
+        upload_resp = requests.post(
+            f"{self.base_url}/purchaseorders/{po_id}/attachment",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            files=files,
+            timeout=30
+        )
+
+        if upload_resp.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to update PO attachment"
+            )
+
+        return {
+            "message": "PO updated and new attachment sent to supplier",
+            "purchaseorder_id": po_id
+        }
+    
+    def _delete_po_attachments(self, access_token: str, po_id: str):
+
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        # 1️⃣ Get Purchase Order details
+        resp = requests.get(
+            f"{self.base_url}/purchaseorders/{po_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to fetch Purchase Order attachments"
+            )
+
+        purchaseorder = resp.json().get("purchaseorder", {})
+        documents = purchaseorder.get("documents", [])
+
+        # 2️⃣ Delete only PO attachment
+        for doc in documents:
+
+            file_name = doc.get("file_name", "")
+
+            # Only delete files with "_po"
+            if "_po" not in file_name:
+                continue
+
+            document_id = doc.get("document_id")
+
+            del_resp = requests.delete(
+                f"{self.base_url}/purchaseorders/{po_id}/documents/{document_id}",
+                headers=headers,
+                params={"organization_id": self.org_id},
+                timeout=15
+            )
+
+            print("Deleting PO attachment:", file_name)
+            print("Delete response:", del_resp.text)

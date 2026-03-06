@@ -549,3 +549,46 @@ def get_vendor_shipment_details(
         salesorder_id=salesorder_id,
         contact_id=current_user.email
     )
+
+@router.get("/{salesorder_id}/supplier", status_code=status.HTTP_200_OK)
+def get_supplier(
+    salesorder_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    try:
+        supplier = sales_order_service.get_supplier_details(
+            access_token=access_token,
+            salesorder_id=salesorder_id
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching supplier: {str(e)}"
+        )
+
+    return supplier
+
+@router.post("/{salesorder_id}/create-po", status_code=status.HTTP_201_CREATED)
+def create_po_from_salesorder(
+    salesorder_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    try:
+        result = sales_order_service.create_po_with_grn(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            created_by=current_user.email
+        )
+        return result
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating PO: {str(e)}"
+        )
