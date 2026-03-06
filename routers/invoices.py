@@ -3,6 +3,9 @@ from auth_utils import get_current_user
 import schemas
 from services.invoice_services import InvoiceService
 from services.zoho_auth_service import get_zoho_access_token
+import io
+from fastapi.responses import StreamingResponse
+
 import zohoschemas
 
 router = APIRouter(
@@ -134,6 +137,40 @@ def get_invoice_pdf(invoice_id: str, current_user=Depends(get_current_user)):
 
     # Return raw PDF stream with correct headers
     return Response(content=pdf_bytes, media_type="application/pdf")
+
+@router.get("/{invoice_id}/attachments")
+def list_invoice_attachments(
+    invoice_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    attachments = invoice_service.get_invoice_attachments(
+        access_token,
+        invoice_id
+    )
+
+    return {"attachments": attachments}
+
+@router.get("/{invoice_id}/attachments/{attachment_id}")
+def download_invoice_attachment(
+    invoice_id: str,
+    attachment_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    file_bytes = invoice_service.download_invoice_attachment(
+        access_token,
+        invoice_id,
+        attachment_id
+    )
+
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type="application/pdf"
+    )
+
 # =====================================================
 # GET ALL COMMENTS FOR INVOICE
 # =====================================================
