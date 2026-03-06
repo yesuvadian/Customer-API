@@ -65,7 +65,6 @@ def upload_grn(
             detail=f"Unexpected error uploading GRN: {str(e)}"
         )
 
-
     return {
         "message": "GRN uploaded successfully",
         "salesorder_id": salesorder_id,
@@ -112,7 +111,6 @@ def update_po(
             file=file,
             uploaded_by=current_user.email
         )
-
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -137,14 +135,14 @@ def update_grn(
     access_token = get_zoho_access_token()
 
     try:
-        sales_order_service.upload_grn_attachment(
+        # Uses update_grn_attachment (File 1) — correct for PUT semantics
+        sales_order_service.update_grn_attachment(
             access_token=access_token,
             salesorder_id=salesorder_id,
             cf_grn_number=cf_grn_number,
             file=file,
             uploaded_by=current_user.email
         )
-
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -167,7 +165,7 @@ def get_po_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
     pdf_bytes = sales_order_service.get_attachment_pdf_by_prefix(
         access_token,
         salesorder_id,
-        prefix="po_"
+        prefix="_po"
     )
 
     return Response(content=pdf_bytes, media_type="application/pdf")
@@ -180,7 +178,7 @@ def get_grn_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
     pdf_bytes = sales_order_service.get_attachment_pdf_by_prefix(
         access_token,
         salesorder_id,
-        prefix="grn_"
+        prefix="_grn"
     )
 
     return Response(content=pdf_bytes, media_type="application/pdf")
@@ -338,7 +336,7 @@ def delete_po(salesorder_id: str, current_user=Depends(get_current_user)):
         sales_order_service.delete_attachment_by_prefix(
             access_token=access_token,
             salesorder_id=salesorder_id,
-            prefix="po_"
+            prefix="_po"
         )
     except HTTPException as e:
         raise e
@@ -358,7 +356,7 @@ def delete_grn(salesorder_id: str, current_user=Depends(get_current_user)):
         sales_order_service.delete_attachment_by_prefix(
             access_token=access_token,
             salesorder_id=salesorder_id,
-            prefix="grn_"
+            prefix="_grn"
         )
 
         # Optional: also clear GRN number
@@ -367,7 +365,6 @@ def delete_grn(salesorder_id: str, current_user=Depends(get_current_user)):
             salesorder_id=salesorder_id,
             grn_number=""
         )
-
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -407,7 +404,7 @@ def delete_grn_file(salesorder_id: str, current_user=Depends(get_current_user)):
         sales_order_service.delete_attachment_by_prefix(
             access_token=access_token,
             salesorder_id=salesorder_id,
-            prefix="grn_"
+            prefix="_grn"
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting GRN file: {str(e)}")
@@ -439,10 +436,10 @@ def add_comment(salesorder_id: str, payload: dict, current_user=Depends(get_curr
     Add a comment to a Sales Order
     """
     access_token = get_zoho_access_token()
-    
+
     description = payload.get("description", "")
     show_to_client = payload.get("show_comment_to_clients", True)
-    
+
     try:
         result = sales_order_service.add_comment(
             access_token=access_token,
@@ -455,6 +452,7 @@ def add_comment(salesorder_id: str, payload: dict, current_user=Depends(get_curr
         raise HTTPException(status_code=500, detail=f"Error adding comment: {str(e)}")
 
     return result
+
 # ------------------------------------
 # COMMENTS: UPDATE
 # ------------------------------------
@@ -477,6 +475,7 @@ def update_comment(salesorder_id: str, comment_id: str, payload: dict, current_u
         raise HTTPException(status_code=500, detail=f"Error updating comment: {str(e)}")
 
     return result
+
 # ------------------------------------
 # COMMENTS: DELETE
 # ------------------------------------
@@ -497,6 +496,7 @@ def delete_comment(salesorder_id: str, comment_id: str, current_user=Depends(get
         raise HTTPException(status_code=500, detail=f"Error deleting comment: {str(e)}")
 
     return result
+
 # ------------------------------------
 # COMMENTS: LIST
 # ------------------------------------
@@ -516,6 +516,7 @@ def get_comments(salesorder_id: str, current_user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Error fetching comments: {str(e)}")
 
     return {"comments": comments}
+
 @router.get("/{salesorder_id}/pdf", status_code=status.HTTP_200_OK)
 def get_order_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
     """
@@ -549,3 +550,68 @@ def get_vendor_shipment_details(
         salesorder_id=salesorder_id,
         contact_id=current_user.email
     )
+
+@router.get("/{salesorder_id}/eway-bill", status_code=status.HTTP_200_OK)
+def get_eway_bill(salesorder_id: str, current_user=Depends(get_current_user)):
+    """
+    Get E-Way Bill PDF for a Sales Order.
+    The file is uploaded from the Purchase Order page by the supplier.
+    """
+    access_token = get_zoho_access_token()
+
+    try:
+        pdf_bytes = sales_order_service.get_eway_bill_pdf(
+            access_token=access_token,
+            salesorder_id=salesorder_id
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching E-Way Bill: {str(e)}"
+        )
+
+    return Response(content=pdf_bytes, media_type="application/pdf")
+
+@router.get("/{salesorder_id}/supplier", status_code=status.HTTP_200_OK)
+def get_supplier(
+    salesorder_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    try:
+        supplier = sales_order_service.get_supplier_details(
+            access_token=access_token,
+            salesorder_id=salesorder_id
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching supplier: {str(e)}"
+        )
+
+    return supplier
+
+@router.post("/{salesorder_id}/create-po", status_code=status.HTTP_201_CREATED)
+def create_po_from_salesorder(
+    salesorder_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    try:
+        result = sales_order_service.create_po_with_grn(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            created_by=current_user.email
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating PO: {str(e)}"
+        )

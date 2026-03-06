@@ -22,7 +22,7 @@ TOKEN_RESPONSE=$(curl -s -X POST "$API_BASE/token" \
 ERP_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token')
 
 if [[ -z "$ERP_TOKEN" || "$ERP_TOKEN" == "null" ]]; then
-  log "âŒ Failed to obtain access token"
+  log "❌ Failed to obtain access token"
   log "$TOKEN_RESPONSE"
   exit 1
 fi
@@ -35,13 +35,13 @@ HEADERS=(
 # -------------------------------------------------
 # Step 2: Call Zoho Sync API
 # -------------------------------------------------
-log "ðŸš€ Calling ZOHO CUSTOMER SYNC"
+log "🚀 Calling ZOHO CUSTOMER SYNC"
 
 HTTP_CODE=$(curl -s -o /tmp/resp.$$ -w "%{http_code}" \
   -X POST "$API_BASE/zoho-register/sync-customers" \
   "${HEADERS[@]}")
 
-log "ðŸ“¡ ZOHO CUSTOMER SYNC HTTP $HTTP_CODE"
+log "📡 ZOHO CUSTOMER SYNC HTTP $HTTP_CODE"
 cat /tmp/resp.$$ >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
 rm -f /tmp/resp.$$
