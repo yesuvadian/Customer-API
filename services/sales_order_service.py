@@ -16,11 +16,8 @@ class SalesOrderService:
 
     def _build_filename(self, salesorder: dict, file: UploadFile, doc_type: str) -> str:
         salesorder_number = salesorder.get("salesorder_number", "")
-
         clean_number = salesorder_number.lower().replace("-", "_")
-
         extension = file.filename.split(".")[-1] if "." in file.filename else "pdf"
-
         return f"{clean_number}_{doc_type}.{extension}"
 
     def upload_po_attachment(
@@ -30,11 +27,9 @@ class SalesOrderService:
         file: UploadFile,
         uploaded_by: str | None = None
     ):
-
         # ✅ Fetch current order status properly
         salesorder = self._get_order_status(access_token, salesorder_id)
         self._validate_status_for_po(salesorder.get("status"))
-
 
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
@@ -55,7 +50,6 @@ class SalesOrderService:
                 file.content_type or "application/pdf"
             )
         }
-
 
         response = requests.post(
             f"{self.base_url}/salesorders/{salesorder_id}/attachment",
@@ -97,7 +91,6 @@ class SalesOrderService:
         file: UploadFile,
         uploaded_by: str | None = None
     ):
-
         salesorder = self._get_order_status(access_token, salesorder_id)
         self._validate_status_for_grn(salesorder)
 
@@ -107,7 +100,6 @@ class SalesOrderService:
             salesorder_id=salesorder_id,
             grn_number=cf_grn_number
         )
-
 
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
@@ -188,7 +180,10 @@ class SalesOrderService:
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
         return data
-    
+
+    # -------------------------------------------------
+    # Update GRN Attachment (PUT)
+    # -------------------------------------------------
     def update_grn_attachment(
         self,
         access_token: str,
@@ -197,7 +192,6 @@ class SalesOrderService:
         file: UploadFile,
         uploaded_by: str | None = None
     ):
-
         # 1️⃣ Fetch order
         salesorder = self._get_order_status(access_token, salesorder_id)
 
@@ -287,10 +281,11 @@ class SalesOrderService:
         return {"message": "GRN updated successfully"}
 
     def update_grn_number_field(
-    self,
-    access_token: str,
-    salesorder_id: str,
-    grn_number: str ):
+        self,
+        access_token: str,
+        salesorder_id: str,
+        grn_number: str
+    ):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
             "Content-Type": "application/json"
@@ -325,7 +320,7 @@ class SalesOrderService:
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
         return response.json()
-    
+
     def get_grn_data(self, access_token: str, salesorder_id: str, contact_id: str):
         contact_id = self._resolve_contact_id(contact_id)
 
@@ -375,7 +370,7 @@ class SalesOrderService:
             "grn_number": grn_number,
             "attachment": grn_attachment
         }
-    
+
     def _get_order_status(self, access_token: str, salesorder_id: str) -> dict:
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
@@ -399,7 +394,6 @@ class SalesOrderService:
         print("🔥 status:", salesorder.get("status"))
         return salesorder
 
-    
     def _validate_status_for_po(self, order_status: str | None):
         if not order_status:
             return
@@ -410,9 +404,7 @@ class SalesOrderService:
                 detail=f"PO cannot be updated when order status is '{order_status}'"
             )
 
-
     def _validate_status_for_grn(self, salesorder: dict):
-
         packages = salesorder.get("packages", [])
 
         if not packages:
@@ -434,7 +426,7 @@ class SalesOrderService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="GRN allowed only when package status is shipped"
             )
-        
+
     def get_attachment_pdf_by_prefix(
         self,
         access_token: str,
@@ -494,12 +486,12 @@ class SalesOrderService:
             )
 
         return file_response.content
-    
+
     def download_attachment(
-    self,
-    access_token: str,
-    salesorder_id: str,
-    attachment_id: str
+        self,
+        access_token: str,
+        salesorder_id: str,
+        attachment_id: str
     ):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
@@ -519,7 +511,7 @@ class SalesOrderService:
             )
 
         return response.content
-    
+
     def delete_attachment_by_prefix(
         self,
         access_token: str,
@@ -562,7 +554,7 @@ class SalesOrderService:
             salesorder_id=salesorder_id,
             attachment_id=document_id
         )
-    
+
     def delete_attachment(
         self,
         access_token: str,
@@ -701,16 +693,15 @@ class SalesOrderService:
 
         headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
         response = requests.get(
-        f"{self.base_url}/salesorders",
-        headers=headers,
-        params={
-            "organization_id": self.org_id,
-            "customer_id": contact_id,
-            "include": "custom_fields"
-        },
-        timeout=15
-    )
-
+            f"{self.base_url}/salesorders",
+            headers=headers,
+            params={
+                "organization_id": self.org_id,
+                "customer_id": contact_id,
+                "include": "custom_fields"
+            },
+            timeout=15
+        )
 
         if response.status_code != 200:
             raise HTTPException(
@@ -729,7 +720,6 @@ class SalesOrderService:
     # Get Sales Order
     # -------------------------------------------------
     def get_order(self, access_token: str, salesorder_id: str, contact_id: str):
-
         contact_id = self._resolve_contact_id(contact_id)
         headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
 
@@ -806,9 +796,9 @@ class SalesOrderService:
     # -------------------------------------------------
     def get_order_pdf(self, access_token: str, salesorder_id: str):
         headers = {
-    "Authorization": f"Zoho-oauthtoken {access_token}",
-    "Accept": "application/pdf"
-}
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Accept": "application/pdf"
+        }
         params = {"organization_id": self.org_id}
 
         response = requests.get(
@@ -1043,7 +1033,64 @@ class SalesOrderService:
             "tracking_number": latest_package.get("tracking_number"),
             "status": latest_package.get("status")
         }
-    
+
+    # -------------------------------------------------
+    # Get E-Way Bill PDF from Sales Order
+    # -------------------------------------------------
+    def get_eway_bill_pdf(self, access_token: str, salesorder_id: str) -> bytes:
+        """
+        Returns the E-Way Bill PDF bytes uploaded against this sales order.
+        Searches for any attachment whose filename contains 'eway_bill'.
+        """
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+        # Fetch sales order to get document list
+        response = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=404, detail="Sales order not found")
+
+        salesorder = response.json().get("salesorder", {})
+        documents = salesorder.get("documents", [])
+
+        # Find latest file whose name contains 'eway_bill'
+        document_id = None
+        for doc in reversed(documents):
+            filename = doc.get("file_name", "").lower()
+            if "eway_bill" in filename:
+                document_id = doc.get("document_id")
+                break
+
+        if not document_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="E-Way Bill not found for this Sales Order"
+            )
+
+        # Download the file
+        file_response = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=30
+        )
+
+        if file_response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Failed to download E-Way Bill"
+            )
+
+        return file_response.content
+
+    # -------------------------------------------------
+    # Get Supplier Details
+    # -------------------------------------------------
     def get_supplier_details(
         self,
         access_token: str,
@@ -1099,15 +1146,33 @@ class SalesOrderService:
 
         supplier = supplier_resp.json().get("contact", {})
 
+        # 🔍 DEBUG: print full supplier to inspect field names
+        print("🔍 RAW SUPPLIER DATA:", supplier_resp.json())
+
+        billing = supplier.get("billing_address", {})
+        address_parts = [
+            billing.get("address"),
+            billing.get("street2"),
+            billing.get("city"),
+            billing.get("state"),
+            billing.get("zip"),
+            billing.get("country"),
+        ]
+        address = ", ".join(part for part in address_parts if part)
+
         return {
             "supplier_id": supplier.get("contact_id"),
             "supplier_name": supplier.get("contact_name"),
             "email": supplier.get("email"),
             "phone": supplier.get("phone"),
             "mobile": supplier.get("mobile"),
-            "company_name": supplier.get("company_name")
+            "company_name": supplier.get("company_name"),
+            "address": address
         }
-    
+
+    # -------------------------------------------------
+    # Create PO with GRN
+    # -------------------------------------------------
     def create_po_with_grn(
         self,
         access_token: str,
@@ -1119,9 +1184,7 @@ class SalesOrderService:
             "Content-Type": "application/json"
         }
 
-        # -------------------------------------------------
         # 1️⃣ Get Sales Order
-        # -------------------------------------------------
         so_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
@@ -1134,9 +1197,7 @@ class SalesOrderService:
 
         salesorder = so_resp.json().get("salesorder", {})
 
-        # -------------------------------------------------
         # CHECK IF PURCHASE ORDER ALREADY EXISTS
-        # -------------------------------------------------
         salesorder_number = salesorder.get("salesorder_number")
 
         existing_po = self._find_po_by_salesorder(
@@ -1155,9 +1216,7 @@ class SalesOrderService:
                 salesorder_id=salesorder_id
             )
 
-        # -------------------------------------------------
         # 2️⃣ Extract Vendor
-        # -------------------------------------------------
         vendor_id = None
 
         for field in salesorder.get("custom_fields", []):
@@ -1171,9 +1230,7 @@ class SalesOrderService:
                 detail="Supplier not set on this Sales Order"
             )
 
-        # -------------------------------------------------
         # 3️⃣ Prepare PO items
-        # -------------------------------------------------
         po_items = []
 
         for item in salesorder.get("line_items", []):
@@ -1191,9 +1248,7 @@ class SalesOrderService:
                 detail="Sales Order has no line items"
             )
 
-        # -------------------------------------------------
         # 4️⃣ Create Purchase Order
-        # -------------------------------------------------
         po_resp = requests.post(
             f"{self.base_url}/purchaseorders",
             headers=headers,
@@ -1216,9 +1271,7 @@ class SalesOrderService:
         purchaseorder = po_resp.json().get("purchaseorder", {})
         po_id = purchaseorder.get("purchaseorder_id")
 
-        # -------------------------------------------------
         # 5️⃣ Mark PO issued
-        # -------------------------------------------------
         issue_resp = requests.post(
             f"{self.base_url}/purchaseorders/{po_id}/status/issued",
             headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
@@ -1232,9 +1285,7 @@ class SalesOrderService:
                 detail="Failed to mark PO issued"
             )
 
-        # -------------------------------------------------
         # 6️⃣ Find PO attachment in Sales Order
-        # -------------------------------------------------
         documents = salesorder.get("documents", [])
 
         po_document = None
@@ -1253,9 +1304,7 @@ class SalesOrderService:
         document_id = po_document.get("document_id")
         file_name = po_document.get("file_name")
 
-        # -------------------------------------------------
         # 7️⃣ Download attachment
-        # -------------------------------------------------
         file_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
             headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
@@ -1271,9 +1320,7 @@ class SalesOrderService:
 
         file_bytes = file_resp.content
 
-        # -------------------------------------------------
         # 8️⃣ Attach to Purchase Order
-        # -------------------------------------------------
         files = {
             "attachment": (
                 file_name,
@@ -1300,7 +1347,7 @@ class SalesOrderService:
             "message": "Purchase Order created with user uploaded PO attachment",
             "purchaseorder_id": po_id
         }
-    
+
     def _find_po_by_salesorder(self, access_token: str, salesorder_number: str):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
@@ -1328,7 +1375,7 @@ class SalesOrderService:
             return purchaseorders[0]
 
         return None
-    
+
     def _update_po_attachment(
         self,
         access_token: str,
@@ -1336,19 +1383,14 @@ class SalesOrderService:
         salesorder: dict,
         salesorder_id: str
     ):
-
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # -------------------------------------------------
         # 1️⃣ Delete existing attachments from PO
-        # -------------------------------------------------
         self._delete_po_attachments(access_token, po_id)
 
-        # -------------------------------------------------
         # 2️⃣ Find PO file in Sales Order
-        # -------------------------------------------------
         documents = salesorder.get("documents", [])
 
         po_document = None
@@ -1367,9 +1409,7 @@ class SalesOrderService:
         document_id = po_document.get("document_id")
         file_name = po_document.get("file_name")
 
-        # -------------------------------------------------
         # 3️⃣ Download file from Sales Order
-        # -------------------------------------------------
         file_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
             headers=headers,
@@ -1383,9 +1423,7 @@ class SalesOrderService:
                 detail="Failed to download updated PO attachment"
             )
 
-        # -------------------------------------------------
         # 4️⃣ Upload to Purchase Order
-        # -------------------------------------------------
         files = {
             "attachment": (
                 file_name,
@@ -1412,9 +1450,8 @@ class SalesOrderService:
             "message": "PO updated and new attachment sent to supplier",
             "purchaseorder_id": po_id
         }
-    
-    def _delete_po_attachments(self, access_token: str, po_id: str):
 
+    def _delete_po_attachments(self, access_token: str, po_id: str):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
@@ -1438,7 +1475,6 @@ class SalesOrderService:
 
         # 2️⃣ Delete only PO attachment
         for doc in documents:
-
             file_name = doc.get("file_name", "")
 
             # Only delete files with "_po"
