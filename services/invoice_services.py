@@ -85,21 +85,35 @@ class InvoiceService:
             return cached
 
         headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
         response = requests.get(
             f"{self.base_url}/invoices",
             headers=headers,
-            params={"organization_id": self.org_id, "customer_id": contact_id},
+            params={
+                "organization_id": self.org_id,
+                "customer_id": contact_id
+            },
             timeout=15
         )
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "Failed to fetch invoices", "zoho_response": response.json()}
+                detail={
+                    "message": "Failed to fetch invoices",
+                    "zoho_response": response.json()
+                }
             )
 
         invoices = response.json().get("invoices", [])
+
+        # MAP SALES ORDER NUMBER FROM ZOHO FIELD
+        for inv in invoices:
+            inv["salesorder_number"] = inv.get("reference_number")
+
+        # CACHE RESULT
         cache.set(cache_key, invoices)
+
         return invoices
 
 
