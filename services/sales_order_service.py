@@ -6,6 +6,7 @@ from services.zoho_contact_service import ZohoContactService
 from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta
 from services.redis_cache import RedisCacheService as cache
 from fastapi import UploadFile
+from datetime import datetime
 
 
 class SalesOrderService:
@@ -1094,7 +1095,7 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # 1️⃣ Fetch Sales Order
+        # Fetch Sales Order
         so_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
@@ -1103,80 +1104,37 @@ class SalesOrderService:
         )
 
         if so_resp.status_code != 200:
-            raise HTTPException(400, "Failed to fetch sales order")
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to fetch sales order"
+            )
 
         salesorder = so_resp.json().get("salesorder", {})
 
-        supplier_id = None
         supplier_details = None
 
-        # 2️⃣ Read custom fields
+        # Extract supplier custom field
         for field in salesorder.get("custom_fields", []):
-            if field.get("api_name") == "cf_supplier":
-                supplier_id = field.get("value")
-
             if field.get("api_name") == "cf_supplier_details":
                 supplier_details = field.get("value")
+                break
 
-        # ------------------------------------------------
-        # CASE 1️⃣ Supplier exists in custom field
-        # ------------------------------------------------
-        if supplier_details:
-            lines = supplier_details.split("\n")
-
-            company_name = lines[0] if len(lines) > 0 else ""
-            address = lines[1] if len(lines) > 1 else ""
-
+        if not supplier_details:
             return {
-                "company_name": company_name,
-                "address": address
+                "company_name": "No Supplier",
+                "address": ""
             }
 
-        # ------------------------------------------------
-        # CASE 2️⃣ Supplier ID exists but details missing
-        # ------------------------------------------------
-        if supplier_id:
+        lines = supplier_details.split("\n")
 
-            supplier_resp = requests.get(
-                f"{self.base_url}/contacts/{supplier_id}",
-                headers=headers,
-                params={"organization_id": self.org_id},
-                timeout=15
-            )
+        company = lines[0] if len(lines) > 0 else ""
+        address = "\n".join(lines[1:]) if len(lines) > 1 else ""
 
-            if supplier_resp.status_code != 200:
-                return {
-                    "company_name": "No supplier",
-                    "address": ""
-                }
-
-            supplier = supplier_resp.json().get("contact", {})
-            billing = supplier.get("billing_address", {})
-
-            address_parts = [
-                billing.get("address"),
-                billing.get("street2"),
-                billing.get("city"),
-                billing.get("state"),
-                billing.get("zip"),
-                billing.get("country"),
-            ]
-
-            address = ", ".join(part for part in address_parts if part)
-
-            return {
-                "company_name": supplier.get("company_name", "No supplier"),
-                "address": address
-            }
-
-        # ------------------------------------------------
-        # CASE 3️⃣ No supplier at all
-        # ------------------------------------------------
         return {
-            "company_name": "No supplier",
-            "address": ""
+            "company_name": company,
+            "address": address
         }
-    
+
     # -------------------------------------------------
     # Create PO with GRN
     # -------------------------------------------------
@@ -1597,7 +1555,7 @@ class SalesOrderService:
         # 3️⃣ Create Sales Order
         payload = {
             "customer_id": customer_id,
-            "date": estimate.get("date"),
+            "date": datetime.now().strftime("%Y-%m-%d"),
             "reference_number": estimate_number,
             "line_items": line_items,
             "notes": f"Created automatically from Quote {estimate_number}",
