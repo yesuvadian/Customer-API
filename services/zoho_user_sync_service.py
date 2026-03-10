@@ -6,7 +6,7 @@ from security_utils import get_password_hash
 from services.contact_service import ContactService
 from utils.email_service import EmailService
 from utils.email_template_loader import render_welcome_email
-
+from config import IS_DEV
 
 # -------------------------------------------------
 # Default password (ONLY for new Zoho users)
@@ -217,17 +217,17 @@ class ZohoUserSyncService:
                 if action == "created":
                     inserted += 1
 
-                    body_html = render_welcome_email(
-                        name=f"{user.firstname or ''} {user.lastname or ''}".strip(),
-                        email=user.email
-                    )
+                    if not IS_DEV:
+                        body_html = render_welcome_email(
+                            name=f"{user.firstname or ''} {user.lastname or ''}".strip(),
+                            email=user.email
+                        )
 
-                    # ✅ Correct method call (instance)
-                    self.email_service.send_email_starttls(
-                        to_email=user.email,
-                        subject="Welcome to PowerXchange.ai",
-                        body_html=body_html
-                    )
+                        self.email_service.send_email_starttls(
+                            to_email=user.email,
+                            subject="Welcome to PowerXchange.ai",
+                            body_html=body_html
+                        )
 
                 elif action == "updated":
                     updated += 1
