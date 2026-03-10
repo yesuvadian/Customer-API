@@ -1095,25 +1095,22 @@ class SalesOrderService:
         }
 
         # 1️⃣ Fetch Sales Order
-        response = requests.get(
+        so_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
             params={"organization_id": self.org_id},
             timeout=15
         )
 
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to fetch sales order"
-            )
+        if so_resp.status_code != 200:
+            raise HTTPException(400, "Failed to fetch sales order")
 
-        salesorder = response.json().get("salesorder", {})
+        salesorder = so_resp.json().get("salesorder", {})
 
         supplier_id = None
         supplier_details = None
 
-        # 2️⃣ Extract custom fields
+        # 2️⃣ Read custom fields
         for field in salesorder.get("custom_fields", []):
             if field.get("api_name") == "cf_supplier":
                 supplier_id = field.get("value")
@@ -1122,9 +1119,8 @@ class SalesOrderService:
                 supplier_details = field.get("value")
 
         # ------------------------------------------------
-        # PRIMARY SOURCE → custom field stored during SO creation
+        # CASE 1️⃣ Supplier exists in custom field
         # ------------------------------------------------
-
         if supplier_details:
             lines = supplier_details.split("\n")
 
@@ -1132,63 +1128,55 @@ class SalesOrderService:
             address = lines[1] if len(lines) > 1 else ""
 
             return {
-                "supplier_id": supplier_id,
-                "supplier_name": company_name,
                 "company_name": company_name,
-                "address": address,
-                "email": None,
-                "phone": None,
-                "mobile": None
+                "address": address
             }
 
         # ------------------------------------------------
-        # FALLBACK → fetch from Zoho contacts
+        # CASE 2️⃣ Supplier ID exists but details missing
         # ------------------------------------------------
+        if supplier_id:
 
-        if not supplier_id:
-            raise HTTPException(
-                status_code=404,
-                detail="Supplier not set on this Sales Order"
+            supplier_resp = requests.get(
+                f"{self.base_url}/contacts/{supplier_id}",
+                headers=headers,
+                params={"organization_id": self.org_id},
+                timeout=15
             )
 
-        supplier_resp = requests.get(
-            f"{self.base_url}/contacts/{supplier_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
+            if supplier_resp.status_code != 200:
+                return {
+                    "company_name": "No supplier",
+                    "address": ""
+                }
 
-        if supplier_resp.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to fetch supplier details"
-            )
+            supplier = supplier_resp.json().get("contact", {})
+            billing = supplier.get("billing_address", {})
 
-        supplier = supplier_resp.json().get("contact", {})
+            address_parts = [
+                billing.get("address"),
+                billing.get("street2"),
+                billing.get("city"),
+                billing.get("state"),
+                billing.get("zip"),
+                billing.get("country"),
+            ]
 
-        billing = supplier.get("billing_address", {})
+            address = ", ".join(part for part in address_parts if part)
 
-        address_parts = [
-            billing.get("address"),
-            billing.get("street2"),
-            billing.get("city"),
-            billing.get("state"),
-            billing.get("zip"),
-            billing.get("country"),
-        ]
+            return {
+                "company_name": supplier.get("company_name", "No supplier"),
+                "address": address
+            }
 
-        address = ", ".join(part for part in address_parts if part)
-
+        # ------------------------------------------------
+        # CASE 3️⃣ No supplier at all
+        # ------------------------------------------------
         return {
-            "supplier_id": supplier.get("contact_id"),
-            "supplier_name": supplier.get("contact_name"),
-            "company_name": supplier.get("company_name"),
-            "email": supplier.get("email"),
-            "phone": supplier.get("phone"),
-            "mobile": supplier.get("mobile"),
-            "address": address
+            "company_name": "No supplier",
+            "address": ""
         }
-
+    
     # -------------------------------------------------
     # Create PO with GRN
     # -------------------------------------------------
