@@ -5,6 +5,7 @@ import schemas
 from services.quote_service import QuoteService
 from services.zoho_auth_service import get_zoho_access_token
 import zohoschemas
+from services.sales_order_service import SalesOrderService
 
 router = APIRouter(
     prefix="/zohoquotes",
@@ -13,6 +14,7 @@ router = APIRouter(
 )
 
 quote_service = QuoteService()
+sales_order_service = SalesOrderService()
 
 # -----------------------------
 # Request Quote (Customer)
@@ -207,56 +209,88 @@ def get_quote(estimate_id: str, current_user=Depends(get_current_user)):
             raise HTTPException(status_code=500, detail=f"Error fetching quote details: {str(e)}")
 
         return quote
-@router.put("/{estimate_id}/decline", response_model=zohoschemas.QuoteResponse, status_code=status.HTTP_200_OK)
+@router.put("/{estimate_id}/decline", response_model=zohoschemas.QuoteResponse)
 def decline_quote(estimate_id: str, current_user=Depends(get_current_user)):
-    """
-    Decline Quote:
-    - Marks a Zoho Books estimate as declined
-    """
+
     access_token = get_zoho_access_token()
+
     try:
-        result = quote_service.update_quote_status(access_token, estimate_id, "declined")
+        result = quote_service.update_quote_status(
+            access_token,
+            estimate_id,
+            "declined"
+        )
+
         quote_service.add_comment(
-            access_token=access_token,  
+            access_token=access_token,
             estimate_id=estimate_id,
             description="Quote declined by customer.",
-           # show_to_client=True,
-            email=current_user.email)
+            email=current_user.email
+        )
+
+        quote = quote_service.get_quote(
+            access_token,
+            estimate_id,
+            current_user.email
+        )
+
+    except HTTPException as e:
+        raise e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error declining quote: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error declining quote: {str(e)}"
+        )
 
     return zohoschemas.QuoteResponse(
         message="Quote declined successfully",
-        estimate_id=result["estimate_id"],
-        estimate_number=result["estimate_id"],
-        status=result["status"]
+        estimate_id=quote["estimate_id"],
+        estimate_number=quote["estimate_number"],
+        status=quote["status"]
     )
 
-
-@router.put("/{estimate_id}/accept", response_model=zohoschemas.QuoteResponse, status_code=status.HTTP_200_OK)
-def accept_quote(estimate_id: str, current_user=Depends(get_current_user)):
-    """
-    Accept Quote:
-    - Marks a Zoho Books estimate as accepted
-    """
+@router.put("/{estimate_id}/accept")
+def accept_quote(
+    estimate_id: str,
+    current_user=Depends(get_current_user)
+):
     access_token = get_zoho_access_token()
+
     try:
-        result = quote_service.update_quote_status(access_token, estimate_id, "accepted")
+        result = quote_service.update_quote_status(
+            access_token,
+            estimate_id,
+            "accepted"
+        )
+
+        salesorder = sales_order_service.create_salesorder_from_quote(
+            access_token=access_token,
+            estimate_id=estimate_id
+        )
+
         quote_service.add_comment(
-            access_token=access_token,  
+            access_token=access_token,
             estimate_id=estimate_id,
             description="Quote accepted by customer.",
-           # show_to_client=True,
-            email=current_user.email)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error accepting quote: {str(e)}")
+            email=current_user.email
+        )
 
-    return zohoschemas.QuoteResponse(
-        message="Quote accepted successfully",
-        estimate_id=result["estimate_id"],
-        estimate_number=result["estimate_id"],
-        status=result["status"]
-    )
+    except HTTPException as e:
+        raise e
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Accept quote failed: {str(e)}"
+        )
+
+    return {
+        "message": "Quote accepted and Sales Order created",
+        "estimate_id": result.get("estimate_id"),
+        "salesorder_id": salesorder.get("salesorder_id"),
+        "salesorder_number": salesorder.get("salesorder_number")
+    }
+
 @router.get("/{estimate_id}/pdf", status_code=status.HTTP_200_OK)
 def get_quote_pdf(estimate_id: str, current_user=Depends(get_current_user)):
     """

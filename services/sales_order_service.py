@@ -6,6 +6,7 @@ from services.zoho_contact_service import ZohoContactService
 from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta
 from services.redis_cache import RedisCacheService as cache
 from fastapi import UploadFile
+from datetime import datetime
 
 
 class SalesOrderService:
@@ -1088,85 +1089,49 @@ class SalesOrderService:
 
         return file_response.content
 
-    # -------------------------------------------------
-    # Get Supplier Details
-    # -------------------------------------------------
-    def get_supplier_details(
-        self,
-        access_token: str,
-        salesorder_id: str
-    ):
+    def get_supplier_details(self, access_token: str, salesorder_id: str):
+
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # 1️⃣ Fetch Sales Order
-        response = requests.get(
+        # Fetch Sales Order
+        so_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
             params={"organization_id": self.org_id},
             timeout=15
         )
 
-        if response.status_code != 200:
+        if so_resp.status_code != 200:
             raise HTTPException(
                 status_code=400,
                 detail="Failed to fetch sales order"
             )
 
-        salesorder = response.json().get("salesorder", {})
+        salesorder = so_resp.json().get("salesorder", {})
 
-        # 2️⃣ Extract supplier custom field
-        supplier_id = None
+        supplier_details = None
 
+        # Extract supplier custom field
         for field in salesorder.get("custom_fields", []):
-            if field.get("api_name") == "cf_supplier":
-                supplier_id = field.get("value")
+            if field.get("api_name") == "cf_supplier_details":
+                supplier_details = field.get("value")
                 break
 
-        if not supplier_id:
-            raise HTTPException(
-                status_code=404,
-                detail="Supplier not set on this Sales Order"
-            )
+        if not supplier_details:
+            return {
+                "company_name": "No Supplier",
+                "address": ""
+            }
 
-        # 3️⃣ Fetch supplier contact details
-        supplier_resp = requests.get(
-            f"{self.base_url}/contacts/{supplier_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
+        lines = supplier_details.split("\n")
 
-        if supplier_resp.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to fetch supplier details"
-            )
-
-        supplier = supplier_resp.json().get("contact", {})
-
-        # 🔍 DEBUG: print full supplier to inspect field names
-        print("🔍 RAW SUPPLIER DATA:", supplier_resp.json())
-
-        billing = supplier.get("billing_address", {})
-        address_parts = [
-            billing.get("address"),
-            billing.get("street2"),
-            billing.get("city"),
-            billing.get("state"),
-            billing.get("zip"),
-            billing.get("country"),
-        ]
-        address = ", ".join(part for part in address_parts if part)
+        company = lines[0] if len(lines) > 0 else ""
+        address = "\n".join(lines[1:]) if len(lines) > 1 else ""
 
         return {
-            "supplier_id": supplier.get("contact_id"),
-            "supplier_name": supplier.get("contact_name"),
-            "email": supplier.get("email"),
-            "phone": supplier.get("phone"),
-            "mobile": supplier.get("mobile"),
-            "company_name": supplier.get("company_name"),
+            "company_name": company,
             "address": address
         }
 
@@ -1492,3 +1457,173 @@ class SalesOrderService:
 
             print("Deleting PO attachment:", file_name)
             print("Delete response:", del_resp.text)
+
+    def create_salesorder_from_quote(self, access_token: str, estimate_id: str):
+
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        # 1️⃣ Fetch Quote
+        quote_resp = requests.get(
+            f"{self.base_url}/estimates/{estimate_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if quote_resp.status_code != 200:
+            raise HTTPException(400, "Failed to fetch quote")
+
+        estimate = quote_resp.json().get("estimate", {})
+
+        supplier_id = None
+
+        for field in estimate.get("custom_fields", []):
+            if field.get("api_name") == "cf_supplier":
+                supplier_id = field.get("value")
+                break
+
+        if not supplier_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Supplier not set on this Quote"
+            )
+
+        supplier_resp = requests.get(
+            f"{self.base_url}/contacts/{supplier_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if supplier_resp.status_code != 200:
+            raise HTTPException(400, "Failed to fetch supplier details")
+
+        supplier = supplier_resp.json().get("contact", {})
+
+        company_name = supplier.get("company_name", "")
+
+        billing = supplier.get("billing_address", {})
+
+        address_parts = [
+            billing.get("address"),
+            billing.get("street2"),
+            billing.get("city"),
+            billing.get("state"),
+            billing.get("zip"),
+            billing.get("country"),
+        ]
+
+        billing_address = ", ".join(part for part in address_parts if part)
+
+        supplier_details = f"{company_name}\n{billing_address}"
+
+        if estimate.get("status") != "accepted":
+            raise HTTPException(
+                400,
+                "Sales order can only be created from accepted quotes"
+            )
+
+        customer_id = estimate.get("customer_id")
+        estimate_number = estimate.get("estimate_number")
+
+        if not customer_id:
+            raise HTTPException(400, "Quote has no customer")
+
+        # 2️⃣ Build Line Items
+        line_items = []
+
+        for item in estimate.get("line_items", []):
+            item_id = item.get("item_id")
+            quantity = item.get("quantity")
+            rate = item.get("rate")
+
+            if not item_id or not quantity:
+                raise HTTPException(400, "Invalid item in quote")
+
+            line_items.append({
+                "item_id": item_id,
+                "quantity": quantity,
+                "rate": rate
+            })
+
+        if not line_items:
+            raise HTTPException(400, "Quote has no items")
+
+        # 3️⃣ Create Sales Order
+        payload = {
+            "customer_id": customer_id,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "reference_number": estimate_number,
+            "line_items": line_items,
+            "notes": f"Created automatically from Quote {estimate_number}",
+            "custom_fields": [
+                {
+                    "api_name": "cf_supplier",
+                    "value": supplier_id
+                },
+                {
+                    "api_name": "cf_supplier_details",
+                    "value": supplier_details
+                }
+            ]
+        }
+
+        create_resp = requests.post(
+            f"{self.base_url}/salesorders",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            json=payload,
+            timeout=15
+        )
+
+        print("CREATE SO RESPONSE:", create_resp.status_code)
+        print("CREATE SO BODY:", create_resp.text)
+
+        if create_resp.status_code not in (200, 201):
+            raise HTTPException(400, create_resp.text)
+
+        # 4️⃣ Extract Sales Order
+        salesorder = create_resp.json().get("salesorder")
+
+        if not salesorder:
+            raise HTTPException(400, "Sales order creation failed")
+
+        salesorder_id = salesorder.get("salesorder_id")
+
+        # 5️⃣ Mark Sales Order as OPEN
+        self.mark_salesorder_open(access_token, salesorder_id)
+
+        # Update local response status
+        salesorder["status"] = "open"
+
+        return salesorder
+    
+    def mark_salesorder_open(self, access_token: str, salesorder_id: str):
+        """
+        Mark a Sales Order as OPEN in Zoho Books
+        """
+
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        resp = requests.post(
+            f"{self.base_url}/salesorders/{salesorder_id}/status/open",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        print("MARK SO OPEN STATUS:", resp.status_code)
+        print("MARK SO OPEN BODY:", resp.text)
+
+        if resp.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to mark sales order as open"
+            )
+
+        return resp.json()
