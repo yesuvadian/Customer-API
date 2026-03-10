@@ -281,6 +281,9 @@ class QuoteService:
             timeout=15
         )
 
+        print("ZOHO STATUS UPDATE:", response.status_code)
+        print("ZOHO STATUS BODY:", response.text)
+
         data = response.json()
         self._invalidate_quote_caches(estimate_id=estimate_id)
 
