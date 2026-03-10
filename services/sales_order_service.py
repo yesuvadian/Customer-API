@@ -6,6 +6,7 @@ from services.zoho_contact_service import ZohoContactService
 from utils.comment_meta_util import build_comment_meta, extract_comment_meta, strip_comment_meta
 from services.redis_cache import RedisCacheService as cache
 from fastapi import UploadFile
+from datetime import datetime
 
 
 class SalesOrderService:
@@ -1094,98 +1095,43 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # 1️⃣ Fetch Sales Order
-        response = requests.get(
+        # Fetch Sales Order
+        so_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
             params={"organization_id": self.org_id},
             timeout=15
         )
 
-        if response.status_code != 200:
+        if so_resp.status_code != 200:
             raise HTTPException(
                 status_code=400,
                 detail="Failed to fetch sales order"
             )
 
-        salesorder = response.json().get("salesorder", {})
+        salesorder = so_resp.json().get("salesorder", {})
 
-        supplier_id = None
         supplier_details = None
 
-        # 2️⃣ Extract custom fields
+        # Extract supplier custom field
         for field in salesorder.get("custom_fields", []):
-            if field.get("api_name") == "cf_supplier":
-                supplier_id = field.get("value")
-
             if field.get("api_name") == "cf_supplier_details":
                 supplier_details = field.get("value")
+                break
 
-        # ------------------------------------------------
-        # PRIMARY SOURCE → custom field stored during SO creation
-        # ------------------------------------------------
-
-        if supplier_details:
-            lines = supplier_details.split("\n")
-
-            company_name = lines[0] if len(lines) > 0 else ""
-            address = lines[1] if len(lines) > 1 else ""
-
+        if not supplier_details:
             return {
-                "supplier_id": supplier_id,
-                "supplier_name": company_name,
-                "company_name": company_name,
-                "address": address,
-                "email": None,
-                "phone": None,
-                "mobile": None
+                "company_name": "No Supplier",
+                "address": ""
             }
 
-        # ------------------------------------------------
-        # FALLBACK → fetch from Zoho contacts
-        # ------------------------------------------------
+        lines = supplier_details.split("\n")
 
-        if not supplier_id:
-            raise HTTPException(
-                status_code=404,
-                detail="Supplier not set on this Sales Order"
-            )
-
-        supplier_resp = requests.get(
-            f"{self.base_url}/contacts/{supplier_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if supplier_resp.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to fetch supplier details"
-            )
-
-        supplier = supplier_resp.json().get("contact", {})
-
-        billing = supplier.get("billing_address", {})
-
-        address_parts = [
-            billing.get("address"),
-            billing.get("street2"),
-            billing.get("city"),
-            billing.get("state"),
-            billing.get("zip"),
-            billing.get("country"),
-        ]
-
-        address = ", ".join(part for part in address_parts if part)
+        company = lines[0] if len(lines) > 0 else ""
+        address = "\n".join(lines[1:]) if len(lines) > 1 else ""
 
         return {
-            "supplier_id": supplier.get("contact_id"),
-            "supplier_name": supplier.get("contact_name"),
-            "company_name": supplier.get("company_name"),
-            "email": supplier.get("email"),
-            "phone": supplier.get("phone"),
-            "mobile": supplier.get("mobile"),
+            "company_name": company,
             "address": address
         }
 
@@ -1609,7 +1555,7 @@ class SalesOrderService:
         # 3️⃣ Create Sales Order
         payload = {
             "customer_id": customer_id,
-            "date": estimate.get("date"),
+            "date": datetime.now().strftime("%Y-%m-%d"),
             "reference_number": estimate_number,
             "line_items": line_items,
             "notes": f"Created automatically from Quote {estimate_number}",
