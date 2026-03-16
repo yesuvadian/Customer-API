@@ -680,6 +680,8 @@ class RoleModulePrivilegeBase(BaseModel):
     can_import: bool = False
     can_export: bool = False
     can_view: bool = False
+    can_approve: bool = False
+    can_assign: bool = False
 
 
 class RoleModulePrivilegeCreate(RoleModulePrivilegeBase):
@@ -694,6 +696,8 @@ class RoleModulePrivilegeUpdate(BaseModel):
     can_import: Optional[bool] = None
     can_export: Optional[bool] = None
     can_view: Optional[bool] = None
+    can_approve: Optional[bool] = None
+    can_assign: Optional[bool] = None
     modified_by: Optional[UUID] = None
 
 
@@ -933,9 +937,256 @@ class CategoryDetailsResponse(CategoryDetailsBase):
     modified_by: Optional[UUID]
     cts: datetime
     mts: datetime
-    
+
     # Nested Relationship (Like 'division' in your reference)
-    master: Optional[CategoryMasterResponse] = None 
+    master: Optional[CategoryMasterResponse] = None
 
     class Config:
         orm_mode = True
+
+
+# ==========================================
+# Testing Request Schemas
+# ==========================================
+
+class TestingRequestCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    transformer_type: Optional[str] = None
+    transformer_rating: Optional[str] = None
+    manufacturer: Optional[str] = None
+    serial_number: Optional[str] = None
+    equipment_type_id: Optional[int] = None
+    test_type_id: Optional[int] = None
+    zone: Optional[str] = None
+    ce_circle: Optional[str] = None
+    se_division: Optional[str] = None
+    ee_subdivision: Optional[str] = None
+    aee_section: Optional[str] = None
+    ae_je: Optional[str] = None
+    assigned_tester_id: Optional[UUID] = None
+    priority: Optional[str] = "normal"
+    requested_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    notes: Optional[str] = None
+
+class TestingRequestUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    transformer_type: Optional[str] = None
+    transformer_rating: Optional[str] = None
+    manufacturer: Optional[str] = None
+    serial_number: Optional[str] = None
+    equipment_type_id: Optional[int] = None
+    test_type_id: Optional[int] = None
+    zone: Optional[str] = None
+    ce_circle: Optional[str] = None
+    se_division: Optional[str] = None
+    ee_subdivision: Optional[str] = None
+    aee_section: Optional[str] = None
+    ae_je: Optional[str] = None
+    priority: Optional[str] = None
+    requested_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    notes: Optional[str] = None
+
+class TestingRequestAssign(BaseModel):
+    tester_id: UUID
+
+class TestingRequestResponse(BaseModel):
+    id: UUID
+    request_number: str
+    title: str
+    description: Optional[str] = None
+    transformer_type: Optional[str] = None
+    transformer_rating: Optional[str] = None
+    manufacturer: Optional[str] = None
+    serial_number: Optional[str] = None
+    equipment_type_id: Optional[int] = None
+    test_type_id: Optional[int] = None
+    equipment_type_name: Optional[str] = None
+    test_type_name: Optional[str] = None
+    zone: Optional[str] = None
+    ce_circle: Optional[str] = None
+    se_division: Optional[str] = None
+    ee_subdivision: Optional[str] = None
+    aee_section: Optional[str] = None
+    ae_je: Optional[str] = None
+    status: str
+    priority: Optional[str] = None
+    originator_id: UUID
+    originator_name: Optional[str] = None
+    assigned_tester_id: Optional[UUID] = None
+    assigned_tester_name: Optional[str] = None
+    assigned_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    requested_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Test Result Schemas
+# ==========================================
+
+class TestResultCreate(BaseModel):
+    test_name: str
+    test_category: Optional[str] = None
+    result_value: Optional[str] = None
+    result_unit: Optional[str] = None
+    pass_fail: Optional[str] = None
+    remarks: Optional[str] = None
+
+class TestResultResponse(BaseModel):
+    id: UUID
+    testing_request_id: UUID
+    test_name: str
+    test_category: Optional[str] = None
+    result_value: Optional[str] = None
+    result_unit: Optional[str] = None
+    pass_fail: Optional[str] = None
+    remarks: Optional[str] = None
+    file_name: Optional[str] = None
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    template_key: Optional[str] = None
+    test_data: Optional[dict] = None
+    overall_result: Optional[str] = None
+    tested_by: Optional[UUID] = None
+    tested_at: Optional[datetime] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Structured Test Result Schemas (JSONB)
+# ==========================================
+
+class TestResultStructuredCreate(BaseModel):
+    template_key: str
+    test_data: dict
+    overall_result: Optional[str] = None
+    remarks: Optional[str] = None
+
+class TestResultImageResponse(BaseModel):
+    id: UUID
+    file_name: str
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    caption: Optional[str] = None
+    download_url: Optional[str] = None
+    cts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class TestResultStructuredResponse(BaseModel):
+    id: UUID
+    testing_request_id: UUID
+    test_name: str
+    template_key: Optional[str] = None
+    test_data: Optional[dict] = None
+    overall_result: Optional[str] = None
+    remarks: Optional[str] = None
+    tested_by: Optional[UUID] = None
+    tested_at: Optional[datetime] = None
+    images: List[TestResultImageResponse] = []
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Recommendation Schemas
+# ==========================================
+
+class RecommendationCreate(BaseModel):
+    testing_request_id: UUID
+    recommendation_type: str
+    summary: str
+    detailed_notes: Optional[str] = None
+
+class RecommendationUpdate(BaseModel):
+    recommendation_type: Optional[str] = None
+    summary: Optional[str] = None
+    detailed_notes: Optional[str] = None
+
+class ApprovalAction(BaseModel):
+    notes: Optional[str] = None
+
+class RecommendationResponse(BaseModel):
+    id: UUID
+    testing_request_id: UUID
+    recommendation_type: str
+    summary: str
+    detailed_notes: Optional[str] = None
+    approval_status: Optional[str] = None
+    approved_by: Optional[UUID] = None
+    approved_at: Optional[datetime] = None
+    approval_notes: Optional[str] = None
+    submitted_by: Optional[UUID] = None
+    submitted_at: Optional[datetime] = None
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Procurement Request Schemas
+# ==========================================
+
+class ProcurementRequestCreate(BaseModel):
+    testing_request_id: UUID
+    recommendation_id: Optional[UUID] = None
+    title: str
+    description: Optional[str] = None
+    estimated_cost: Optional[float] = None
+    quantity: Optional[int] = None
+    specifications: Optional[str] = None
+
+class ProcurementRequestUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    estimated_cost: Optional[float] = None
+    quantity: Optional[int] = None
+    specifications: Optional[str] = None
+
+class ProcurementRequestResponse(BaseModel):
+    id: UUID
+    procurement_number: str
+    testing_request_id: UUID
+    recommendation_id: Optional[UUID] = None
+    title: str
+    description: Optional[str] = None
+    status: Optional[str] = None
+    estimated_cost: Optional[float] = None
+    quantity: Optional[int] = None
+    specifications: Optional[str] = None
+    raised_by: UUID
+    raised_at: Optional[datetime] = None
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
