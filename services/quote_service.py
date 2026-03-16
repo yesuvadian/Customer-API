@@ -1,3 +1,5 @@
+import os
+
 import requests
 from fastapi import HTTPException, UploadFile, status
 import config
@@ -96,6 +98,7 @@ class QuoteService:
         }
 
         contact_id = self._resolve_contact_id(payload.contact_id)
+        print("Creating draft quote enquiry for contact_id:", contact_id)
 
         body = {
             "customer_id": contact_id,
@@ -113,6 +116,7 @@ class QuoteService:
             "notes": payload.notes or "Quote enquiry submitted from customer portal",
             "status": "draft"
         }
+        print("Draft quote enquiry payload:", body)
 
         response = requests.post(
             f"{self.base_url}/estimates",
@@ -184,6 +188,34 @@ class QuoteService:
         estimate = response.json()["estimate"]
         self._invalidate_quote_caches(contact_id, estimate["estimate_id"])
         return estimate
+    
+    def find_vendors_for_items(self, item_ids: list[str], auth_header: str) -> list[str]:
+            """
+            Sends item IDs to the Vendor App using a GET request.
+            """
+            # Ensure this port matches where your Vendor App is running
+            vendor_url = f"{config.VENDOR_APP_URL}/company_products/find_vendors_by_ids"
+            
+            try:
+                # requests.get with 'params' will turn [1, 2] into ?ids=1&ids=2
+                response = requests.get(
+                        vendor_url,
+                        params={"ids": item_ids},
+                        headers={
+                             "x-internal-secret": config.INTERNAL_SERVICE_SECRET,
+                        },
+                        timeout=10
+                    )
+                
+                if response.status_code == 200:
+                    return response.json().get("company_ids", [])
+                else:
+                    print(f"Vendor app returned status {response.status_code}: {response.text}")
+                    return []
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"Failed to reach Vendor App: {str(e)}")
+                return []
 
     # -------------------------------------------------
     # List Quotes

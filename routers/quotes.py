@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status, HTTPException
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status, HTTPException, Request
 from auth_utils import get_current_user
 import schemas
 from services.quote_service import QuoteService
@@ -44,6 +44,45 @@ def request_quote(payload: zohoschemas.RequestQuote, current_user=Depends(get_cu
         estimate_number=estimate["estimate_number"],
         status=estimate["status"]
     )
+
+
+@router.post("/request_with_vendors", response_model=zohoschemas.QuoteResponse, status_code=status.HTTP_201_CREATED)
+def request_quote_with_vendors(payload: zohoschemas.RequestQuote,request: Request, current_user=Depends(get_current_user)):
+    """
+    Request Quote:
+    - Creates DRAFT quote in Zoho Books
+    - Sales team completes & sends
+    """
+    access_token = get_zoho_access_token()
+    auth_header = request.headers.get("Authorization")
+
+    try:
+        estimate = quote_service.create_draft_quote(access_token, payload)
+
+        # 2. Extract Zoho Item IDs from the payload
+        zoho_item_ids = [str(item.item_id) for item in payload.items]
+        
+        # 3. Call Vendor App to find matching vendors
+        matched_vendors = quote_service.find_vendors_for_items(
+            item_ids=zoho_item_ids,
+            auth_header=auth_header
+)
+        return zohoschemas.QuoteResponse(
+            message="Quote request submitted successfully",
+            estimate_id=estimate["estimate_id"],
+            estimate_number=estimate.get("estimate_number", ""),
+            status=estimate["status"],
+            matched_vendors=matched_vendors
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error while creating quote: {str(e)}"
+        )
+
+
 @router.post(
     "/{estimate_id}/attachment",
     status_code=status.HTTP_201_CREATED

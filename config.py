@@ -179,3 +179,13 @@ if APP_ENV == "production":
         ZOHO_SENT_EMAIL,
     ]):
         raise RuntimeError("Zoho Books environment variables are not fully configured")
+    
+# ======================================================
+VENDOR_APP_URL = os.getenv("VENDOR_APP_URL", "http://127.0.0.1:8001")
+
+
+# VENDOR_APP_URL="https://vendor.yourdomain.com/api/vendors"
+APP_ENV="production"
+DEBUG=False
+
+INTERNAL_SERVICE_SECRET=os.getenv("INTERNAL_SERVICE_SECRET", "super_vendor_secret_123")
