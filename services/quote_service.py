@@ -114,7 +114,8 @@ class QuoteService:
                 "tax_exemption_code": "NON"
             }],
             "notes": payload.notes or "Quote enquiry submitted from customer portal",
-            "status": "draft"
+            "status": "draft",
+            "custom_fields": self._build_rfq_field(access_token)
         }
         print("Draft quote enquiry payload:", body)
 
@@ -148,6 +149,7 @@ class QuoteService:
         contact_id = self._resolve_contact_id(payload.contact_id)
         line_items = []
 
+        # Fetch item details from Zoho
         for item in payload.items:
             item_resp = requests.get(
                 f"{self.base_url}/items/{item.item_id}",
@@ -159,22 +161,31 @@ class QuoteService:
             if item_resp.status_code != 200:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={"message": f"Failed to fetch item {item.item_id}", "zoho_response": item_resp.json()}
+                    detail={
+                        "message": f"Failed to fetch item {item.item_id}",
+                        "zoho_response": item_resp.json()
+                    }
                 )
 
             item_data = item_resp.json()["item"]
+
             line_items.append({
                 "item_id": item.item_id,
                 "quantity": item.quantity,
                 "rate": item_data.get("rate", 0),
-                "name": item_data.get("name", ""),
-                "tax_exemption_code": "NON"
+                "name": item_data.get("name", "")
             })
 
+        # Create estimate in Zoho
         response = requests.post(
             f"{self.base_url}/estimates",
             headers=headers,
-            json={"customer_id": contact_id, "line_items": line_items, "notes": payload.notes},
+            json={
+                "customer_id": contact_id,
+                "line_items": line_items,
+                "notes": payload.notes,
+                "custom_fields": self._build_rfq_field(access_token)
+            },
             params={"organization_id": self.org_id},
             timeout=15
         )
@@ -182,11 +193,17 @@ class QuoteService:
         if response.status_code != 201:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "Failed to create draft quote", "zoho_response": response.json()}
+                detail={
+                    "message": "Failed to create draft quote",
+                    "zoho_response": response.json()
+                }
             )
 
         estimate = response.json()["estimate"]
+
+        # invalidate redis cache
         self._invalidate_quote_caches(contact_id, estimate["estimate_id"])
+
         return estimate
     
     def find_vendors_for_items(self, item_ids: list[str], auth_header: str) -> list[str]:
@@ -216,6 +233,67 @@ class QuoteService:
             except requests.exceptions.RequestException as e:
                 print(f"Failed to reach Vendor App: {str(e)}")
                 return []
+
+
+    # -------------------------------------------------
+    # Build RFQ Custom Field
+    # -------------------------------------------------
+    def _build_rfq_field(self, access_token: str):
+
+        rfq = self.generate_next_rfq(access_token)
+
+        return [{
+            "customfield_id": config.ZOHO_ESTIMATE_RFQ_FIELD_ID,
+            "value": rfq
+        }]
+
+
+    # -------------------------------------------------
+    # Generate Next RFQ Number
+    # -------------------------------------------------
+    def generate_next_rfq(self, access_token: str) -> str:
+
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        response = requests.get(
+            f"{self.base_url}/estimates",
+            headers=headers,
+            params={
+                "organization_id": self.org_id,
+                "sort_column": "created_time",
+                "sort_order": "D",
+                "per_page": 1
+            },
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Failed to fetch estimates for RFQ generation"
+            )
+
+        estimates = response.json().get("estimates", [])
+
+        # If no estimates exist yet
+        if not estimates:
+            return "RFQ-0001"
+
+        rfq = (
+            estimates[0].get("cf_rfq")
+            or estimates[0].get("custom_field_hash", {}).get("cf_rfq")
+        )
+
+        if rfq and rfq.startswith("RFQ-"):
+            try:
+                number = int(rfq.split("-")[1]) + 1
+                return f"RFQ-{number:04d}"
+            except Exception as e:
+                print("RFQ parse error:", e)
+
+        return "RFQ-0001"
 
     # -------------------------------------------------
     # List Quotes
@@ -382,30 +460,35 @@ class QuoteService:
         self._invalidate_quote_caches(estimate_id=estimate_id)
         return {"message": "Comment deleted successfully"}
     def get_quote_pdf(self, access_token: str, estimate_id: str):
-                headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
-                params = {
-                    "organization_id": self.org_id,
-                    "print": "true",
-                    "accept": "pdf"
-                }
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
 
-                response = requests.get(
-                    f"{self.base_url}/estimates/{estimate_id}",
-                    headers=headers,
-                    params=params,
-                    timeout=30
-                )
+        params = {
+            "organization_id": self.org_id,
+            "print": "true",
+            "accept": "pdf"
+        }
 
-                if response.status_code != 200:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "message": f"Failed to fetch PDF for estimate {estimate_id}",
-                            "zoho_response": response.json() if "application/json" in response.headers.get("Content-Type","") else None
-                        }
+        response = requests.get(
+            f"{self.base_url}/estimates/{estimate_id}",
+            headers=headers,
+            params=params,
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to fetch PDF for estimate {estimate_id}",
+                    "zoho_response": (
+                        response.json()
+                        if "application/json" in response.headers.get("Content-Type", "")
+                        else None
                     )
+                }
+            )
 
-                return response.content  # raw PDF bytes
+        return response.content  # raw PDF bytes
     
 
 
