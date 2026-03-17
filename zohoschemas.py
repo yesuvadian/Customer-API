@@ -1,6 +1,6 @@
 from datetime import date
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 # -----------------------------
 # Quote Item
 # -----------------------------
@@ -31,6 +31,8 @@ class RequestQuote(BaseModel):
 
 class SendQuoteWithSupplier(BaseModel):
     supplier_id: str
+class AssignVendors(BaseModel):
+    vendors: List[dict]
 # -----------------------------
 # ERP Review Quote
 # -----------------------------
@@ -62,6 +64,8 @@ class QuoteResponse(BaseModel):
     estimate_number: str
     status: str
     message: Optional[str] = None
+    matched_vendors: Optional[List[Dict[str, Any]]] = []
+
 
 
 
