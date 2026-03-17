@@ -84,6 +84,7 @@ tar --exclude="venv" `
     --exclude=".vscode" `
     --exclude="*.xlsx" `
     --exclude="output_*.csv" `
+    --exclude="$ArchiveName" `
     -czf $ArchiveName *
 
 Write-Host "Uploading archive to server..."
