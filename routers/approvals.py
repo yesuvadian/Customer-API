@@ -2,6 +2,7 @@ from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -9,6 +10,7 @@ from database import get_db
 from models import User
 from schemas import ApprovalAction, RecommendationResponse
 from services.approval_service import ApprovalService
+from services.report_service import ReportService
 
 router = APIRouter(
     prefix="/approvals",
@@ -26,6 +28,35 @@ def get_pending_approvals(
 ):
     service = ApprovalService(db)
     return service.get_pending_approvals(skip=skip, limit=limit)
+
+
+@router.get("/{recommendation_id}/detail")
+def get_approval_detail(
+    recommendation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns recommendation + testing request info + test results for approver review."""
+    service = ApprovalService(db)
+    return service.get_approval_detail(recommendation_id)
+
+
+@router.get("/{recommendation_id}/report")
+def get_approval_report(
+    recommendation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate and return a PDF test report for approval review."""
+    service = ReportService(db)
+    pdf_bytes = service.generate_approval_report(recommendation_id)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="test_report_{recommendation_id}.pdf"',
+        },
+    )
 
 
 @router.put("/{recommendation_id}/approve", response_model=RecommendationResponse)

@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from models import TestingRequest, TestingRequestStatus, TestResult, TestResultImage, CategoryDetails
+from models import TestingRequest, TestingRequestStatus, TestResult, TestResultImage, CategoryDetails, Recommendation, RecommendationType
 from utils.common_service import UTCDateTimeMixin
 
 
@@ -87,11 +87,54 @@ class TestingService:
                 detail="At least one test result must be uploaded before submitting",
             )
 
-        request.status = TestingRequestStatus.test_submitted
+        # --- Auto-create Recommendation from test results ---
+        rec_type = self._derive_recommendation_type(results)
+        summary = self._build_recommendation_summary(request, results, rec_type)
+
+        recommendation = Recommendation(
+            testing_request_id=request_id,
+            recommendation_type=rec_type,
+            summary=summary,
+            detailed_notes=None,
+            submitted_by=tester_id,
+            submitted_at=UTCDateTimeMixin._utc_now(),
+            approval_status="pending",
+            created_by=tester_id,
+        )
+        self.db.add(recommendation)
+
+        # Transition directly to under_approval (skips test_submitted)
+        request.status = TestingRequestStatus.under_approval
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
         return request
+
+    @staticmethod
+    def _derive_recommendation_type(results: list) -> RecommendationType:
+        """Derive recommendation type from overall_result of test results."""
+        overall_results = [
+            (r.overall_result or "").lower().strip()
+            for r in results if r.overall_result
+        ]
+        if not overall_results:
+            return RecommendationType.conditional
+
+        if all(r == "pass" for r in overall_results):
+            return RecommendationType.pass_test
+        elif any(r == "fail" for r in overall_results):
+            return RecommendationType.fail
+        else:
+            return RecommendationType.conditional
+
+    @staticmethod
+    def _build_recommendation_summary(request, results: list, rec_type: RecommendationType) -> str:
+        """Build a human-readable recommendation summary."""
+        test_names = [r.test_name or r.template_key or "Test" for r in results]
+        tests_str = ", ".join(test_names)
+        title = request.title or request.request_number
+        type_label = rec_type.value.upper()
+        return f"[{type_label}] {title} — {len(results)} test(s): {tests_str}"
 
     def get_my_assignments(self, tester_id: UUID, skip: int = 0, limit: int = 100) -> List[TestingRequest]:
         return (
