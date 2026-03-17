@@ -28,6 +28,8 @@ class RequestQuote(BaseModel):
         description="Optional notes from customer"
     )
 
+class AssignVendors(BaseModel):
+    vendors: List[dict]
 # -----------------------------
 # ERP Review Quote
 # -----------------------------
