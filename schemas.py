@@ -1128,12 +1128,17 @@ class RecommendationUpdate(BaseModel):
 class ApprovalAction(BaseModel):
     notes: Optional[str] = None
 
+class SubmitTestResultsBody(BaseModel):
+    replacement_products: Optional[list] = None  # [{item_id, item_name, category, quantity}, ...]
+
+
 class RecommendationResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
     recommendation_type: str
     summary: str
     detailed_notes: Optional[str] = None
+    replacement_products: Optional[list] = None
     approval_status: Optional[str] = None
     approved_by: Optional[UUID] = None
     approved_at: Optional[datetime] = None

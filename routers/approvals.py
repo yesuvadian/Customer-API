@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User
+from models import Recommendation, User
 from schemas import ApprovalAction, RecommendationResponse
 from services.approval_service import ApprovalService
 from services.report_service import ReportService
@@ -57,6 +57,25 @@ def get_approval_report(
             "Content-Disposition": f'inline; filename="test_report_{recommendation_id}.pdf"',
         },
     )
+
+
+@router.get("/by-request/{testing_request_id}")
+def get_recommendation_by_request(
+    testing_request_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns the recommendation (with replacement_products) for a given testing request."""
+    rec = (
+        db.query(Recommendation)
+        .filter(Recommendation.testing_request_id == testing_request_id)
+        .order_by(Recommendation.cts.desc())
+        .first()
+    )
+    if not rec:
+        return None
+    service = ApprovalService(db)
+    return service.get_approval_detail(rec.id)
 
 
 @router.put("/{recommendation_id}/approve", response_model=RecommendationResponse)

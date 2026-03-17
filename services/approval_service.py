@@ -97,6 +97,7 @@ class ApprovalService:
             "submitted_at": rec.submitted_at.isoformat() if rec.submitted_at else None,
             "cts": rec.cts.isoformat() if rec.cts else None,
             "mts": rec.mts.isoformat() if rec.mts else None,
+            "replacement_products": rec.replacement_products,
             "testing_request": request_info,
             "test_results": test_results,
         }

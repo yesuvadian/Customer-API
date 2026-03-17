@@ -67,7 +67,7 @@ class TestingService:
             .all()
         )
 
-    def submit_test_results(self, request_id: UUID, tester_id: UUID) -> TestingRequest:
+    def submit_test_results(self, request_id: UUID, tester_id: UUID, replacement_products=None) -> TestingRequest:
         request = self._get_request(request_id)
         if request.status != TestingRequestStatus.in_progress:
             raise HTTPException(
@@ -96,6 +96,7 @@ class TestingService:
             recommendation_type=rec_type,
             summary=summary,
             detailed_notes=None,
+            replacement_products=replacement_products,
             submitted_by=tester_id,
             submitted_at=UTCDateTimeMixin._utc_now(),
             approval_status="pending",

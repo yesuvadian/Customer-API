@@ -14,6 +14,7 @@ from schemas import (
     TestResultStructuredCreate,
     TestResultStructuredResponse,
     TestResultImageResponse,
+    SubmitTestResultsBody,
 )
 from services.testing_service import TestingService
 
@@ -68,11 +69,16 @@ def get_test_results(
 @router.put("/{request_id}/submit_results", response_model=TestingRequestResponse)
 def submit_test_results(
     request_id: UUID,
+    body: Optional[SubmitTestResultsBody] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     service = TestingService(db)
-    return service.submit_test_results(request_id, tester_id=current_user.id)
+    return service.submit_test_results(
+        request_id,
+        tester_id=current_user.id,
+        replacement_products=body.replacement_products if body else None,
+    )
 
 
 # ─── Template & Structured Results ──────────────────────────

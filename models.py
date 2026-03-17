@@ -1222,6 +1222,7 @@ class Recommendation(Base):
     recommendation_type = Column(Enum(RecommendationType), nullable=False)
     summary = Column(Text, nullable=False)
     detailed_notes = Column(Text, nullable=True)
+    replacement_products = Column(JSONB, nullable=True)  # [{item_id, item_name, category, quantity}, ...]
 
     # Approval
     approval_status = Column(String(20), default="pending")
