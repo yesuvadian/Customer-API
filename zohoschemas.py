@@ -12,13 +12,24 @@ class QuoteItem(BaseModel):
 # Request Quote (customer)
 # -----------------------------
 class RequestQuote(BaseModel):
+
     contact_id: str = Field(
         ...,
         description="Zoho contact_id or customer email. If email is provided, service resolves to contact_id."
     )
-    items: List[QuoteItem] = Field(..., description="List of items in the quote")
-    notes: Optional[str] = Field(None, description="Optional notes from customer")
 
+    items: List[QuoteItem] = Field(
+        ...,
+        description="List of items in the quote"
+    )
+
+    notes: Optional[str] = Field(
+        None,
+        description="Optional notes from customer"
+    )
+
+class AssignVendors(BaseModel):
+    vendors: List[dict]
 # -----------------------------
 # ERP Review Quote
 # -----------------------------
