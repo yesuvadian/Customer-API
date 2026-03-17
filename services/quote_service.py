@@ -343,6 +343,83 @@ class QuoteService:
         self._invalidate_quote_caches(contact_id, estimate_id)
         return estimate
 
+# -------------------------------------------------
+# Mark Estimate as Sent with Supplier
+# -------------------------------------------------
+    def mark_estimate_as_sent_with_supplier(
+        self,
+        access_token: str,
+        estimate_id: str,
+        supplier_id: str
+    ):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        # -----------------------------
+        # Step 1: Update custom field
+        # -----------------------------
+        update_payload = {
+            "custom_fields": [
+                {
+                    "api_name": "cf_supplier",
+                    "value": supplier_id   # must be Zoho vendor ID
+                }
+            ]
+        }
+
+        update_response = requests.put(
+            f"{self.base_url}/estimates/{estimate_id}",
+            headers=headers,
+            json=update_payload,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if update_response.status_code != 200:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                {
+                    "message": "Failed to update supplier field",
+                    "zoho_response": update_response.json()
+                }
+            )
+
+        # -----------------------------
+        # Step 2: Mark as sent
+        # -----------------------------
+        send_response = requests.post(
+            f"{self.base_url}/estimates/{estimate_id}/status/sent",
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        print("ZOHO SENT STATUS:", send_response.status_code)
+        print("ZOHO SENT BODY:", send_response.text)
+
+        data = send_response.json()
+
+        # Invalidate cache
+        self._invalidate_quote_caches(estimate_id=estimate_id)
+
+        if send_response.status_code != 200 or data.get("code") != 0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                {
+                    "message": "Failed to mark estimate as sent",
+                    "zoho_response": data
+                }
+            )
+
+        return {
+            "message": data.get("message", "Estimate marked as sent"),
+            "estimate_id": estimate_id,
+            "status": "sent",
+            "supplier_id": supplier_id
+        }
+
     def customer_approve_quote(self, access_token: str, estimate_id: str, payload, contact_id: str):
         return self.review_quote(access_token, estimate_id, payload, contact_id, contact_id)
 
