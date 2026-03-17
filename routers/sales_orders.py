@@ -615,3 +615,39 @@ def create_po_from_salesorder(
             status_code=500,
             detail=f"Error creating PO: {str(e)}"
         )
+    
+@router.post("/from-quote/{estimate_id}", status_code=status.HTTP_201_CREATED)
+def create_salesorder_from_quote(
+    estimate_id: str,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    try:
+        salesorder = sales_order_service.create_salesorder_from_quote(
+            access_token=access_token,
+            estimate_id=estimate_id
+        )
+
+        if not salesorder:
+            raise HTTPException(
+                status_code=400,
+                detail="Sales order was not created"
+            )
+
+        return {
+            "message": "Sales order created successfully",
+            "salesorder": salesorder
+        }
+
+    except HTTPException as http_error:
+        # Pass service layer errors directly
+        raise http_error
+
+    except Exception as e:
+        print("SALES ORDER CREATION ERROR:", str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while creating sales order"
+        )
