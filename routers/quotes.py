@@ -24,6 +24,10 @@ def request_quote(payload: zohoschemas.RequestQuote, current_user=Depends(get_cu
     - Creates DRAFT quote in Zoho Books
     - Sales team completes & sends
     """
+    selected_item_ids = [item.item_id for item in payload.items]
+ 
+    print(f"Selected item IDs for quote request: {selected_item_ids}")
+    
     access_token = get_zoho_access_token()
 
     try:

@@ -1,4 +1,5 @@
 import requests
+from fastapi import HTTPException
 import config
 from services.zoho_auth_service import get_zoho_access_token
 #from services.zoho_token_service import get_zoho_access_token
@@ -17,13 +18,23 @@ def zoho_request(method: str, path: str, *, params=None, json=None):
         "Content-Type": "application/json"
     }
 
-    response = requests.request(
-        method=method,
-        url=f"{config.ZOHO_API_BASE}/books/v3{path}",
-        headers=headers,
-        params=params,
-        json=json,
-        timeout=15
-    )
+    try:
+        response = requests.request(
+            method=method,
+            url=f"{config.ZOHO_API_BASE}/books/v3{path}",
+            headers=headers,
+            params=params,
+            json=json,
+            timeout=15
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Zoho Books API is unavailable",
+                "service": config.ZOHO_API_BASE,
+                "error": str(exc),
+            },
+        ) from exc
 
     return response

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
+from schemas import IdList
 #from services.company_product_service import CompanyProductService
 from schemas import CompanyAssignedProductSchema, CompanyProductBulkAssignRequest, CompanyProductSchema
 from services.companyproduct_service import CompanyProductService  # <-- Pydantic schema
@@ -45,3 +46,4 @@ def bulk_assign(request: CompanyProductBulkAssignRequest, db: Session = Depends(
     product_ids = [prod["product_id"] for prod in request.products]
     assigned = CompanyProductService.bulk_assign(db, request.company_id, product_ids)
     return {"detail": "Products assigned successfully", "assigned": assigned}
+

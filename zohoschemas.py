@@ -1,6 +1,9 @@
 from datetime import date
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import List, Optional
+from pydantic import BaseModel
+from typing import List
+
 # -----------------------------
 # Quote Item
 # -----------------------------
@@ -16,6 +19,10 @@ class RequestQuote(BaseModel):
         ...,
         description="Zoho contact_id or customer email. If email is provided, service resolves to contact_id."
     )
+    vendor_id: Optional[str] = Field(      # ← ADDED
+        None,
+        description="Optional vendor ID. If provided, RQ is stored for vendor portal."
+    )
     items: List[QuoteItem] = Field(..., description="List of items in the quote")
     notes: Optional[str] = Field(None, description="Optional notes from customer")
 
@@ -26,7 +33,6 @@ class ReviewQuote(BaseModel):
     contact_id: str = Field(..., description="Zoho contact_id or email of customer")
     status: str = Field(
         ...,
-        #regex="^(approved|rejected)$",
         description="ERP review status: approved or rejected"
     )
     notes: Optional[str] = Field(None, description="ERP reviewer notes")
@@ -37,7 +43,6 @@ class ReviewQuote(BaseModel):
 class ApproveQuote(BaseModel):
     status: str = Field(
         ...,
-        #regex="^(accepted|declined)$",
         description="Customer decision: accepted or declined"
     )
     notes: Optional[str] = Field(None, description="Customer notes or feedback")
@@ -50,7 +55,6 @@ class QuoteResponse(BaseModel):
     estimate_number: str
     status: str
     message: Optional[str] = None
-
 
 
 # -----------------------------
@@ -78,7 +82,6 @@ class ReviewSalesOrder(BaseModel):
     contact_id: str = Field(..., description="Zoho contact_id or email of customer")
     status: str = Field(
         ...,
-        #regex="^(approved|rejected)$",
         description="ERP review status: approved or rejected"
     )
     notes: Optional[str] = Field(None, description="ERP reviewer notes")
@@ -89,7 +92,6 @@ class ReviewSalesOrder(BaseModel):
 class ApproveSalesOrder(BaseModel):
     status: str = Field(
         ...,
-        #regex="^(accepted|declined)$",
         description="Customer decision: accepted or declined"
     )
     notes: Optional[str] = Field(None, description="Customer notes or feedback")
@@ -102,8 +104,6 @@ class SalesOrderResponse(BaseModel):
     salesorder_number: str
     status: str
     message: Optional[str] = None
-
-
 
 
 # -----------------------------
@@ -131,7 +131,6 @@ class ReviewInvoice(BaseModel):
     contact_id: str = Field(..., description="Zoho contact_id or email of customer")
     status: str = Field(
         ...,
-        #regex="^(approved|rejected)$",
         description="ERP review status: approved or rejected"
     )
     notes: Optional[str] = Field(None, description="ERP reviewer notes")
@@ -142,7 +141,6 @@ class ReviewInvoice(BaseModel):
 class ApproveInvoice(BaseModel):
     status: str = Field(
         ...,
-        #regex="^(accepted|declined)$",
         description="Customer decision: accepted or declined"
     )
     notes: Optional[str] = Field(None, description="Customer notes or feedback")
@@ -155,7 +153,6 @@ class InvoiceResponse(BaseModel):
     invoice_number: str
     status: str
     message: Optional[str] = None
-
 
 
 # -----------------------------
@@ -183,7 +180,6 @@ class ReviewRetainerInvoice(BaseModel):
     contact_id: str = Field(..., description="Zoho contact_id or email of customer")
     status: str = Field(
         ...,
-        #regex="^(approved|rejected)$",
         description="ERP review status: approved or rejected"
     )
     notes: Optional[str] = Field(None, description="ERP reviewer notes")
@@ -194,7 +190,6 @@ class ReviewRetainerInvoice(BaseModel):
 class ApproveRetainerInvoice(BaseModel):
     status: str = Field(
         ...,
-        #regex="^(accepted|declined)$",
         description="Customer decision: accepted or declined"
     )
     notes: Optional[str] = Field(None, description="Customer notes or feedback")
@@ -207,6 +202,8 @@ class RetainerInvoiceResponse(BaseModel):
     retainerinvoice_number: str
     status: str
     message: Optional[str] = None
+
+
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -272,7 +269,6 @@ class ReviewPayment(BaseModel):
     contact_id: str = Field(..., description="Zoho contact_id or email of customer")
     status: str = Field(
         ...,
-        #regex="^(approved|rejected)$",
         description="ERP review status: approved or rejected"
     )
     notes: Optional[str] = Field(None, description="ERP reviewer notes")
@@ -283,10 +279,12 @@ class ReviewPayment(BaseModel):
 class ApprovePayment(BaseModel):
     status: str = Field(
         ...,
-        #regex="^(accepted|declined)$",
         description="Customer decision: accepted or declined"
     )
     notes: Optional[str] = Field(None, description="Customer notes or feedback")
+
+class IdList(BaseModel):
+    ids: List[int]
 
 # -----------------------------
 # Payment Response (generic)
@@ -296,6 +294,8 @@ class PaymentResponse(BaseModel):
     payment_number: str
     status: str
     message: Optional[str] = None
+
+
 class RequestQuoteEnquiry(BaseModel):
     contact_id: str
     enquiry_description: str
@@ -329,7 +329,7 @@ class ContactPerson(BaseModel):
     last_name: Optional[str] = None
     email: EmailStr
     phone_number: str | None = None
-    email_confirmed: bool = False 
+    email_confirmed: bool = False
     mobile_confirmed: bool = False
     mobile: str
     designation: Optional[str] = None
@@ -361,19 +361,7 @@ class CreateContact(BaseModel):
     shipping_address: Optional[Address] = None
     contact_persons: Optional[List[ContactPerson]] = None
 
-    # @model_validator(mode='after')
-    # def check_unique_contacts(self) -> 'CreateContact':
-    #     if self.contact_persons:
-    #         emails = [p.email for p in self.contact_persons]
-    #         mobiles = [p.mobile for p in self.contact_persons if p.mobile]
 
-    #         if len(emails) != len(set(emails)):
-    #             raise ValueError("Duplicate emails found in contact list")
-    #         if len(mobiles) != len(set(mobiles)):
-    #             raise ValueError("Duplicate mobile numbers found in contact list")
-    #     return self
-
-    
 class ContactResponse(BaseModel):
     contact_id: str
     contact_name: str
@@ -382,11 +370,14 @@ class ContactResponse(BaseModel):
     message: Optional[str] = None
 
 
-
-    
-
 class CommentCreate(BaseModel):
     description: str
 
 class CommentUpdate(BaseModel):
     description: str
+
+# -----------------------------
+# Vendor Register
+# -----------------------------
+class VendorRegister(BaseModel):
+    vendor_id: str = Field(..., description="Vendor ID to register in the portal")

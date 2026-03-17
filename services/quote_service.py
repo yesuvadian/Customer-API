@@ -183,6 +183,7 @@ class QuoteService:
 
         estimate = response.json()["estimate"]
         self._invalidate_quote_caches(contact_id, estimate["estimate_id"])
+        
         return estimate
 
     # -------------------------------------------------
