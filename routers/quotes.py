@@ -85,6 +85,32 @@ def request_quote_with_vendors(payload: zohoschemas.RequestQuote,request: Reques
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error while creating quote: {str(e)}"
         )
+    
+@router.post("/assign_vendors/{estimate_id}")
+def assign_vendors_to_quote(
+    estimate_id: str,
+    payload: zohoschemas.AssignVendors,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    try:
+        result = quote_service.assign_vendors_to_quote(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            vendors=payload.vendors
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error assigning vendors: {str(e)}"
+        )
+
+    return {
+        "message": "Vendors assigned successfully",
+        "estimate_id": estimate_id,
+        "vendors": payload.vendors
+    }
 
 
 @router.post(
