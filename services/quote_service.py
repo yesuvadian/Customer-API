@@ -225,7 +225,7 @@ class QuoteService:
                     )
                 
                 if response.status_code == 200:
-                    return response.json().get("company_ids", [])
+                    return response.json().get("vendors", [])
                 else:
                     print(f"Vendor app returned status {response.status_code}: {response.text}")
                     return []
@@ -282,7 +282,6 @@ class QuoteService:
         estimate_id: str,
         vendors: list[dict]
     ):
-
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
             "Content-Type": "application/json"
@@ -291,20 +290,25 @@ class QuoteService:
         zoho_vendor_ids = []
 
         for vendor in vendors:
-            vendor_name = vendor["name"]
-
-            contact_id = self.create_vendor_if_not_exists(
-                access_token,
-                vendor_name
-            )
+            # ✅ Use ERP ID directly if available
+            if vendor.get("zoho_erp_id"):
+                contact_id = vendor["zoho_erp_id"]
+            else:
+                contact_id = self.create_vendor_if_not_exists(
+                    access_token,
+                    vendor["name"]
+                )
 
             zoho_vendor_ids.append(contact_id)
+
+        if not zoho_vendor_ids:
+            raise HTTPException(400, "No valid vendors found")
 
         payload = {
             "custom_fields": [
                 {
                     "api_name": "cf_supplier",
-                    "value": zoho_vendor_ids[0]   # Zoho lookup expects single value
+                    "value": zoho_vendor_ids[0]  # Zoho supports single lookup
                 }
             ]
         }
@@ -317,14 +321,11 @@ class QuoteService:
             timeout=15
         )
 
-        print("UPDATE QUOTE:", resp.status_code)
-        print("BODY:", resp.text)
-
         if resp.status_code != 200:
             raise HTTPException(400, resp.text)
 
-        return resp.json()
-    # -------------------------------------------------
+        return resp.json() 
+# -------------------------------------------------
     # Build RFQ Custom Field
     # -------------------------------------------------
     def _build_rfq_field(self, access_token: str):
@@ -463,6 +464,83 @@ class QuoteService:
         estimate = response.json()["estimate"]
         self._invalidate_quote_caches(contact_id, estimate_id)
         return estimate
+
+# -------------------------------------------------
+# Mark Estimate as Sent with Supplier
+# -------------------------------------------------
+    def mark_estimate_as_sent_with_supplier(
+        self,
+        access_token: str,
+        estimate_id: str,
+        supplier_id: str
+    ):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        # -----------------------------
+        # Step 1: Update custom field
+        # -----------------------------
+        update_payload = {
+            "custom_fields": [
+                {
+                    "api_name": "cf_supplier",
+                    "value": supplier_id   # must be Zoho vendor ID
+                }
+            ]
+        }
+
+        update_response = requests.put(
+            f"{self.base_url}/estimates/{estimate_id}",
+            headers=headers,
+            json=update_payload,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if update_response.status_code != 200:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                {
+                    "message": "Failed to update supplier field",
+                    "zoho_response": update_response.json()
+                }
+            )
+
+        # -----------------------------
+        # Step 2: Mark as sent
+        # -----------------------------
+        send_response = requests.post(
+            f"{self.base_url}/estimates/{estimate_id}/status/sent",
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        print("ZOHO SENT STATUS:", send_response.status_code)
+        print("ZOHO SENT BODY:", send_response.text)
+
+        data = send_response.json()
+
+        # Invalidate cache
+        self._invalidate_quote_caches(estimate_id=estimate_id)
+
+        if send_response.status_code != 200 or data.get("code") != 0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                {
+                    "message": "Failed to mark estimate as sent",
+                    "zoho_response": data
+                }
+            )
+
+        return {
+            "message": data.get("message", "Estimate marked as sent"),
+            "estimate_id": estimate_id,
+            "status": "sent",
+            "supplier_id": supplier_id
+        }
 
     def customer_approve_quote(self, access_token: str, estimate_id: str, payload, contact_id: str):
         return self.review_quote(access_token, estimate_id, payload, contact_id, contact_id)
