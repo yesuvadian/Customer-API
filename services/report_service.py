@@ -275,8 +275,9 @@ class ReportService:
     def _build_test_data_table(self, styles, test_data: dict, template_key: str = None):
         elements = []
 
-        # Try to get template for field labels
+        # Try to get template for field labels and table column metadata
         field_labels = {}
+        field_meta = {}  # key -> full field dict (for table columns etc.)
         sections_order = []
         if template_key:
             try:
@@ -287,6 +288,7 @@ class ReportService:
                         sec_fields = []
                         for f in sec.get("fields", []):
                             field_labels[f["key"]] = f.get("label", f["key"])
+                            field_meta[f["key"]] = f
                             sec_fields.append(f["key"])
                         sections_order.append((sec["title"], sec_fields))
             except Exception:
@@ -295,15 +297,59 @@ class ReportService:
         if sections_order:
             # Render by template sections
             for sec_title, field_keys in sections_order:
-                sec_data = []
+                sec_data = []        # for scalar key-value pairs
+                table_elements = []  # for table-type fields
+
                 for key in field_keys:
                     if key in test_data:
                         val = test_data[key]
                         label = field_labels.get(key, key.replace("_", " ").title())
-                        display_val = self._format_value(val)
-                        sec_data.append([label, display_val])
+                        meta = field_meta.get(key, {})
 
-                if sec_data:
+                        # Check if this is a table-type field with list data
+                        if meta.get("type") == "table" and isinstance(val, list):
+                            # Flush any pending scalar data first
+                            if sec_data:
+                                rows = []
+                                for i in range(0, len(sec_data), 2):
+                                    row = [sec_data[i][0], sec_data[i][1]]
+                                    if i + 1 < len(sec_data):
+                                        row += [sec_data[i + 1][0], sec_data[i + 1][1]]
+                                    else:
+                                        row += ["", ""]
+                                    rows.append(row)
+                                table_elements.append(self._detail_table_raw(rows))
+                                table_elements.append(Spacer(1, 2 * mm))
+                                sec_data = []
+
+                            # Render as a proper data table
+                            columns = meta.get("columns", [])
+                            table_elements.extend(
+                                self._build_list_table(label, val, columns)
+                            )
+                        elif isinstance(val, list) and val and isinstance(val[0], dict):
+                            # List of dicts without template metadata — auto-detect columns
+                            if sec_data:
+                                rows = []
+                                for i in range(0, len(sec_data), 2):
+                                    row = [sec_data[i][0], sec_data[i][1]]
+                                    if i + 1 < len(sec_data):
+                                        row += [sec_data[i + 1][0], sec_data[i + 1][1]]
+                                    else:
+                                        row += ["", ""]
+                                    rows.append(row)
+                                table_elements.append(self._detail_table_raw(rows))
+                                table_elements.append(Spacer(1, 2 * mm))
+                                sec_data = []
+
+                            table_elements.extend(
+                                self._build_list_table(label, val, [])
+                            )
+                        else:
+                            display_val = self._format_value(val)
+                            sec_data.append([label, display_val])
+
+                if sec_data or table_elements:
                     elements.append(Paragraph(
                         f"<b>{sec_title}</b>",
                         ParagraphStyle(
@@ -312,38 +358,123 @@ class ReportService:
                             spaceBefore=2 * mm, spaceAfter=1 * mm,
                         ),
                     ))
-                    # Build 2-column key-value table
-                    rows = []
-                    for i in range(0, len(sec_data), 2):
-                        row = [sec_data[i][0], sec_data[i][1]]
-                        if i + 1 < len(sec_data):
-                            row += [sec_data[i + 1][0], sec_data[i + 1][1]]
-                        else:
-                            row += ["", ""]
-                        rows.append(row)
 
-                    table = self._detail_table_raw(rows)
-                    elements.append(table)
+                    # Render remaining scalar data
+                    if sec_data:
+                        rows = []
+                        for i in range(0, len(sec_data), 2):
+                            row = [sec_data[i][0], sec_data[i][1]]
+                            if i + 1 < len(sec_data):
+                                row += [sec_data[i + 1][0], sec_data[i + 1][1]]
+                            else:
+                                row += ["", ""]
+                            rows.append(row)
+                        elements.append(self._detail_table_raw(rows))
+
+                    # Append any table elements
+                    if table_elements:
+                        if sec_data:
+                            elements.append(Spacer(1, 2 * mm))
+                        elements.extend(table_elements)
         else:
             # Fallback: render all key-value pairs
             rows = []
+            list_tables = []
             items = list(test_data.items())
-            for i in range(0, len(items), 2):
-                k1, v1 = items[i]
-                label1 = k1.replace("_", " ").title()
-                val1 = self._format_value(v1)
-                if i + 1 < len(items):
-                    k2, v2 = items[i + 1]
-                    label2 = k2.replace("_", " ").title()
-                    val2 = self._format_value(v2)
+            for k, v in items:
+                label = k.replace("_", " ").title()
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    list_tables.append((label, v))
                 else:
-                    label2, val2 = "", ""
-                rows.append([label1, val1, label2, val2])
+                    val = self._format_value(v)
+                    rows.append((label, val))
 
             if rows:
-                table = self._detail_table_raw(rows)
-                elements.append(table)
+                table_rows = []
+                for i in range(0, len(rows), 2):
+                    row = [rows[i][0], rows[i][1]]
+                    if i + 1 < len(rows):
+                        row += [rows[i + 1][0], rows[i + 1][1]]
+                    else:
+                        row += ["", ""]
+                    table_rows.append(row)
+                elements.append(self._detail_table_raw(table_rows))
 
+            for label, data_list in list_tables:
+                elements.append(Spacer(1, 2 * mm))
+                elements.extend(self._build_list_table(label, data_list, []))
+
+        return elements
+
+    # ───────────────────────────────────────────────────
+    # Helper: Build a data table from list of dicts
+    # ───────────────────────────────────────────────────
+    def _build_list_table(self, title: str, data: list, columns: list):
+        """Render a list of dicts as a proper table with headers.
+
+        Args:
+            title: Table title/label
+            data: List of dict rows
+            columns: Template column definitions [{"key": ..., "label": ...}, ...]
+                     If empty, auto-detect from data keys.
+        """
+        elements = []
+        if not data:
+            return elements
+
+        # Determine column keys and labels
+        if columns:
+            col_keys = [c["key"] for c in columns]
+            col_labels = [c.get("label", c["key"].replace("_", " ").title()) for c in columns]
+        else:
+            # Auto-detect from first row
+            col_keys = list(data[0].keys())
+            col_labels = [k.replace("_", " ").title() for k in col_keys]
+
+        # Build header row
+        lbl_style = ParagraphStyle("tblHdr", fontSize=8, textColor=colors.white,
+                                   fontName="Helvetica-Bold")
+        val_style = ParagraphStyle("tblVal", fontSize=8, textColor=colors.black)
+
+        header_row = [Paragraph(lbl, lbl_style) for lbl in col_labels]
+        table_data = [header_row]
+
+        # Build data rows
+        for row_dict in data:
+            row = []
+            for key in col_keys:
+                val = row_dict.get(key, "")
+                row.append(Paragraph(self._format_value(val), val_style))
+            table_data.append(row)
+
+        # Calculate column widths
+        page_width = A4[0] - 30 * mm
+        num_cols = len(col_keys)
+        col_width = page_width / num_cols
+
+        table = Table(table_data, colWidths=[col_width] * num_cols)
+        table.setStyle(TableStyle([
+            # Header row styling
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c5f8a")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 8),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            # Data rows
+            ("FONTSIZE", (0, 1), (-1, -1), 8),
+            ("ALIGN", (0, 1), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            # Grid
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+            # Alternating row colors
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f8fc")]),
+            # Padding
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(table)
         return elements
 
     # ───────────────────────────────────────────────────
