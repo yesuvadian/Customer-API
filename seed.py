@@ -1053,11 +1053,13 @@ def seed_test_type_categories(session, master_ids):
             "Relay Functional Test",
             "Relay Calibration Test",
             "Relay Setting Verification",
+            "Relay Testing",
         ],
         "Meter": [
             "Energy Meter Accuracy Test",
             "Meter Calibration Test",
             "CT/PT Ratio Verification",
+            "Meter Testing",
         ],
         "Tower": [
             "Tower Foundation Inspection",
@@ -1084,6 +1086,37 @@ def seed_test_type_categories(session, master_ids):
             "Sag Tension Survey",
             "Conductor Resistance Test",
             "Ground Wire Continuity Test",
+        ],
+        # ── Power Transformer (from HTML mockups) ──
+        "Power Transformer": [
+            "Power Transformer Nameplate Details",
+            "Transformer Physical Inspection",
+            "Ratio Test HV-IV",
+            "Ratio Test HV-LV",
+            "Short Circuit Test HV-IV",
+            "Short Circuit Test HV-LV",
+            "Magnetic Balance Test HV",
+            "Magnetic Balance Test IV",
+            "Magnetic Balance Test LV",
+            "Open Circuit Test HV-IV (1Ph)",
+            "Open Circuit Test HV-IV (3Ph)",
+            "Open Circuit Test HV-LV (1Ph)",
+            "Open Circuit Test HV-LV (3Ph)",
+            "Open Circuit Test IV-LV (1Ph)",
+            "Open Circuit Test IV-LV (3Ph)",
+            "Capacitance & Tan Delta Test (Transformer)",
+            "Capacitance & Tan Delta Comparison",
+        ],
+        # ── Current Transformer (additional tests from HTML mockups) ──
+        "Current Transformer": [
+            "CT Insulation Test",
+            "CT Ratio Test (Detailed)",
+            "Capacitance & Tan Delta Test (CT)",
+            "Tan Delta NCT Test",
+        ],
+        # ── CVT (new equipment type from HTML mockups) ──
+        "CVT": [
+            "CVT Test Report",
         ],
     }
 
