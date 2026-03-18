@@ -46,27 +46,47 @@ def request_quote(payload: zohoschemas.RequestQuote, current_user=Depends(get_cu
     )
 
 
-@router.post("/request_with_vendors", response_model=zohoschemas.QuoteResponse, status_code=status.HTTP_201_CREATED)
-def request_quote_with_vendors(payload: zohoschemas.RequestQuote,request: Request, current_user=Depends(get_current_user)):
+@router.post(
+    "/request_with_vendors",
+    response_model=zohoschemas.QuoteResponse,
+    status_code=status.HTTP_201_CREATED
+)
+def request_quote_with_vendors(
+    payload: zohoschemas.RequestQuote,
+    request: Request,
+    current_user=Depends(get_current_user)
+):
     """
     Request Quote:
     - Creates DRAFT quote in Zoho Books
-    - Sales team completes & sends
+    - Finds matching vendors from Vendor App
     """
     access_token = get_zoho_access_token()
     auth_header = request.headers.get("Authorization")
 
     try:
+        # ✅ Step 1: Create draft quote
         estimate = quote_service.create_draft_quote(access_token, payload)
 
-        # 2. Extract Zoho Item IDs from the payload
+        # ✅ Step 2: Extract item IDs
         zoho_item_ids = [str(item.item_id) for item in payload.items]
-        
-        # 3. Call Vendor App to find matching vendors
-        matched_vendors = quote_service.find_vendors_for_items(
+
+        # ✅ Step 3: Fetch vendors from Vendor App
+        matched_vendors_raw = quote_service.find_vendors_for_items(
             item_ids=zoho_item_ids,
             auth_header=auth_header
-)
+        )
+
+        # ✅ Step 4: Transform vendors
+        matched_vendors = [
+            {
+                "name": f"{v.get('firstname', '')} {v.get('lastname', '')}".strip(),
+                "zoho_erp_id": v.get("zoho_erp_id")
+            }
+            for v in matched_vendors_raw
+        ]
+
+        # ✅ Step 5: Return response
         return zohoschemas.QuoteResponse(
             message="Quote request submitted successfully",
             estimate_id=estimate["estimate_id"],
@@ -74,13 +94,16 @@ def request_quote_with_vendors(payload: zohoschemas.RequestQuote,request: Reques
             status=estimate["status"],
             matched_vendors=matched_vendors
         )
+
     except HTTPException as e:
         raise e
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error while creating quote: {str(e)}"
-        )
+        )   
+    
     
 @router.post("/assign_vendors/{estimate_id}")
 def assign_vendors_to_quote(
@@ -90,23 +113,43 @@ def assign_vendors_to_quote(
 ):
     access_token = get_zoho_access_token()
 
+    # ✅ Validate payload
+    if not payload.vendors:
+        raise HTTPException(
+            status_code=400,
+            detail="Vendors list cannot be empty"
+        )
+
     try:
+        # 🔥 Transform vendors for service layer
+        transformed_vendors = []
+        for v in payload.vendors:
+            transformed_vendors.append({
+                "name": f"{v.get('firstname', '')} {v.get('lastname', '')}".strip(),
+                "zoho_erp_id": v.get("zoho_erp_id")
+            })
+
         result = quote_service.assign_vendors_to_quote(
             access_token=access_token,
             estimate_id=estimate_id,
-            vendors=payload.vendors
+            vendors=transformed_vendors
         )
+
+        return {
+            "message": "Vendors assigned successfully",
+            "estimate_id": estimate_id,
+            "vendors": transformed_vendors,
+            "zoho_response": result   # optional but useful for debugging
+        }
+
+    except HTTPException as e:
+        raise e
+
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Error assigning vendors: {str(e)}"
         )
-
-    return {
-        "message": "Vendors assigned successfully",
-        "estimate_id": estimate_id,
-        "vendors": payload.vendors
-    }
 
 
 @router.post(
