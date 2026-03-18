@@ -28,6 +28,9 @@ class RequestQuote(BaseModel):
         description="Optional notes from customer"
     )
 
+
+class SendQuoteWithSupplier(BaseModel):
+    supplier_id: str
 class AssignVendors(BaseModel):
     vendors: List[dict]
 # -----------------------------

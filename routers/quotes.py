@@ -274,7 +274,64 @@ def review_quote(estimate_id: str, payload: zohoschemas.ReviewQuote, current_use
         estimate_number=updated["estimate_number"],
         status=updated["status"]
     )
+# -----------------------------
+# Send Quote (ERP → Supplier)
+# -----------------------------
+@router.post(
+    "/{estimate_id}/send",
+    response_model=zohoschemas.QuoteResponse,
+    status_code=status.HTTP_200_OK
+)
+def send_quote_with_supplier(
+    estimate_id: str,
+    payload: zohoschemas.SendQuoteWithSupplier,
+    current_user=Depends(get_current_user)
+):
+    """
+    Send Quote:
+    - Attach supplier (Zoho vendor lookup)
+    - Mark estimate as sent
+    """
 
+    access_token = get_zoho_access_token()
+
+    try:
+        result = quote_service.mark_estimate_as_sent_with_supplier(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            supplier_id=payload.supplier_id
+        )
+
+        # Optional audit comment
+        quote_service.add_comment(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            description=f"Quote sent to supplier ({payload.supplier_id})",
+            email=current_user.email
+        )
+
+        # Fetch updated quote
+        quote = quote_service.get_quote(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            contact_id=current_user.email
+        )
+
+    except HTTPException as e:
+        raise e
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error sending quote: {str(e)}"
+        )
+
+    return zohoschemas.QuoteResponse(
+        message="Quote sent successfully",
+        estimate_id=quote["estimate_id"],
+        estimate_number=quote["estimate_number"],
+        status=quote["status"]
+    )
 # -----------------------------
 # Customer Approval
 # -----------------------------
