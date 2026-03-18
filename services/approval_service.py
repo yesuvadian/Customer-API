@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from models import Recommendation, TestingRequest, TestingRequestStatus, TestResult, User
+from models import Recommendation, RecommendationType, TestingRequest, TestingRequestStatus, TestResult, User
 from utils.common_service import UTCDateTimeMixin
 
 
@@ -14,6 +14,9 @@ class ApprovalService:
         self.db = db
 
     def get_pending_approvals(self, skip: int = 0, limit: int = 100) -> List[Recommendation]:
+        # Auto-create recommendations for orphaned test_submitted requests
+        self._auto_create_recommendations_for_orphaned()
+
         return (
             self.db.query(Recommendation)
             .filter(Recommendation.approval_status == "pending")
@@ -22,6 +25,73 @@ class ApprovalService:
             .limit(limit)
             .all()
         )
+
+    def _auto_create_recommendations_for_orphaned(self):
+        """Find test_submitted requests without recommendations and auto-create them."""
+        from sqlalchemy import and_, exists
+
+        orphaned = (
+            self.db.query(TestingRequest)
+            .filter(
+                TestingRequest.status.in_([
+                    TestingRequestStatus.test_submitted,
+                    TestingRequestStatus.under_approval,
+                ]),
+                ~exists(
+                    self.db.query(Recommendation.id)
+                    .filter(Recommendation.testing_request_id == TestingRequest.id)
+                    .correlate(TestingRequest)
+                ),
+            )
+            .all()
+        )
+
+        for request in orphaned:
+            results = (
+                self.db.query(TestResult)
+                .filter(TestResult.testing_request_id == request.id)
+                .order_by(TestResult.cts.asc())
+                .all()
+            )
+
+            # Derive recommendation type
+            overall_results = [
+                (r.overall_result or "").lower().strip()
+                for r in results if r.overall_result
+            ]
+            if not overall_results:
+                rec_type = RecommendationType.conditional
+            elif all(r == "pass" for r in overall_results):
+                rec_type = RecommendationType.pass_test
+            elif any(r == "fail" for r in overall_results):
+                rec_type = RecommendationType.fail
+            else:
+                rec_type = RecommendationType.conditional
+
+            # Build summary
+            test_names = [r.test_name or r.template_key or "Test" for r in results]
+            tests_str = ", ".join(test_names) if test_names else "No tests"
+            title = request.title or request.request_number
+            type_label = rec_type.value.upper()
+            summary = f"[{type_label}] {title} — {len(results)} test(s): {tests_str}"
+
+            rec = Recommendation(
+                testing_request_id=request.id,
+                recommendation_type=rec_type,
+                summary=summary,
+                approval_status="pending",
+                submitted_by=request.assigned_tester_id,
+                submitted_at=UTCDateTimeMixin._utc_now(),
+                created_by=request.assigned_tester_id,
+            )
+            self.db.add(rec)
+
+            # Move to under_approval if still at test_submitted
+            if request.status == TestingRequestStatus.test_submitted:
+                request.status = TestingRequestStatus.under_approval
+
+        if orphaned:
+            self.db.commit()
 
     def get_approval_detail(self, recommendation_id: UUID) -> dict:
         """Return recommendation + testing request details + test results for approver review."""

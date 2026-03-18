@@ -69,10 +69,10 @@ class TestingService:
 
     def submit_test_results(self, request_id: UUID, tester_id: UUID, replacement_products=None) -> TestingRequest:
         request = self._get_request(request_id)
-        if request.status != TestingRequestStatus.in_progress:
+        if request.status not in (TestingRequestStatus.in_progress, TestingRequestStatus.test_submitted):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only in-progress requests can have results submitted",
+                detail="Only in-progress or test_submitted requests can have results submitted",
             )
         if str(request.assigned_tester_id) != str(tester_id):
             raise HTTPException(
@@ -87,22 +87,35 @@ class TestingService:
                 detail="At least one test result must be uploaded before submitting",
             )
 
-        # --- Auto-create Recommendation from test results ---
+        # --- Auto-create or update Recommendation from test results ---
         rec_type = self._derive_recommendation_type(results)
         summary = self._build_recommendation_summary(request, results, rec_type)
 
-        recommendation = Recommendation(
-            testing_request_id=request_id,
-            recommendation_type=rec_type,
-            summary=summary,
-            detailed_notes=None,
-            replacement_products=replacement_products,
-            submitted_by=tester_id,
-            submitted_at=UTCDateTimeMixin._utc_now(),
-            approval_status="pending",
-            created_by=tester_id,
+        # Check for existing recommendation (re-submission from test_submitted)
+        existing_rec = (
+            self.db.query(Recommendation)
+            .filter(Recommendation.testing_request_id == request_id)
+            .first()
         )
-        self.db.add(recommendation)
+        if existing_rec:
+            existing_rec.recommendation_type = rec_type
+            existing_rec.summary = summary
+            existing_rec.replacement_products = replacement_products
+            existing_rec.approval_status = "pending"
+            existing_rec.modified_by = tester_id
+        else:
+            recommendation = Recommendation(
+                testing_request_id=request_id,
+                recommendation_type=rec_type,
+                summary=summary,
+                detailed_notes=None,
+                replacement_products=replacement_products,
+                submitted_by=tester_id,
+                submitted_at=UTCDateTimeMixin._utc_now(),
+                approval_status="pending",
+                created_by=tester_id,
+            )
+            self.db.add(recommendation)
 
         # Transition directly to under_approval (skips test_submitted)
         request.status = TestingRequestStatus.under_approval
