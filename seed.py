@@ -1050,42 +1050,10 @@ def seed_test_type_categories(session, master_ids):
         ],
         # ── Additional equipment from KPTCL flow (PDF) ──
         "Relay": [
-            "Relay Functional Test",
-            "Relay Calibration Test",
-            "Relay Setting Verification",
             "Relay Testing",
         ],
         "Meter": [
-            "Energy Meter Accuracy Test",
-            "Meter Calibration Test",
-            "CT/PT Ratio Verification",
             "Meter Testing",
-        ],
-        "Tower": [
-            "Tower Foundation Inspection",
-            "Tower Earthing Resistance Test",
-            "Structural Integrity Test",
-        ],
-        "CB": [
-            "Circuit Breaker Timing Test",
-            "Contact Resistance Test",
-            "Insulation Resistance Test",
-            "SF6 Gas Pressure Test",
-        ],
-        "Isolators": [
-            "Isolator Contact Resistance Test",
-            "Insulation Resistance Test",
-            "Mechanical Operation Test",
-        ],
-        "Hot Line": [
-            "Hot Line Maintenance Inspection",
-            "Live Line Insulation Test",
-        ],
-        "Transmission Line Data": [
-            "Line Parameter Measurement",
-            "Sag Tension Survey",
-            "Conductor Resistance Test",
-            "Ground Wire Continuity Test",
         ],
         # ── Power Transformer (from HTML mockups) ──
         "Power Transformer": [
