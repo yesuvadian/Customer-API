@@ -825,7 +825,7 @@ TEST_TEMPLATES = {
                 "title": "Test Information",
                 "fields": [
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                 ]
             },
             {
@@ -875,7 +875,7 @@ TEST_TEMPLATES = {
                 "title": "Test Information",
                 "fields": [
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                 ]
             },
             {
@@ -920,7 +920,7 @@ TEST_TEMPLATES = {
                 "title": "Test Information",
                 "fields": [
                     {"key": "location", "label": "Location of the Transformer", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                 ]
             },
             {
@@ -949,12 +949,12 @@ TEST_TEMPLATES = {
                     {"key": "sym_short_circuit_current", "label": "Symmetrical Short Circuit Current", "type": "text", "unit": "kA"},
                     {"key": "max_sc_duration", "label": "Max Short Circuit Duration", "type": "text"},
                     {"key": "lo_of_keb", "label": "L.O of KEB", "type": "text"},
-                    {"key": "date_of_order", "label": "Date of Order", "type": "text"},
-                    {"key": "date_of_testing_maker", "label": "Date of Testing by Maker", "type": "text"},
+                    {"key": "date_of_order", "label": "Date of Order", "type": "date"},
+                    {"key": "date_of_testing_maker", "label": "Date of Testing by Maker", "type": "date"},
                     {"key": "yom", "label": "Year of Manufacture", "type": "text"},
                     {"key": "taps_on_hv", "label": "Taps available on HV", "type": "text"},
                     {"key": "specification", "label": "Specification", "type": "text"},
-                    {"key": "date_of_commission", "label": "Date of Commission", "type": "text"},
+                    {"key": "date_of_commission", "label": "Date of Commission", "type": "date"},
                 ]
             },
             {
@@ -1391,7 +1391,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                     {"key": "ct_make", "label": "Make", "type": "text"},
                     {"key": "actr", "label": "ACTR", "type": "text"},
                     {"key": "core1_burden", "label": "Core 1 Burden", "type": "text"},
@@ -1449,7 +1449,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                     {"key": "polarity", "label": "Polarity", "type": "text"},
                 ]
             },
@@ -1510,7 +1510,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                     {"key": "cvt_make", "label": "Make", "type": "text"},
                     {"key": "core1_burden", "label": "Core 1 - Burden", "type": "text"},
                     {"key": "core1_class", "label": "Core 1 - Class", "type": "text"},
@@ -1582,7 +1582,7 @@ TEST_TEMPLATES = {
                     {"key": "bay_name", "label": "Bay Name", "type": "text"},
                     {"key": "ct_make", "label": "CT Make", "type": "text"},
                     {"key": "ct_sl_no", "label": "CT Serial No", "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                 ]
             },
             {
@@ -1626,7 +1626,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "transformer_name", "label": "Transformer Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                 ]
             },
             {
@@ -1706,7 +1706,7 @@ TEST_TEMPLATES = {
                 "title": "Test Information",
                 "fields": [
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                 ]
             },
             {
@@ -1745,7 +1745,7 @@ TEST_TEMPLATES = {
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "nct_make", "label": "NCT Make", "type": "text"},
                     {"key": "nct_sl_no", "label": "NCT Serial No", "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "text", "required": True},
+                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                 ]
             },
             {

@@ -248,14 +248,29 @@ class ReportService:
         if result.tested_at:
             tested_at = result.tested_at.strftime("%d-%b-%Y %H:%M")
 
+        # Resolve template friendly name
+        template_display = result.template_key or "-"
+        if result.template_key:
+            try:
+                from test_templates import get_template_by_key
+                tmpl = get_template_by_key(result.template_key)
+                if tmpl:
+                    template_display = tmpl.get("name", template_display)
+            except Exception:
+                pass
+
         meta_data = [
             ["Tested By", self._user_name(result.tested_by),
              "Date of Testing", tested_at],
             ["Overall Result", overall or "-",
-             "Template", result.template_key or "-"],
+             "Test Type", template_display],
         ]
-        if result.remarks:
-            meta_data.append(["Remarks", result.remarks, "", ""])
+        # Show remarks — prefer top-level, fall back to test_data overall_remarks
+        remarks_text = result.remarks
+        if not remarks_text and result.test_data:
+            remarks_text = result.test_data.get("overall_remarks")
+        if remarks_text:
+            meta_data.append(["Remarks", str(remarks_text), "", ""])
 
         elements.append(self._detail_table(meta_data, styles))
         elements.append(Spacer(1, 2 * mm))
