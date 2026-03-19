@@ -157,25 +157,29 @@ def seed_roles(session):
     return role_ids
 
 def assign_viewer_role_to_new_users(session, new_user_ids, role_ids):
+    """Assign Viewer role to new users who don't have ANY role yet.
+    Rule: Each user can only belong to ONE role.
+    """
     viewer_role_id = role_ids.get("Viewer")
     if not viewer_role_id:
         print("[ERROR] Viewer role not found")
         return
 
     for user_id in new_user_ids:
-        exists = session.query(UserRole).filter_by(
+        # Skip if user already has ANY role (single-role rule)
+        has_any_role = session.query(UserRole).filter(
+            UserRole.user_id == user_id
+        ).first()
+        if has_any_role:
+            continue
+
+        session.add(UserRole(
             user_id=user_id,
             role_id=viewer_role_id
-        ).first()
-
-        if not exists:
-            session.add(UserRole(
-                user_id=user_id,
-                role_id=viewer_role_id
-            ))
+        ))
 
     session.commit()
-    print("[OK] Viewer (Read-only) role assigned to new users.")
+    print("[OK] Viewer (Read-only) role assigned to new users without any role.")
 
 def seed_plans(session):
     plans_data = [
@@ -358,6 +362,17 @@ def seed_modules(session):
 {"name": "ERP Database","description": "Internal ERP DB access (backend only)","path": "erp_database","group_name": "ERP","is_active": False},
 {"name": "Mongo Database","description": "Internal Mongo DB access (backend only)", "path": "mongo_database", "group_name": "ERP", "is_active": False},
 {"name": "zohocontacts", "description": "Manage Zoho Contacts", "path": "zohocontacts", "group_name": "CRM"},
+# ✅ PROCUREMENT / ZOHO PORTAL MODULES
+{"name": "Request Quote", "description": "Request quotes from suppliers", "path": "request_quote", "group_name": "Procurement"},
+{"name": "Request Product", "description": "Request new products", "path": "request_product", "group_name": "Procurement"},
+{"name": "Quotes", "description": "View and manage quotes", "path": "quotes", "group_name": "Procurement"},
+{"name": "Sales Orders", "description": "View and manage sales orders", "path": "sales_orders", "group_name": "Procurement"},
+{"name": "Invoices", "description": "View and manage invoices", "path": "invoices", "group_name": "Procurement"},
+{"name": "Retainer Invoices", "description": "Manage retainer invoices", "path": "retainer_invoices", "group_name": "Procurement"},
+{"name": "Payments Made", "description": "Track payments made", "path": "payments_made", "group_name": "Procurement"},
+{"name": "Statements", "description": "View account statements", "path": "statements", "group_name": "Procurement"},
+{"name": "Enquiry", "description": "Submit and manage enquiries", "path": "enquiry", "group_name": "Procurement"},
+{"name": "Contact Us", "description": "Customer support", "path": "contact_us", "group_name": "Procurement"},
 # ✅ TESTING REQUEST SYSTEM MODULES
 {"name": "Testing Requests", "description": "Create and manage transformer testing requests", "path": "testing_requests", "group_name": "Testing"},
 {"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
@@ -437,6 +452,10 @@ def seed_privileges(session, role_ids, module_ids):
         "Company Product Certificates", "Company Product Supply References",
         "Category Master", "Category Details",
         "Sync ERP Vendor", "KYC Status", "zohocontacts",
+        # ✅ PROCUREMENT / ZOHO PORTAL MODULES
+        "Request Quote", "Request Product", "Quotes", "Sales Orders",
+        "Invoices", "Retainer Invoices", "Payments Made", "Statements",
+        "Enquiry", "Contact Us",
         # ✅ TESTING REQUEST SYSTEM MODULES
         "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests"
     ]
@@ -562,6 +581,17 @@ def seed_privileges(session, role_ids, module_ids):
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
         {"role": "Originator", "module": "Dashboard", "can_view": True},
+        # Originator — Procurement modules
+        {"role": "Originator", "module": "Request Quote", "can_view": True, "can_add": True},
+        {"role": "Originator", "module": "Request Product", "can_view": True, "can_add": True},
+        {"role": "Originator", "module": "Quotes", "can_view": True},
+        {"role": "Originator", "module": "Sales Orders", "can_view": True},
+        {"role": "Originator", "module": "Invoices", "can_view": True},
+        {"role": "Originator", "module": "Retainer Invoices", "can_view": True},
+        {"role": "Originator", "module": "Payments Made", "can_view": True},
+        {"role": "Originator", "module": "Statements", "can_view": True},
+        {"role": "Originator", "module": "Enquiry", "can_view": True, "can_add": True},
+        {"role": "Originator", "module": "Contact Us", "can_view": True},
 
         # TESTER — view Testing Requests, full on Testing + Recommendations
         {"role": "Tester", "module": "Testing Requests", "can_view": True},
@@ -658,11 +688,17 @@ def seed_user_roles(session, role_ids):
         user = session.query(User).filter_by(email=ur["email"]).first()
         role_id = role_ids.get(ur["role"])
         if user and role_id:
+            # Single-role rule: remove any existing roles first
+            session.query(UserRole).filter(
+                UserRole.user_id == user.id,
+                UserRole.role_id != role_id
+            ).delete()
+
             exists = session.query(UserRole).filter_by(user_id=user.id, role_id=role_id).first()
             if not exists:
                 session.add(UserRole(user_id=user.id, role_id=role_id))
     session.commit()
-    print("[OK] User-role assignments seeded successfully.")
+    print("[OK] User-role assignments seeded successfully (single-role enforced).")
 
 
 # ----------------- TNEB Product Seed -----------------

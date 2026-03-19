@@ -1170,6 +1170,7 @@ class TestResult(Base):
     test_data = Column(JSONB, nullable=True)
     overall_result = Column(String(20), nullable=True)
     template_key = Column(String(100), nullable=True)
+    replacement_products = Column(JSONB, nullable=True)  # [{item_id, item_name, category, quantity}, ...]
 
     tested_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     tested_at = Column(DateTime(timezone=True), nullable=True)

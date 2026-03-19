@@ -136,11 +136,65 @@ def get_registration_user(token: str = Depends(oauth2_scheme)) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired registration token",
         )
+def build_user_privileges(db: Session, user_id) -> dict:
+    """
+    Build the merged privilege dict for a user from all their roles.
+    Returns: { "ModuleName": { "can_view": bool, ... , "is_active": bool }, ... }
+    """
+    modules_map = {
+        m.id: {
+            "name": m.name,
+            "is_active": m.is_active  # UI visibility ONLY
+        }
+        for m in db.query(Module).all()
+    }
+
+    filtered_privileges = {}
+
+    raw_privs = db.query(RoleModulePrivilege).filter(
+        RoleModulePrivilege.role_id.in_(
+            [r.role_id for r in db.query(UserRole).filter_by(user_id=user_id)]
+        )
+    ).all()
+
+    for priv in raw_privs:
+        module_info = modules_map.get(priv.module_id)
+        if not module_info:
+            continue
+
+        mod_name = module_info["name"]
+
+        if mod_name not in filtered_privileges:
+            filtered_privileges[mod_name] = {
+                "can_view": False,
+                "can_add": False,
+                "can_edit": False,
+                "can_delete": False,
+                "can_search": False,
+                "can_import": False,
+                "can_export": False,
+                "is_active": module_info["is_active"],  # 🔥 IMPORTANT
+            }
+
+        for key in [
+            "can_view",
+            "can_add",
+            "can_edit",
+            "can_delete",
+            "can_search",
+            "can_import",
+            "can_export",
+        ]:
+            filtered_privileges[mod_name][key] |= getattr(priv, key)
+
+    return filtered_privileges
+
+
 def login_user(db: Session, email: str, password: str):
     try:
         # Always use UTC-aware time
         now = UTCDateTimeMixin._utc_now()
- 
+
         # Step 1: Fetch user
         user = db.query(User).filter_by(email=email).first()
         if not user:
@@ -148,14 +202,14 @@ def login_user(db: Session, email: str, password: str):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
             )
- 
+
         # Step 2: Check if user is active
         if not user.isactive:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is inactive. Please contact administrator."
             )
- 
+
         # Step 3: Security record
         security = db.query(UserSecurity).filter_by(user_id=user.id).first()
         if not security:
@@ -166,50 +220,50 @@ def login_user(db: Session, email: str, password: str):
             )
             db.add(security)
             db.flush()
- 
+
         # Step 4: Account locked? Show remaining time
         if security.login_locked_until and security.login_locked_until > now:
             remaining = security.login_locked_until - now
             remaining_minutes = int(remaining.total_seconds() // 60)
- 
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Account locked. Try again in {remaining_minutes} minute(s)."
             )
- 
+
         # Step 5: Password verification
         if verify_password(password, user.password_hash):
- 
+
             # Reset attempts
             security.failed_login_attempts = 0
- 
+
             # Clear lock ONLY if expired
             if security.login_locked_until and security.login_locked_until <= now:
                 security.login_locked_until = None
- 
+
             db.commit()
- 
+
         else:
             # FAILED LOGIN
             security.failed_login_attempts += 1
- 
+
             # Lock account
             if security.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
                 security.login_locked_until = now + timedelta(minutes=LOGIN_LOCK_DURATION_MIN)
                 db.commit()
- 
+
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Too many failed attempts. Account locked for {LOGIN_LOCK_DURATION_MIN} minute(s)."
                 )
- 
+
             # Not locked yet → generic error
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
             )
- 
+
         # Step 6: Load roles
         role_ids = [r.role_id for r in db.query(UserRole).filter_by(user_id=user.id).all()]
         if not role_ids:
@@ -217,63 +271,15 @@ def login_user(db: Session, email: str, password: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User has no roles assigned. Contact administrator."
             )
- 
+
         roles = db.query(Role).filter(Role.id.in_(role_ids)).all()
         role_names = [r.name for r in roles]
- 
+
         # -------------------------------------------------------
-        # Step 7: Privileges (DO NOT filter by is_active)
+        # Step 7: Privileges (uses shared helper)
         # -------------------------------------------------------
+        filtered_privileges = build_user_privileges(db, user.id)
 
-        modules_map = {
-            m.id: {
-                "name": m.name,
-                "is_active": m.is_active  # UI visibility ONLY
-            }
-            for m in db.query(Module).all()
-        }
-
-        filtered_privileges = {}
-
-        raw_privs = db.query(RoleModulePrivilege).filter(
-            RoleModulePrivilege.role_id.in_(
-                [r.role_id for r in db.query(UserRole).filter_by(user_id=user.id)]
-            )
-        ).all()
-
-        for priv in raw_privs:
-            module_info = modules_map.get(priv.module_id)
-            if not module_info:
-                continue
-
-            mod_name = module_info["name"]
-
-            if mod_name not in filtered_privileges:
-                filtered_privileges[mod_name] = {
-                    "can_view": False,
-                    "can_add": False,
-                    "can_edit": False,
-                    "can_delete": False,
-                    "can_search": False,
-                    "can_import": False,
-                    "can_export": False,
-                    "is_active": module_info["is_active"],  # 🔥 IMPORTANT
-                }
-
-            for key in [
-                "can_view",
-                "can_add",
-                "can_edit",
-                "can_delete",
-                "can_search",
-                "can_import",
-                "can_export",
-            ]:
-                filtered_privileges[mod_name][key] |= getattr(priv, key)
-
-
-
-        
         # Step 8: Plan info
         plan = None
         if user.plan_id:
@@ -285,7 +291,7 @@ def login_user(db: Session, email: str, password: str):
                     "plan_description": plan_obj.plan_description,
                     "plan_limit": plan_obj.plan_limit,
                 }
- 
+
         # Step 9: Login success
         return {
             "access_token": create_access_token({"sub": str(user.id)}),
@@ -308,10 +314,10 @@ def login_user(db: Session, email: str, password: str):
             "privileges": filtered_privileges
 
         }
- 
+
     except HTTPException:
         raise
- 
+
     except Exception as e:
         print(f"Login error: {e}")
         raise HTTPException(
