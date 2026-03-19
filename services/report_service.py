@@ -300,7 +300,12 @@ class ReportService:
                 sec_data = []        # for scalar key-value pairs
                 table_elements = []  # for table-type fields
 
+                # Skip fields already shown in the test metadata section
+                _skip_keys = {"overall_result", "overall_remarks"}
+
                 for key in field_keys:
+                    if key in _skip_keys:
+                        continue
                     if key in test_data:
                         val = test_data[key]
                         label = field_labels.get(key, key.replace("_", " ").title())
