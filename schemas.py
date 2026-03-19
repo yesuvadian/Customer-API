@@ -979,6 +979,7 @@ class TestingRequestUpdate(BaseModel):
     serial_number: Optional[str] = None
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
+    assigned_tester_id: Optional[UUID] = None
     zone: Optional[str] = None
     ce_circle: Optional[str] = None
     se_division: Optional[str] = None
@@ -1061,8 +1062,11 @@ class TestResultResponse(BaseModel):
     template_key: Optional[str] = None
     test_data: Optional[dict] = None
     overall_result: Optional[str] = None
+    replacement_products: Optional[list] = None
     tested_by: Optional[UUID] = None
     tested_at: Optional[datetime] = None
+    image_count: int = 0
+    images: List["TestResultImageResponse"] = []
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
 
@@ -1079,6 +1083,7 @@ class TestResultStructuredCreate(BaseModel):
     test_data: dict
     overall_result: Optional[str] = None
     remarks: Optional[str] = None
+    replacement_products: Optional[list] = None
 
 class TestResultImageResponse(BaseModel):
     id: UUID
@@ -1100,6 +1105,7 @@ class TestResultStructuredResponse(BaseModel):
     test_data: Optional[dict] = None
     overall_result: Optional[str] = None
     remarks: Optional[str] = None
+    replacement_products: Optional[list] = None
     tested_by: Optional[UUID] = None
     tested_at: Optional[datetime] = None
     images: List[TestResultImageResponse] = []

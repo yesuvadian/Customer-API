@@ -176,38 +176,66 @@ class TestingService:
 
     def create_structured_result(
         self, request_id: UUID, template_key: str, test_data: dict,
-        overall_result: Optional[str], remarks: Optional[str], tester_id: UUID
+        overall_result: Optional[str], remarks: Optional[str], tester_id: UUID,
+        replacement_products: Optional[list] = None,
     ) -> TestResult:
         """Create a structured test result with JSONB data."""
         from test_templates import get_template_by_key
         request = self._get_request(request_id)
-        if request.status not in (TestingRequestStatus.in_progress, TestingRequestStatus.accepted):
+        allowed = (
+            TestingRequestStatus.in_progress,
+            TestingRequestStatus.accepted,
+            TestingRequestStatus.test_submitted,
+        )
+        if request.status not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Test results can only be submitted for in-progress or accepted requests",
+                detail="Test results can only be saved for accepted, in-progress, or test_submitted requests",
             )
 
         template = get_template_by_key(template_key)
         test_name = template["name"] if template else template_key
 
-        result = TestResult(
-            testing_request_id=request_id,
-            test_name=test_name,
-            template_key=template_key,
-            test_data=test_data,
-            overall_result=overall_result,
-            remarks=remarks,
-            tested_by=tester_id,
-            tested_at=UTCDateTimeMixin._utc_now(),
-            created_by=tester_id,
+        # Upsert: update existing result if same request + template_key, else create
+        existing = (
+            self.db.query(TestResult)
+            .filter(
+                TestResult.testing_request_id == request_id,
+                TestResult.template_key == template_key,
+            )
+            .first()
         )
+
+        if existing:
+            existing.test_name = test_name
+            existing.test_data = test_data
+            existing.overall_result = overall_result
+            existing.remarks = remarks
+            existing.replacement_products = replacement_products
+            existing.tested_by = tester_id
+            existing.tested_at = UTCDateTimeMixin._utc_now()
+            existing.modified_by = tester_id
+            result = existing
+        else:
+            result = TestResult(
+                testing_request_id=request_id,
+                test_name=test_name,
+                template_key=template_key,
+                test_data=test_data,
+                overall_result=overall_result,
+                remarks=remarks,
+                replacement_products=replacement_products,
+                tested_by=tester_id,
+                tested_at=UTCDateTimeMixin._utc_now(),
+                created_by=tester_id,
+            )
+            self.db.add(result)
 
         # Auto-transition to in_progress if still accepted
         if request.status == TestingRequestStatus.accepted:
             request.status = TestingRequestStatus.in_progress
             request.modified_by = tester_id
 
-        self.db.add(result)
         self.db.commit()
         self.db.refresh(result)
         return result

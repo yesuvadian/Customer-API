@@ -56,14 +56,54 @@ def start_testing(
     return service.start_testing(request_id, tester_id=current_user.id)
 
 
-@router.get("/{request_id}/results", response_model=List[TestResultResponse])
+@router.get("/{request_id}/results")
 def get_test_results(
     request_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     service = TestingService(db)
-    return service.get_test_results(request_id)
+    results = service.get_test_results(request_id)
+    # Build response with image metadata for each result
+    response = []
+    for r in results:
+        imgs = [
+            TestResultImageResponse(
+                id=img.id,
+                file_name=img.file_name,
+                file_type=img.file_type,
+                file_size=img.file_size,
+                caption=img.caption,
+                download_url=f"/testing/results/images/{img.id}",
+                cts=img.cts,
+            )
+            for img in (r.images or [])
+        ]
+        resp = TestResultResponse(
+            id=r.id,
+            testing_request_id=r.testing_request_id,
+            test_name=r.test_name,
+            test_category=r.test_category,
+            result_value=r.result_value,
+            result_unit=r.result_unit,
+            pass_fail=r.pass_fail,
+            remarks=r.remarks,
+            file_name=r.file_name,
+            file_type=r.file_type,
+            file_size=r.file_size,
+            template_key=r.template_key,
+            test_data=r.test_data,
+            overall_result=r.overall_result,
+            replacement_products=r.replacement_products,
+            tested_by=r.tested_by,
+            tested_at=r.tested_at,
+            image_count=len(imgs),
+            images=imgs,
+            cts=r.cts,
+            mts=r.mts,
+        )
+        response.append(resp)
+    return response
 
 
 @router.put("/{request_id}/submit_results", response_model=TestingRequestResponse)
@@ -110,6 +150,7 @@ def create_structured_result(
         overall_result=data.overall_result,
         remarks=data.remarks,
         tester_id=current_user.id,
+        replacement_products=data.replacement_products,
     )
     # Build response with images list
     return _build_structured_response(result)
@@ -177,6 +218,7 @@ def _build_structured_response(result) -> TestResultStructuredResponse:
         test_data=result.test_data,
         overall_result=result.overall_result,
         remarks=result.remarks,
+        replacement_products=result.replacement_products,
         tested_by=result.tested_by,
         tested_at=result.tested_at,
         images=images,

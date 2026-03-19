@@ -28,7 +28,7 @@ class ApprovalService:
 
     def _auto_create_recommendations_for_orphaned(self):
         """Find test_submitted requests without recommendations and auto-create them."""
-        from sqlalchemy import and_, exists
+        from sqlalchemy import exists, select
 
         orphaned = (
             self.db.query(TestingRequest)
@@ -38,8 +38,8 @@ class ApprovalService:
                     TestingRequestStatus.under_approval,
                 ]),
                 ~exists(
-                    self.db.query(Recommendation.id)
-                    .filter(Recommendation.testing_request_id == TestingRequest.id)
+                    select(Recommendation.id)
+                    .where(Recommendation.testing_request_id == TestingRequest.id)
                     .correlate(TestingRequest)
                 ),
             )
