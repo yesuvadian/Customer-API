@@ -200,6 +200,52 @@ class ApprovalService:
         self.db.refresh(rec)
         return rec
 
+    def get_approval_stats(self, approver_id: UUID = None) -> dict:
+        """Return approval counts: pending, approved, rejected, total_reviewed."""
+        from sqlalchemy import func
+
+        pending = (
+            self.db.query(func.count(Recommendation.id))
+            .filter(Recommendation.approval_status == "pending")
+            .scalar()
+        )
+
+        if approver_id:
+            approved = (
+                self.db.query(func.count(Recommendation.id))
+                .filter(
+                    Recommendation.approval_status == "approved",
+                    Recommendation.approved_by == approver_id,
+                )
+                .scalar()
+            )
+            rejected = (
+                self.db.query(func.count(Recommendation.id))
+                .filter(
+                    Recommendation.approval_status == "rejected",
+                    Recommendation.approved_by == approver_id,
+                )
+                .scalar()
+            )
+        else:
+            approved = (
+                self.db.query(func.count(Recommendation.id))
+                .filter(Recommendation.approval_status == "approved")
+                .scalar()
+            )
+            rejected = (
+                self.db.query(func.count(Recommendation.id))
+                .filter(Recommendation.approval_status == "rejected")
+                .scalar()
+            )
+
+        return {
+            "pending": pending,
+            "approved": approved,
+            "rejected": rejected,
+            "total_reviewed": approved + rejected,
+        }
+
     def reject_recommendation(
         self, recommendation_id: UUID, approver_id: UUID, notes: Optional[str] = None
     ) -> Recommendation:

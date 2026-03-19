@@ -160,5 +160,40 @@ class TestingRequestService:
         self.db.refresh(request)
         return request
 
+    def get_stats(self, user_id: UUID = None) -> dict:
+        """Return counts by testing request status."""
+        query = self.db.query(TestingRequest)
+        if user_id:
+            query = query.filter(
+                or_(
+                    TestingRequest.originator_id == user_id,
+                    TestingRequest.assigned_tester_id == user_id,
+                )
+            )
+        total = query.count()
+        draft = query.filter(TestingRequest.status == TestingRequestStatus.draft).count()
+        submitted = query.filter(TestingRequest.status == TestingRequestStatus.submitted).count()
+        in_progress = query.filter(
+            TestingRequest.status.in_([
+                TestingRequestStatus.assigned,
+                TestingRequestStatus.accepted,
+                TestingRequestStatus.in_progress,
+            ])
+        ).count()
+        under_approval = query.filter(TestingRequest.status == TestingRequestStatus.under_approval).count()
+        approved = query.filter(TestingRequest.status == TestingRequestStatus.approved).count()
+        rejected = query.filter(TestingRequest.status == TestingRequestStatus.rejected).count()
+        completed = query.filter(TestingRequest.status == TestingRequestStatus.completed).count()
+        return {
+            "total": total,
+            "draft": draft,
+            "submitted": submitted,
+            "in_progress": in_progress,
+            "under_approval": under_approval,
+            "approved": approved,
+            "rejected": rejected,
+            "completed": completed,
+        }
+
     # NOTE: Tester workflow transitions (accept, start, submit_results)
     # are in services/testing_service.py, used by routers/testing.py.

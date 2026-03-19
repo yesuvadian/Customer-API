@@ -175,6 +175,19 @@ def list_testers(
         return result
 
 
+@router.get("/stats")
+def get_testing_request_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return testing request counts by status for the current user."""
+    service = TestingRequestService(db)
+    roles = _user_role_names(db, current_user.id)
+    # Admin sees all stats, others see only their own
+    user_id = None if "Admin" in roles else current_user.id
+    return service.get_stats(user_id=user_id)
+
+
 @router.post("/", response_model=TestingRequestResponse)
 def create_testing_request(
     data: TestingRequestCreate,

@@ -19,6 +19,16 @@ router = APIRouter(
 )
 
 
+@router.get("/stats")
+def get_approval_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return approval counts: pending, approved, rejected, total_reviewed."""
+    service = ApprovalService(db)
+    return service.get_approval_stats(approver_id=current_user.id)
+
+
 @router.get("/pending", response_model=List[RecommendationResponse])
 def get_pending_approvals(
     skip: int = Query(0, ge=0),
