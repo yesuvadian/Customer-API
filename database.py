@@ -1,4 +1,5 @@
 import os
+from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
@@ -110,6 +111,18 @@ Base = declarative_base()
 # ======================================================
 
 def get_vendor_db():
+    db = VendorSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ------------------------------------------------------
+# Helper for service-layer usage (non-FastAPI dependency)
+# ------------------------------------------------------
+@contextmanager
+def get_vendor_session():
     db = VendorSessionLocal()
     try:
         yield db

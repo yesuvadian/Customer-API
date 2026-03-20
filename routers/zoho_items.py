@@ -24,3 +24,4 @@ def get_taxes():
 @router.get("/{item_id}/image")
 def get_item_image(item_id: str):
     return service.get_item_image(item_id)
+

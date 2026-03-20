@@ -10,6 +10,17 @@ _access_token: str | None = None
 _expiry_time: float = 0
 
 
+def _raise_zoho_unavailable(exc: Exception) -> None:
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "message": "Zoho authentication service is unavailable",
+            "service": config.ZOHO_ACCOUNTS_BASE,
+            "error": str(exc),
+        },
+    ) from exc
+
+
 def get_zoho_access_token() -> str:
     """
     Return a cached Zoho access token or refresh it if expired.
@@ -21,20 +32,23 @@ def get_zoho_access_token() -> str:
     if _access_token and time.time() < (_expiry_time - 60):
         return _access_token
 
-    response = requests.post(
-        f"{config.ZOHO_ACCOUNTS_BASE}/oauth/v2/token",
-        params={
-            "refresh_token": config.ZOHO_REFRESH_TOKEN,
-            "client_id": config.ZOHO_CLIENT_ID,
-            "client_secret": config.ZOHO_CLIENT_SECRET,
-            "grant_type": "refresh_token"
-        },
-        timeout=10
-    )
+    try:
+        response = requests.post(
+            f"{config.ZOHO_ACCOUNTS_BASE}/oauth/v2/token",
+            data={
+                "refresh_token": config.ZOHO_REFRESH_TOKEN,
+                "client_id": config.ZOHO_CLIENT_ID,
+                "client_secret": config.ZOHO_CLIENT_SECRET,
+                "grant_type": "refresh_token"
+            },
+            timeout=10
+        )
+    except requests.RequestException as exc:
+        _raise_zoho_unavailable(exc)
 
     if response.status_code != 200:
         raise HTTPException(
-            status_code=500,
+            status_code=502,
             detail={
                 "message": "Failed to refresh Zoho access token",
                 "response": response.text

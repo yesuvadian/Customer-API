@@ -1058,6 +1058,53 @@ class CompanyProductSupplyReference(Base):
     )
     creator = relationship("User", foreign_keys=[created_by])
 
+class RFQ(Base):
+    __tablename__ = "rfq_requests"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    product_id = Column(
+        Integer,
+        ForeignKey("public.products.id"),
+        nullable=False
+    )
+
+    quantity = Column(Integer, nullable=False)
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id")
+    )
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    product = relationship("Product")
+
+class RFQVendor(Base):
+    __tablename__ = "rfq_vendors"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    rfq_id = Column(
+        Integer,
+        ForeignKey("public.rfq_requests.id"),
+        nullable=False
+    )
+
+    vendor_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+        nullable=False
+    )
+
+    status = Column(String, default="pending")
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    rfq = relationship("RFQ")
+
 
 # ------------------------------
 # TestingRequest Model
