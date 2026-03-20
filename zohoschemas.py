@@ -32,6 +32,9 @@ class RequestQuote(BaseModel):
 class SendQuoteWithSupplier(BaseModel):
     supplier_id: str
 class AssignVendors(BaseModel):
+    contact_id: str
+    items: List[QuoteItem]
+    notes: Optional[str] = None
     vendors: List[dict]
 # -----------------------------
 # ERP Review Quote
@@ -62,7 +65,6 @@ class QuoteResponse(BaseModel):
     estimate_number: str
     status: str
     message: Optional[str] = None
-    matched_vendors: Optional[List[Dict[str, Any]]] = []
 
 
 
