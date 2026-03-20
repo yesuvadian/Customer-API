@@ -3,6 +3,7 @@ param(
     [string]$Environment = "dev",
 
     [switch]$CreateDB,
+    [switch]$DropTables,
     [switch]$CreateTables,
     [switch]$Seed,
     [switch]$All
@@ -32,6 +33,7 @@ Write-Host "====================================="
 # If -All, enable all steps
 if ($All) {
     $CreateDB = $true
+    $DropTables = $true
     $CreateTables = $true
     $Seed = $true
 }
@@ -42,9 +44,10 @@ if (-not $CreateDB -and -not $CreateTables -and -not $Seed) {
     Write-Host "Usage:"
     Write-Host "  .\db_setup.ps1 -Environment dev -All              # Run all steps"
     Write-Host "  .\db_setup.ps1 -Environment dev -CreateDB         # Create database only"
+    Write-Host "  .\db_setup.ps1 -Environment dev -DropTables       # Drop all tables"
     Write-Host "  .\db_setup.ps1 -Environment dev -CreateTables     # Create tables only"
     Write-Host "  .\db_setup.ps1 -Environment dev -Seed             # Run seed only"
-    Write-Host "  .\db_setup.ps1 -Environment dev -CreateTables -Seed  # Tables + seed"
+    Write-Host "  .\db_setup.ps1 -Environment dev -DropTables -CreateTables -Seed  # Fresh setup"
     Write-Host ""
     exit 0
 }
@@ -102,7 +105,31 @@ if ($CreateDB) {
 }
 
 # ---------------------------------
-# Step 2: Create Tables + Migrate
+# Step 2: Drop Tables
+# ---------------------------------
+if ($DropTables) {
+    Write-Host ""
+
+    if ($Environment -eq "main") {
+        $confirm = Read-Host "DROP ALL TABLES on PRODUCTION? This cannot be undone! (yes/no)"
+        if ($confirm -ne "yes") {
+            Write-Host "Cancelled."
+            exit 1
+        }
+    }
+
+    Write-Host "Dropping all tables..."
+
+    $script = "#!/bin/bash`ncd $RemoteApiPath`nsource venv/bin/activate`npython -c ""`nfrom database import engine`nfrom models import Base`nBase.metadata.drop_all(bind=engine)`nprint('All tables dropped successfully.')`n""`n"
+
+    $ok = Invoke-RemoteScript -ScriptBody $script
+    if (-not $ok) {
+        Write-Host "Warning: Drop tables may have failed. Check output above."
+    }
+}
+
+# ---------------------------------
+# Step 3: Create Tables
 # ---------------------------------
 if ($CreateTables) {
     Write-Host ""
@@ -153,7 +180,7 @@ print('Migration complete.')
 }
 
 # ---------------------------------
-# Step 3: Run Seed
+# Step 4: Run Seed
 # ---------------------------------
 if ($Seed) {
     Write-Host ""
