@@ -58,12 +58,14 @@ if ($Environment -eq "main") {
     }
 }
 
-# Helper: write script to temp file with LF line endings, scp to server, execute, cleanup
+# Helper: write script to temp file with LF, scp to server, execute with -t for sudo, cleanup
 function Invoke-RemoteScript {
-    param([string]$ScriptBody)
+    param(
+        [string]$ScriptBody,
+        [switch]$NeedsSudo
+    )
 
     $localTmp = [System.IO.Path]::GetTempFileName()
-    # Write with explicit LF (no CRLF)
     [System.IO.File]::WriteAllText($localTmp, $ScriptBody.Replace("`r",""))
 
     scp $localTmp ${Server}:/tmp/db_setup.sh
@@ -73,7 +75,11 @@ function Invoke-RemoteScript {
         return $false
     }
 
-    ssh $Server "chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm -f /tmp/db_setup.sh"
+    if ($NeedsSudo) {
+        ssh -t $Server "chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm -f /tmp/db_setup.sh"
+    } else {
+        ssh $Server "chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm -f /tmp/db_setup.sh"
+    }
     $result = $LASTEXITCODE
 
     Remove-Item $localTmp -ErrorAction SilentlyContinue
@@ -89,20 +95,56 @@ if ($CreateDB) {
 
     $script = "#!/bin/bash`nif sudo -u postgres psql -tc ""SELECT 1 FROM pg_database WHERE datname = '$DbName'"" | grep -q 1; then`n  echo 'Database already exists'`nelse`n  sudo -u postgres psql -c ""CREATE DATABASE \""$DbName\"" OWNER $DbUser;""`n  echo 'Database created successfully'`nfi`n"
 
-    $ok = Invoke-RemoteScript -ScriptBody $script
+    $ok = Invoke-RemoteScript -ScriptBody $script -NeedsSudo
     if (-not $ok) {
         Write-Host "Warning: DB creation may have failed. Check output above."
     }
 }
 
 # ---------------------------------
-# Step 2: Create Tables
+# Step 2: Create Tables + Migrate
 # ---------------------------------
 if ($CreateTables) {
     Write-Host ""
-    Write-Host "Creating tables..."
+    Write-Host "Creating / updating tables..."
 
-    $script = "#!/bin/bash`ncd $RemoteApiPath`nsource venv/bin/activate`npython -c ""from database import engine; from models import Base; Base.metadata.create_all(bind=engine); print('Tables created successfully')""`n"
+    $script = @"
+#!/bin/bash
+cd $RemoteApiPath
+source venv/bin/activate
+python -c "
+from database import engine
+from models import Base
+from sqlalchemy import inspect, text
+
+# Create any new tables
+Base.metadata.create_all(bind=engine)
+print('Tables created/verified.')
+
+# Auto-add missing columns to existing tables
+inspector = inspect(engine)
+with engine.connect() as conn:
+    for table_name, table in Base.metadata.tables.items():
+        schema = table.schema or 'public'
+        try:
+            existing = {c['name'] for c in inspector.get_columns(table_name, schema=schema)}
+        except Exception:
+            continue
+        for col in table.columns:
+            if col.name not in existing:
+                col_type = col.type.compile(engine.dialect)
+                default = ''
+                if col.default is not None:
+                    default = ' DEFAULT ' + str(col.default.arg)
+                elif col.nullable:
+                    default = ' DEFAULT NULL'
+                stmt = f'ALTER TABLE {schema}.{table_name} ADD COLUMN {col.name} {col_type}{default}'
+                print(f'  Adding column: {schema}.{table_name}.{col.name} ({col_type})')
+                conn.execute(text(stmt))
+    conn.commit()
+print('Migration complete.')
+"
+"@
 
     $ok = Invoke-RemoteScript -ScriptBody $script
     if (-not $ok) {
