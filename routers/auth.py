@@ -8,7 +8,8 @@ from schemas import (
     PasswordResetConfirm, PasswordResetRequest,
     PasswordResetResponse, PlanOut, RefreshTokenRequest
 )
-from auth_utils import login_user, requestpasswordreset, resetpassword
+from auth_utils import build_user_privileges, get_current_user, login_user, requestpasswordreset, resetpassword
+from models import User
 from services.auth_service import AuthService
 from services.plan_service import PlanService
 
@@ -18,6 +19,15 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post("/login", response_model=LoginResponse)
 def login(request: LoginRequest, db: Session = Depends(get_db)):
     return login_user(db=db, email=request.email, password=request.password)
+
+
+@router.get("/privileges")
+def get_privileges(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return fresh privilege dict for the current user (no re-login needed)."""
+    return build_user_privileges(db, current_user.id)
 
 
 @router.post("/refresh")

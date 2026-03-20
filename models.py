@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import (
     Column, Float, LargeBinary, Numeric, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
 )
-from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
 from database import Base
 from utils.common_service import UTCDateTimeMixin
@@ -40,6 +40,25 @@ class BankStatusEnum(PyEnum):
     pending = "pending"
     approved = "approved"
     rejected = "rejected"
+
+class TestingRequestStatus(PyEnum):
+    draft = "draft"
+    submitted = "submitted"
+    assigned = "assigned"
+    accepted = "accepted"
+    in_progress = "in_progress"
+    test_submitted = "test_submitted"
+    under_approval = "under_approval"
+    approved = "approved"
+    rejected = "rejected"
+    procurement_initiated = "procurement_initiated"
+    completed = "completed"
+
+class RecommendationType(PyEnum):
+    pass_test = "pass"
+    fail = "fail"
+    conditional = "conditional"
+    retest = "retest"
 
 
 class Plan(Base):
@@ -477,6 +496,8 @@ class RoleModulePrivilege(Base):
     can_import = Column(Boolean, default=False)
     can_export = Column(Boolean, default=False)
     can_view = Column(Boolean, default=False)
+    can_approve = Column(Boolean, default=False)
+    can_assign = Column(Boolean, default=False)
 
     created_by = Column(ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     modified_by = Column(ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
@@ -1036,3 +1057,227 @@ class CompanyProductSupplyReference(Base):
         foreign_keys=[company_product_id]
     )
     creator = relationship("User", foreign_keys=[created_by])
+
+
+# ------------------------------
+# TestingRequest Model
+# ------------------------------
+class TestingRequest(Base):
+    __tablename__ = "testing_requests"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    request_number = Column(String(50), unique=True, nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+
+    # Transformer details
+    transformer_type = Column(String(100), nullable=True)
+    transformer_rating = Column(String(100), nullable=True)
+    manufacturer = Column(String(255), nullable=True)
+    serial_number = Column(String(100), nullable=True)
+
+    # Equipment & Test type (FK → CategoryMaster / CategoryDetails)
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=True)
+    test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id"), nullable=True)
+
+    # Organizational hierarchy
+    zone = Column(String(255), nullable=True)
+    ce_circle = Column(String(255), nullable=True)
+    se_division = Column(String(255), nullable=True)
+    ee_subdivision = Column(String(255), nullable=True)
+    aee_section = Column(String(255), nullable=True)
+    ae_je = Column(String(255), nullable=True)
+
+    # Workflow
+    status = Column(Enum(TestingRequestStatus), default=TestingRequestStatus.draft, nullable=False)
+    priority = Column(String(20), default="normal")
+
+    # Assignments
+    originator_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+    assigned_tester_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    assigned_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Dates
+    requested_date = Column(DateTime(timezone=True), nullable=True)
+    due_date = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Notes
+    notes = Column(Text, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    originator = relationship("User", foreign_keys=[originator_id])
+    assigned_tester = relationship("User", foreign_keys=[assigned_tester_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    test_results = relationship("TestResult", back_populates="testing_request", cascade="all, delete-orphan")
+    recommendations = relationship("Recommendation", back_populates="testing_request", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# TesterLocation Mapping (links tester users to org hierarchy without altering users table)
+# ------------------------------
+class TesterLocation(Base):
+    __tablename__ = "tester_locations"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+    zone = Column(String(255), nullable=True)
+    ce_circle = Column(String(255), nullable=True)
+    se_division = Column(String(255), nullable=True)
+    ee_subdivision = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
+# ------------------------------
+# TestResult Model
+# ------------------------------
+class TestResult(Base):
+    __tablename__ = "test_results"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
+
+    test_name = Column(String(255), nullable=False)
+    test_category = Column(String(100), nullable=True)
+    result_value = Column(String(255), nullable=True)
+    result_unit = Column(String(50), nullable=True)
+    pass_fail = Column(String(10), nullable=True)
+    remarks = Column(Text, nullable=True)
+
+    # File attachment
+    file_name = Column(String(255), nullable=True)
+    file_type = Column(String(100), nullable=True)
+    file_size = Column(Integer, nullable=True)
+    file_data = Column(LargeBinary, nullable=True)
+
+    # Structured test data (JSONB)
+    test_data = Column(JSONB, nullable=True)
+    overall_result = Column(String(20), nullable=True)
+    template_key = Column(String(100), nullable=True)
+    replacement_products = Column(JSONB, nullable=True)  # [{item_id, item_name, category, quantity}, ...]
+
+    tested_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    tested_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    testing_request = relationship("TestingRequest", back_populates="test_results")
+    images = relationship("TestResultImage", back_populates="test_result", cascade="all, delete-orphan")
+    tester = relationship("User", foreign_keys=[tested_by])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+
+
+# ------------------------------
+# Test Result Image Model
+# ------------------------------
+class TestResultImage(Base):
+    __tablename__ = "test_result_images"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    test_result_id = Column(UUID(as_uuid=True), ForeignKey("public.test_results.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    file_type = Column(String(100), nullable=True)
+    file_size = Column(Integer, nullable=True)
+    file_data = Column(LargeBinary, nullable=False)
+    caption = Column(String(500), nullable=True)
+    sort_order = Column(Integer, default=0)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    test_result = relationship("TestResult", back_populates="images")
+
+
+# ------------------------------
+# Recommendation Model
+# ------------------------------
+class Recommendation(Base):
+    __tablename__ = "recommendations"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
+
+    recommendation_type = Column(Enum(RecommendationType), nullable=False)
+    summary = Column(Text, nullable=False)
+    detailed_notes = Column(Text, nullable=True)
+    replacement_products = Column(JSONB, nullable=True)  # [{item_id, item_name, category, quantity}, ...]
+
+    # Approval
+    approval_status = Column(String(20), default="pending")
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approval_notes = Column(Text, nullable=True)
+
+    submitted_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    testing_request = relationship("TestingRequest", back_populates="recommendations")
+    submitter = relationship("User", foreign_keys=[submitted_by])
+    approver = relationship("User", foreign_keys=[approved_by])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+
+
+# ------------------------------
+# ProcurementRequest Model
+# ------------------------------
+class ProcurementRequest(Base):
+    __tablename__ = "procurement_requests"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    procurement_number = Column(String(50), unique=True, nullable=False)
+    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id"), nullable=False)
+    recommendation_id = Column(UUID(as_uuid=True), ForeignKey("public.recommendations.id"), nullable=True)
+
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), default="initiated")
+
+    estimated_cost = Column(Float, nullable=True)
+    quantity = Column(Integer, nullable=True)
+    specifications = Column(Text, nullable=True)
+
+    raised_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+    raised_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    testing_request = relationship("TestingRequest", foreign_keys=[testing_request_id])
+    recommendation = relationship("Recommendation", foreign_keys=[recommendation_id])
+    raiser = relationship("User", foreign_keys=[raised_by])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])

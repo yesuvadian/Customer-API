@@ -34,6 +34,30 @@ def seed_users(session):
                 # ✅ ERP SERVICE USER
         {"first_name": "ERP", "last_name": "Service", "email": "erp_bot@relu.com",
          "phone_number": "4444444444", "password": "ErpBot@123"},
+        # ✅ TESTING REQUEST SYSTEM USERS
+        {"first_name": "Originator", "last_name": "User", "email": "dakshanamurthy@hotmail.com",
+         "phone_number": "3333333333", "password": "Originator@123"},
+        {"first_name": "Tester", "last_name": "User", "email": "tester@relu.com",
+         "phone_number": "2222222222", "password": "Tester@123"},
+        {"first_name": "Approver", "last_name": "User", "email": "approver@relu.com",
+         "phone_number": "1111111111", "password": "Approver@123"},
+        # Testers per circle/division
+        {"first_name": "Ramesh", "last_name": "AE - BMAZ North", "email": "tester.bmaz.north@relu.com",
+         "phone_number": "2200000001"},
+        {"first_name": "Suresh", "last_name": "AE - BMAZ South", "email": "tester.bmaz.south@relu.com",
+         "phone_number": "2200000002"},
+        {"first_name": "Mahesh", "last_name": "AE - BRAZ", "email": "tester.braz@relu.com",
+         "phone_number": "2200000003"},
+        {"first_name": "Ganesh", "last_name": "AE - Hubli Division", "email": "tester.hubli@relu.com",
+         "phone_number": "2200000004"},
+        {"first_name": "Naresh", "last_name": "AE - Belagavi Division", "email": "tester.belagavi@relu.com",
+         "phone_number": "2200000005"},
+        {"first_name": "Rajesh", "last_name": "AE - Mysuru Division", "email": "tester.mysuru@relu.com",
+         "phone_number": "2200000006"},
+        {"first_name": "Dinesh", "last_name": "AE - Gulbarga Division", "email": "tester.gulbarga@relu.com",
+         "phone_number": "2200000007"},
+        {"first_name": "Harish", "last_name": "AE - Bellary Division", "email": "tester.bellary@relu.com",
+         "phone_number": "2200000008"},
           # ✅ SHEET USERS (NEW → customer)
         {"first_name": "MVS", "last_name": "MANIAN", "email": "venkat@vmepl.com",
          "phone_number": "9876543210", "usertype": "customer"},
@@ -99,7 +123,7 @@ def seed_users(session):
         newly_created_user_ids.append(user.id)
 
     session.commit()
-    print("✅ New users seeded.")
+    print("[OK] New users seeded.")
     return newly_created_user_ids
 
 
@@ -111,7 +135,11 @@ def seed_roles(session):
         {"name": "Auditor", "description": "Can view scan history and audit trails"},
         {"name": "Vendor", "description": "Can have access over products"},
          # ✅ ERP SERVICE ROLE
-        {"name": "ERP_SERVICE", "description": "Automated ERP sync service"}
+        {"name": "ERP_SERVICE", "description": "Automated ERP sync service"},
+        # ✅ TESTING REQUEST SYSTEM ROLES
+        {"name": "Originator", "description": "Creates testing requests and raises procurement"},
+        {"name": "Tester", "description": "Performs transformer testing and uploads results"},
+        {"name": "Approver", "description": "Reviews and approves or rejects recommendations"},
     ]
 
     role_ids = {}
@@ -125,29 +153,33 @@ def seed_roles(session):
         else:
             role_ids[r["name"]] = existing_role.id
     session.commit()
-    print("✅ Roles seeded successfully.")
+    print("[OK] Roles seeded successfully.")
     return role_ids
 
 def assign_viewer_role_to_new_users(session, new_user_ids, role_ids):
+    """Assign Viewer role to new users who don't have ANY role yet.
+    Rule: Each user can only belong to ONE role.
+    """
     viewer_role_id = role_ids.get("Viewer")
     if not viewer_role_id:
-        print("❌ Viewer role not found")
+        print("[ERROR] Viewer role not found")
         return
 
     for user_id in new_user_ids:
-        exists = session.query(UserRole).filter_by(
+        # Skip if user already has ANY role (single-role rule)
+        has_any_role = session.query(UserRole).filter(
+            UserRole.user_id == user_id
+        ).first()
+        if has_any_role:
+            continue
+
+        session.add(UserRole(
             user_id=user_id,
             role_id=viewer_role_id
-        ).first()
-
-        if not exists:
-            session.add(UserRole(
-                user_id=user_id,
-                role_id=viewer_role_id
-            ))
+        ))
 
     session.commit()
-    print("✅ Viewer (Read-only) role assigned to new users.")
+    print("[OK] Viewer (Read-only) role assigned to new users without any role.")
 
 def seed_plans(session):
     plans_data = [
@@ -171,7 +203,7 @@ def seed_plans(session):
             existing_plan.plan_limit = p["plan_limit"]
             existing_plan.isactive = p["isactive"]
     session.commit()
-    print("✅ Plans seeded successfully.")
+    print("[OK] Plans seeded successfully.")
 def seed_category_master(session):
     """Seeds the CategoryMaster table with required categories."""
 
@@ -203,7 +235,7 @@ def seed_category_master(session):
             master_ids[c["name"]] = existing.id
 
     session.commit()
-    print("✅ Category Master seeded successfully.")
+    print("[OK] Category Master seeded successfully.")
     return master_ids
 
 def seed_category_details(session, master_ids):
@@ -258,7 +290,7 @@ def seed_category_details(session, master_ids):
     for d in category_details_data:
         master_id = master_ids.get(d["master_name"])
         if not master_id:
-            print(f"⚠️ Master not found: {d['master_name']}")
+            print(f"[WARN] Master not found: {d['master_name']}")
             continue
 
         existing = session.query(CategoryDetails).filter_by(
@@ -278,7 +310,7 @@ def seed_category_details(session, master_ids):
             existing.is_active = True
 
     session.commit()
-    print("✅ Category Details seeded successfully.")
+    print("[OK] Category Details seeded successfully.")
 
 def seed_country_india(session):
     existing = session.query(Country).filter_by(name="INDIA").first()
@@ -291,9 +323,9 @@ def seed_country_india(session):
         )
         session.add(country)
         session.commit()
-        print("✅ India seeded successfully.")
+        print("[OK] India seeded successfully.")
     else:
-        print("ℹ️ India already exists in countries table.")
+        print("[INFO] India already exists in countries table.")
         
 def seed_modules(session):
     modules_data = [
@@ -329,8 +361,25 @@ def seed_modules(session):
 {"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
 {"name": "ERP Database","description": "Internal ERP DB access (backend only)","path": "erp_database","group_name": "ERP","is_active": False},
 {"name": "Mongo Database","description": "Internal Mongo DB access (backend only)", "path": "mongo_database", "group_name": "ERP", "is_active": False},
-{"name": "zohocontacts", "description": "Manage Zoho Contacts", "path": "zohocontacts", "group_name": "CRM"}
-
+{"name": "zohocontacts", "description": "Manage Zoho Contacts", "path": "zohocontacts", "group_name": "CRM"},
+# ✅ PROCUREMENT / ZOHO PORTAL MODULES
+{"name": "Request Quote", "description": "Request quotes from suppliers", "path": "request_quote", "group_name": "Procurement"},
+{"name": "Request Product", "description": "Request new products", "path": "request_product", "group_name": "Procurement"},
+{"name": "Quotes", "description": "View and manage quotes", "path": "quotes", "group_name": "Procurement"},
+{"name": "Sales Orders", "description": "View and manage sales orders", "path": "sales_orders", "group_name": "Procurement"},
+{"name": "Invoices", "description": "View and manage invoices", "path": "invoices", "group_name": "Procurement"},
+{"name": "Retainer Invoices", "description": "Manage retainer invoices", "path": "retainer_invoices", "group_name": "Procurement"},
+{"name": "Payments Made", "description": "Track payments made", "path": "payments_made", "group_name": "Procurement"},
+{"name": "Statements", "description": "View account statements", "path": "statements", "group_name": "Procurement"},
+{"name": "Enquiry", "description": "Submit and manage enquiries", "path": "enquiry", "group_name": "Procurement"},
+{"name": "Contact Us", "description": "Customer support", "path": "contact_us", "group_name": "Procurement"},
+# ✅ TESTING REQUEST SYSTEM MODULES
+{"name": "Testing Requests", "description": "Create and manage transformer testing requests", "path": "testing_requests", "group_name": "Testing"},
+{"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
+{"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
+{"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
+{"name": "Validation Requests", "description": "Create and manage validation requests", "path": "validation_requests", "group_name": "Testing"},
+{"name": "Tester Mapping", "description": "Map testers to locations (zone/circle/division)", "path": "tester_mapping", "group_name": "Testing"},
 
     ]
 
@@ -362,7 +411,7 @@ def seed_modules(session):
             module_ids[m["name"]] = existing.id
 
     session.commit()
-    print("✅ Modules seeded successfully.")
+    print("[OK] Modules seeded successfully.")
     return module_ids
 
 
@@ -402,7 +451,13 @@ def seed_privileges(session, role_ids, module_ids):
         "Divisions", "User Documents",
         "Company Product Certificates", "Company Product Supply References",
         "Category Master", "Category Details",
-        "Sync ERP Vendor", "KYC Status", "zohocontacts"
+        "Sync ERP Vendor", "KYC Status", "zohocontacts",
+        # ✅ PROCUREMENT / ZOHO PORTAL MODULES
+        "Request Quote", "Request Product", "Quotes", "Sales Orders",
+        "Invoices", "Retainer Invoices", "Payments Made", "Statements",
+        "Enquiry", "Contact Us",
+        # ✅ TESTING REQUEST SYSTEM MODULES
+        "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests"
     ]
 
     # -------------------------------------------------------
@@ -509,6 +564,69 @@ def seed_privileges(session, role_ids, module_ids):
     privileges_data.extend(erp_service_privileges)
 
     # -------------------------------------------------------
+    # ⭐ TESTING REQUEST SYSTEM PRIVILEGES
+    # -------------------------------------------------------
+    testing_privileges = [
+        # ORIGINATOR — full on Testing Requests + Procurement, view on others, can_assign
+        {
+            "role": "Originator", "module": "Testing Requests",
+            "can_view": True, "can_add": True, "can_edit": True,
+            "can_delete": True, "can_search": True, "can_assign": True
+        },
+        {"role": "Originator", "module": "Testing", "can_view": True},
+        {"role": "Originator", "module": "Recommendations", "can_view": True},
+        {"role": "Originator", "module": "Approvals", "can_view": True},
+        {
+            "role": "Originator", "module": "Validation Requests",
+            "can_view": True, "can_add": True, "can_edit": True, "can_search": True
+        },
+        {"role": "Originator", "module": "Dashboard", "can_view": True},
+        # Originator — Procurement modules
+        {"role": "Originator", "module": "Request Quote", "can_view": True, "can_add": True},
+        {"role": "Originator", "module": "Request Product", "can_view": True, "can_add": True},
+        {"role": "Originator", "module": "Quotes", "can_view": True},
+        {"role": "Originator", "module": "Sales Orders", "can_view": True},
+        {"role": "Originator", "module": "Invoices", "can_view": True},
+        {"role": "Originator", "module": "Retainer Invoices", "can_view": True},
+        {"role": "Originator", "module": "Payments Made", "can_view": True},
+        {"role": "Originator", "module": "Statements", "can_view": True},
+        {"role": "Originator", "module": "Enquiry", "can_view": True, "can_add": True},
+        {"role": "Originator", "module": "Contact Us", "can_view": True},
+
+        # TESTER — view Testing Requests, full on Testing + Recommendations
+        {"role": "Tester", "module": "Testing Requests", "can_view": True},
+        {
+            "role": "Tester", "module": "Testing",
+            "can_view": True, "can_add": True, "can_edit": True, "can_search": True
+        },
+        {
+            "role": "Tester", "module": "Recommendations",
+            "can_view": True, "can_add": True, "can_edit": True
+        },
+        {"role": "Tester", "module": "Dashboard", "can_view": True},
+
+        # APPROVER — view Testing Requests + Recommendations, approve on Approvals
+        {"role": "Approver", "module": "Testing Requests", "can_view": True},
+        {"role": "Approver", "module": "Testing", "can_view": True},
+        {"role": "Approver", "module": "Recommendations", "can_view": True},
+        {
+            "role": "Approver", "module": "Approvals",
+            "can_view": True, "can_approve": True
+        },
+        {"role": "Approver", "module": "Dashboard", "can_view": True},
+
+        # TESTER MAPPING — Admin full, Originator view-only
+        {
+            "role": "Admin", "module": "Tester Mapping",
+            "can_view": True, "can_add": True, "can_edit": True,
+            "can_delete": True, "can_search": True
+        },
+        {"role": "Originator", "module": "Tester Mapping", "can_view": True},
+    ]
+
+    privileges_data.extend(testing_privileges)
+
+    # -------------------------------------------------------
     # INSERT PRIVILEGES INTO DATABASE
     # -------------------------------------------------------
     for p in privileges_data:
@@ -534,10 +652,12 @@ def seed_privileges(session, role_ids, module_ids):
                 can_search=p.get("can_search", False),
                 can_import=p.get("can_import", False),
                 can_export=p.get("can_export", False),
+                can_approve=p.get("can_approve", False),
+                can_assign=p.get("can_assign", False),
             ))
 
     session.commit()
-    print("✅ Privileges seeded successfully!")
+    print("[OK] Privileges seeded successfully!")
 
 
 def seed_user_roles(session, role_ids):
@@ -548,18 +668,37 @@ def seed_user_roles(session, role_ids):
         {"email": "auditor@relu.com", "role": "Auditor"},
         {"email": "vendor@relu.com", "role": "Vendor"},
           # ✅ ERP SERVICE USER ROLE
-        {"email": "erp_bot@relu.com", "role": "ERP_SERVICE"}
+        {"email": "erp_bot@relu.com", "role": "ERP_SERVICE"},
+        # ✅ TESTING REQUEST SYSTEM USER ROLES
+        {"email": "originator@relu.com", "role": "Originator"},
+        {"email": "tester@relu.com", "role": "Tester"},
+        {"email": "approver@relu.com", "role": "Approver"},
+        # Circle/Division testers
+        {"email": "tester.bmaz.north@relu.com", "role": "Tester"},
+        {"email": "tester.bmaz.south@relu.com", "role": "Tester"},
+        {"email": "tester.braz@relu.com", "role": "Tester"},
+        {"email": "tester.hubli@relu.com", "role": "Tester"},
+        {"email": "tester.belagavi@relu.com", "role": "Tester"},
+        {"email": "tester.mysuru@relu.com", "role": "Tester"},
+        {"email": "tester.gulbarga@relu.com", "role": "Tester"},
+        {"email": "tester.bellary@relu.com", "role": "Tester"},
     ]
 
     for ur in user_roles_data:
         user = session.query(User).filter_by(email=ur["email"]).first()
         role_id = role_ids.get(ur["role"])
         if user and role_id:
+            # Single-role rule: remove any existing roles first
+            session.query(UserRole).filter(
+                UserRole.user_id == user.id,
+                UserRole.role_id != role_id
+            ).delete()
+
             exists = session.query(UserRole).filter_by(user_id=user.id, role_id=role_id).first()
             if not exists:
                 session.add(UserRole(user_id=user.id, role_id=role_id))
     session.commit()
-    print("✅ User-role assignments seeded successfully.")
+    print("[OK] User-role assignments seeded successfully (single-role enforced).")
 
 
 # ----------------- TNEB Product Seed -----------------
@@ -568,11 +707,11 @@ import json
 
 def seed_product_categories(session):
 
-    # ---- 1️⃣ READ categories from JSON file ----
+    # ---- 1. READ categories from JSON file ----
     with open("categories_data_clean.json", "r", encoding="utf-8") as f:
         categories_raw = json.load(f)
 
-    # ---- 2️⃣ REMOVE DUPLICATES BY CATEGORY NAME ----
+    # ---- 2. REMOVE DUPLICATES BY CATEGORY NAME ----
     unique_categories = {}
     for item in categories_raw:
         name = item["name"].strip()
@@ -587,7 +726,7 @@ def seed_product_categories(session):
         for name, desc in unique_categories.items()
     ]
 
-    # ---- 3️⃣ SEED INTO DATABASE (your original logic) ----
+    # ---- 3. SEED INTO DATABASE (your original logic) ----
     category_ids = {}
 
     for c in categories_data:
@@ -609,7 +748,7 @@ def seed_product_categories(session):
 
     session.commit()
 
-    print("✅ Product categories seeded successfully.")
+    print("[OK] Product categories seeded successfully.")
     return category_ids
 
 
@@ -636,7 +775,7 @@ def seed_divisions(session):
             existing.is_active = True
 
     session.commit()
-    print("✅ Divisions seeded successfully.")
+    print("[OK] Divisions seeded successfully.")
 
 import json
 
@@ -644,11 +783,11 @@ import json
 
 def seed_product_subcategories(session, category_ids):
 
-    # ---- 1️⃣ Load subcategories from JSON file ----
+    # ---- 1. Load subcategories from JSON file ----
     with open("subcategories_data_clean.json", "r", encoding="utf-8") as f:
         subcategories_raw = json.load(f)
 
-    # ---- 2️⃣ Remove duplicates (unique by name + category) ----
+    # ---- 2. Remove duplicates (unique by name + category) ----
     unique_pairs = set()
     subcategories_data = []
 
@@ -664,9 +803,9 @@ def seed_product_subcategories(session, category_ids):
                 "category": category
             })
 
-    print(f"🔎 Unique subcategories found: {len(subcategories_data)}")
+    print(f"[INFO] Unique subcategories found: {len(subcategories_data)}")
 
-    # ---- 3️⃣ Seed subcategories into DB ----
+    # ---- 3. Seed subcategories into DB ----
     subcategory_ids = {}
 
     for sc in subcategories_data:
@@ -676,7 +815,7 @@ def seed_product_subcategories(session, category_ids):
         # Must exist in categories
         category_id = category_ids.get(category_name)
         if not category_id:
-            print(f"⚠️ Category not found for subcategory: {subcategory_name}")
+            print(f"[WARN] Category not found for subcategory: {subcategory_name}")
             continue
 
         # Check if subcategory already exists under this category
@@ -711,7 +850,7 @@ def seed_product_subcategories(session, category_ids):
 
     session.commit()
 
-    print("✅ Product subcategories seeded successfully.")
+    print("[OK] Product subcategories seeded successfully.")
     return subcategory_ids
 
 
@@ -774,7 +913,7 @@ def seed_indian_states(session, india):
             inserted_states[s["name"]] = existing.id
 
     session.commit()
-    print("✅ Indian states seeded successfully.")
+    print("[OK] Indian states seeded successfully.")
     return inserted_states
 
 # ----------------- Country & States Seed -----------------
@@ -784,7 +923,7 @@ def seed_india_country(session):
         india = Country(name="INDIA", code="IND", erp_external_id="1473917605099")
         session.add(india)
         session.commit()
-        print("✅ India seeded successfully.")
+        print("[OK] India seeded successfully.")
         
     return session.query(Country).filter_by(name="INDIA").first()
 
@@ -867,7 +1006,7 @@ def seed_products(session, category_ids, subcategory_ids, filepath="product.json
             existing.is_active = True
 
     session.commit()
-    print("✅ Existing data + file data seeded successfully.")
+    print("[OK] Existing data + file data seeded successfully.")
     
 
 def seed_cities(session, state_ids, filepath="city.json"):
@@ -881,7 +1020,7 @@ def seed_cities(session, state_ids, filepath="city.json"):
     for c in file_data:
         state_id = state_ids.get(c["statename"])
         if not state_id:
-            print(f"⚠️ State '{c['statename']}' not found. Skipping city '{c['name']}'.")
+            print(f"[WARN] State '{c['statename']}' not found. Skipping city '{c['name']}'.")
             continue
 
         existing = session.query(City).filter_by(name=c["name"], state_id=state_id).first()
@@ -899,11 +1038,380 @@ def seed_cities(session, state_ids, filepath="city.json"):
             existing.erp_sync_status = "pending"
 
     session.commit()
-    print("✅ Cities seeded successfully.")
+    print("[OK] Cities seeded successfully.")
+
+
+# ----------------- Testing Request System Seed -----------------
+
+def seed_test_type_categories(session, master_ids):
+    """
+    Seeds Equipment types as CategoryMaster rows and
+    Test types as CategoryDetails rows linked to their parent equipment.
+    Description='Testing Equipment' tags these masters for filtering.
+    """
+
+    equipment_tests = {
+        # ── From user's Equipment → Test mapping ──
+        "Feeder protection relays": [
+            "Relay Testing Report",
+        ],
+        "Power transformers": [
+            "Differential Protection Test",
+        ],
+        "Transformer differential relay": [
+            "Stability / Bias Test",
+        ],
+        "Protection relays": [
+            "Protection Relay Functional Test",
+        ],
+        "Current transformers": [
+            "Insulation Resistance (IR) Test",
+            "CT Ratio Test",
+            "Core Insulation Test",
+        ],
+        "Protection system": [
+            "Transformer Protection Commissioning",
+        ],
+        "Feeder Metering": [
+            "Energy meter accuracy test",
+        ],
+        "Transformer": [
+            "Physical inspection",
+            "Insulation resistance test",
+            "Transformer ratio test",
+            "Current ratio test",
+            "Short circuit test",
+            "Open circuit test",
+            "Magnetic balance test",
+        ],
+        # ── Additional equipment from KPTCL flow (PDF) ──
+        "Relay": [
+            "Relay Testing",
+        ],
+        "Meter": [
+            "Meter Testing",
+        ],
+        # ── Power Transformer (from HTML mockups) ──
+        "Power Transformer": [
+            "Power Transformer Nameplate Details",
+            "Transformer Physical Inspection",
+            "Ratio Test HV-IV",
+            "Ratio Test HV-LV",
+            "Short Circuit Test HV-IV",
+            "Short Circuit Test HV-LV",
+            "Magnetic Balance Test HV",
+            "Magnetic Balance Test IV",
+            "Magnetic Balance Test LV",
+            "Open Circuit Test HV-IV (1Ph)",
+            "Open Circuit Test HV-IV (3Ph)",
+            "Open Circuit Test HV-LV (1Ph)",
+            "Open Circuit Test HV-LV (3Ph)",
+            "Open Circuit Test IV-LV (1Ph)",
+            "Open Circuit Test IV-LV (3Ph)",
+            "Capacitance & Tan Delta Test (Transformer)",
+            "Capacitance & Tan Delta Comparison",
+        ],
+        # ── Current Transformer (additional tests from HTML mockups) ──
+        "Current Transformer": [
+            "CT Insulation Test",
+            "CT Ratio Test (Detailed)",
+            "Capacitance & Tan Delta Test (CT)",
+            "Tan Delta NCT Test",
+        ],
+        # ── CVT (new equipment type from HTML mockups) ──
+        "CVT": [
+            "CVT Test Report",
+        ],
+    }
+
+    for equipment_name, test_list in equipment_tests.items():
+        # ---- upsert CategoryMaster (Equipment) ----
+        existing_master = session.query(CategoryMaster).filter_by(name=equipment_name).first()
+        if not existing_master:
+            master = CategoryMaster(
+                name=equipment_name,
+                description="Testing Equipment",
+                is_active=True,
+            )
+            session.add(master)
+            session.flush()
+            master_id = master.id
+        else:
+            existing_master.description = "Testing Equipment"
+            existing_master.is_active = True
+            master_id = existing_master.id
+
+        master_ids[equipment_name] = master_id
+
+        # ---- upsert CategoryDetails (Test Types) ----
+        for test_name in test_list:
+            existing_detail = session.query(CategoryDetails).filter_by(
+                name=test_name,
+                category_master_id=master_id,
+            ).first()
+            if not existing_detail:
+                session.add(CategoryDetails(
+                    name=test_name,
+                    description=f"Test for {equipment_name}",
+                    category_master_id=master_id,
+                    is_active=True,
+                ))
+            else:
+                existing_detail.is_active = True
+
+    session.commit()
+    print("[OK] Equipment & Test Type categories seeded successfully.")
+
+    # ── Priority master ──
+    priority_master_name = "Testing Priority"
+    existing_pm = session.query(CategoryMaster).filter_by(name=priority_master_name).first()
+    if not existing_pm:
+        pm = CategoryMaster(name=priority_master_name, description="Testing Priority", is_active=True)
+        session.add(pm)
+        session.flush()
+        pm_id = pm.id
+    else:
+        existing_pm.description = "Testing Priority"
+        pm_id = existing_pm.id
+    master_ids[priority_master_name] = pm_id
+
+    for p in ["Low", "Normal", "Medium", "High", "Critical"]:
+        existing_p = session.query(CategoryDetails).filter_by(name=p, category_master_id=pm_id).first()
+        if not existing_p:
+            session.add(CategoryDetails(name=p, description=f"{p} priority", category_master_id=pm_id, is_active=True))
+
+    # ── Transformer Rating master ──
+    rating_master_name = "Transformer Rating"
+    existing_rm = session.query(CategoryMaster).filter_by(name=rating_master_name).first()
+    if not existing_rm:
+        rm = CategoryMaster(name=rating_master_name, description="Transformer Rating", is_active=True)
+        session.add(rm)
+        session.flush()
+        rm_id = rm.id
+    else:
+        existing_rm.description = "Transformer Rating"
+        rm_id = existing_rm.id
+    master_ids[rating_master_name] = rm_id
+
+    for r in ["5 kVA", "10 kVA", "16 kVA", "25 kVA", "63 kVA", "100 kVA", "200 kVA",
+              "315 kVA", "500 kVA", "1 MVA", "2 MVA", "5 MVA", "10 MVA",
+              "20 MVA", "31.5 MVA", "50 MVA", "100 MVA", "160 MVA", "315 MVA"]:
+        existing_r = session.query(CategoryDetails).filter_by(name=r, category_master_id=rm_id).first()
+        if not existing_r:
+            session.add(CategoryDetails(name=r, description=f"Rating {r}", category_master_id=rm_id, is_active=True))
+
+    session.commit()
+    print("[OK] Priority & Transformer Rating categories seeded successfully.")
+
+    # ── Organizational Hierarchy dropdowns ──
+    org_hierarchy = {
+        "KPTCL Zone": [
+            "Bangalore Zone",
+            "Gulbarga Zone",
+            "Hubli Zone",
+            "Mysore Zone",
+        ],
+        "CE Circle": [
+            "BMAZ North",
+            "BMAZ South",
+            "BRAZ",
+            "CTAZ",
+            "O&M Zone Hubballi",
+            "Belagavi Zone",
+            "Mangaluru Zone",
+            "Shivamogga Zone",
+            "Mysuru Zone",
+            "Hassan Zone",
+            "Gulbarga Zone",
+            "Bellary Zone",
+        ],
+        "SE Division": [
+            "Bangalore Urban Division",
+            "Bangalore Rural Division",
+            "Tumkur Division",
+            "Ramanagara Division",
+            "Mysuru Division",
+            "Mandya Division",
+            "Hassan Division",
+            "Hubli Division",
+            "Dharwad Division",
+            "Belagavi Division",
+            "Gulbarga Division",
+            "Raichur Division",
+            "Bellary Division",
+        ],
+        "EE Sub-Division": [
+            "TL & SS Sub-Division 1",
+            "TL & SS Sub-Division 2",
+            "TL & SS Sub-Division 3",
+            "TL & SS Sub-Division 4",
+            "TL & SS Sub-Division 5",
+        ],
+        "AEE Section": [
+            "SS Section 1",
+            "SS Section 2",
+            "SS Section 3",
+            "SS Section 4",
+            "SS Section 5",
+        ],
+        "AE-JE Maintenance": [
+            "AE Maintenance 1",
+            "AE Maintenance 2",
+            "JE Maintenance 1",
+            "JE Maintenance 2",
+            "JE Maintenance 3",
+        ],
+    }
+
+    for master_name, details_list in org_hierarchy.items():
+        existing_m = session.query(CategoryMaster).filter_by(name=master_name).first()
+        if not existing_m:
+            m = CategoryMaster(name=master_name, description=master_name, is_active=True)
+            session.add(m)
+            session.flush()
+            m_id = m.id
+        else:
+            existing_m.description = master_name
+            m_id = existing_m.id
+        master_ids[master_name] = m_id
+
+        for detail_name in details_list:
+            existing_d = session.query(CategoryDetails).filter_by(name=detail_name, category_master_id=m_id).first()
+            if not existing_d:
+                session.add(CategoryDetails(name=detail_name, description=master_name, category_master_id=m_id, is_active=True))
+
+    session.commit()
+    print("[OK] Organizational hierarchy categories seeded successfully.")
+
+
+def seed_sample_testing_request(session):
+    """Seeds a sample testing request in draft status for demo purposes."""
+    from models import TestingRequest, TestingRequestStatus
+
+    existing = session.query(TestingRequest).filter_by(request_number="TR-20260313-0001").first()
+    if existing:
+        print("[INFO] Sample testing request already exists.")
+        return
+
+    originator = session.query(User).filter_by(email="originator@relu.com").first()
+    if not originator:
+        print("[WARN] Originator user not found. Skipping sample testing request.")
+        return
+
+    request = TestingRequest(
+        request_number="TR-20260313-0001",
+        title="11kV Distribution Transformer 100kVA - Routine Testing",
+        description="Routine testing required for newly procured 11kV 100kVA distribution transformer before deployment.",
+        transformer_type="Distribution Transformer",
+        transformer_rating="100 kVA",
+        manufacturer="Sample Manufacturer Ltd",
+        serial_number="DT-2026-001",
+        status=TestingRequestStatus.draft,
+        priority="normal",
+        originator_id=originator.id,
+        created_by=originator.id,
+    )
+    session.add(request)
+    session.commit()
+    print("[OK] Sample testing request seeded.")
+
+
+# ----------------- Migrate Schema -----------------
+
+def migrate_testing_request_columns(session):
+    """Add columns to testing_requests and create tester_locations table if missing."""
+    from sqlalchemy import text
+    try:
+        session.execute(text("""
+            ALTER TABLE public.testing_requests
+            ADD COLUMN IF NOT EXISTS equipment_type_id INTEGER
+            REFERENCES public."CategoryMaster"(id);
+        """))
+        session.execute(text("""
+            ALTER TABLE public.testing_requests
+            ADD COLUMN IF NOT EXISTS test_type_id INTEGER
+            REFERENCES public."CategoryDetails"(id);
+        """))
+        # Organizational hierarchy columns
+        for col in ["zone", "ce_circle", "se_division", "ee_subdivision", "aee_section", "ae_je"]:
+            session.execute(text(f"""
+                ALTER TABLE public.testing_requests
+                ADD COLUMN IF NOT EXISTS {col} VARCHAR(255);
+            """))
+        # Create tester_locations mapping table
+        session.execute(text("""
+            CREATE TABLE IF NOT EXISTS public.tester_locations (
+                id SERIAL PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES public.users(id),
+                zone VARCHAR(255),
+                ce_circle VARCHAR(255),
+                se_division VARCHAR(255),
+                ee_subdivision VARCHAR(255),
+                is_active BOOLEAN DEFAULT TRUE
+            );
+        """))
+        session.commit()
+        print("[OK] testing_requests columns + tester_locations table migrated.")
+    except Exception as e:
+        session.rollback()
+        print(f"[WARN] Migration skipped or failed: {e}")
+
+
+def seed_tester_locations(session):
+    """Seeds tester-to-location mappings in tester_locations table."""
+    from models import TesterLocation
+
+    tester_mappings = [
+        {"email": "tester@relu.com", "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
+         "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1"},
+        {"email": "tester.bmaz.north@relu.com", "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
+         "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1"},
+        {"email": "tester.bmaz.south@relu.com", "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
+         "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2"},
+        {"email": "tester.braz@relu.com", "zone": "Bangalore Zone", "ce_circle": "BRAZ",
+         "se_division": "Tumkur Division", "ee_subdivision": "TL & SS Sub-Division 3"},
+        {"email": "tester.hubli@relu.com", "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
+         "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1"},
+        {"email": "tester.belagavi@relu.com", "zone": "Hubli Zone", "ce_circle": "Belagavi Zone",
+         "se_division": "Belagavi Division", "ee_subdivision": "TL & SS Sub-Division 2"},
+        {"email": "tester.mysuru@relu.com", "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
+         "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1"},
+        {"email": "tester.gulbarga@relu.com", "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
+         "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1"},
+        {"email": "tester.bellary@relu.com", "zone": "Gulbarga Zone", "ce_circle": "Bellary Zone",
+         "se_division": "Bellary Division", "ee_subdivision": "TL & SS Sub-Division 2"},
+    ]
+
+    for tm in tester_mappings:
+        user = session.query(User).filter_by(email=tm["email"]).first()
+        if not user:
+            continue
+        existing = session.query(TesterLocation).filter_by(user_id=user.id).first()
+        if not existing:
+            session.add(TesterLocation(
+                user_id=user.id,
+                zone=tm["zone"],
+                ce_circle=tm["ce_circle"],
+                se_division=tm["se_division"],
+                ee_subdivision=tm["ee_subdivision"],
+                is_active=True,
+            ))
+        else:
+            existing.zone = tm["zone"]
+            existing.ce_circle = tm["ce_circle"]
+            existing.se_division = tm["se_division"]
+            existing.ee_subdivision = tm["ee_subdivision"]
+            existing.is_active = True
+
+    session.commit()
+    print("[OK] Tester-location mappings seeded successfully.")
+
+
 # ----------------- Run Seed -----------------
 
 def run_seed():
     with get_db_session() as session:
+        migrate_testing_request_columns(session)
         role_ids = seed_roles(session)
         new_user_ids = seed_users(session)  # 👈 capture new users
         module_ids = seed_modules(session)
@@ -922,7 +1430,10 @@ def run_seed():
         seed_divisions(session)
         master_ids=seed_category_master(session)
         seed_category_details(session, master_ids)
-        print("✅ All seed data inserted successfully.")
+        seed_test_type_categories(session, master_ids)
+        seed_tester_locations(session)
+        seed_sample_testing_request(session)
+        print("[OK] All seed data inserted successfully.")
 
 
 if __name__ == "__main__":
