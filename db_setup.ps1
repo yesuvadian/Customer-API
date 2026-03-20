@@ -120,7 +120,7 @@ if ($DropTables) {
 
     Write-Host "Dropping all tables..."
 
-    $script = "#!/bin/bash`ncd $RemoteApiPath`nsource venv/bin/activate`npython -c ""`nfrom database import engine`nfrom models import Base`nBase.metadata.drop_all(bind=engine)`nprint('All tables dropped successfully.')`n""`n"
+    $script = "#!/bin/bash`ncd $RemoteApiPath`nsource venv/bin/activate`npython -c ""`nfrom database import engine`nfrom sqlalchemy import text`nwith engine.connect() as conn:`n    conn.execute(text('DROP SCHEMA public CASCADE'))`n    conn.execute(text('CREATE SCHEMA public'))`n    conn.execute(text('GRANT ALL ON SCHEMA public TO relu_user'))`n    conn.commit()`nprint('All tables dropped successfully.')`n""`n"
 
     $ok = Invoke-RemoteScript -ScriptBody $script
     if (-not $ok) {
