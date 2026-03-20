@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status, HTTPException
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status, HTTPException, Request
 from auth_utils import get_current_user
 import schemas
 from services.quote_service import QuoteService
@@ -44,6 +44,114 @@ def request_quote(payload: zohoschemas.RequestQuote, current_user=Depends(get_cu
         estimate_number=estimate["estimate_number"],
         status=estimate["status"]
     )
+
+
+@router.post(
+    "/request_with_vendors",
+    response_model=zohoschemas.QuoteResponse,
+    status_code=status.HTTP_201_CREATED
+)
+def request_quote_with_vendors(
+    payload: zohoschemas.RequestQuote,
+    request: Request,
+    current_user=Depends(get_current_user)
+):
+    """
+    Request Quote:
+    - Creates DRAFT quote in Zoho Books
+    - Finds matching vendors from Vendor App
+    """
+    access_token = get_zoho_access_token()
+    auth_header = request.headers.get("Authorization")
+
+    try:
+        # ✅ Step 1: Create draft quote
+        estimate = quote_service.create_draft_quote(access_token, payload)
+
+        # ✅ Step 2: Extract item IDs
+        zoho_item_ids = [str(item.item_id) for item in payload.items]
+
+        # ✅ Step 3: Fetch vendors from Vendor App
+        matched_vendors_raw = quote_service.find_vendors_for_items(
+            item_ids=zoho_item_ids,
+            auth_header=auth_header
+        )
+
+        # ✅ Step 4: Transform vendors
+        matched_vendors = [
+            {
+                "name": f"{v.get('firstname', '')} {v.get('lastname', '')}".strip(),
+                "zoho_erp_id": v.get("zoho_erp_id")
+            }
+            for v in matched_vendors_raw
+        ]
+
+        # ✅ Step 5: Return response
+        return zohoschemas.QuoteResponse(
+            message="Quote request submitted successfully",
+            estimate_id=estimate["estimate_id"],
+            estimate_number=estimate.get("estimate_number", ""),
+            status=estimate["status"],
+            matched_vendors=matched_vendors
+        )
+
+    except HTTPException as e:
+        raise e
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error while creating quote: {str(e)}"
+        )   
+    
+    
+@router.post("/assign_vendors/{estimate_id}")
+def assign_vendors_to_quote(
+    estimate_id: str,
+    payload: zohoschemas.AssignVendors,
+    current_user=Depends(get_current_user)
+):
+    access_token = get_zoho_access_token()
+
+    # ✅ Validate payload
+    if not payload.vendors:
+        raise HTTPException(
+            status_code=400,
+            detail="Vendors list cannot be empty"
+        )
+
+    try:
+        # 🔥 Transform vendors for service layer
+        transformed_vendors = []
+        for v in payload.vendors:
+            transformed_vendors.append({
+                "name": f"{v.get('firstname', '')} {v.get('lastname', '')}".strip(),
+                "zoho_erp_id": v.get("zoho_erp_id")
+            })
+
+        result = quote_service.assign_vendors_to_quote(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            vendors=transformed_vendors
+        )
+
+        return {
+            "message": "Vendors assigned successfully",
+            "estimate_id": estimate_id,
+            "vendors": transformed_vendors,
+            "zoho_response": result   # optional but useful for debugging
+        }
+
+    except HTTPException as e:
+        raise e
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error assigning vendors: {str(e)}"
+        )
+
+
 @router.post(
     "/{estimate_id}/attachment",
     status_code=status.HTTP_201_CREATED
@@ -166,7 +274,64 @@ def review_quote(estimate_id: str, payload: zohoschemas.ReviewQuote, current_use
         estimate_number=updated["estimate_number"],
         status=updated["status"]
     )
+# -----------------------------
+# Send Quote (ERP → Supplier)
+# -----------------------------
+@router.post(
+    "/{estimate_id}/send",
+    response_model=zohoschemas.QuoteResponse,
+    status_code=status.HTTP_200_OK
+)
+def send_quote_with_supplier(
+    estimate_id: str,
+    payload: zohoschemas.SendQuoteWithSupplier,
+    current_user=Depends(get_current_user)
+):
+    """
+    Send Quote:
+    - Attach supplier (Zoho vendor lookup)
+    - Mark estimate as sent
+    """
 
+    access_token = get_zoho_access_token()
+
+    try:
+        result = quote_service.mark_estimate_as_sent_with_supplier(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            supplier_id=payload.supplier_id
+        )
+
+        # Optional audit comment
+        quote_service.add_comment(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            description=f"Quote sent to supplier ({payload.supplier_id})",
+            email=current_user.email
+        )
+
+        # Fetch updated quote
+        quote = quote_service.get_quote(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            contact_id=current_user.email
+        )
+
+    except HTTPException as e:
+        raise e
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error sending quote: {str(e)}"
+        )
+
+    return zohoschemas.QuoteResponse(
+        message="Quote sent successfully",
+        estimate_id=quote["estimate_id"],
+        estimate_number=quote["estimate_number"],
+        status=quote["status"]
+    )
 # -----------------------------
 # Customer Approval
 # -----------------------------

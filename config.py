@@ -150,6 +150,10 @@ ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
 ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")    
 ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
 ZOHO_ORG_ID = os.getenv("ZOHO_ORG_ID")
+ZOHO_ESTIMATE_RFQ_FIELD_ID = os.getenv(
+    "ZOHO_ESTIMATE_RFQ_FIELD_ID",
+    "2789833000001742002"   # RFQ custom field id
+)
 
 # India DC (books.zohosecure.in → zohoapis.in)
 ZOHO_API_BASE = os.getenv("ZOHO_API_BASE", "https://www.zohoapis.in")
@@ -179,3 +183,13 @@ if APP_ENV == "production":
         ZOHO_SENT_EMAIL,
     ]):
         raise RuntimeError("Zoho Books environment variables are not fully configured")
+    
+# ======================================================
+VENDOR_APP_URL = os.getenv("VENDOR_APP_URL", "http://127.0.0.1:8001")
+
+
+# VENDOR_APP_URL="https://vendor.yourdomain.com/api/vendors"
+APP_ENV="production"
+DEBUG=False
+
+INTERNAL_SERVICE_SECRET=os.getenv("INTERNAL_SERVICE_SECRET", "super_vendor_secret_123")
