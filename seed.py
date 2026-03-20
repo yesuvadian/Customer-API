@@ -364,6 +364,7 @@ def seed_modules(session):
 {"name": "zohocontacts", "description": "Manage Zoho Contacts", "path": "zohocontacts", "group_name": "CRM"},
 # ✅ PROCUREMENT / ZOHO PORTAL MODULES
 {"name": "Request Quote", "description": "Request quotes from suppliers", "path": "request_quote", "group_name": "Procurement"},
+{"name": "RQ with Vendor", "description": "Request quotes with vendor selection", "path": "rq_with_vendor", "group_name": "Procurement"},
 {"name": "Request Product", "description": "Request new products", "path": "request_product", "group_name": "Procurement"},
 {"name": "Quotes", "description": "View and manage quotes", "path": "quotes", "group_name": "Procurement"},
 {"name": "Sales Orders", "description": "View and manage sales orders", "path": "sales_orders", "group_name": "Procurement"},
@@ -583,6 +584,7 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Originator", "module": "Dashboard", "can_view": True},
         # Originator — Procurement modules
         {"role": "Originator", "module": "Request Quote", "can_view": True, "can_add": True},
+        {"role": "Originator", "module": "RQ with Vendor", "can_view": True, "can_add": True},
         {"role": "Originator", "module": "Request Product", "can_view": True, "can_add": True},
         {"role": "Originator", "module": "Quotes", "can_view": True},
         {"role": "Originator", "module": "Sales Orders", "can_view": True},
