@@ -84,17 +84,18 @@ class UserRoleService:
         self.db.commit()
         return True
 
-    # ----------------- SYNC -----------------
+    # ----------------- SYNC (single-role enforced) -----------------
     def sync_roles_for_user(self, user_id: UUID, new_role_ids: Set[int]):
-        current_role_ids = self.get_roles_by_user(user_id)
+        """Sync user to a single role. Each user can only belong to one role."""
+        if not new_role_ids:
+            # Remove all roles
+            self.db.query(UserRole).filter(UserRole.user_id == user_id).delete()
+            self.db.commit()
+            return
 
-        # Add new roles
-        for role_id in new_role_ids - current_role_ids:
-            self.assign_role_to_user(user_id, role_id)
-
-        # Remove roles not in new_role_ids
-        for role_id in current_role_ids - new_role_ids:
-            self.unassign_role_from_user_by_role(user_id, role_id)
+        # Single-role rule: use only the first role
+        target_role_id = next(iter(new_role_ids))
+        self.assign_role_to_user(user_id, target_role_id)
 
     # ----------------- LIST / FETCH -----------------
     def list_user_roles(self, skip: int = 0, limit: int = 100) -> List[UserRole]:

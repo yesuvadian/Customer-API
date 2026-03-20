@@ -168,6 +168,10 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             action = "can_search"
         elif "export" in endpoint_name:
             action = "can_export"
+        elif "approve" in endpoint_name or "reject" in endpoint_name:
+            action = "can_approve"
+        elif "assign" in endpoint_name:
+            action = "can_assign"
         else:
             action = METHOD_ACTION_MAP.get(request.method)
 

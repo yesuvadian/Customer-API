@@ -52,14 +52,14 @@ if all([ERP_DB_HOST, ERP_DB_PORT, ERP_DB_NAME, ERP_DB_USER, ERP_DB_PASSWORD]):
             future=True,
         )
 
-        print("✅ ERP PostgreSQL connected successfully.")
+        print("[OK] ERP PostgreSQL connected successfully.")
 
     except Exception as e:
         ERP_AVAILABLE = False
-        print(f"⚠️ ERP PostgreSQL unavailable, skipping: {e}")
+        print(f"[WARN] ERP PostgreSQL unavailable, skipping: {e}")
 else:
     ERP_AVAILABLE = False
-    print("⚠️ ERP PostgreSQL environment variables missing — skipping ERP DB.")
+    print("[WARN] ERP PostgreSQL environment variables missing -- skipping ERP DB.")
         
 
 # ======================================================
@@ -73,7 +73,7 @@ VENDOR_DB_USER = os.getenv("DB_USER")
 VENDOR_DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 if not all([VENDOR_DB_HOST, VENDOR_DB_PORT, VENDOR_DB_NAME, VENDOR_DB_USER, VENDOR_DB_PASSWORD]):
-    raise RuntimeError("❌ Missing required Vendor PostgreSQL environment variables!")
+    raise RuntimeError("[ERROR] Missing required Vendor PostgreSQL environment variables!")
 
 VENDOR_DATABASE_URL = (
     f"postgresql+psycopg2://{VENDOR_DB_USER}:{VENDOR_DB_PASSWORD}"
@@ -96,7 +96,7 @@ VendorSessionLocal = sessionmaker(
     future=True,
 )
 
-print("✅ Vendor PostgreSQL connected successfully.")
+print("[OK] Vendor PostgreSQL connected successfully.")
 
 
 # ======================================================
@@ -181,11 +181,11 @@ if all([MONGO_URI, MONGO_DB, MONGO_COLLECTION]):
         # test ping
         mongo_client.admin.command("ping")
 
-        print("✅ MongoDB connected successfully.")
+        print("[OK] MongoDB connected successfully.")
 
     except Exception as e:
         MONGO_AVAILABLE = False
-        print(f"⚠️ MongoDB unavailable, skipping: {e}")
+        print(f"[WARN] MongoDB unavailable, skipping: {e}")
 else:
     MONGO_AVAILABLE = False
-    print("⚠️ MongoDB environment variables missing — skipping MongoDB.")
+    print("[WARN] MongoDB environment variables missing -- skipping MongoDB.")
