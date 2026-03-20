@@ -65,11 +65,17 @@ if ($CreateDB) {
     Write-Host ""
     Write-Host "Creating database '$DbName'..."
 
-    $createDbCmd = @"
-sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '$DbName'" | grep -q 1 && echo 'Database already exists' || (sudo -u postgres psql -c "CREATE DATABASE \"$DbName\" OWNER $DbUser;" && echo 'Database created successfully')
+    $scriptContent = @"
+#!/bin/bash
+if sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '$DbName'" | grep -q 1; then
+    echo "Database already exists"
+else
+    sudo -u postgres psql -c "CREATE DATABASE \"$DbName\" OWNER $DbUser;"
+    echo "Database created successfully"
+fi
 "@
-    $createDbCmd = $createDbCmd -replace "`r",""
-    ssh -t $Server $createDbCmd
+    $scriptContent = $scriptContent -replace "`r",""
+    $scriptContent | ssh $Server "cat > /tmp/db_setup.sh && chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm /tmp/db_setup.sh"
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Warning: DB creation returned non-zero exit. Check output above."
@@ -83,11 +89,14 @@ if ($CreateTables) {
     Write-Host ""
     Write-Host "Creating tables..."
 
-    $createTablesCmd = @"
-cd $RemoteApiPath && source venv/bin/activate && python -c "from database import engine; from models import Base; Base.metadata.create_all(bind=engine); print('Tables created successfully')"
+    $scriptContent = @"
+#!/bin/bash
+cd $RemoteApiPath
+source venv/bin/activate
+python -c "from database import engine; from models import Base; Base.metadata.create_all(bind=engine); print('Tables created successfully')"
 "@
-    $createTablesCmd = $createTablesCmd -replace "`r",""
-    ssh -t $Server $createTablesCmd
+    $scriptContent = $scriptContent -replace "`r",""
+    $scriptContent | ssh $Server "cat > /tmp/db_setup.sh && chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm /tmp/db_setup.sh"
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Warning: Table creation returned non-zero exit. Check output above."
@@ -101,11 +110,14 @@ if ($Seed) {
     Write-Host ""
     Write-Host "Running seed..."
 
-    $seedCmd = @"
-cd $RemoteApiPath && source venv/bin/activate && python seed.py
+    $scriptContent = @"
+#!/bin/bash
+cd $RemoteApiPath
+source venv/bin/activate
+python seed.py
 "@
-    $seedCmd = $seedCmd -replace "`r",""
-    ssh -t $Server $seedCmd
+    $scriptContent = $scriptContent -replace "`r",""
+    $scriptContent | ssh $Server "cat > /tmp/db_setup.sh && chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm /tmp/db_setup.sh"
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Warning: Seed returned non-zero exit. Check output above."
