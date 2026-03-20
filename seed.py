@@ -364,10 +364,10 @@ def seed_modules(session):
 {"name": "zohocontacts", "description": "Manage Zoho Contacts", "path": "zohocontacts", "group_name": "CRM"},
 # ✅ PROCUREMENT / ZOHO PORTAL MODULES
 {"name": "Request Quote", "description": "Request quotes from suppliers", "path": "request_quote", "group_name": "Procurement"},
-{"name": "RQ with Vendor", "description": "Request quotes with vendor selection", "path": "rq_with_vendor", "group_name": "Procurement"},
+{"name": "RQ with Vendor", "description": "Request quotes with vendor selection", "path": "rqWithVendor", "group_name": "Procurement"},
 {"name": "Request Product", "description": "Request new products", "path": "request_product", "group_name": "Procurement"},
 {"name": "Quotes", "description": "View and manage quotes", "path": "quotes", "group_name": "Procurement"},
-{"name": "Sales Orders", "description": "View and manage sales orders", "path": "sales_orders", "group_name": "Procurement"},
+{"name": "Sales Orders", "description": "View and manage sales orders", "path": "sales_orders", "group_name": "Procurement"},  
 {"name": "Invoices", "description": "View and manage invoices", "path": "invoices", "group_name": "Procurement"},
 {"name": "Retainer Invoices", "description": "Manage retainer invoices", "path": "retainer_invoices", "group_name": "Procurement"},
 {"name": "Payments Made", "description": "Track payments made", "path": "payments_made", "group_name": "Procurement"},
@@ -456,7 +456,7 @@ def seed_privileges(session, role_ids, module_ids):
         # ✅ PROCUREMENT / ZOHO PORTAL MODULES
         "Request Quote", "Request Product", "Quotes", "Sales Orders",
         "Invoices", "Retainer Invoices", "Payments Made", "Statements",
-        "Enquiry", "Contact Us",
+        "Enquiry", "Contact Us", "RQ with Vendor",
         # ✅ TESTING REQUEST SYSTEM MODULES
         "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests"
     ]
