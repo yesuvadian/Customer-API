@@ -96,6 +96,10 @@ $remoteCommand = @"
 cd $RemoteBasePath &&
 tar -xzf $ArchiveName -C api &&
 rm $ArchiveName &&
+cd $RemoteApiPath &&
+source venv/bin/activate &&
+pip install -r requirements.txt --quiet &&
+cd $RemoteBasePath &&
 sed -i 's|^DB_HOST=.*|DB_HOST=localhost|' $RemoteApiPath/.env &&
 sed -i 's|^DB_USER=.*|DB_USER=relu_user|' $RemoteApiPath/.env &&
 sed -i 's|^DB_PASSWORD=.*|DB_PASSWORD=StrongPassword123!|' $RemoteApiPath/.env &&
