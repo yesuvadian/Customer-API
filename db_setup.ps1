@@ -58,6 +58,28 @@ if ($Environment -eq "main") {
     }
 }
 
+# Helper: write script to temp file with LF line endings, scp to server, execute, cleanup
+function Invoke-RemoteScript {
+    param([string]$ScriptBody)
+
+    $localTmp = [System.IO.Path]::GetTempFileName()
+    # Write with explicit LF (no CRLF)
+    [System.IO.File]::WriteAllText($localTmp, $ScriptBody.Replace("`r",""))
+
+    scp $localTmp ${Server}:/tmp/db_setup.sh
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Failed to upload script to server."
+        Remove-Item $localTmp -ErrorAction SilentlyContinue
+        return $false
+    }
+
+    ssh $Server "chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm -f /tmp/db_setup.sh"
+    $result = $LASTEXITCODE
+
+    Remove-Item $localTmp -ErrorAction SilentlyContinue
+    return ($result -eq 0)
+}
+
 # ---------------------------------
 # Step 1: Create Database
 # ---------------------------------
@@ -65,20 +87,11 @@ if ($CreateDB) {
     Write-Host ""
     Write-Host "Creating database '$DbName'..."
 
-    $scriptContent = @"
-#!/bin/bash
-if sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '$DbName'" | grep -q 1; then
-    echo "Database already exists"
-else
-    sudo -u postgres psql -c "CREATE DATABASE \"$DbName\" OWNER $DbUser;"
-    echo "Database created successfully"
-fi
-"@
-    $scriptContent = $scriptContent -replace "`r",""
-    $scriptContent | ssh $Server "cat > /tmp/db_setup.sh && chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm /tmp/db_setup.sh"
+    $script = "#!/bin/bash`nif sudo -u postgres psql -tc ""SELECT 1 FROM pg_database WHERE datname = '$DbName'"" | grep -q 1; then`n  echo 'Database already exists'`nelse`n  sudo -u postgres psql -c ""CREATE DATABASE \""$DbName\"" OWNER $DbUser;""`n  echo 'Database created successfully'`nfi`n"
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Warning: DB creation returned non-zero exit. Check output above."
+    $ok = Invoke-RemoteScript -ScriptBody $script
+    if (-not $ok) {
+        Write-Host "Warning: DB creation may have failed. Check output above."
     }
 }
 
@@ -89,17 +102,11 @@ if ($CreateTables) {
     Write-Host ""
     Write-Host "Creating tables..."
 
-    $scriptContent = @"
-#!/bin/bash
-cd $RemoteApiPath
-source venv/bin/activate
-python -c "from database import engine; from models import Base; Base.metadata.create_all(bind=engine); print('Tables created successfully')"
-"@
-    $scriptContent = $scriptContent -replace "`r",""
-    $scriptContent | ssh $Server "cat > /tmp/db_setup.sh && chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm /tmp/db_setup.sh"
+    $script = "#!/bin/bash`ncd $RemoteApiPath`nsource venv/bin/activate`npython -c ""from database import engine; from models import Base; Base.metadata.create_all(bind=engine); print('Tables created successfully')""`n"
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Warning: Table creation returned non-zero exit. Check output above."
+    $ok = Invoke-RemoteScript -ScriptBody $script
+    if (-not $ok) {
+        Write-Host "Warning: Table creation may have failed. Check output above."
     }
 }
 
@@ -110,17 +117,11 @@ if ($Seed) {
     Write-Host ""
     Write-Host "Running seed..."
 
-    $scriptContent = @"
-#!/bin/bash
-cd $RemoteApiPath
-source venv/bin/activate
-python seed.py
-"@
-    $scriptContent = $scriptContent -replace "`r",""
-    $scriptContent | ssh $Server "cat > /tmp/db_setup.sh && chmod +x /tmp/db_setup.sh && bash /tmp/db_setup.sh && rm /tmp/db_setup.sh"
+    $script = "#!/bin/bash`ncd $RemoteApiPath`nsource venv/bin/activate`npython seed.py`n"
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Warning: Seed returned non-zero exit. Check output above."
+    $ok = Invoke-RemoteScript -ScriptBody $script
+    if (-not $ok) {
+        Write-Host "Warning: Seed may have failed. Check output above."
     }
 }
 
