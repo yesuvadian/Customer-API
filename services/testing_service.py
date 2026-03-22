@@ -106,6 +106,7 @@ class TestingService:
         else:
             recommendation = Recommendation(
                 testing_request_id=request_id,
+                organization_id=request.organization_id,  # Auto-populate from testing_request
                 recommendation_type=rec_type,
                 summary=summary,
                 detailed_notes=None,
@@ -219,6 +220,7 @@ class TestingService:
         else:
             result = TestResult(
                 testing_request_id=request_id,
+                organization_id=request.organization_id,  # Auto-populate from testing_request
                 test_name=test_name,
                 template_key=template_key,
                 test_data=test_data,

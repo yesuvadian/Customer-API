@@ -1,8 +1,17 @@
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
+import pandas as pd
+from typing import Dict, Optional
 from database import VendorSessionLocal
-from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State,City, User, UserRole, Module ,City
+from models import (
+    CategoryDetails, CategoryMaster, Country, Division, Plan, Product,
+    ProductCategory, ProductSubCategory, Role, RoleModulePrivilege,
+    State, City, User, UserRole, Module,
+    # Organization models
+    Organization, OrgDepartment, OrgRole, OrgUserRole,
+    OrgRolePermission, RoleTemplate, OrgInvitation
+)
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
@@ -381,6 +390,8 @@ def seed_modules(session):
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 {"name": "Validation Requests", "description": "Create and manage validation requests", "path": "validation_requests", "group_name": "Testing"},
 {"name": "Tester Mapping", "description": "Map testers to locations (zone/circle/division)", "path": "tester_mapping", "group_name": "Testing"},
+# ✅ ORGANIZATION MANAGEMENT MODULE
+{"name": "Organizations", "description": "Manage organizations, departments, roles, and users", "path": "organizations", "group_name": "User & Access"},
 
     ]
 
@@ -458,7 +469,9 @@ def seed_privileges(session, role_ids, module_ids):
         "Invoices", "Retainer Invoices", "Payments Made", "Statements",
         "Enquiry", "Contact Us", "RQ with Vendor",
         # ✅ TESTING REQUEST SYSTEM MODULES
-        "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests"
+        "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests",
+        # ✅ ORGANIZATION MANAGEMENT MODULE
+        "Organizations"
     ]
 
     # -------------------------------------------------------
@@ -1409,10 +1422,561 @@ def seed_tester_locations(session):
     print("[OK] Tester-location mappings seeded successfully.")
 
 
+# ----------------- Organization System Seed -----------------
+
+def seed_role_templates(session):
+    """
+    Seed role templates for auto-provisioning default roles to new organizations.
+    """
+    # Get all module IDs for permission templates
+    all_modules = session.query(Module.id).filter(Module.is_active == True).all()
+    module_ids = [m.id for m in all_modules]
+
+    if not module_ids:
+        print("[WARN] No modules found. Role templates will be created without permission templates.")
+        module_ids = []
+
+    templates_data = [
+        {
+            "name": "Admin",
+            "description": "Full administrative access to the organization. Can manage users, roles, departments, and all organization resources.",
+            "is_org_admin": True,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": True,
+                    "can_approve": True,
+                    "can_assign": True,
+                    "can_export": True,
+                    "can_import": True
+                }
+                for mid in module_ids
+            ]
+        },
+        {
+            "name": "Originator",
+            "description": "Creates testing requests and raises procurement. Full access to testing requests and procurement modules.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": True,
+                    "can_approve": False,
+                    "can_assign": True,
+                    "can_export": True,
+                    "can_import": False
+                }
+                for mid in module_ids
+            ]
+        },
+        {
+            "name": "Tester",
+            "description": "Performs transformer testing and uploads results. Full access to testing and recommendations modules.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "can_export": True,
+                    "can_import": False
+                }
+                for mid in module_ids
+            ]
+        },
+        {
+            "name": "Approver",
+            "description": "Reviews and approves or rejects recommendations. Approval access to testing workflow.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": False,
+                    "can_edit": False,
+                    "can_delete": False,
+                    "can_approve": True,
+                    "can_assign": False,
+                    "can_export": True,
+                    "can_import": False
+                }
+                for mid in module_ids
+            ]
+        },
+        {
+            "name": "Department Manager",
+            "description": "Manage department users and departmental resources. Can view and manage users within their department.",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": False,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": False,
+                    "can_approve": True,
+                    "can_assign": False,
+                    "can_export": True,
+                    "can_import": False
+                }
+                for mid in module_ids
+            ]
+        },
+        {
+            "name": "Employee",
+            "description": "Standard employee access. Can view organization resources and manage their own data.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": False,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": False,
+                    "can_edit": False,
+                    "can_delete": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "can_export": False,
+                    "can_import": False
+                }
+                for mid in module_ids
+            ]
+        },
+        {
+            "name": "Viewer",
+            "description": "Read-only access to organization resources.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": False,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": False,
+                    "can_edit": False,
+                    "can_delete": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "can_export": False,
+                    "can_import": False
+                }
+                for mid in module_ids
+            ]
+        },
+        {
+            "name": "Contributor",
+            "description": "Can add and edit resources but cannot delete or approve.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": False,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "can_export": True,
+                    "can_import": True
+                }
+                for mid in module_ids
+            ]
+        }
+    ]
+
+    created_count = 0
+    updated_count = 0
+
+    for template_data in templates_data:
+        existing = session.query(RoleTemplate).filter_by(name=template_data["name"]).first()
+
+        if existing:
+            existing.description = template_data["description"]
+            existing.is_org_admin = template_data["is_org_admin"]
+            existing.is_dept_admin = template_data["is_dept_admin"]
+            existing.auto_provision = template_data["auto_provision"]
+            existing.permissions_template = template_data["permissions_template"]
+            existing.mts = datetime.now(datetime.now().astimezone().tzinfo)
+            updated_count += 1
+        else:
+            template = RoleTemplate(
+                id=uuid.uuid4(),
+                name=template_data["name"],
+                description=template_data["description"],
+                is_org_admin=template_data["is_org_admin"],
+                is_dept_admin=template_data["is_dept_admin"],
+                auto_provision=template_data["auto_provision"],
+                permissions_template=template_data["permissions_template"],
+                cts=datetime.now(datetime.now().astimezone().tzinfo),
+                mts=datetime.now(datetime.now().astimezone().tzinfo)
+            )
+            session.add(template)
+            created_count += 1
+
+    session.commit()
+    print(f"[OK] Role templates seeded: {created_count} created, {updated_count} updated")
+
+
+def seed_super_admin(session):
+    """
+    Create a super admin user if it doesn't exist.
+    """
+    super_admin_email = "superadmin@system.com"
+
+    existing = session.query(User).filter_by(email=super_admin_email).first()
+    if existing:
+        # Update existing user to super admin
+        existing.usertype = "super_admin"
+        existing.isactive = True
+        session.commit()
+        print(f"[OK] Super admin user updated: {super_admin_email}")
+        return existing.id
+
+    # Create new super admin
+    super_admin = User(
+        id=uuid.uuid4(),
+        email=super_admin_email,
+        password_hash=get_password_hash("Admin123!"),
+        firstname="Super",
+        lastname="Admin",
+        phone_number="+1234567890",
+        usertype="super_admin",
+        isactive=True,
+        email_confirmed=True,
+        phone_confirmed=True
+    )
+    session.add(super_admin)
+    session.commit()
+    print(f"[OK] Super admin user created: {super_admin_email} / Admin123!")
+    return super_admin.id
+
+
+def seed_sample_organization(session):
+    """
+    Create a sample organization with admin user for testing.
+    """
+    org_code = "SAMPLE_ORG"
+
+    # Check if organization already exists
+    existing_org = session.query(Organization).filter_by(code=org_code).first()
+    if existing_org:
+        print(f"[INFO] Sample organization already exists: {org_code}")
+        return
+
+    # Get a basic plan if available
+    basic_plan = session.query(Plan).filter_by(planname="Basic").first()
+    plan_id = basic_plan.id if basic_plan else None
+
+    # Create organization
+    org = Organization(
+        id=uuid.uuid4(),
+        name="Sample Organization",
+        code=org_code,
+        display_name="Sample Org",
+        organization_type="vendor",
+        industry="Technology",
+        primary_email="info@sampleorg.com",
+        primary_phone="+1234567890",
+        is_active=True,
+        is_verified=False,
+        plan_id=plan_id,
+        settings={},
+        cts=datetime.now(datetime.now().astimezone().tzinfo),
+        mts=datetime.now(datetime.now().astimezone().tzinfo)
+    )
+    session.add(org)
+    session.flush()
+
+    # Provision default roles from templates
+    templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
+
+    provisioned_roles = []
+    for template in templates:
+        role = OrgRole(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name=template.name,
+            description=template.description,
+            role_type="default",
+            is_org_admin=template.is_org_admin,
+            is_dept_admin=template.is_dept_admin,
+            is_active=True,
+            cts=datetime.now(datetime.now().astimezone().tzinfo),
+            mts=datetime.now(datetime.now().astimezone().tzinfo)
+        )
+        session.add(role)
+        session.flush()
+
+        # Save all provisioned roles for later assignment
+        provisioned_roles.append(role)
+
+        # Create permissions from template
+        if template.permissions_template:
+            for perm_data in template.permissions_template:
+                permission = OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=perm_data.get("module_id"),
+                    can_view=perm_data.get("can_view", False),
+                    can_add=perm_data.get("can_add", False),
+                    can_edit=perm_data.get("can_edit", False),
+                    can_delete=perm_data.get("can_delete", False),
+                    can_approve=perm_data.get("can_approve", False),
+                    can_assign=perm_data.get("can_assign", False),
+                    can_export=perm_data.get("can_export", False),
+                    can_import=perm_data.get("can_import", False),
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                )
+                session.add(permission)
+
+    # Create org admin user
+    admin_email = "orgadmin@sampleorg.com"
+    existing_admin = session.query(User).filter_by(email=admin_email).first()
+
+    if not existing_admin:
+        admin_user = User(
+            id=uuid.uuid4(),
+            email=admin_email,
+            password_hash=get_password_hash("OrgAdmin123!"),
+            firstname="Organization",
+            lastname="Admin",
+            phone_number="+1987654321",
+            organization_id=org.id,
+            isactive=True,
+            email_confirmed=True,
+            phone_confirmed=True
+        )
+        session.add(admin_user)
+        session.flush()
+
+        # Assign Admin role to admin user
+        admin_role = next((r for r in provisioned_roles if r.is_org_admin), None)
+        if admin_role:
+            user_role = OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=admin_user.id,
+                org_role_id=admin_role.id,
+                assigned_by=admin_user.id,
+                is_active=True
+            )
+            session.add(user_role)
+
+        session.commit()
+        print(f"[OK] Sample organization created: {org_code}")
+        print(f"    Admin User: {admin_email} / OrgAdmin123!")
+    else:
+        # Update existing user and assign Admin role
+        existing_admin.organization_id = org.id
+        admin_role = next((r for r in provisioned_roles if r.is_org_admin), None)
+        if admin_role:
+            existing_role = session.query(OrgUserRole).filter_by(
+                user_id=existing_admin.id,
+                org_role_id=admin_role.id
+            ).first()
+            if not existing_role:
+                user_role = OrgUserRole(
+                    id=uuid.uuid4(),
+                    user_id=existing_admin.id,
+                    org_role_id=admin_role.id,
+                    assigned_by=existing_admin.id,
+                    is_active=True
+                )
+                session.add(user_role)
+        session.commit()
+        print(f"[OK] Sample organization created and linked to existing admin: {admin_email}")
+
+
+def seed_kptcl_departments(session, org_id: str, excel_path: str = r"C:\Users\yesuv\Downloads\KPTCL_Substation_Mapping.xlsx"):
+    """
+    Seed KPTCL department hierarchy from Excel file.
+    Creates 6-level hierarchy: Zone → Circle → Division → Sub Division → Section → Substation
+    """
+    print("\n--- KPTCL Department Hierarchy Seeding ---")
+
+    # Check if organization exists
+    org = session.query(Organization).filter(Organization.id == uuid.UUID(org_id)).first()
+    if not org:
+        print(f"[ERROR] Organization {org_id} not found")
+        return
+
+    # Delete existing departments for this organization
+    print(f"[INFO] Deleting existing departments for organization: {org.name}")
+    existing_depts = session.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == uuid.UUID(org_id)
+    ).all()
+    for dept in existing_depts:
+        session.delete(dept)
+    session.commit()
+    print(f"[OK] Deleted {len(existing_depts)} existing departments")
+
+    # Read Excel file
+    try:
+        print(f"[INFO] Reading Excel file: {excel_path}")
+        df = pd.read_excel(excel_path)
+        print(f"[OK] Loaded {len(df)} rows with columns: {df.columns.tolist()}")
+    except Exception as e:
+        print(f"[ERROR] Failed to read Excel file: {e}")
+        return
+
+    # Hierarchy levels in order
+    levels = ['Zone', 'Circle', 'Division', 'Sub Division', 'Section', 'Substation']
+
+    # Track created departments by full path
+    department_map: Dict[str, str] = {}
+
+    def generate_code(name: str) -> str:
+        """Generate a department code from the name."""
+        clean_name = name.replace(' Zone', '').replace(' Circle', '').replace(' Division', '')
+        clean_name = clean_name.replace(' Section', '').replace('kV', '').strip()
+        words = clean_name.split()
+        if len(words) > 1:
+            code = ''.join([w[0].upper() for w in words[:3]])
+        else:
+            code = clean_name[:3].upper()
+        return code
+
+    # Create root "Zone" parent department
+    print(f"\n{'='*60}")
+    print(f"Creating root Zone parent department...")
+    print(f"{'='*60}")
+
+    root_zone_id = str(uuid.uuid4())
+    root_zone = OrgDepartment(
+        id=uuid.UUID(root_zone_id),
+        organization_id=uuid.UUID(org_id),
+        name="Zone",
+        code="ZONE",
+        description="Root parent for all zones",
+        parent_department_id=None,
+        manager_id=None,
+        is_active=True,
+        cts=datetime.utcnow(),
+        mts=datetime.utcnow()
+    )
+    session.add(root_zone)
+    session.commit()
+    print(f"[OK] Created root Zone department")
+
+    # Process each level
+    for level_idx, level in enumerate(levels):
+        print(f"\n{'='*60}")
+        print(f"Creating {level} departments...")
+        print(f"{'='*60}")
+
+        parent_level = levels[level_idx - 1] if level_idx > 0 else None
+
+        # Get unique combinations at this level
+        if parent_level:
+            parent_cols = levels[:level_idx]
+            current_cols = parent_cols + [level]
+            unique_combos = df[current_cols].drop_duplicates()
+        else:
+            unique_combos = df[[level]].drop_duplicates()
+
+        print(f"Found {len(unique_combos)} unique {level} departments")
+
+        # Create each department at this level
+        created_count = 0
+        skipped_count = 0
+        for _, row in unique_combos.iterrows():
+            dept_name = str(row[level]).strip()
+
+            # Build full path for tracking
+            if parent_level:
+                parent_path = '|'.join([str(row[pl]).strip() for pl in parent_cols])
+                full_path = f"{parent_path}|{dept_name}"
+
+                # Get parent ID
+                parent_id = department_map.get(parent_path)
+                if not parent_id:
+                    print(f"  [WARNING] Parent not found for {dept_name}")
+                    skipped_count += 1
+                    continue
+            else:
+                # First level (Zone) - use root Zone as parent
+                full_path = dept_name
+                parent_id = root_zone_id
+
+            # Check if department with this name already exists in this org
+            existing = session.query(OrgDepartment).filter(
+                OrgDepartment.organization_id == uuid.UUID(org_id),
+                OrgDepartment.name == dept_name
+            ).first()
+
+            if existing:
+                # Use existing department ID
+                department_map[full_path] = str(existing.id)
+                skipped_count += 1
+                continue
+
+            # Generate code
+            code = generate_code(dept_name)
+
+            # Create department - commit immediately to handle unique constraint
+            dept_id = str(uuid.uuid4())
+            new_dept = OrgDepartment(
+                id=uuid.UUID(dept_id),
+                organization_id=uuid.UUID(org_id),
+                name=dept_name,
+                code=code,
+                description=None,
+                parent_department_id=uuid.UUID(parent_id) if parent_id else None,
+                manager_id=None,
+                is_active=True,
+                cts=datetime.utcnow(),
+                mts=datetime.utcnow()
+            )
+            session.add(new_dept)
+
+            try:
+                session.commit()
+                department_map[full_path] = dept_id
+                created_count += 1
+            except Exception as e:
+                session.rollback()
+                print(f"  [ERROR] Failed to create {dept_name}: {e}")
+                skipped_count += 1
+
+        print(f"[OK] Created {created_count} {level} departments (skipped {skipped_count} duplicates)")
+
+    print(f"\n{'='*60}")
+    print(f"[OK] COMPLETED: Created {len(department_map) + 1} total departments (including root Zone)")
+    print(f"{'='*60}\n")
+
+
 # ----------------- Run Seed -----------------
 
 def run_seed():
     with get_db_session() as session:
+        print("\n" + "=" * 80)
+        print("  DATABASE SEEDING STARTED")
+        print("=" * 80 + "\n")
+
+        # Core System
         migrate_testing_request_columns(session)
         role_ids = seed_roles(session)
         new_user_ids = seed_users(session)  # 👈 capture new users
@@ -1421,26 +1985,70 @@ def run_seed():
         seed_user_roles(session, role_ids)
         assign_viewer_role_to_new_users(session, new_user_ids, role_ids)
         seed_plans(session)
-        #category_ids = seed_product_categories(session)
-        #subcategory_ids = seed_product_subcategories(session, category_ids)
-        #seed_products(session, category_ids, subcategory_ids)
-            # Geography
+
+        # Geography
         seed_country_india
         india = seed_india_country(session)
         state_ids=seed_indian_states(session, india)
         seed_cities(session,state_ids)
+
+        # Company Structure
         seed_divisions(session)
         master_ids=seed_category_master(session)
         seed_category_details(session, master_ids)
         seed_test_type_categories(session, master_ids)
         seed_tester_locations(session)
         seed_sample_testing_request(session)
-        print("[OK] All seed data inserted successfully.")
+
+        # Organization Multi-Tenancy System
+        print("\n--- Organization System Seeding ---")
+        seed_role_templates(session)
+        seed_super_admin(session)
+        seed_sample_organization(session)
+
+        print("\n" + "=" * 80)
+        print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")
+        print("=" * 80)
+        print("\nQuick Start:")
+        print("  1. Super Admin: superadmin@system.com / Admin123!")
+        print("  2. Sample Org Admin: orgadmin@sampleorg.com / OrgAdmin123!")
+        print("  3. View API docs: http://localhost:8000/docs")
+        print("\n" + "=" * 80 + "\n")
+
+
+def seed_kptcl_only(org_id: str):
+    """
+    Run only KPTCL department seeding for a specific organization.
+    Usage: python seed.py --kptcl <org_id>
+    """
+    with get_db_session() as session:
+        print("\n" + "=" * 80)
+        print("  KPTCL DEPARTMENT SEEDING")
+        print("=" * 80 + "\n")
+        seed_kptcl_departments(session, org_id)
+        print("\n" + "=" * 80)
+        print("  [OK] KPTCL DEPARTMENTS SEEDED SUCCESSFULLY")
+        print("=" * 80 + "\n")
 
 
 if __name__ == "__main__":
+    import sys
+
     try:
-        run_seed()
+        # Check for --kptcl flag for KPTCL-only seeding
+        if len(sys.argv) > 2 and sys.argv[1] == "--kptcl":
+            org_id = sys.argv[2]
+            seed_kptcl_only(org_id)
+        else:
+            # Run full seed
+            run_seed()
+
+            # Optionally seed KPTCL if --with-kptcl flag is provided with org_id
+            if len(sys.argv) > 2 and sys.argv[1] == "--with-kptcl":
+                org_id = sys.argv[2]
+                print("\n[INFO] Seeding KPTCL departments...")
+                with get_db_session() as session:
+                    seed_kptcl_departments(session, org_id)
     except Exception as e:
         import traceback
         traceback.print_exc()

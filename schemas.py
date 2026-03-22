@@ -580,6 +580,10 @@ class UserResponse(BaseModel):
     email_confirmed: bool
     phone_confirmed: bool
 
+    usertype: Optional[str] = None
+    organization_id: Optional[str] = None
+    department_id: Optional[str] = None  # User's assigned department
+
     cts: datetime
     mts: datetime
 
@@ -958,12 +962,19 @@ class TestingRequestCreate(BaseModel):
     serial_number: Optional[str] = None
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
+
+    # New department-based location
+    organization_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+
+    # Legacy location fields (optional for backward compatibility)
     zone: Optional[str] = None
     ce_circle: Optional[str] = None
     se_division: Optional[str] = None
     ee_subdivision: Optional[str] = None
     aee_section: Optional[str] = None
     ae_je: Optional[str] = None
+
     assigned_tester_id: Optional[UUID] = None
     priority: Optional[str] = "normal"
     requested_date: Optional[datetime] = None
@@ -980,12 +991,19 @@ class TestingRequestUpdate(BaseModel):
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
     assigned_tester_id: Optional[UUID] = None
+
+    # New department-based location
+    organization_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+
+    # Legacy location fields
     zone: Optional[str] = None
     ce_circle: Optional[str] = None
     se_division: Optional[str] = None
     ee_subdivision: Optional[str] = None
     aee_section: Optional[str] = None
     ae_je: Optional[str] = None
+
     priority: Optional[str] = None
     requested_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
@@ -1007,12 +1025,20 @@ class TestingRequestResponse(BaseModel):
     test_type_id: Optional[int] = None
     equipment_type_name: Optional[str] = None
     test_type_name: Optional[str] = None
+
+    # New department-based location
+    organization_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+    department_name: Optional[str] = None  # Computed field
+
+    # Legacy location fields
     zone: Optional[str] = None
     ce_circle: Optional[str] = None
     se_division: Optional[str] = None
     ee_subdivision: Optional[str] = None
     aee_section: Optional[str] = None
     ae_je: Optional[str] = None
+
     status: str
     priority: Optional[str] = None
     originator_id: UUID
@@ -1046,10 +1072,12 @@ class TestResultCreate(BaseModel):
     result_unit: Optional[str] = None
     pass_fail: Optional[str] = None
     remarks: Optional[str] = None
+    organization_id: Optional[UUID] = None
 
 class TestResultResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    organization_id: Optional[UUID] = None
     test_name: str
     test_category: Optional[str] = None
     result_value: Optional[str] = None
@@ -1084,6 +1112,7 @@ class TestResultStructuredCreate(BaseModel):
     overall_result: Optional[str] = None
     remarks: Optional[str] = None
     replacement_products: Optional[list] = None
+    organization_id: Optional[UUID] = None
 
 class TestResultImageResponse(BaseModel):
     id: UUID
@@ -1100,6 +1129,7 @@ class TestResultImageResponse(BaseModel):
 class TestResultStructuredResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    organization_id: Optional[UUID] = None
     test_name: str
     template_key: Optional[str] = None
     test_data: Optional[dict] = None
@@ -1125,6 +1155,7 @@ class RecommendationCreate(BaseModel):
     recommendation_type: str
     summary: str
     detailed_notes: Optional[str] = None
+    organization_id: Optional[UUID] = None
 
 class RecommendationUpdate(BaseModel):
     recommendation_type: Optional[str] = None
@@ -1141,6 +1172,7 @@ class SubmitTestResultsBody(BaseModel):
 class RecommendationResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    organization_id: Optional[UUID] = None
     recommendation_type: str
     summary: str
     detailed_notes: Optional[str] = None
@@ -1167,6 +1199,7 @@ class RecommendationResponse(BaseModel):
 class ProcurementRequestCreate(BaseModel):
     testing_request_id: UUID
     recommendation_id: Optional[UUID] = None
+    organization_id: Optional[UUID] = None
     title: str
     description: Optional[str] = None
     estimated_cost: Optional[float] = None
@@ -1186,6 +1219,7 @@ class ProcurementRequestResponse(BaseModel):
     procurement_number: str
     testing_request_id: UUID
     recommendation_id: Optional[UUID] = None
+    organization_id: Optional[UUID] = None
     title: str
     description: Optional[str] = None
     status: Optional[str] = None
@@ -1201,3 +1235,320 @@ class ProcurementRequestResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==========================================
+# Organization Schemas
+# ==========================================
+
+class OrganizationBase(BaseModel):
+    name: str
+    code: str
+    display_name: Optional[str] = None
+    organization_type: Optional[str] = None
+    industry: Optional[str] = None
+    website: Optional[str] = None
+    primary_email: Optional[str] = None
+    primary_phone: Optional[str] = None
+
+class OrganizationCreate(OrganizationBase):
+    plan_id: Optional[UUID] = None
+    is_active: bool = True
+    settings: Optional[Dict] = {}
+
+class OrganizationUpdate(BaseModel):
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    organization_type: Optional[str] = None
+    industry: Optional[str] = None
+    website: Optional[str] = None
+    primary_email: Optional[str] = None
+    primary_phone: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_verified: Optional[bool] = None
+    plan_id: Optional[UUID] = None
+    subscription_start_date: Optional[datetime] = None
+    subscription_end_date: Optional[datetime] = None
+    settings: Optional[Dict] = None
+
+class OrganizationOut(OrganizationBase):
+    id: UUID
+    is_active: bool
+    is_verified: bool
+    plan_id: Optional[UUID] = None
+    subscription_start_date: Optional[datetime] = None
+    subscription_end_date: Optional[datetime] = None
+    settings: Optional[Dict] = None
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+    erp_sync_status: Optional[str] = None
+    erp_external_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization Department Schemas
+# ==========================================
+
+class OrgDepartmentBase(BaseModel):
+    name: str
+    code: Optional[str] = None
+    description: Optional[str] = None
+    parent_department_id: Optional[UUID] = None
+    manager_id: Optional[UUID] = None
+
+class OrgDepartmentCreate(OrgDepartmentBase):
+    organization_id: UUID
+    is_active: bool = True
+
+class OrgDepartmentUpdate(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    description: Optional[str] = None
+    parent_department_id: Optional[UUID] = None
+    manager_id: Optional[UUID] = None
+    is_active: Optional[bool] = None
+
+class OrgDepartmentOut(OrgDepartmentBase):
+    id: UUID
+    organization_id: UUID
+    is_active: bool
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+    erp_sync_status: Optional[str] = None
+    erp_external_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization Role Schemas
+# ==========================================
+
+class OrgRoleBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_org_admin: bool = False
+    is_dept_admin: bool = False
+
+class OrgRoleCreate(OrgRoleBase):
+    organization_id: UUID
+    role_type: str = "custom"
+    is_active: bool = True
+
+class OrgRoleUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_org_admin: Optional[bool] = None
+    is_dept_admin: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+class OrgRoleOut(OrgRoleBase):
+    id: UUID
+    organization_id: UUID
+    role_type: str
+    is_active: bool
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization User Role Schemas
+# ==========================================
+
+class OrgUserRoleBase(BaseModel):
+    user_id: UUID
+    org_role_id: UUID
+    department_id: Optional[UUID] = None
+
+class OrgUserRoleCreate(OrgUserRoleBase):
+    assigned_by: Optional[UUID] = None
+    is_active: bool = True
+
+class OrgUserRoleUpdate(BaseModel):
+    is_active: Optional[bool] = None
+
+class OrgUserRoleOut(OrgUserRoleBase):
+    id: UUID
+    assigned_at: Optional[datetime] = None
+    assigned_by: Optional[UUID] = None
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization Role Permission Schemas
+# ==========================================
+
+class OrgRolePermissionBase(BaseModel):
+    org_role_id: UUID
+    module_id: int
+    can_view: bool = False
+    can_add: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
+    can_approve: bool = False
+    can_assign: bool = False
+    can_export: bool = False
+    can_import: bool = False
+
+class OrgRolePermissionCreate(OrgRolePermissionBase):
+    pass
+
+class OrgRolePermissionUpdate(BaseModel):
+    can_view: Optional[bool] = None
+    can_add: Optional[bool] = None
+    can_edit: Optional[bool] = None
+    can_delete: Optional[bool] = None
+    can_approve: Optional[bool] = None
+    can_assign: Optional[bool] = None
+    can_export: Optional[bool] = None
+    can_import: Optional[bool] = None
+
+class OrgRolePermissionOut(OrgRolePermissionBase):
+    id: UUID
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Bulk Permission Set Schema
+# ==========================================
+
+class PermissionSet(BaseModel):
+    module_id: int
+    can_view: bool = False
+    can_add: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
+    can_approve: bool = False
+    can_assign: bool = False
+    can_export: bool = False
+    can_import: bool = False
+
+class BulkPermissionUpdate(BaseModel):
+    permissions: List[PermissionSet]
+
+
+# ==========================================
+# Organization User Create Schema
+# ==========================================
+
+class OrgUserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    firstname: str
+    lastname: Optional[str] = None
+    phone_number: str
+    employee_id: Optional[str] = None
+    department_id: Optional[UUID] = None
+    role_ids: Optional[List[UUID]] = []
+    isactive: bool = True
+
+class OrgUserUpdate(BaseModel):
+    firstname: Optional[str] = None
+    lastname: Optional[str] = None
+    phone_number: Optional[str] = None
+    employee_id: Optional[str] = None
+    department_id: Optional[UUID] = None
+    isactive: Optional[bool] = None
+
+
+# ==========================================
+# Role Assignment Schema
+# ==========================================
+
+class RoleAssignment(BaseModel):
+    org_role_id: UUID
+    department_id: Optional[UUID] = None
+
+
+# ==========================================
+# Organization Invitation Schemas
+# ==========================================
+
+class OrgInvitationCreate(BaseModel):
+    email: EmailStr
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    org_role_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+    expires_in_days: int = 7
+
+class OrgInvitationOut(BaseModel):
+    id: UUID
+    organization_id: UUID
+    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    org_role_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+    invitation_token: str
+    expires_at: datetime
+    status: str
+    accepted_at: Optional[datetime] = None
+    accepted_by_user_id: Optional[UUID] = None
+    invited_by: UUID
+    cts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Role Template Schemas
+# ==========================================
+
+class RoleTemplateCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_org_admin: bool = False
+    is_dept_admin: bool = False
+    auto_provision: bool = False
+    permissions_template: Optional[List[Dict]] = []
+
+class RoleTemplateOut(BaseModel):
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    is_org_admin: bool
+    is_dept_admin: bool
+    auto_provision: bool
+    permissions_template: Optional[List[Dict]] = []
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization with Admin User (for creation)
+# ==========================================
+
+class OrganizationWithAdmin(BaseModel):
+    organization: OrganizationCreate
+    admin_email: EmailStr
+    admin_password: str
+    admin_firstname: str
+    admin_lastname: Optional[str] = None
+    admin_phone: str

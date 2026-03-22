@@ -61,6 +61,9 @@ from routers.customer_care import router as customer_care_router
 from routers import testing_requests, testing, recommendations, approvals, procurement
 from routers import tester_locations
 
+# Organization Multi-Tenancy
+from routers import organizations, org_departments, org_users, org_roles
+
 # Optional: create all database tables (uncomment if needed)
 # Base.metadata.create_all(bind=engine)
 
@@ -177,6 +180,12 @@ app.include_router(recommendations.router)
 app.include_router(approvals.router)
 app.include_router(procurement.router)
 app.include_router(tester_locations.router)
+
+# Organization Multi-Tenancy
+app.include_router(organizations.router)
+app.include_router(org_departments.router)
+app.include_router(org_users.router)
+app.include_router(org_roles.router)
 
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")

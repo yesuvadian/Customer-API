@@ -2,7 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from models import Module, RoleModulePrivilege, UserRole
+from models import Module, RoleModulePrivilege, UserRole, OrgUserRole, OrgRolePermission
 
 
 class ModuleService:
@@ -43,30 +43,54 @@ class ModuleService:
     def get_modules_for_user(cls, db: Session, user_id: int):
         """
         Returns ONLY active modules where user has can_view permission.
+        Supports both old role system and new organization role system.
         """
 
-        # 1️⃣ Get user roles
-        role_ids = (
+        module_ids = set()
+
+        # 1️⃣ OLD ROLE SYSTEM: Get user roles
+        old_role_ids = (
             db.query(UserRole.role_id)
             .filter(UserRole.user_id == user_id)
             .all()
         )
-        role_ids = [r[0] for r in role_ids]
+        old_role_ids = [r[0] for r in old_role_ids]
 
-        if not role_ids:
-            return []
+        if old_role_ids:
+            # Get privileges for old roles
+            old_privileges = (
+                db.query(RoleModulePrivilege)
+                .filter(
+                    RoleModulePrivilege.role_id.in_(old_role_ids),
+                    RoleModulePrivilege.can_view.is_(True)
+                )
+                .all()
+            )
+            module_ids.update([p.module_id for p in old_privileges])
 
-        # 2️⃣ Get privileges for those roles
-        allowed_privileges = (
-            db.query(RoleModulePrivilege)
+        # 2️⃣ NEW ORGANIZATION ROLE SYSTEM: Get org user roles
+        org_user_roles = (
+            db.query(OrgUserRole)
             .filter(
-                RoleModulePrivilege.role_id.in_(role_ids),
-                RoleModulePrivilege.can_view.is_(True)
+                OrgUserRole.user_id == user_id,
+                OrgUserRole.is_active == True
             )
             .all()
         )
+        org_role_ids = [ur.org_role_id for ur in org_user_roles]
 
-        module_ids = [p.module_id for p in allowed_privileges]
+        if org_role_ids:
+            # Get privileges for org roles
+            org_privileges = (
+                db.query(OrgRolePermission)
+                .filter(
+                    OrgRolePermission.org_role_id.in_(org_role_ids),
+                    OrgRolePermission.can_view.is_(True)
+                )
+                .all()
+            )
+            module_ids.update([p.module_id for p in org_privileges])
+
         if not module_ids:
             return []
 
