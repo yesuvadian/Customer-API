@@ -31,22 +31,29 @@ This directory contains test scripts, diagnostic tools, and utility scripts for 
 - **check_sample_org_user.py** - Verify sample organization users
 
 ### Database Verification
+- **check_db.py** - Check database connection and basic configuration
 - **check_tables.py** - Verify database table structure
+- **check_table_schema.py** - Verify database table schema and structure
 - **check_modules.py** - Check module configuration
 - **check_query.py** - Generic database query utility
 - **check_all_requests.py** - List all testing requests
 - **check_request.py** - Check specific testing request details
+- **check_testing_request_schema.py** - Check testing request table schema and relationships
+- **check_tester_setup.py** - Verify tester role and user setup in the database
 
 ### Debugging
 - **debug_approval.py** - Debug approval workflow issues
+- **debug_role_matching.py** - Debug role matching logic for tester assignment workflow
 
 ## Utility Scripts
 
 ### Database Setup
 - **clean_and_seed.py** - Clean database and run seed data
 - **create_sample_tester_roles.py** - Create sample tester roles for testing
+- **quick_reset.py** - Quick database reset utility for development
 
 ### Migrations
+- **run_migration.py** - Run database migrations
 - **run_migration_001.py** - Run migration 001 (tester role configuration)
 - **run_approval_migration.py** - Run approval workflow migration
 
