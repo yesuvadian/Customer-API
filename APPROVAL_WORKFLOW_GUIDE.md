@@ -277,7 +277,14 @@ In **Organizations → User Roles** page:
 
 Repeat for other tester roles.
 
-### 3. Run Migration
+### 3. Setup Workflow
+
+**For Fresh Database:**
+The approval workflow is included in `migrations/seed_testing_request_workflow.sql`.
+When you run the migration, it will create the workflow with approval step automatically.
+
+**For Existing Database (already has workflow):**
+Run the migration script to add the approval step:
 
 ```bash
 cd C:\Yesu\CustomerAPI\Customer-API
