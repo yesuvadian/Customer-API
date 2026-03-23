@@ -390,8 +390,10 @@ def seed_modules(session):
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 {"name": "Validation Requests", "description": "Create and manage validation requests", "path": "validation_requests", "group_name": "Testing"},
 {"name": "Tester Mapping", "description": "Map testers to locations (DEPRECATED - use org departments)", "path": "tester_mapping", "group_name": "Testing", "is_active": False},
-# ✅ ORGANIZATION MANAGEMENT MODULE
-{"name": "Organizations", "description": "Manage organizations, departments, roles, and users", "path": "organizations", "group_name": "User & Access"},
+# ✅ ORGANIZATION MANAGEMENT MODULES
+{"name": "Organizations", "description": "Manage organizations, departments, roles, and users", "path": "organizations", "group_name": "Organization"},
+{"name": "Organization User Roles", "description": "Assign organization-specific roles to users within your organization", "path": "org_user_roles", "group_name": "Organization"},
+{"name": "Organization Role Permissions", "description": "Configure permissions for organization roles", "path": "org_role_permissions", "group_name": "Organization"},
 # ✅ WORKFLOW MANAGEMENT MODULE
 {"name": "Workflows", "description": "Manage workflow definitions, states, transitions, and permissions", "path": "workflows", "group_name": "Administration"},
 

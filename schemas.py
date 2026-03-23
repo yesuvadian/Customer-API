@@ -1483,6 +1483,45 @@ class RoleAssignment(BaseModel):
 
 
 # ==========================================
+# Organization User with Roles Schema
+# ==========================================
+
+class OrgUserRoleInfo(BaseModel):
+    """Role information for user display"""
+    role_id: UUID
+    role_name: str
+    is_org_admin: bool
+    is_dept_admin: bool
+    department_id: Optional[UUID] = None
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class OrgUserWithRoles(BaseModel):
+    """User schema with role information"""
+    id: UUID
+    email: str
+    firstname: Optional[str] = None
+    lastname: Optional[str] = None
+    phone_number: str
+    organization_id: Optional[UUID] = None
+    employee_id: Optional[str] = None
+    department_id: Optional[UUID] = None
+    isactive: bool
+    usertype: Optional[str] = None
+    email_confirmed: bool
+    phone_confirmed: bool
+    cts: datetime
+    mts: datetime
+    roles: List[OrgUserRoleInfo] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
 # Organization Invitation Schemas
 # ==========================================
 

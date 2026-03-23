@@ -16,7 +16,8 @@ from schemas import (
     OrgUserUpdate,
     User as UserOut,
     RoleAssignment,
-    OrgUserRoleOut
+    OrgUserRoleOut,
+    OrgUserWithRoles
 )
 from services.org_user_service import OrgUserService
 
@@ -27,7 +28,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=OrgUserWithRoles, status_code=status.HTTP_201_CREATED)
 def create_org_user(
     org_id: UUID,
     user_data: OrgUserCreate,
@@ -40,14 +41,20 @@ def create_org_user(
     Auto-assigns to specified department and roles if provided.
     """
     service = OrgUserService(db)
-    return service.create_org_user(
+    user = service.create_org_user(
         organization_id=org_id,
         user_data=user_data,
         created_by=current_user.id
     )
+    # Convert to OrgUserWithRoles
+    users_with_roles = service.list_org_users_with_roles(
+        organization_id=org_id,
+        search=user.email
+    )
+    return users_with_roles[0] if users_with_roles else user
 
 
-@router.get("/", response_model=List[UserOut])
+@router.get("/", response_model=List[OrgUserWithRoles])
 def list_org_users(
     org_id: UUID,
     department_id: Optional[UUID] = None,
@@ -59,11 +66,11 @@ def list_org_users(
     current_user: User = Depends(require_org_member)
 ):
     """
-    List users in the organization.
+    List users in the organization with their roles.
     Optionally filter by department, active status, or search term.
     """
     service = OrgUserService(db)
-    return service.list_org_users(
+    return service.list_org_users_with_roles(
         organization_id=org_id,
         department_id=department_id,
         skip=skip,
@@ -73,7 +80,7 @@ def list_org_users(
     )
 
 
-@router.get("/{user_id}", response_model=UserOut)
+@router.get("/{user_id}", response_model=OrgUserWithRoles)
 def get_org_user(
     org_id: UUID,
     user_id: UUID,
@@ -81,14 +88,14 @@ def get_org_user(
     current_user: User = Depends(require_org_member)
 ):
     """
-    Get user details.
+    Get user details with roles.
     Any organization member can view other members.
     """
     service = OrgUserService(db)
-    return service.get_org_user(user_id, org_id)
+    return service.get_org_user_with_roles(user_id, org_id)
 
 
-@router.put("/{user_id}", response_model=UserOut)
+@router.put("/{user_id}", response_model=OrgUserWithRoles)
 def update_org_user(
     org_id: UUID,
     user_id: UUID,
@@ -101,12 +108,14 @@ def update_org_user(
     Only org admins can update users.
     """
     service = OrgUserService(db)
-    return service.update_org_user(
+    service.update_org_user(
         user_id=user_id,
         organization_id=org_id,
         user_data=user_data,
         modified_by=current_user.id
     )
+    # Return user with roles
+    return service.get_org_user_with_roles(user_id, org_id)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -192,12 +201,14 @@ def get_user_roles(
     return service.get_user_roles(user_id, org_id)
 
 
-@router.get("/me", response_model=UserOut)
+@router.get("/me", response_model=OrgUserWithRoles)
 def get_current_org_user(
     org_id: UUID,
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_org_member)
 ):
     """
-    Get current user's information.
+    Get current user's information with roles.
     """
-    return current_user
+    service = OrgUserService(db)
+    return service.get_org_user_with_roles(current_user.id, org_id)

@@ -1,11 +1,11 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from uuid import UUID
 from typing import List, Optional
 from fastapi import HTTPException, status
 
 from models import User, Organization, OrgDepartment, OrgRole, OrgUserRole
-from schemas import OrgUserCreate, OrgUserUpdate
+from schemas import OrgUserCreate, OrgUserUpdate, OrgUserWithRoles, OrgUserRoleInfo
 from security_utils import get_password_hash
 from utils.common_service import UTCDateTimeMixin
 
@@ -141,6 +141,51 @@ class OrgUserService(UTCDateTimeMixin):
             )
         return user
 
+    def get_org_user_with_roles(self, user_id: UUID, organization_id: UUID) -> OrgUserWithRoles:
+        """Get user by ID with role information."""
+        user = self.get_org_user(user_id, organization_id)
+
+        # Get user's roles
+        user_roles = self.db.query(OrgUserRole).join(
+            OrgRole, OrgUserRole.org_role_id == OrgRole.id
+        ).filter(
+            OrgUserRole.user_id == user.id,
+            OrgUserRole.is_active == True
+        ).all()
+
+        # Build role info list
+        role_infos = []
+        for user_role in user_roles:
+            role = self.db.query(OrgRole).filter(OrgRole.id == user_role.org_role_id).first()
+            if role:
+                role_infos.append(OrgUserRoleInfo(
+                    role_id=role.id,
+                    role_name=role.name,
+                    is_org_admin=role.is_org_admin,
+                    is_dept_admin=role.is_dept_admin,
+                    department_id=user_role.department_id,
+                    is_active=user_role.is_active
+                ))
+
+        # Create user with roles
+        return OrgUserWithRoles(
+            id=user.id,
+            email=user.email,
+            firstname=user.firstname,
+            lastname=user.lastname,
+            phone_number=user.phone_number,
+            organization_id=user.organization_id,
+            employee_id=user.employee_id,
+            department_id=user.department_id,
+            isactive=user.isactive,
+            usertype=user.usertype,
+            email_confirmed=user.email_confirmed,
+            phone_confirmed=user.phone_confirmed,
+            cts=user.cts,
+            mts=user.mts,
+            roles=role_infos
+        )
+
     def list_org_users(
         self,
         organization_id: UUID,
@@ -173,6 +218,73 @@ class OrgUserService(UTCDateTimeMixin):
             query = query.limit(limit)
 
         return query.all()
+
+    def list_org_users_with_roles(
+        self,
+        organization_id: UUID,
+        department_id: Optional[UUID] = None,
+        skip: int = 0,
+        limit: Optional[int] = None,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None
+    ) -> List[OrgUserWithRoles]:
+        """List users in an organization with their role information."""
+        # Get users
+        users = self.list_org_users(
+            organization_id=organization_id,
+            department_id=department_id,
+            skip=skip,
+            limit=limit,
+            is_active=is_active,
+            search=search
+        )
+
+        # Build response with roles
+        result = []
+        for user in users:
+            # Get user's roles
+            user_roles = self.db.query(OrgUserRole).join(
+                OrgRole, OrgUserRole.org_role_id == OrgRole.id
+            ).filter(
+                OrgUserRole.user_id == user.id,
+                OrgUserRole.is_active == True
+            ).all()
+
+            # Build role info list
+            role_infos = []
+            for user_role in user_roles:
+                role = self.db.query(OrgRole).filter(OrgRole.id == user_role.org_role_id).first()
+                if role:
+                    role_infos.append(OrgUserRoleInfo(
+                        role_id=role.id,
+                        role_name=role.name,
+                        is_org_admin=role.is_org_admin,
+                        is_dept_admin=role.is_dept_admin,
+                        department_id=user_role.department_id,
+                        is_active=user_role.is_active
+                    ))
+
+            # Create user with roles
+            user_with_roles = OrgUserWithRoles(
+                id=user.id,
+                email=user.email,
+                firstname=user.firstname,
+                lastname=user.lastname,
+                phone_number=user.phone_number,
+                organization_id=user.organization_id,
+                employee_id=user.employee_id,
+                department_id=user.department_id,
+                isactive=user.isactive,
+                usertype=user.usertype,
+                email_confirmed=user.email_confirmed,
+                phone_confirmed=user.phone_confirmed,
+                cts=user.cts,
+                mts=user.mts,
+                roles=role_infos
+            )
+            result.append(user_with_roles)
+
+        return result
 
     def update_org_user(
         self,
