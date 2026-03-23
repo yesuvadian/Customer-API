@@ -15,7 +15,7 @@ from schemas import (
     ApprovalResponse,
     TesterInfo
 )
-from security_utils import get_current_user
+from auth_utils import get_current_user
 from services.testing_request_workflow_service import TestingRequestWorkflowService
 
 router = APIRouter(prefix="/testing-requests/approvals", tags=["Testing Request Approvals"])

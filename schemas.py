@@ -1878,3 +1878,46 @@ class PerformTransitionResponse(BaseModel):
     message: str
     new_state: Optional[WorkflowStateResponse] = None
     audit_log_id: Optional[UUID] = None
+
+
+# ==========================================
+# Testing Request Approval Workflow Schemas
+# ==========================================
+
+# Alias for testing request output in approval workflow
+TestingRequestOut = TestingRequestResponse
+
+
+class TesterInfo(BaseModel):
+    """Information about a tester user for assignment"""
+    user_id: str
+    email: str
+    name: str
+    department_id: Optional[str] = None
+    active_requests: int  # Current workload
+
+    class Config:
+        from_attributes = True
+
+
+class ApproverTesterSelection(BaseModel):
+    """Request body for approver selecting a tester"""
+    tester_role_id: UUID  # Which tester role was selected
+    tester_id: UUID       # Which specific user was chosen
+    comment: Optional[str] = None  # Optional approval comment
+
+    class Config:
+        from_attributes = True
+
+
+class ApprovalResponse(BaseModel):
+    """Response from approval/rejection action"""
+    success: bool
+    message: str
+    testing_request_id: str
+    assigned_tester_id: Optional[str] = None
+    assigned_tester_email: Optional[str] = None
+    new_status: str
+
+    class Config:
+        from_attributes = True
