@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from services.websocket_manager import send_to_user
 import os, json, hmac, hashlib
 
 from services.redis_cache import RedisCacheService as cache
 from services.zoho_cache_map import ZOHO_MODULE_CACHE_KEYS
+from services.zoho_contact_service import ZohoContactService
+
+contact_service = ZohoContactService()
 
 router = APIRouter()
 
@@ -108,10 +112,22 @@ async def zoho_webhook(module: str, request: Request):
     root_key = ROOT_KEYS.get(module)
     root_obj = payload.get(root_key, {})
 
-    contact_id = (
+    zoho_contact_id = (
         root_obj.get("customer_id")
         or root_obj.get("contact_id")
     )
+
+    if not zoho_contact_id:
+        print("⚠️ contact_id missing")
+        return {"status": "ignored"}
+
+    # 🔥 Convert to email (IMPORTANT)
+    try:
+        contact = contact_service.get_contact_by_id(zoho_contact_id)
+        contact_id = contact.get("email")  # use email for WebSocket
+    except Exception as e:
+        print("❌ Failed to resolve contact email:", e)
+        return {"status": "ignored"}
 
     if not contact_id:
         print("⚠️ contact_id missing")
@@ -132,22 +148,18 @@ async def zoho_webhook(module: str, request: Request):
                 "message": f"New quote {estimate_id} created"
             }
 
-            # store in Redis
+            # ✅ store in Redis
             cache_key = f"notifications:{contact_id}"
             existing = cache.get(cache_key) or []
 
-            # safety (ensure list)
             if not isinstance(existing, list):
                 existing = []
 
             existing.append(notification)
             cache.set(cache_key, existing)
 
-        elif event_type == "estimate.updated":
-            print(f"🟡 Quote Updated: {estimate_id}")
-
-        elif event_type == "estimate.sent":
-            print(f"📤 Quote Sent: {estimate_id}")
+            # 🚀 NEW: send real-time via WebSocket
+            await send_to_user(contact_id, notification)
 
     # -------------------------------------------------
     # 8. Invalidate cache
