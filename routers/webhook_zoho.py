@@ -10,6 +10,9 @@ router = APIRouter()
 ZOHO_WEBHOOK_SECRET = os.getenv("ZOHO_WEBHOOK_SECRET")
 
 
+# -------------------------------------------------
+# 🔐 Verify Zoho Signature
+# -------------------------------------------------
 def verify_zoho_signature(raw_body: bytes, signature: str) -> bool:
     calculated = hmac.new(
         ZOHO_WEBHOOK_SECRET.encode(),
@@ -20,6 +23,9 @@ def verify_zoho_signature(raw_body: bytes, signature: str) -> bool:
     return hmac.compare_digest(calculated, signature)
 
 
+# -------------------------------------------------
+# 🚀 Webhook Endpoint
+# -------------------------------------------------
 @router.post("/webhooks/zoho/{module}", response_class=JSONResponse)
 async def zoho_webhook(module: str, request: Request):
     module = module.lower()
@@ -28,17 +34,17 @@ async def zoho_webhook(module: str, request: Request):
 
     print("🚀 ZOHO WEBHOOK HIT:", module)
     print("Content-Type:", headers.get("content-type"))
-    print("RAW BODY:", raw_body[:500])  # limit log size
+    print("RAW BODY:", raw_body[:500])
 
     # -------------------------------------------------
-    # 1. Handle Zoho ping / validation calls
+    # 1. Zoho validation ping
     # -------------------------------------------------
     if headers.get("content-type", "").startswith("application/x-www-form-urlencoded"):
         print("ℹ️ Zoho validation ping received")
         return {"status": "ok"}
 
     # -------------------------------------------------
-    # 2. Verify signature (OFFICIAL & CORRECT)
+    # 2. Verify signature
     # -------------------------------------------------
     signature = headers.get("x-zoho-webhook-signature")
     if not signature:
@@ -57,6 +63,9 @@ async def zoho_webhook(module: str, request: Request):
     except Exception:
         print("⚠️ Invalid JSON payload")
         return {"status": "ignored"}
+
+    # 👉 NEW: extract event type
+    event_type = payload.get("event_type", "")
 
     # -------------------------------------------------
     # 4. Resolve cache namespaces
@@ -109,7 +118,39 @@ async def zoho_webhook(module: str, request: Request):
         return {"status": "ignored"}
 
     # -------------------------------------------------
-    # 7. Invalidate cache
+    # 🔔 7. Notification Logic (NEW)
+    # -------------------------------------------------
+    if module == "quotes":
+        estimate_id = root_obj.get("estimate_id")
+
+        if event_type == "estimate.created":
+            print(f"🟢 New Quote Created: {estimate_id}")
+
+            notification = {
+                "type": "quote_created",
+                "estimate_id": estimate_id,
+                "message": f"New quote {estimate_id} created"
+            }
+
+            # store in Redis
+            cache_key = f"notifications:{contact_id}"
+            existing = cache.get(cache_key) or []
+
+            # safety (ensure list)
+            if not isinstance(existing, list):
+                existing = []
+
+            existing.append(notification)
+            cache.set(cache_key, existing)
+
+        elif event_type == "estimate.updated":
+            print(f"🟡 Quote Updated: {estimate_id}")
+
+        elif event_type == "estimate.sent":
+            print(f"📤 Quote Sent: {estimate_id}")
+
+    # -------------------------------------------------
+    # 8. Invalidate cache
     # -------------------------------------------------
     for ns in cache_namespaces:
         key = f"zoho:{ns}:{contact_id}"
@@ -123,5 +164,6 @@ async def zoho_webhook(module: str, request: Request):
         "message": "cache invalidated",
         "module": module,
         "contact_id": contact_id,
+        "event_type": event_type,
         "keys": deleted_keys,
     }
