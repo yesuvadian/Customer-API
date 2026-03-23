@@ -1,5 +1,6 @@
 from typing import List
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status, HTTPException, Request
+import requests
 from auth_utils import get_current_user
 import schemas
 from services.quote_service import QuoteService
@@ -26,6 +27,10 @@ def request_quote(payload: zohoschemas.RequestQuote, current_user=Depends(get_cu
     - Creates DRAFT quote in Zoho Books
     - Sales team completes & sends
     """
+    selected_item_ids = [item.item_id for item in payload.items]
+ 
+    print(f"Selected item IDs for quote request: {selected_item_ids}")
+    
     access_token = get_zoho_access_token()
 
     try:
@@ -46,68 +51,178 @@ def request_quote(payload: zohoschemas.RequestQuote, current_user=Depends(get_cu
     )
 
 
-@router.post("/request_with_vendors", response_model=zohoschemas.QuoteResponse, status_code=status.HTTP_201_CREATED)
-def request_quote_with_vendors(payload: zohoschemas.RequestQuote,request: Request, current_user=Depends(get_current_user)):
+@router.post(
+    "/request_with_vendors",
+    status_code=status.HTTP_200_OK
+)
+def request_quote_with_vendors(
+    payload: zohoschemas.RequestQuote,
+    request: Request,
+    current_user=Depends(get_current_user)
+):
     """
     Request Quote:
-    - Creates DRAFT quote in Zoho Books
-    - Sales team completes & sends
+    - ONLY finds matching vendors
+    - DOES NOT create quote
     """
+
     access_token = get_zoho_access_token()
     auth_header = request.headers.get("Authorization")
 
     try:
-        estimate = quote_service.create_draft_quote(access_token, payload)
-
-        # 2. Extract Zoho Item IDs from the payload
+        # ✅ Step 1: Extract item IDs
         zoho_item_ids = [str(item.item_id) for item in payload.items]
-        
-        # 3. Call Vendor App to find matching vendors
-        matched_vendors = quote_service.find_vendors_for_items(
+
+        # ✅ Step 2: Fetch vendors from Vendor App
+        matched_vendors_raw = quote_service.find_vendors_for_items(
             item_ids=zoho_item_ids,
             auth_header=auth_header
-)
-        return zohoschemas.QuoteResponse(
-            message="Quote request submitted successfully",
-            estimate_id=estimate["estimate_id"],
-            estimate_number=estimate.get("estimate_number", ""),
-            status=estimate["status"],
-            matched_vendors=matched_vendors
         )
+
+        # ✅ Step 3: Transform vendors
+        matched_vendors = [
+            {
+                "name": f"{v.get('firstname', '')} {v.get('lastname', '')}".strip(),
+                "zoho_erp_id": v.get("zoho_erp_id")
+            }
+            for v in matched_vendors_raw
+        ]
+
+        # ✅ Step 4: Return ONLY vendors
+        return {
+            "message": "Vendors fetched successfully",
+            "vendors": matched_vendors
+        }
+
     except HTTPException as e:
         raise e
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error while creating quote: {str(e)}"
+            detail=f"Unexpected error while fetching vendors: {str(e)}"
         )
     
-@router.post("/assign_vendors/{estimate_id}")
-def assign_vendors_to_quote(
-    estimate_id: str,
+    
+@router.post("/assign_vendors")
+def create_quotes_for_vendors(
     payload: zohoschemas.AssignVendors,
     current_user=Depends(get_current_user)
 ):
     access_token = get_zoho_access_token()
 
+    # ✅ Validate
+    if not payload.vendors:
+        raise HTTPException(400, "Vendors list cannot be empty")
+
     try:
-        result = quote_service.assign_vendors_to_quote(
-            access_token=access_token,
-            estimate_id=estimate_id,
-            vendors=payload.vendors
-        )
+        # ✅ Resolve contact
+        contact_id = quote_service._resolve_contact_id(payload.contact_id)
+
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        # ✅ Build line items
+        line_items = []
+        for item in payload.items:
+            item_resp = requests.get(
+                f"{quote_service.base_url}/items/{item.item_id}",
+                headers=headers,
+                params={"organization_id": quote_service.org_id},
+                timeout=15
+            )
+
+            if item_resp.status_code != 200:
+                raise HTTPException(400, f"Item fetch failed: {item.item_id}")
+
+            item_data = item_resp.json()["item"]
+
+            line_items.append({
+                "item_id": item.item_id,
+                "quantity": item.quantity,
+                "rate": item_data.get("rate", 0),
+                "name": item_data.get("name", "")
+            })
+
+        # ✅ Base payload
+        base_payload = {
+            "customer_id": contact_id,
+            "line_items": line_items,
+            "notes": payload.notes or "Multi vendor quote"
+        }
+
+        created_quotes = []
+
+        # 🔥 LOOP vendors → create quote per vendor
+        for v in payload.vendors:
+
+            # ✅ Get vendor id
+            if v.get("zoho_erp_id"):
+                supplier_id = v["zoho_erp_id"]
+            else:
+                supplier_id = quote_service.create_vendor_if_not_exists(
+                    access_token,
+                    f"{v.get('firstname', '')} {v.get('lastname', '')}".strip()
+                )
+
+            # ✅ Attach supplier
+            payload_copy = base_payload.copy()
+            payload_copy["custom_fields"] = [
+                {
+                    "api_name": "cf_supplier",
+                    "value": supplier_id
+                }
+            ]
+
+            # ✅ Create quote
+            create_resp = requests.post(
+                f"{quote_service.base_url}/estimates",
+                headers={
+                    "Authorization": f"Zoho-oauthtoken {access_token}",
+                    "Content-Type": "application/json"
+                },
+                params={"organization_id": quote_service.org_id},
+                json=payload_copy,
+                timeout=15
+            )
+
+            if create_resp.status_code not in (200, 201):
+                raise HTTPException(400, create_resp.text)
+
+            estimate = create_resp.json()["estimate"]
+            estimate_id = estimate["estimate_id"]
+
+            # ✅ Mark as sent
+            send_resp = requests.post(
+                f"{quote_service.base_url}/estimates/{estimate_id}/status/sent",
+                headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+                params={"organization_id": quote_service.org_id},
+                timeout=15
+            )
+
+            if send_resp.status_code != 200:
+                raise HTTPException(400, send_resp.text)
+
+            created_quotes.append({
+                "estimate_id": estimate_id,
+                "vendor": f"{v.get('firstname', '')} {v.get('lastname', '')}".strip(),
+                "status": "sent"
+            })
+
+        return {
+            "message": "Quotes created and sent successfully",
+            "quotes": created_quotes
+        }
+
+    except HTTPException as e:
+        raise e
+
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Error assigning vendors: {str(e)}"
+            detail=f"Error creating quotes: {str(e)}"
         )
-
-    return {
-        "message": "Vendors assigned successfully",
-        "estimate_id": estimate_id,
-        "vendors": payload.vendors
-    }
-
 
 @router.post(
     "/{estimate_id}/attachment",

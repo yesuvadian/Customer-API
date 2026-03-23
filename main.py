@@ -57,6 +57,10 @@ from routers import (
 from routers.kyc_router import router as kyc_router
 from routers.customer_care import router as customer_care_router
 
+# Testing Request System
+from routers import testing_requests, testing, recommendations, approvals, procurement
+from routers import tester_locations
+
 # Optional: create all database tables (uncomment if needed)
 # Base.metadata.create_all(bind=engine)
 
@@ -165,6 +169,14 @@ app.include_router(statements.router)
 app.include_router(zoho_register.router)
 app.include_router(webhook_zoho.router)
 app.include_router(customer_care_router)
+
+# Testing Request System
+app.include_router(testing_requests.router)
+app.include_router(testing.router)
+app.include_router(recommendations.router)
+app.include_router(approvals.router)
+app.include_router(procurement.router)
+app.include_router(tester_locations.router)
 
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")
