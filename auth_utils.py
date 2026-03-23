@@ -349,12 +349,6 @@ def login_user(db: Session, email: str, password: str):
                 }
 
         # Step 9: Login success
-        with open("C:/Yesu/CustomerAPI/Customer-API/debug_login.txt", "a") as f:
-            f.write(f"user.email: {user.email}\n")
-            f.write(f"user.organization_id: {user.organization_id}\n")
-            f.write(f"type: {type(user.organization_id)}\n")
-            f.write(f"str(user.organization_id): {str(user.organization_id) if user.organization_id else 'None'}\n\n")
-        print(f"DEBUG: user.organization_id = {user.organization_id}, type = {type(user.organization_id)}")
         return {
             "access_token": create_access_token({"sub": str(user.id)}),
             "refresh_token": create_refresh_token(str(user.id)),
