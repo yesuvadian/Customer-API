@@ -58,7 +58,7 @@ from routers.kyc_router import router as kyc_router
 from routers.customer_care import router as customer_care_router
 
 # Testing Request System
-from routers import testing_requests, testing, recommendations, approvals, procurement, testing_request_approvals
+from routers import testing_requests, testing, recommendations, approvals, procurement, testing_request_approvals, admin_tester_config
 # DEPRECATED: from routers import tester_locations  # Use org departments instead
 from routers import tester_assignment
 
@@ -183,6 +183,7 @@ app.include_router(testing.router)
 app.include_router(recommendations.router)
 app.include_router(approvals.router)
 app.include_router(testing_request_approvals.router)
+app.include_router(admin_tester_config.router)
 app.include_router(procurement.router)
 # DEPRECATED: app.include_router(tester_locations.router)  # Use org departments instead
 app.include_router(tester_assignment.router)

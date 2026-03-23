@@ -3,12 +3,13 @@ Testing Request Approval Endpoints
 Handles approval workflow with tester role selection and assignment
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
 
 from database import get_db
-from models import User, TestingRequest, OrgRole, OrgUserRole
+from models import User, TestingRequest, OrgRole, OrgUserRole, OrgRolePermission, TestingRequestStatus, TesterRoleModuleRequirement
 from schemas import (
     TestingRequestOut,
     ApproverTesterSelection,
@@ -33,7 +34,7 @@ def get_pending_approvals(
     Filters by organization and department based on user's permissions.
     """
     query = db.query(TestingRequest).filter(
-        TestingRequest.status == 'pending_approval'
+        TestingRequest.status == TestingRequestStatus.submitted  # Using submitted for testing (pending_approval requires migration)
     )
 
     # Filter by organization if user belongs to one
@@ -48,6 +49,9 @@ def get_pending_approvals(
         query = query.filter(TestingRequest.department_id == department_id)
 
     requests = query.order_by(TestingRequest.cts.desc()).all()
+    print(f"[DEBUG] Found {len(requests)} pending approvals")
+    for req in requests:
+        print(f"[DEBUG] Request: {req.id}, Status: {req.status}, Org: {req.organization_id}")
     return requests
 
 
@@ -59,7 +63,12 @@ def get_available_tester_roles(
 ):
     """
     Get all tester roles available for the testing request's organization.
-    Returns roles that contain the word "tester" (configurable).
+    Returns ONLY roles that have FULL permissions on EXACTLY the configured modules.
+
+    Logic:
+    1. Get module requirement configuration (org-specific or global default)
+    2. For each role in organization, check if it has FULL permissions on EXACTLY those modules
+    3. Return only matching roles with user counts
     """
     # Get the testing request
     testing_request = db.query(TestingRequest).filter(
@@ -72,15 +81,62 @@ def get_available_tester_roles(
             detail="Testing request not found"
         )
 
-    # Get all active organization roles with "Tester" in name
-    tester_roles = db.query(OrgRole).filter(
+    # Get tester role module requirements configuration
+    # Priority: org-specific config > global default
+    config = db.query(TesterRoleModuleRequirement).filter(
+        TesterRoleModuleRequirement.is_active == True,
+        or_(
+            TesterRoleModuleRequirement.organization_id == testing_request.organization_id,
+            TesterRoleModuleRequirement.organization_id.is_(None)  # Global default
+        )
+    ).order_by(
+        # Org-specific first (NULL last)
+        TesterRoleModuleRequirement.organization_id.desc().nullslast()
+    ).first()
+
+    if not config:
+        return []
+
+    required_modules = set(config.required_module_ids)
+
+    # Get all active roles in organization
+    all_roles = db.query(OrgRole).filter(
         OrgRole.organization_id == testing_request.organization_id,
-        OrgRole.is_active == True,
-        OrgRole.name.ilike('%tester%')  # Roles containing "tester"
+        OrgRole.is_active == True
     ).all()
 
+    # Filter roles: must have FULL permissions on EXACTLY the required modules
+    eligible_roles = []
+
+    for role in all_roles:
+        # Get ALL permissions for this role
+        permissions = db.query(OrgRolePermission).filter(
+            OrgRolePermission.org_role_id == role.id
+        ).all()
+
+        # Find modules where role has FULL permissions (all 6 flags TRUE)
+        full_permission_modules = set()
+        for perm in permissions:
+            if (perm.can_view and
+                perm.can_add and
+                perm.can_edit and
+                perm.can_delete and
+                perm.can_approve and
+                perm.can_assign):
+                full_permission_modules.add(perm.module_id)
+
+        # Check for EXACT match
+        if full_permission_modules == required_modules:
+            eligible_roles.append(role)
+            print(f"[DEBUG] Role '{role.name}' matches (modules: {full_permission_modules})")
+        else:
+            print(f"[DEBUG] Role '{role.name}' excluded (has modules: {full_permission_modules})")
+
+    print(f"[DEBUG] {len(eligible_roles)} eligible tester roles found")
+
+    # Build response with user counts
     result = []
-    for role in tester_roles:
+    for role in eligible_roles:
         # Count active users with this role
         user_count = db.query(OrgUserRole).filter(
             OrgUserRole.org_role_id == role.id,
@@ -177,10 +233,11 @@ def approve_and_assign_tester(
         )
 
     # Validate state
-    if testing_request.status != 'pending_approval':
+    # Using submitted for testing (pending_approval requires migration)
+    if testing_request.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Request must be in 'pending_approval' state, currently: {testing_request.status}"
+            detail=f"Request must be in 'pending_approval' or 'submitted' state, currently: {testing_request.status}"
         )
 
     # Validate tester exists and has the role
@@ -254,10 +311,11 @@ def reject_testing_request(
         )
 
     # Validate state
-    if testing_request.status != 'pending_approval':
+    # Using submitted for testing (pending_approval requires migration)
+    if testing_request.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Request must be in 'pending_approval' state"
+            detail=f"Request must be in 'pending_approval' or 'submitted' state"
         )
 
     if not rejection_comment or len(rejection_comment.strip()) == 0:

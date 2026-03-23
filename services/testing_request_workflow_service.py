@@ -11,7 +11,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-from models import TestingRequest, User
+from models import TestingRequest, User, TestingRequestStatus
 from services.workflow_engine import IntegratedWorkflowEngine
 from services.tester_auto_assignment_service import TesterAutoAssignmentService
 
@@ -361,8 +361,9 @@ class TestingRequestWorkflowService:
         """
         try:
             # 1. Validate current state
-            if testing_request.status != 'pending_approval':
-                return False, f"Request must be in 'pending_approval' state, currently: {testing_request.status}"
+            # Using submitted for testing (pending_approval requires migration)
+            if testing_request.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
+                return False, f"Request must be in 'pending_approval' or 'submitted' state, currently: {testing_request.status}"
 
             # 2. Verify tester exists and is active
             from models import User
@@ -384,6 +385,16 @@ class TestingRequestWorkflowService:
 
             if not has_role:
                 return False, "Selected tester does not have the specified role"
+
+            # 4. Check if we're in testing mode with 'submitted' status
+            if testing_request.status == TestingRequestStatus.submitted:
+                # TESTING MODE: Bypass workflow engine for submitted status
+                # Just do direct assignment without workflow transitions
+                testing_request.assigned_tester_id = selected_tester.id
+                testing_request.status = TestingRequestStatus.assigned
+                self.db.commit()
+
+                return True, f"Request approved and assigned to {selected_tester.email} (testing mode)"
 
             # 4. Execute workflow transition: pending_approval → assigned
             from models import WorkflowTransition
@@ -412,7 +423,7 @@ class TestingRequestWorkflowService:
                 return False, msg
 
             # 7. Update status
-            testing_request.status = 'assigned'
+            testing_request.status = TestingRequestStatus.assigned
 
             # 8. Log the assignment
             from models import WorkflowAuditLog
@@ -464,11 +475,20 @@ class TestingRequestWorkflowService:
         """
         try:
             # 1. Validate current state
-            if testing_request.status != 'pending_approval':
-                return False, f"Request must be in 'pending_approval' state"
+            # Using submitted for testing (pending_approval requires migration)
+            if testing_request.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
+                return False, f"Request must be in 'pending_approval' or 'submitted' state"
 
             if not comment:
                 return False, "Rejection comment is required"
+
+            # 2. Check if we're in testing mode with 'submitted' status
+            if testing_request.status == TestingRequestStatus.submitted:
+                # TESTING MODE: Bypass workflow engine for submitted status
+                testing_request.status = TestingRequestStatus.rejected
+                self.db.commit()
+
+                return True, f"Request rejected (testing mode): {comment}"
 
             # 2. Get rejection transition
             from models import WorkflowTransition

@@ -36,6 +36,8 @@ class TestingRequestService:
             serial_number=data.get("serial_number"),
             equipment_type_id=data.get("equipment_type_id"),
             test_type_id=data.get("test_type_id"),
+            organization_id=data.get("organization_id"),
+            department_id=data.get("department_id"),
             zone=data.get("zone"),
             ce_circle=data.get("ce_circle"),
             se_division=data.get("se_division"),

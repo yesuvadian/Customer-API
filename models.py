@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import (
     Column, Float, LargeBinary, Numeric, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
 )
-from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB
+from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB, ARRAY
 from sqlalchemy.orm import relationship
 from database import Base
 from utils.common_service import UTCDateTimeMixin
@@ -44,6 +44,7 @@ class BankStatusEnum(PyEnum):
 class TestingRequestStatus(PyEnum):
     draft = "draft"
     submitted = "submitted"
+    pending_approval = "pending_approval"
     assigned = "assigned"
     accepted = "accepted"
     in_progress = "in_progress"
@@ -236,6 +237,7 @@ class OrgRole(Base):
 
     is_org_admin = Column(Boolean, default=False)
     is_dept_admin = Column(Boolean, default=False)
+    is_tester_assignable = Column(Boolean, default=False)  # Can this role be assigned as tester in testing requests
     is_active = Column(Boolean, default=True)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -1876,3 +1878,95 @@ class WorkflowAuditLog(Base, UTCDateTimeMixin):
     performer = relationship("User", foreign_keys=[performed_by])
     user_role = relationship("OrgRole", foreign_keys=[user_role_id])
     user_department = relationship("OrgDepartment", foreign_keys=[user_department_id])
+
+# ------------------------------
+# WorkflowRoleConfig Model
+# ------------------------------
+class WorkflowRoleConfig(Base):
+    """
+    Configuration for role assignment in workflows.
+    Defines which module permissions are required for a role to be assignable in a workflow.
+    Only roles with FULL permissions on the specified module will appear in assignment dropdowns.
+    """
+    __tablename__ = "workflow_role_configs"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Workflow type (e.g., "testing_request", "inspection_request", "approval_workflow")
+    workflow_type = Column(String(100), nullable=False, index=True)
+
+    # Role assignment type (e.g., "tester", "inspector", "reviewer")
+    assignment_type = Column(String(100), nullable=False)
+
+    # Module that must have FULL permissions
+    module_id = Column(Integer, ForeignKey("public.modules.id", ondelete="CASCADE"), nullable=False)
+
+    # Required permissions on the module (role must have ALL of these set to TRUE)
+    requires_can_view = Column(Boolean, default=True)
+    requires_can_add = Column(Boolean, default=True)
+    requires_can_edit = Column(Boolean, default=True)
+    requires_can_delete = Column(Boolean, default=True)
+    requires_can_approve = Column(Boolean, default=True)
+    requires_can_assign = Column(Boolean, default=True)
+
+    # Description
+    description = Column(Text)
+
+    # Active flag
+    is_active = Column(Boolean, default=True)
+
+    # Audit fields
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    module = relationship("Module")
+
+
+# ------------------------------
+# Tester Role Configuration Model
+# ------------------------------
+class TesterRoleModuleRequirement(Base):
+    """
+    Configuration for tester role selection in testing request approvals.
+    Defines which modules a role must have FULL permissions on to appear
+    in the tester assignment dropdown.
+
+    Role must have ALL 6 permissions (view, add, edit, delete, approve, assign)
+    on EXACTLY the modules listed in required_module_ids.
+    """
+    __tablename__ = "tester_role_module_requirements"
+    __table_args__ = (
+        UniqueConstraint('organization_id', name='uq_tester_role_config_org'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Organization (NULL = global default)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True
+    )
+
+    # Required module IDs (EXACT match required)
+    required_module_ids = Column(ARRAY(Integer), nullable=False)
+
+    # Metadata
+    description = Column(Text)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    # Audit fields
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
+    cts = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])

@@ -10,7 +10,7 @@ from models import (
     State, City, User, UserRole, Module,
     # Organization models
     Organization, OrgDepartment, OrgRole, OrgUserRole,
-    OrgRolePermission, RoleTemplate, OrgInvitation
+    OrgRolePermission, RoleTemplate, OrgInvitation, TesterRoleModuleRequirement
 )
 from security_utils import get_password_hash  # password hashing utils
 
@@ -1711,6 +1711,38 @@ def seed_super_admin(session):
     return super_admin.id
 
 
+def seed_tester_role_module_requirements(session):
+    """
+    Seed global default configuration for tester role module requirements.
+    Defines which modules a role must have FULL permissions on to appear in tester assignment dropdown.
+    """
+    # Check if global default already exists
+    existing_config = session.query(TesterRoleModuleRequirement).filter_by(
+        organization_id=None
+    ).first()
+
+    if existing_config:
+        print(f"[INFO] Global tester role module requirements already exist")
+        return existing_config.id
+
+    # Create global default configuration
+    # Modules: 45=Testing Requests, 46=Testing, 49=Testing Request Approvals, 51=Tester Mapping
+    config = TesterRoleModuleRequirement(
+        id=uuid.uuid4(),
+        organization_id=None,  # Global default
+        required_module_ids=[45, 46, 49, 51],
+        description="Global default: Roles must have full permissions on Testing Requests, Testing, Testing Request Approvals, and Tester Mapping modules",
+        is_active=True,
+        cts=datetime.now(datetime.now().astimezone().tzinfo),
+        mts=datetime.now(datetime.now().astimezone().tzinfo)
+    )
+    session.add(config)
+    session.commit()
+
+    print(f"[OK] Global tester role module requirements seeded: {config.required_module_ids}")
+    return config.id
+
+
 def seed_sample_organization(session):
     """
     Create a sample organization with admin user for testing.
@@ -1721,14 +1753,20 @@ def seed_sample_organization(session):
     existing_org = session.query(Organization).filter_by(code=org_code).first()
     if existing_org:
         print(f"[INFO] Sample organization already exists: {org_code}")
-        return
+        org = existing_org
+        # Skip organization creation but continue with tester roles/users
+        skip_org_creation = True
+    else:
+        skip_org_creation = False
 
-    # Get a basic plan if available
-    basic_plan = session.query(Plan).filter_by(planname="Basic").first()
-    plan_id = basic_plan.id if basic_plan else None
-
-    # Create organization
     now = datetime.now(datetime.now().astimezone().tzinfo)
+
+    if not skip_org_creation:
+        # Get a basic plan if available
+        basic_plan = session.query(Plan).filter_by(planname="Basic").first()
+        plan_id = basic_plan.id if basic_plan else None
+
+        # Create organization
     org = Organization(
         id=uuid.uuid4(),
         name="Sample Organization",
@@ -1861,8 +1899,8 @@ def seed_sample_organization(session):
         session.commit()
         print(f"[OK] Sample organization created and linked to existing admin: {admin_email}")
 
-    # Create sample departments
-    print(f"[INFO] Creating sample departments for {org_code}")
+        # Create sample departments
+        print(f"[INFO] Creating sample departments for {org_code}")
 
     # Check if departments already exist
     existing_depts = session.query(OrgDepartment).filter_by(organization_id=org.id).count()
@@ -1959,6 +1997,163 @@ def seed_sample_organization(session):
         print(f"[OK] Created 6 sample departments (3 root, 3 child)")
     else:
         print(f"[INFO] Sample organization already has {existing_depts} departments")
+
+    # END of organization creation block
+
+    # Create sample tester roles with EXACT module permissions (always run)
+    print(f"[INFO] Creating sample tester roles for {org_code}")
+
+    # Required modules for testers: [45, 46, 49, 51]
+    # 45=Testing Requests, 46=Testing, 49=Testing Request Approvals, 51=Tester Mapping
+    TESTER_REQUIRED_MODULES = [45, 46, 49, 51]
+
+    tester_roles_config = [
+        {
+            "name": "Field Tester",
+            "description": "Field tester role with exact module permissions for tester assignment"
+        },
+        {
+            "name": "Lab Tester",
+            "description": "Laboratory tester role with exact module permissions for tester assignment"
+        }
+    ]
+
+    tester_roles = []
+    for role_config in tester_roles_config:
+        # Check if role already exists
+        existing_role = session.query(OrgRole).filter_by(
+            organization_id=org.id,
+            name=role_config["name"]
+        ).first()
+
+        if existing_role:
+            role = existing_role
+            # Clear existing permissions
+            session.query(OrgRolePermission).filter_by(org_role_id=role.id).delete()
+        else:
+            # Create new role
+            role = OrgRole(
+                id=uuid.uuid4(),
+                organization_id=org.id,
+                name=role_config["name"],
+                description=role_config["description"],
+                is_org_admin=False,
+                is_dept_admin=False,
+                is_active=True,
+                cts=now,
+                mts=now
+            )
+            session.add(role)
+            session.flush()
+
+        # Add FULL permissions for EXACT modules
+        for module_id in TESTER_REQUIRED_MODULES:
+            perm = OrgRolePermission(
+                id=uuid.uuid4(),
+                org_role_id=role.id,
+                module_id=module_id,
+                can_view=True,
+                can_add=True,
+                can_edit=True,
+                can_delete=True,
+                can_approve=True,
+                can_assign=True
+            )
+            session.add(perm)
+
+        tester_roles.append(role)
+
+    session.commit()
+    print(f"[OK] Created {len(tester_roles)} sample tester roles with exact module permissions {TESTER_REQUIRED_MODULES}")
+
+    # Create sample tester users
+    print(f"[INFO] Creating sample tester users for {org_code}")
+
+    tester_users_config = [
+        {
+            "email": "fieldtester1@sampleorg.com",
+            "password": "Tester123!",
+            "role_name": "Field Tester",
+            "firstname": "Field",
+            "lastname": "Tester One",
+            "phone": "9999999001"
+        },
+        {
+            "email": "fieldtester2@sampleorg.com",
+            "password": "Tester123!",
+            "role_name": "Field Tester",
+            "firstname": "Field",
+            "lastname": "Tester Two",
+            "phone": "9999999002"
+        },
+        {
+            "email": "labtester1@sampleorg.com",
+            "password": "Tester123!",
+            "role_name": "Lab Tester",
+            "firstname": "Lab",
+            "lastname": "Tester One",
+            "phone": "9999999003"
+        },
+        {
+            "email": "labtester2@sampleorg.com",
+            "password": "Tester123!",
+            "role_name": "Lab Tester",
+            "firstname": "Lab",
+            "lastname": "Tester Two",
+            "phone": "9999999004"
+        }
+    ]
+
+    created_users = 0
+    for user_config in tester_users_config:
+        # Check if user exists
+        existing_user = session.query(User).filter_by(email=user_config["email"]).first()
+
+        if existing_user:
+            user = existing_user
+        else:
+            # Create user
+            hashed_password = get_password_hash(user_config["password"])
+            user = User(
+                id=uuid.uuid4(),
+                email=user_config["email"],
+                password_hash=hashed_password,
+                firstname=user_config["firstname"],
+                lastname=user_config["lastname"],
+                phone_number=user_config["phone"],
+                organization_id=org.id,
+                isactive=True,
+                cts=now,
+                mts=now
+            )
+            session.add(user)
+            session.flush()
+            created_users += 1
+
+        # Get the role
+        role = next((r for r in tester_roles if r.name == user_config["role_name"]), None)
+        if not role:
+            print(f"[WARN] Role '{user_config['role_name']}' not found for user {user_config['email']}")
+            continue
+
+        # Check if user already has this role
+        existing_assignment = session.query(OrgUserRole).filter_by(
+            user_id=user.id,
+            org_role_id=role.id
+        ).first()
+
+        if not existing_assignment:
+            # Assign role to user
+            user_role = OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                is_active=True
+            )
+            session.add(user_role)
+
+    session.commit()
+    print(f"[OK] Created {created_users} sample tester users and assigned roles")
 
 
 def seed_kptcl_organization(session):
@@ -2195,6 +2390,164 @@ def seed_kptcl_organization(session):
 
     session.commit()
     print(f"[OK] KPTCL organization created with admin user and roles")
+
+    # Create sample tester roles with EXACT module permissions
+    print(f"[INFO] Creating sample tester roles for KPTCL")
+
+    # Required modules for testers: [45, 46, 49, 51]
+    TESTER_REQUIRED_MODULES = [45, 46, 49, 51]
+
+    tester_roles_config = [
+        {
+            "name": "Field Tester",
+            "description": "Field tester role with exact module permissions for tester assignment"
+        },
+        {
+            "name": "Lab Tester",
+            "description": "Laboratory tester role with exact module permissions for tester assignment"
+        }
+    ]
+
+    tester_roles = []
+    for role_config in tester_roles_config:
+        # Check if role already exists
+        existing_role = session.query(OrgRole).filter_by(
+            organization_id=org.id,
+            name=role_config["name"]
+        ).first()
+
+        if existing_role:
+            role = existing_role
+        else:
+            # Create tester role
+            role = OrgRole(
+                id=uuid.uuid4(),
+                organization_id=org.id,
+                name=role_config["name"],
+                description=role_config["description"],
+                role_type="tester",
+                is_org_admin=False,
+                is_dept_admin=False,
+                is_active=True,
+                cts=now,
+                mts=now
+            )
+            session.add(role)
+            session.flush()
+
+            # Add FULL permissions for EXACT modules only
+            for module_id in TESTER_REQUIRED_MODULES:
+                perm = OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=module_id,
+                    can_view=True,
+                    can_add=True,
+                    can_edit=True,
+                    can_delete=True,
+                    can_approve=True,
+                    can_assign=True,
+                    can_export=True,
+                    can_import=True,
+                    cts=now,
+                    mts=now
+                )
+                session.add(perm)
+
+        tester_roles.append(role)
+
+    session.commit()
+    print(f"[OK] Created {len(tester_roles)} sample tester roles with exact module permissions {TESTER_REQUIRED_MODULES}")
+
+    # Create sample tester users
+    print(f"[INFO] Creating sample tester users for KPTCL")
+
+    tester_users_config = [
+        {
+            "email": "fieldtester1@kptcl.com",
+            "password": "Tester123!",
+            "role_name": "Field Tester",
+            "firstname": "KPTCL Field",
+            "lastname": "Tester One",
+            "phone": "9999999101"
+        },
+        {
+            "email": "fieldtester2@kptcl.com",
+            "password": "Tester123!",
+            "role_name": "Field Tester",
+            "firstname": "KPTCL Field",
+            "lastname": "Tester Two",
+            "phone": "9999999102"
+        },
+        {
+            "email": "labtester1@kptcl.com",
+            "password": "Tester123!",
+            "role_name": "Lab Tester",
+            "firstname": "KPTCL Lab",
+            "lastname": "Tester One",
+            "phone": "9999999103"
+        },
+        {
+            "email": "labtester2@kptcl.com",
+            "password": "Tester123!",
+            "role_name": "Lab Tester",
+            "firstname": "KPTCL Lab",
+            "lastname": "Tester Two",
+            "phone": "9999999104"
+        }
+    ]
+
+    created_users = 0
+    for user_config in tester_users_config:
+        # Check if user exists
+        existing_user = session.query(User).filter_by(email=user_config["email"]).first()
+
+        if existing_user:
+            user = existing_user
+        else:
+            # Create user
+            hashed_password = get_password_hash(user_config["password"])
+            user = User(
+                id=uuid.uuid4(),
+                email=user_config["email"],
+                password_hash=hashed_password,
+                firstname=user_config["firstname"],
+                lastname=user_config["lastname"],
+                phone_number=user_config["phone"],
+                organization_id=org.id,
+                isactive=True,
+                cts=now,
+                mts=now
+            )
+            session.add(user)
+            session.flush()
+            created_users += 1
+
+        # Get the role
+        role = next((r for r in tester_roles if r.name == user_config["role_name"]), None)
+        if not role:
+            print(f"[WARN] Role '{user_config['role_name']}' not found for user {user_config['email']}")
+            continue
+
+        # Check if user already has this role
+        existing_assignment = session.query(OrgUserRole).filter_by(
+            user_id=user.id,
+            org_role_id=role.id
+        ).first()
+
+        if not existing_assignment:
+            # Assign role to user
+            user_role = OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                is_active=True
+            )
+            session.add(user_role)
+
+    session.commit()
+    print(f"[OK] Created {created_users} sample tester users and assigned roles")
+
     return org
 
 
@@ -2401,6 +2754,7 @@ def run_seed():
         print("\n--- Organization System Seeding ---")
         seed_role_templates(session)
         seed_super_admin(session)
+        seed_tester_role_module_requirements(session)
         seed_sample_organization(session)
 
         # Seed KPTCL Organization with Departments
