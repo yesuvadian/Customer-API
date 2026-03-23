@@ -1993,11 +1993,10 @@ def seed_kptcl_organization(session):
                 id=uuid.uuid4(),
                 user_id=user.id,
                 org_role_id=user_data["role"].id,
-                organization_id=org.id,
+                department_id=None,
                 is_active=True,
                 assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-                cts=datetime.now(datetime.now().astimezone().tzinfo),
-                mts=datetime.now(datetime.now().astimezone().tzinfo)
+                assigned_by=None
             )
             session.add(user_role)
 
