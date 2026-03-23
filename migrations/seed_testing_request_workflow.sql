@@ -14,6 +14,7 @@ DECLARE
     -- State IDs
     v_state_draft UUID;
     v_state_submitted UUID;
+    v_state_pending_approval UUID;
     v_state_assigned UUID;
     v_state_accepted UUID;
     v_state_in_progress UUID;
@@ -24,7 +25,9 @@ DECLARE
 
     -- Transition IDs
     v_trans_submit UUID;
-    v_trans_assign UUID;
+    v_trans_send_for_approval UUID;
+    v_trans_approve_and_assign UUID;
+    v_trans_reject_request UUID;
     v_trans_accept UUID;
     v_trans_reject_from_assigned UUID;
     v_trans_start UUID;
@@ -87,9 +90,19 @@ BEGIN
         state_type, color, icon, display_order, is_active
     ) VALUES (
         uuid_generate_v4(), v_workflow_id, 'submitted', 'Submitted',
-        'Request has been submitted and awaiting tester assignment',
+        'Request has been submitted for approval',
         'intermediate', '#2196F3', 'send', 1, TRUE
     ) RETURNING id INTO v_state_submitted;
+
+    -- Pending Approval
+    INSERT INTO workflow_states (
+        id, workflow_id, state_code, state_name, description,
+        state_type, color, icon, display_order, is_active
+    ) VALUES (
+        uuid_generate_v4(), v_workflow_id, 'pending_approval', 'Pending Approval',
+        'Request submitted and awaiting approval from department/section head',
+        'intermediate', '#FFC107', 'approval', 1.5, TRUE
+    ) RETURNING id INTO v_state_pending_approval;
 
     -- Assigned
     INSERT INTO workflow_states (
@@ -161,7 +174,7 @@ BEGIN
         'cancelled', '#607D8B', 'block', 8, TRUE
     ) RETURNING id INTO v_state_cancelled;
 
-    RAISE NOTICE 'Created 9 workflow states';
+    RAISE NOTICE 'Created 10 workflow states';
 
     -- ============================================================
     -- 3. CREATE TRANSITIONS
@@ -174,20 +187,42 @@ BEGIN
         button_label, button_color, icon, requires_comment, display_order, is_active
     ) VALUES (
         uuid_generate_v4(), v_workflow_id, v_state_draft, v_state_submitted,
-        'Submit Request', 'submit', 'Submit the testing request for processing',
+        'Submit Request', 'submit', 'Submit the testing request for approval',
         'Submit', '#2196F3', 'send', FALSE, 0, TRUE
     ) RETURNING id INTO v_trans_submit;
 
-    -- Submitted → Assigned
+    -- Submitted → Pending Approval (automatic)
     INSERT INTO workflow_transitions (
         id, workflow_id, from_state_id, to_state_id,
         transition_name, action_code, description,
         button_label, button_color, icon, requires_comment, display_order, is_active
     ) VALUES (
-        uuid_generate_v4(), v_workflow_id, v_state_submitted, v_state_assigned,
-        'Assign Tester', 'assign_tester', 'Assign a tester to this request',
-        'Assign Tester', '#FF9800', 'person_add', FALSE, 0, TRUE
-    ) RETURNING id INTO v_trans_assign;
+        uuid_generate_v4(), v_workflow_id, v_state_submitted, v_state_pending_approval,
+        'Send for Approval', 'send_for_approval', 'Automatically send to approval queue',
+        NULL, NULL, 'send', FALSE, 0, TRUE
+    ) RETURNING id INTO v_trans_send_for_approval;
+
+    -- Pending Approval → Assigned (after approval with tester selection)
+    INSERT INTO workflow_transitions (
+        id, workflow_id, from_state_id, to_state_id,
+        transition_name, action_code, description,
+        button_label, button_color, icon, requires_comment, display_order, is_active
+    ) VALUES (
+        uuid_generate_v4(), v_workflow_id, v_state_pending_approval, v_state_assigned,
+        'Approve and Assign', 'approve_and_assign', 'Approve request and assign to tester based on selected role/location',
+        'Approve & Assign', '#4CAF50', 'check_circle', FALSE, 0, TRUE
+    ) RETURNING id INTO v_trans_approve_and_assign;
+
+    -- Pending Approval → Rejected
+    INSERT INTO workflow_transitions (
+        id, workflow_id, from_state_id, to_state_id,
+        transition_name, action_code, description,
+        button_label, button_color, icon, requires_comment, display_order, is_active
+    ) VALUES (
+        uuid_generate_v4(), v_workflow_id, v_state_pending_approval, v_state_rejected,
+        'Reject Request', 'reject_request', 'Reject the testing request',
+        'Reject', '#F44336', 'cancel', TRUE, 1, TRUE
+    ) RETURNING id INTO v_trans_reject_request;
 
     -- Assigned → Accepted
     INSERT INTO workflow_transitions (
