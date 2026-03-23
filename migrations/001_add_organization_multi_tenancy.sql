@@ -47,7 +47,37 @@ CREATE INDEX IF NOT EXISTS idx_organizations_plan_id ON public.organizations(pla
 COMMENT ON TABLE public.organizations IS 'Multi-tenant organizations table';
 
 -- =============================================
--- 2. CREATE ORG_DEPARTMENTS TABLE
+-- 2. CREATE ORG_DEPARTMENT_TYPES TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS public.org_department_types (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+
+    type_name VARCHAR(100) NOT NULL,
+    type_code VARCHAR(50) NOT NULL,
+    description TEXT,
+
+    icon VARCHAR(50),
+    color VARCHAR(20),
+    display_order INTEGER DEFAULT 0,
+
+    is_active BOOLEAN DEFAULT TRUE,
+
+    created_by UUID REFERENCES public.users(id),
+    modified_by UUID REFERENCES public.users(id),
+    cts TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    mts TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    CONSTRAINT uq_org_dept_type_code UNIQUE (organization_id, type_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_org_department_types_organization_id ON public.org_department_types(organization_id);
+CREATE INDEX IF NOT EXISTS idx_org_department_types_display_order ON public.org_department_types(display_order);
+
+COMMENT ON TABLE public.org_department_types IS 'Department type definitions (Zone, Circle, Division, etc.)';
+
+-- =============================================
+-- 3. CREATE ORG_DEPARTMENTS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.org_departments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -57,6 +87,7 @@ CREATE TABLE IF NOT EXISTS public.org_departments (
     code VARCHAR(100),
     description TEXT,
 
+    department_type_id UUID REFERENCES public.org_department_types(id) ON DELETE SET NULL,
     parent_department_id UUID REFERENCES public.org_departments(id) ON DELETE SET NULL,
     manager_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
 
@@ -82,7 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_org_departments_manager_id ON public.org_departme
 COMMENT ON TABLE public.org_departments IS 'Organization departments/divisions';
 
 -- =============================================
--- 3. CREATE ORG_ROLES TABLE
+-- 4. CREATE ORG_ROLES TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.org_roles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -110,7 +141,7 @@ CREATE INDEX IF NOT EXISTS idx_org_roles_is_org_admin ON public.org_roles(is_org
 COMMENT ON TABLE public.org_roles IS 'Organization-scoped roles';
 
 -- =============================================
--- 4. CREATE ORG_USER_ROLES TABLE
+-- 5. CREATE ORG_USER_ROLES TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.org_user_roles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -132,7 +163,7 @@ CREATE INDEX IF NOT EXISTS idx_org_user_roles_department_id ON public.org_user_r
 COMMENT ON TABLE public.org_user_roles IS 'User role assignments within organizations';
 
 -- =============================================
--- 5. CREATE ORG_ROLE_PERMISSIONS TABLE
+-- 6. CREATE ORG_ROLE_PERMISSIONS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.org_role_permissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -162,7 +193,7 @@ CREATE INDEX IF NOT EXISTS idx_org_role_permissions_module_id ON public.org_role
 COMMENT ON TABLE public.org_role_permissions IS 'Module permissions for organization roles';
 
 -- =============================================
--- 6. CREATE ROLE_TEMPLATES TABLE
+-- 7. CREATE ROLE_TEMPLATES TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.role_templates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -182,7 +213,7 @@ CREATE TABLE IF NOT EXISTS public.role_templates (
 COMMENT ON TABLE public.role_templates IS 'System-level role templates for auto-provisioning';
 
 -- =============================================
--- 7. CREATE ORG_INVITATIONS TABLE
+-- 8. CREATE ORG_INVITATIONS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.org_invitations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -215,7 +246,7 @@ CREATE INDEX IF NOT EXISTS idx_org_invitations_token ON public.org_invitations(i
 COMMENT ON TABLE public.org_invitations IS 'Organization user invitations';
 
 -- =============================================
--- 8. ALTER USERS TABLE - ADD ORGANIZATION COLUMNS
+-- 9. ALTER USERS TABLE - ADD ORGANIZATION COLUMNS
 -- =============================================
 ALTER TABLE public.users
     ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
@@ -231,7 +262,7 @@ COMMENT ON COLUMN public.users.employee_id IS 'Employee/Vendor ID within organiz
 COMMENT ON COLUMN public.users.department_id IS 'Department the user belongs to';
 
 -- =============================================
--- 9. CREATE FUNCTION TO AUTO-UPDATE TIMESTAMPS
+-- 10. CREATE FUNCTION TO AUTO-UPDATE TIMESTAMPS
 -- =============================================
 CREATE OR REPLACE FUNCTION update_modified_timestamp()
 RETURNS TRIGGER AS $$
@@ -242,7 +273,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- =============================================
--- 10. CREATE TRIGGERS FOR AUTO-UPDATE TIMESTAMPS
+-- 11. CREATE TRIGGERS FOR AUTO-UPDATE TIMESTAMPS
 -- =============================================
 DO $$
 BEGIN
@@ -250,6 +281,14 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trigger_update_organizations_mts') THEN
         CREATE TRIGGER trigger_update_organizations_mts
             BEFORE UPDATE ON public.organizations
+            FOR EACH ROW
+            EXECUTE FUNCTION update_modified_timestamp();
+    END IF;
+
+    -- Org Department Types
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trigger_update_org_department_types_mts') THEN
+        CREATE TRIGGER trigger_update_org_department_types_mts
+            BEFORE UPDATE ON public.org_department_types
             FOR EACH ROW
             EXECUTE FUNCTION update_modified_timestamp();
     END IF;

@@ -52,7 +52,7 @@ def create_department(
 def list_departments(
     org_id: UUID,
     skip: int = 0,
-    limit: int = 100,
+    limit: Optional[int] = None,
     is_active: Optional[bool] = None,
     parent_department_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
@@ -180,7 +180,7 @@ def get_department_users(
     org_id: UUID,
     dept_id: UUID,
     skip: int = 0,
-    limit: int = 100,
+    limit: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_org_member)
 ):

@@ -602,9 +602,10 @@ class UserRole(Base):
     __tablename__ = "user_roles"
     __table_args__ = {"schema": "public"}
 
-    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), primary_key=True)
-    role_id = Column(Integer, ForeignKey("public.roles.id", ondelete="CASCADE"), primary_key=True)
-    assigned_at = Column(DateTime(timezone=True), server_default=func.now())
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"))
+    role_id = Column(Integer, ForeignKey("public.roles.id", ondelete="CASCADE"))
+    is_active = Column(Boolean, default=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
@@ -1609,3 +1610,230 @@ class ProcurementRequest(Base):
     raiser = relationship("User", foreign_keys=[raised_by])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
+
+
+# ============================================================
+# WORKFLOW ENGINE MODELS
+# ============================================================
+
+class Workflow(Base, UTCDateTimeMixin):
+    """
+    Workflow definition model - stores workflow configurations
+    """
+    __tablename__ = "workflows"
+    __table_args__ = (
+        UniqueConstraint('organization_id', 'workflow_type', 'version', name='uq_workflow_org_type_version'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Basic Info
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    workflow_type = Column(String(100), nullable=False)  # 'testing_request', 'approval', etc.
+
+    # Multi-tenancy
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=True)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+    version = Column(Integer, default=1)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    states = relationship("WorkflowState", back_populates="workflow", cascade="all, delete-orphan")
+    transitions = relationship("WorkflowTransition", back_populates="workflow", cascade="all, delete-orphan")
+    permission_entries = relationship("PermissionMatrix", back_populates="workflow", cascade="all, delete-orphan")
+    audit_logs = relationship("WorkflowAuditLog", back_populates="workflow")
+
+
+class WorkflowState(Base, UTCDateTimeMixin):
+    """
+    Workflow state model - represents individual states within a workflow
+    """
+    __tablename__ = "workflow_states"
+    __table_args__ = (
+        UniqueConstraint('workflow_id', 'state_code', name='uq_workflow_state_code'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Relationship
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("public.workflows.id", ondelete="CASCADE"), nullable=False)
+
+    # State Info
+    state_code = Column(String(50), nullable=False)  # 'draft', 'submitted', 'approved'
+    state_name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+
+    # State Type
+    state_type = Column(String(50), default='intermediate')  # 'initial', 'intermediate', 'final', 'cancelled'
+
+    # Display
+    color = Column(String(20), default='#3FA9F5')
+    icon = Column(String(50), default='circle')
+    display_order = Column(Integer, default=0)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    workflow = relationship("Workflow", back_populates="states")
+    creator = relationship("User", foreign_keys=[created_by])
+    transitions_from = relationship("WorkflowTransition", foreign_keys="WorkflowTransition.from_state_id", back_populates="from_state")
+    transitions_to = relationship("WorkflowTransition", foreign_keys="WorkflowTransition.to_state_id", back_populates="to_state")
+
+
+class WorkflowTransition(Base, UTCDateTimeMixin):
+    """
+    Workflow transition model - defines allowed state changes
+    """
+    __tablename__ = "workflow_transitions"
+    __table_args__ = (
+        UniqueConstraint('workflow_id', 'from_state_id', 'to_state_id', 'action_code', name='uq_workflow_transition'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Relationship
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("public.workflows.id", ondelete="CASCADE"), nullable=False)
+    from_state_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_states.id", ondelete="CASCADE"), nullable=False)
+    to_state_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_states.id", ondelete="CASCADE"), nullable=False)
+
+    # Transition Info
+    transition_name = Column(String(200), nullable=False)  # 'Submit', 'Approve', 'Reject'
+    action_code = Column(String(50), nullable=False)  # 'submit', 'approve', 'reject'
+    description = Column(Text, nullable=True)
+
+    # Conditions
+    conditions = Column(JSONB, nullable=True)
+
+    # Display
+    button_label = Column(String(100), nullable=True)
+    button_color = Column(String(20), default='#3FA9F5')
+    icon = Column(String(50), default='arrow_forward')
+    requires_comment = Column(Boolean, default=False)
+    display_order = Column(Integer, default=0)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    workflow = relationship("Workflow", back_populates="transitions")
+    from_state = relationship("WorkflowState", foreign_keys=[from_state_id], back_populates="transitions_from")
+    to_state = relationship("WorkflowState", foreign_keys=[to_state_id], back_populates="transitions_to")
+    creator = relationship("User", foreign_keys=[created_by])
+    permissions = relationship("PermissionMatrix", back_populates="transition", cascade="all, delete-orphan")
+
+
+class PermissionMatrix(Base, UTCDateTimeMixin):
+    """
+    Permission matrix model - role-based permissions for transitions
+    """
+    __tablename__ = "permission_matrix"
+    __table_args__ = (
+        UniqueConstraint('transition_id', 'role_id', 'scope_type', name='uq_permission_transition_role_scope'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Relationship
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("public.workflows.id", ondelete="CASCADE"), nullable=False)
+    transition_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_transitions.id", ondelete="CASCADE"), nullable=False)
+
+    # Role-Based Access
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+
+    # Department Scope
+    scope_type = Column(String(50), nullable=False, default='exact')  # 'exact', 'department_tree', 'organization', 'any'
+    department_type_id = Column(UUID(as_uuid=True), ForeignKey("public.org_department_types.id", ondelete="SET NULL"), nullable=True)
+
+    # Permission Level
+    can_execute = Column(Boolean, default=True)
+    can_view = Column(Boolean, default=True)
+    requires_approval = Column(Boolean, default=False)
+
+    # Additional Conditions
+    conditions = Column(JSONB, nullable=True)
+
+    # Priority
+    priority = Column(Integer, default=0)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    workflow = relationship("Workflow", back_populates="permission_entries")
+    transition = relationship("WorkflowTransition", back_populates="permissions")
+    role = relationship("OrgRole", foreign_keys=[role_id])
+    # department_type = relationship("OrgDepartmentType", foreign_keys=[department_type_id])  # Model doesn't exist
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class WorkflowAuditLog(Base, UTCDateTimeMixin):
+    """
+    Workflow audit log - tracks all state transitions
+    """
+    __tablename__ = "workflow_audit_log"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Relationship
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("public.workflows.id", ondelete="CASCADE"), nullable=False)
+    entity_type = Column(String(100), nullable=False)  # 'testing_request', 'purchase_order'
+    entity_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # Transition Details
+    transition_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_transitions.id", ondelete="SET NULL"), nullable=True)
+    from_state_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_states.id", ondelete="SET NULL"), nullable=True)
+    to_state_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_states.id", ondelete="SET NULL"), nullable=True)
+    action_code = Column(String(50), nullable=True)
+
+    # User & Context
+    performed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    performed_at = Column(DateTime(timezone=True), server_default=func.now())
+    user_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+    user_department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+
+    # Additional Data
+    comment = Column(Text, nullable=True)
+    audit_metadata = Column(JSONB, nullable=True)  # Renamed from 'metadata' to avoid SQLAlchemy conflict
+
+    # Result
+    success = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
+
+    # Relationships
+    workflow = relationship("Workflow", back_populates="audit_logs")
+    transition = relationship("WorkflowTransition", foreign_keys=[transition_id])
+    from_state = relationship("WorkflowState", foreign_keys=[from_state_id])
+    to_state = relationship("WorkflowState", foreign_keys=[to_state_id])
+    performer = relationship("User", foreign_keys=[performed_by])
+    user_role = relationship("OrgRole", foreign_keys=[user_role_id])
+    user_department = relationship("OrgDepartment", foreign_keys=[user_department_id])

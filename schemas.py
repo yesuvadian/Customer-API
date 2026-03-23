@@ -1552,3 +1552,290 @@ class OrganizationWithAdmin(BaseModel):
     admin_firstname: str
     admin_lastname: Optional[str] = None
     admin_phone: str
+
+
+# ==========================================
+# WORKFLOW ENGINE SCHEMAS
+# ==========================================
+
+# ---------- Workflow Schemas ----------
+
+class WorkflowCreate(BaseModel):
+    """Schema for creating a workflow"""
+    name: str
+    description: Optional[str] = None
+    workflow_type: str  # 'testing_request', 'approval', 'procurement'
+    organization_id: Optional[UUID] = None
+    is_active: bool = True
+    version: int = 1
+
+
+class WorkflowUpdate(BaseModel):
+    """Schema for updating a workflow"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class WorkflowResponse(BaseModel):
+    """Schema for workflow response"""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    workflow_type: str
+    organization_id: Optional[UUID] = None
+    is_active: bool
+    version: int
+    created_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Workflow State Schemas ----------
+
+class WorkflowStateCreate(BaseModel):
+    """Schema for creating a workflow state"""
+    workflow_id: UUID
+    state_code: str  # 'draft', 'submitted', 'approved'
+    state_name: str
+    description: Optional[str] = None
+    state_type: str = 'intermediate'  # 'initial', 'intermediate', 'final', 'cancelled'
+    color: str = '#3FA9F5'
+    icon: str = 'circle'
+    display_order: int = 0
+    is_active: bool = True
+
+
+class WorkflowStateUpdate(BaseModel):
+    """Schema for updating a workflow state"""
+    state_name: Optional[str] = None
+    description: Optional[str] = None
+    state_type: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    display_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class WorkflowStateResponse(BaseModel):
+    """Schema for workflow state response"""
+    id: UUID
+    workflow_id: UUID
+    state_code: str
+    state_name: str
+    description: Optional[str] = None
+    state_type: str
+    color: str
+    icon: str
+    display_order: int
+    is_active: bool
+    created_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Workflow Transition Schemas ----------
+
+class WorkflowTransitionCreate(BaseModel):
+    """Schema for creating a workflow transition"""
+    workflow_id: UUID
+    from_state_id: UUID
+    to_state_id: UUID
+    transition_name: str  # 'Submit', 'Approve', 'Reject'
+    action_code: str  # 'submit', 'approve', 'reject'
+    description: Optional[str] = None
+    conditions: Optional[Dict] = None
+    button_label: Optional[str] = None
+    button_color: str = '#3FA9F5'
+    icon: str = 'arrow_forward'
+    requires_comment: bool = False
+    display_order: int = 0
+    is_active: bool = True
+
+
+class WorkflowTransitionUpdate(BaseModel):
+    """Schema for updating a workflow transition"""
+    transition_name: Optional[str] = None
+    action_code: Optional[str] = None
+    description: Optional[str] = None
+    conditions: Optional[Dict] = None
+    button_label: Optional[str] = None
+    button_color: Optional[str] = None
+    icon: Optional[str] = None
+    requires_comment: Optional[bool] = None
+    display_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class WorkflowTransitionResponse(BaseModel):
+    """Schema for workflow transition response"""
+    id: UUID
+    workflow_id: UUID
+    from_state_id: UUID
+    to_state_id: UUID
+    transition_name: str
+    action_code: str
+    description: Optional[str] = None
+    conditions: Optional[Dict] = None
+    button_label: Optional[str] = None
+    button_color: str
+    icon: str
+    requires_comment: bool
+    display_order: int
+    is_active: bool
+    created_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Permission Matrix Schemas ----------
+
+class PermissionMatrixCreate(BaseModel):
+    """Schema for creating a permission matrix entry"""
+    workflow_id: UUID
+    transition_id: UUID
+    role_id: UUID
+    scope_type: str = 'exact'  # 'exact', 'department_tree', 'organization', 'any'
+    department_type_id: Optional[UUID] = None
+    can_execute: bool = True
+    can_view: bool = True
+    requires_approval: bool = False
+    conditions: Optional[Dict] = None
+    priority: int = 0
+    is_active: bool = True
+
+
+class PermissionMatrixUpdate(BaseModel):
+    """Schema for updating a permission matrix entry"""
+    scope_type: Optional[str] = None
+    department_type_id: Optional[UUID] = None
+    can_execute: Optional[bool] = None
+    can_view: Optional[bool] = None
+    requires_approval: Optional[bool] = None
+    conditions: Optional[Dict] = None
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class PermissionMatrixResponse(BaseModel):
+    """Schema for permission matrix response"""
+    id: UUID
+    workflow_id: UUID
+    transition_id: UUID
+    role_id: UUID
+    scope_type: str
+    department_type_id: Optional[UUID] = None
+    can_execute: bool
+    can_view: bool
+    requires_approval: bool
+    conditions: Optional[Dict] = None
+    priority: int
+    is_active: bool
+    created_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Workflow Audit Log Schemas ----------
+
+class WorkflowAuditLogCreate(BaseModel):
+    """Schema for creating a workflow audit log entry"""
+    workflow_id: UUID
+    entity_type: str  # 'testing_request', 'purchase_order'
+    entity_id: UUID
+    transition_id: Optional[UUID] = None
+    from_state_id: Optional[UUID] = None
+    to_state_id: Optional[UUID] = None
+    action_code: Optional[str] = None
+    performed_by: Optional[UUID] = None
+    user_role_id: Optional[UUID] = None
+    user_department_id: Optional[UUID] = None
+    comment: Optional[str] = None
+    metadata: Optional[Dict] = None
+    success: bool = True
+    error_message: Optional[str] = None
+
+
+class WorkflowAuditLogResponse(BaseModel):
+    """Schema for workflow audit log response"""
+    id: UUID
+    workflow_id: UUID
+    entity_type: str
+    entity_id: UUID
+    transition_id: Optional[UUID] = None
+    from_state_id: Optional[UUID] = None
+    to_state_id: Optional[UUID] = None
+    action_code: Optional[str] = None
+    performed_by: Optional[UUID] = None
+    performed_at: Optional[datetime] = None
+    user_role_id: Optional[UUID] = None
+    user_department_id: Optional[UUID] = None
+    comment: Optional[str] = None
+    metadata: Optional[Dict] = None
+    success: bool
+    error_message: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Complex Workflow Schemas ----------
+
+class WorkflowWithStates(WorkflowResponse):
+    """Workflow with its states included"""
+    states: List[WorkflowStateResponse] = []
+
+
+class WorkflowWithTransitions(WorkflowResponse):
+    """Workflow with its states and transitions"""
+    states: List[WorkflowStateResponse] = []
+    transitions: List[WorkflowTransitionResponse] = []
+
+
+class WorkflowFullDetail(WorkflowResponse):
+    """Complete workflow with states, transitions, and permissions"""
+    states: List[WorkflowStateResponse] = []
+    transitions: List[WorkflowTransitionResponse] = []
+    permission_entries: List[PermissionMatrixResponse] = []
+
+
+class AvailableTransitionResponse(BaseModel):
+    """Schema for available transitions for a user"""
+    transition_id: UUID
+    transition_name: str
+    action_code: str
+    to_state_code: str
+    to_state_name: str
+    button_label: Optional[str] = None
+    button_color: str
+    icon: str
+    requires_comment: bool
+
+
+class PerformTransitionRequest(BaseModel):
+    """Schema for performing a transition"""
+    entity_type: str  # 'testing_request'
+    entity_id: UUID
+    transition_id: UUID
+    comment: Optional[str] = None
+    metadata: Optional[Dict] = None
+
+
+class PerformTransitionResponse(BaseModel):
+    """Schema for transition execution response"""
+    success: bool
+    message: str
+    new_state: Optional[WorkflowStateResponse] = None
+    audit_log_id: Optional[UUID] = None

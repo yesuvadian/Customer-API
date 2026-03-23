@@ -34,7 +34,7 @@ def read_user(user_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=list[schemas.User])
-def list_users(skip: int = 0, limit: int = 100, search: str | None = None, db: Session = Depends(get_db)):
+def list_users(skip: int = 0, limit: int | None = None, search: str | None = None, db: Session = Depends(get_db)):
     """List users with optional search."""
     return user_service_instance.get_users(db, skip=skip, limit=limit, search=search)
 
@@ -79,7 +79,7 @@ def logout_user(
 def filter_users_by_product_details(
     search: str | None = None, # Only one search parameter
     skip: int = 0,
-    limit: int = 100,
+    limit: int | None = None,
     db: Session = Depends(get_db)
 ):
     """

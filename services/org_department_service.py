@@ -96,7 +96,7 @@ class OrgDepartmentService(UTCDateTimeMixin):
         self,
         organization_id: UUID,
         skip: int = 0,
-        limit: int = 100,
+        limit: Optional[int] = None,
         is_active: Optional[bool] = None,
         parent_department_id: Optional[UUID] = None
     ) -> List[OrgDepartment]:
@@ -111,7 +111,11 @@ class OrgDepartmentService(UTCDateTimeMixin):
         if parent_department_id is not None:
             query = query.filter(OrgDepartment.parent_department_id == parent_department_id)
 
-        return query.offset(skip).limit(limit).all()
+        query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+
+        return query.all()
 
     def update_department(
         self,

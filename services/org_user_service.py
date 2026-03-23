@@ -146,7 +146,7 @@ class OrgUserService(UTCDateTimeMixin):
         organization_id: UUID,
         department_id: Optional[UUID] = None,
         skip: int = 0,
-        limit: int = 100,
+        limit: Optional[int] = None,
         is_active: Optional[bool] = None,
         search: Optional[str] = None
     ) -> List[User]:
@@ -168,7 +168,11 @@ class OrgUserService(UTCDateTimeMixin):
                 (User.employee_id.ilike(search_pattern))
             )
 
-        return query.offset(skip).limit(limit).all()
+        query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+
+        return query.all()
 
     def update_org_user(
         self,

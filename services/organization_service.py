@@ -197,7 +197,7 @@ class OrganizationService(UTCDateTimeMixin):
     def list_organizations(
         self,
         skip: int = 0,
-        limit: int = 100,
+        limit: Optional[int] = None,
         is_active: Optional[bool] = None
     ) -> List[Organization]:
         """List all organizations with optional filtering."""
@@ -206,7 +206,10 @@ class OrganizationService(UTCDateTimeMixin):
         if is_active is not None:
             query = query.filter(Organization.is_active == is_active)
 
-        return query.offset(skip).limit(limit).all()
+        query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
 
     def update_organization(
         self,

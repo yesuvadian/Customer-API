@@ -120,7 +120,7 @@ def get_organization(
 @router.get("/", response_model=List[OrganizationOut])
 def list_organizations(
     skip: int = 0,
-    limit: int = 100,
+    limit: Optional[int] = None,
     is_active: Optional[bool] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)

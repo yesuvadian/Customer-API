@@ -83,7 +83,7 @@ class OrgRoleService(UTCDateTimeMixin):
         self,
         organization_id: UUID,
         skip: int = 0,
-        limit: int = 100,
+        limit: Optional[int] = None,
         is_active: Optional[bool] = None,
         is_org_admin: Optional[bool] = None
     ) -> List[OrgRole]:
@@ -98,7 +98,10 @@ class OrgRoleService(UTCDateTimeMixin):
         if is_org_admin is not None:
             query = query.filter(OrgRole.is_org_admin == is_org_admin)
 
-        return query.offset(skip).limit(limit).all()
+        query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
 
     def update_role(
         self,

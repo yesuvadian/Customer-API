@@ -30,7 +30,7 @@ def get_role(role_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(e))
 
 @router.get("/", response_model=List[RoleResponse])
-def list_roles(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def list_roles(skip: int = 0, limit: int | None = None, db: Session = Depends(get_db)):
     service = RoleService(db)
     return service.list_roles(skip=skip, limit=limit)
 

@@ -52,7 +52,7 @@ def list_org_users(
     org_id: UUID,
     department_id: Optional[UUID] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: Optional[int] = None,
     is_active: Optional[bool] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db),

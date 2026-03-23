@@ -59,10 +59,14 @@ from routers.customer_care import router as customer_care_router
 
 # Testing Request System
 from routers import testing_requests, testing, recommendations, approvals, procurement
-from routers import tester_locations
+# DEPRECATED: from routers import tester_locations  # Use org departments instead
+from routers import tester_assignment
 
 # Organization Multi-Tenancy
 from routers import organizations, org_departments, org_users, org_roles
+
+# Workflow Engine
+from routers import workflows
 
 # Optional: create all database tables (uncomment if needed)
 # Base.metadata.create_all(bind=engine)
@@ -179,13 +183,17 @@ app.include_router(testing.router)
 app.include_router(recommendations.router)
 app.include_router(approvals.router)
 app.include_router(procurement.router)
-app.include_router(tester_locations.router)
+# DEPRECATED: app.include_router(tester_locations.router)  # Use org departments instead
+app.include_router(tester_assignment.router)
 
 # Organization Multi-Tenancy
 app.include_router(organizations.router)
 app.include_router(org_departments.router)
 app.include_router(org_users.router)
 app.include_router(org_roles.router)
+
+# Workflow Engine
+app.include_router(workflows.router)
 
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")

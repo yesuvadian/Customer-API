@@ -16,11 +16,14 @@ class UserService(UTCDateTimeMixin):
     def get_user(cls,db: Session, user_id: uuid.UUID):
         return db.query(User).filter(User.id == user_id).first()
     @classmethod
-    def get_users(cls,db: Session, skip: int = 0, limit: int = 100, search: str = None):
+    def get_users(cls,db: Session, skip: int = 0, limit: int | None = None, search: str = None):
         query = db.query(User)
         if search:
             query = query.filter(User.email.ilike(f"%{search}%"))
-        return query.offset(skip).limit(limit).all()
+        query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
     @classmethod
     def get_user_by_email(cls,db: Session, email: str):
         """
@@ -131,7 +134,7 @@ class UserService(UTCDateTimeMixin):
         db: Session,
         search_term: str | None = None, # Single search term
         skip: int = 0,
-        limit: int = 100
+        limit: int | None = None
     ):
         """
         Filters distinct users who are linked to a product where the search_term
@@ -165,9 +168,12 @@ class UserService(UTCDateTimeMixin):
             
             # Apply the combined filter
             query = query.filter(filter_condition)
-            
+
         # Apply pagination and return results
-        return query.offset(skip).limit(limit).all()
+        query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
  
 
  

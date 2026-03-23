@@ -1,0 +1,344 @@
+"""
+Testing Request Workflow Integration Service
+
+Bridges the existing testing request system with the workflow engine.
+Provides helper methods to perform status transitions using workflows.
+Includes auto-assignment of testers when requests are submitted.
+"""
+
+from typing import Optional, Dict, Any, Tuple
+from uuid import UUID
+from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
+
+from models import TestingRequest, User
+from services.workflow_engine import IntegratedWorkflowEngine
+from services.tester_auto_assignment_service import TesterAutoAssignmentService
+
+
+class TestingRequestWorkflowService:
+    """
+    Service to manage testing request workflow transitions.
+    """
+
+    WORKFLOW_TYPE = "testing_request"
+    ENTITY_TYPE = "testing_request"
+
+    def __init__(self, db: Session):
+        self.db = db
+        self.workflow_engine = IntegratedWorkflowEngine(db)
+        self.auto_assignment_service = TesterAutoAssignmentService(db)
+
+    # ========================================
+    # GET WORKFLOW
+    # ========================================
+
+    def _get_workflow(self, organization_id: Optional[UUID] = None):
+        """Get the active testing request workflow."""
+        workflow = self.workflow_engine.get_workflow_by_type(
+            self.WORKFLOW_TYPE,
+            organization_id
+        )
+        if not workflow:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Testing request workflow not configured"
+            )
+        return workflow
+
+    # ========================================
+    # GET AVAILABLE ACTIONS
+    # ========================================
+
+    def get_available_actions(
+        self,
+        testing_request: TestingRequest,
+        user: User
+    ) -> list[Dict[str, Any]]:
+        """
+        Get all available workflow actions for a testing request.
+
+        Returns:
+            List of available transitions with button details
+        """
+        workflow = self._get_workflow(testing_request.organization_id)
+
+        return self.workflow_engine.get_available_transitions(
+            workflow_id=workflow.id,
+            current_state_id=self._get_state_id(workflow.id, testing_request.status),
+            user_id=user.id,
+            entity_department_id=testing_request.department_id
+        )
+
+    # ========================================
+    # PERFORM TRANSITION
+    # ========================================
+
+    def perform_transition(
+        self,
+        testing_request: TestingRequest,
+        action_code: str,
+        user: User,
+        comment: Optional[str] = None,
+        metadata: Optional[Dict] = None
+    ) -> tuple[bool, str]:
+        """
+        Perform a workflow transition on a testing request.
+
+        Args:
+            testing_request: The testing request instance
+            action_code: Action code (e.g., 'submit', 'accept', 'approve')
+            user: User performing the action
+            comment: Optional comment for the transition
+            metadata: Optional additional data
+
+        Returns:
+            (success, message)
+        """
+        workflow = self._get_workflow(testing_request.organization_id)
+
+        # Get the transition by action code
+        transition = self.db.query(models.WorkflowTransition).filter(
+            and_(
+                models.WorkflowTransition.workflow_id == workflow.id,
+                models.WorkflowTransition.action_code == action_code,
+                models.WorkflowTransition.is_active == True
+            )
+        ).first()
+
+        if not transition:
+            return False, f"Transition with action '{action_code}' not found"
+
+        # Perform the transition
+        success, message, new_state_code = self.workflow_engine.perform_transition(
+            workflow_id=workflow.id,
+            entity_type=self.ENTITY_TYPE,
+            entity_id=testing_request.id,
+            current_state_code=testing_request.status.value,  # Convert enum to string
+            transition_id=transition.id,
+            user_id=user.id,
+            entity_department_id=testing_request.department_id,
+            comment=comment,
+            metadata=metadata
+        )
+
+        if success and new_state_code:
+            # Update the testing request status
+            testing_request.status = TestingRequestStatus[new_state_code]
+            self.db.commit()
+
+        return success, message
+
+    # ========================================
+    # CONVENIENCE METHODS FOR SPECIFIC ACTIONS
+    # ========================================
+
+    def submit_request(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        comment: Optional[str] = None,
+        auto_assign: bool = True,
+        assignment_strategy: str = 'least_loaded'
+    ) -> Tuple[bool, str]:
+        """
+        Submit a draft testing request.
+
+        Args:
+            testing_request: The testing request to submit
+            user: User performing the submission
+            comment: Optional comment
+            auto_assign: Whether to auto-assign a tester (default: True)
+            assignment_strategy: Strategy for auto-assignment ('least_loaded', 'round_robin', 'random', 'priority')
+
+        Returns:
+            (success, message)
+        """
+        # First, submit the request (draft → submitted)
+        success, message = self.perform_transition(
+            testing_request=testing_request,
+            action_code="submit",
+            user=user,
+            comment=comment
+        )
+
+        if not success:
+            return False, message
+
+        # If auto-assign is enabled, automatically assign a tester
+        if auto_assign:
+            assign_success, tester_id, assign_message = self.auto_assignment_service.auto_assign_tester(
+                testing_request=testing_request,
+                strategy=assignment_strategy
+            )
+
+            if assign_success and tester_id:
+                # Update the testing request with assigned tester
+                testing_request.assigned_tester_id = tester_id
+                self.db.commit()
+
+                # Automatically transition to 'assigned' state
+                # This uses the system/admin user context for the auto-transition
+                transition_success, transition_msg = self.perform_transition(
+                    testing_request=testing_request,
+                    action_code="assign_tester",
+                    user=user,  # Use the submitting user for audit
+                    comment=f"Auto-assigned: {assign_message}",
+                    metadata={"auto_assigned": True, "strategy": assignment_strategy}
+                )
+
+                if transition_success:
+                    return True, f"Request submitted and auto-assigned successfully. {assign_message}"
+                else:
+                    # Assignment happened but workflow transition failed
+                    # This is still a success, just log the workflow issue
+                    return True, f"Request submitted and tester assigned. Note: {transition_msg}"
+            else:
+                # Auto-assignment failed, but submission was successful
+                return True, f"Request submitted successfully. {assign_message}. Manual assignment required."
+
+        return True, message
+
+    def assign_tester(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        tester_id: UUID,
+        comment: Optional[str] = None
+    ) -> tuple[bool, str]:
+        """Assign a tester to the request."""
+        return self.perform_transition(
+            testing_request=testing_request,
+            action_code="assign_tester",
+            user=user,
+            comment=comment,
+            metadata={"tester_id": str(tester_id)}
+        )
+
+    def accept_assignment(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        comment: Optional[str] = None
+    ) -> tuple[bool, str]:
+        """Tester accepts the assignment."""
+        return self.perform_transition(
+            testing_request=testing_request,
+            action_code="accept",
+            user=user,
+            comment=comment
+        )
+
+    def reject_assignment(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        comment: str
+    ) -> tuple[bool, str]:
+        """Tester rejects the assignment."""
+        return self.perform_transition(
+            testing_request=testing_request,
+            action_code="reject_assignment",
+            user=user,
+            comment=comment
+        )
+
+    def start_testing(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        comment: Optional[str] = None
+    ) -> tuple[bool, str]:
+        """Start the testing process."""
+        return self.perform_transition(
+            testing_request=testing_request,
+            action_code="start",
+            user=user,
+            comment=comment
+        )
+
+    def submit_test_results(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        comment: Optional[str] = None
+    ) -> tuple[bool, str]:
+        """Submit test results."""
+        return self.perform_transition(
+            testing_request=testing_request,
+            action_code="submit_results",
+            user=user,
+            comment=comment
+        )
+
+    def approve_results(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        comment: Optional[str] = None
+    ) -> tuple[bool, str]:
+        """Approve test results."""
+        return self.perform_transition(
+            testing_request=testing_request,
+            action_code="approve",
+            user=user,
+            comment=comment
+        )
+
+    def reject_results(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        comment: str
+    ) -> tuple[bool, str]:
+        """Reject test results."""
+        return self.perform_transition(
+            testing_request=testing_request,
+            action_code="reject_results",
+            user=user,
+            comment=comment
+        )
+
+    def cancel_request(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        comment: str
+    ) -> tuple[bool, str]:
+        """Cancel the testing request."""
+        return self.perform_transition(
+            testing_request=testing_request,
+            action_code="cancel",
+            user=user,
+            comment=comment
+        )
+
+    # ========================================
+    # HELPER METHODS
+    # ========================================
+
+    def _get_state_id(self, workflow_id: UUID, status_code: str) -> UUID:
+        """Get state ID from status code."""
+        state = self.workflow_engine.get_state_by_code(workflow_id, status_code)
+        if not state:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Workflow state '{status_code}' not found"
+            )
+        return state.id
+
+    def get_workflow_history(
+        self,
+        testing_request_id: UUID
+    ) -> list:
+        """Get the complete workflow history for a testing request."""
+        return self.workflow_engine.get_audit_history(
+            entity_type=self.ENTITY_TYPE,
+            entity_id=testing_request_id
+        )
+
+
+# Import models at the end to avoid circular imports
+from models import TestingRequestStatus
+import models
+from sqlalchemy import and_

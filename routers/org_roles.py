@@ -54,7 +54,7 @@ def create_role(
 def list_roles(
     org_id: UUID,
     skip: int = 0,
-    limit: int = 100,
+    limit: Optional[int] = None,
     is_active: Optional[bool] = None,
     is_org_admin: Optional[bool] = None,
     db: Session = Depends(get_db),
