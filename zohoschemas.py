@@ -1,6 +1,6 @@
 from datetime import date
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 # -----------------------------
 # Quote Item
 # -----------------------------
@@ -12,13 +12,27 @@ class QuoteItem(BaseModel):
 # Request Quote (customer)
 # -----------------------------
 class RequestQuote(BaseModel):
+
     contact_id: str = Field(
         ...,
         description="Zoho contact_id or customer email. If email is provided, service resolves to contact_id."
     )
-    items: List[QuoteItem] = Field(..., description="List of items in the quote")
-    notes: Optional[str] = Field(None, description="Optional notes from customer")
 
+    items: List[QuoteItem] = Field(
+        ...,
+        description="List of items in the quote"
+    )
+
+    notes: Optional[str] = Field(
+        None,
+        description="Optional notes from customer"
+    )
+
+
+class SendQuoteWithSupplier(BaseModel):
+    supplier_id: str
+class AssignVendors(BaseModel):
+    vendors: List[dict]
 # -----------------------------
 # ERP Review Quote
 # -----------------------------
@@ -50,6 +64,8 @@ class QuoteResponse(BaseModel):
     estimate_number: str
     status: str
     message: Optional[str] = None
+    matched_vendors: Optional[List[Dict[str, Any]]] = []
+
 
 
 
