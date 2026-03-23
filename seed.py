@@ -1697,6 +1697,7 @@ def seed_sample_organization(session):
     plan_id = basic_plan.id if basic_plan else None
 
     # Create organization
+    now = datetime.now(datetime.now().astimezone().tzinfo)
     org = Organization(
         id=uuid.uuid4(),
         name="Sample Organization",
@@ -1706,12 +1707,26 @@ def seed_sample_organization(session):
         industry="Technology",
         primary_email="info@sampleorg.com",
         primary_phone="+1234567890",
+        website="https://sampleorg.com",
+        address="123 Sample Street",
+        city="Sample City",
+        state="Sample State",
+        country="USA",
+        pincode="12345",
         is_active=True,
         is_verified=False,
         plan_id=plan_id,
+        subscription_start_date=now,
+        subscription_end_date=now + timedelta(days=365),
         settings={},
-        cts=datetime.now(datetime.now().astimezone().tzinfo),
-        mts=datetime.now(datetime.now().astimezone().tzinfo)
+        created_by=None,
+        modified_by=None,
+        cts=now,
+        mts=now,
+        erp_sync_status="pending",
+        erp_last_sync_at=None,
+        erp_error_message=None,
+        erp_external_id=None
     )
     session.add(org)
     session.flush()
