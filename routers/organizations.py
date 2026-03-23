@@ -129,12 +129,7 @@ def list_organizations(
     List organizations.
     - Super admins: See all organizations
     - Org admins: See only their organization
-    - UPDATED: Now allows org admins to view their own organization
     """
-    # Debug logging
-    with open("C:/Yesu/CustomerAPI/Customer-API/debug_org_list.txt", "a") as f:
-        f.write(f"list_organizations called by {current_user.email}\n")
-        f.write(f"organization_id: {current_user.organization_id}\n\n")
     service = OrganizationService(db)
 
     # Check if user is super admin (no organization_id)
