@@ -388,6 +388,7 @@ def seed_modules(session):
 {"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
 {"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
+{"name": "Testing Request Approvals", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
 {"name": "Validation Requests", "description": "Create and manage validation requests", "path": "validation_requests", "group_name": "Testing"},
 {"name": "Tester Mapping", "description": "Map testers to locations (DEPRECATED - use org departments)", "path": "tester_mapping", "group_name": "Testing", "is_active": False},
 # ✅ ORGANIZATION MANAGEMENT MODULES

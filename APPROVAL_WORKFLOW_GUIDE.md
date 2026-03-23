@@ -235,12 +235,17 @@ INSERT INTO workflow_states (
 3. **pending_approval → rejected** (manual, with comment required)
 
 ### Permissions
+
+**Module:** "Testing Request Approvals" (separate from "Approvals" module which is for recommendations)
+
 Added to permission_matrix for roles:
 - Approver
 - Department Head
 - Section Head
 - Division Head
 - Admin
+
+**Note:** The "Approvals" module is for recommendation approvals, while "Testing Request Approvals" is specifically for the testing request approval workflow described in this document.
 
 ---
 
