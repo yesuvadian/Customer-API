@@ -1436,13 +1436,41 @@ def seed_role_templates(session):
     """
     Seed role templates for auto-provisioning default roles to new organizations.
     """
-    # Get all module IDs for permission templates
-    all_modules = session.query(Module.id).filter(Module.is_active == True).all()
-    module_ids = [m.id for m in all_modules]
+    # Get all modules with their details
+    all_modules = session.query(Module).filter(Module.is_active == True).all()
 
-    if not module_ids:
+    if not all_modules:
         print("[WARN] No modules found. Role templates will be created without permission templates.")
-        module_ids = []
+
+    # Build module lookup by group and name
+    modules_by_group = {}
+    modules_by_name = {}
+    for mod in all_modules:
+        if mod.group_name:
+            modules_by_group.setdefault(mod.group_name, []).append(mod.id)
+        if mod.name:
+            modules_by_name[mod.name] = mod.id
+
+    # Get all module IDs (for Admin role only)
+    all_module_ids = [m.id for m in all_modules]
+
+    # Define module sets for different roles
+    # Testing group modules
+    testing_modules = modules_by_group.get("Testing", [])
+
+    # Procurement modules (by name)
+    procurement_module_names = [
+        "Request Quote", "RQ with Vendor", "Request Product", "Quotes",
+        "Sales Orders", "Invoices", "Retainer Invoices", "Payments Made",
+        "Statements", "Enquiry", "Contact Us"
+    ]
+    procurement_modules = [modules_by_name.get(name) for name in procurement_module_names if modules_by_name.get(name)]
+
+    # Organization modules
+    org_modules = modules_by_group.get("Organization", [])
+
+    # Dashboard (should be accessible to everyone)
+    dashboard_module = [modules_by_name.get("Dashboard")] if modules_by_name.get("Dashboard") else []
 
     templates_data = [
         {
@@ -1463,7 +1491,7 @@ def seed_role_templates(session):
                     "can_export": True,
                     "can_import": True
                 }
-                for mid in module_ids
+                for mid in all_module_ids  # Admin gets access to everything
             ]
         },
         {
@@ -1484,7 +1512,7 @@ def seed_role_templates(session):
                     "can_export": True,
                     "can_import": False
                 }
-                for mid in module_ids
+                for mid in (testing_modules + procurement_modules + dashboard_module)  # Only testing, procurement, dashboard
             ]
         },
         {
@@ -1505,7 +1533,7 @@ def seed_role_templates(session):
                     "can_export": True,
                     "can_import": False
                 }
-                for mid in module_ids
+                for mid in (testing_modules + dashboard_module)  # Only testing modules and dashboard
             ]
         },
         {
@@ -1526,7 +1554,7 @@ def seed_role_templates(session):
                     "can_export": True,
                     "can_import": False
                 }
-                for mid in module_ids
+                for mid in (testing_modules + dashboard_module)  # Only testing modules (for approvals) and dashboard
             ]
         },
         {
@@ -1543,11 +1571,11 @@ def seed_role_templates(session):
                     "can_edit": True,
                     "can_delete": False,
                     "can_approve": True,
-                    "can_assign": False,
+                    "can_assign": True,
                     "can_export": True,
                     "can_import": False
                 }
-                for mid in module_ids
+                for mid in (testing_modules + procurement_modules + org_modules + dashboard_module)  # Testing, procurement, org, dashboard
             ]
         },
         {
@@ -1568,7 +1596,7 @@ def seed_role_templates(session):
                     "can_export": False,
                     "can_import": False
                 }
-                for mid in module_ids
+                for mid in (testing_modules + procurement_modules + dashboard_module)  # View-only access to testing, procurement, dashboard
             ]
         },
         {
@@ -1589,7 +1617,7 @@ def seed_role_templates(session):
                     "can_export": False,
                     "can_import": False
                 }
-                for mid in module_ids
+                for mid in (testing_modules + procurement_modules + dashboard_module)  # View-only access to testing, procurement, dashboard
             ]
         },
         {
@@ -1610,7 +1638,7 @@ def seed_role_templates(session):
                     "can_export": True,
                     "can_import": True
                 }
-                for mid in module_ids
+                for mid in (testing_modules + procurement_modules + dashboard_module)  # Can contribute to testing, procurement, dashboard
             ]
         }
     ]
