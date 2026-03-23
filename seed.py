@@ -1830,6 +1830,105 @@ def seed_sample_organization(session):
         session.commit()
         print(f"[OK] Sample organization created and linked to existing admin: {admin_email}")
 
+    # Create sample departments
+    print(f"[INFO] Creating sample departments for {org_code}")
+
+    # Check if departments already exist
+    existing_depts = session.query(OrgDepartment).filter_by(organization_id=org.id).count()
+    if existing_depts == 0:
+        now = datetime.now(datetime.now().astimezone().tzinfo)
+
+        # Engineering department (root)
+        engineering_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Engineering",
+            code="ENG",
+            description="Engineering and Development",
+            parent_department_id=None,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(engineering_dept)
+        session.flush()
+
+        # Backend team (child of Engineering)
+        backend_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Backend Team",
+            code="BACKEND",
+            description="Backend Development Team",
+            parent_department_id=engineering_dept.id,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(backend_dept)
+
+        # Frontend team (child of Engineering)
+        frontend_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Frontend Team",
+            code="FRONTEND",
+            description="Frontend Development Team",
+            parent_department_id=engineering_dept.id,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(frontend_dept)
+
+        # Sales department (root)
+        sales_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Sales",
+            code="SALES",
+            description="Sales and Business Development",
+            parent_department_id=None,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(sales_dept)
+        session.flush()
+
+        # Inside Sales (child of Sales)
+        inside_sales_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Inside Sales",
+            code="INSIDE_SALES",
+            description="Inside Sales Team",
+            parent_department_id=sales_dept.id,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(inside_sales_dept)
+
+        # Human Resources (root)
+        hr_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Human Resources",
+            code="HR",
+            description="Human Resources Department",
+            parent_department_id=None,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(hr_dept)
+
+        session.commit()
+        print(f"[OK] Created 6 sample departments (3 root, 3 child)")
+    else:
+        print(f"[INFO] Sample organization already has {existing_depts} departments")
+
 
 def seed_kptcl_organization(session):
     """
