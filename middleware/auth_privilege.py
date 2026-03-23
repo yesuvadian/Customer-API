@@ -72,9 +72,10 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         return await call_next(request)
 
     # --------------------------------------------------
-    # 3. Allow Zoho webhooks
+    # 3. Allow Zoho webhooks (FIXED)
     # --------------------------------------------------
-    if path.startswith(ZOHO_PREFIXES):
+    if path.startswith("/webhooks/zoho"):
+        print("✅ Skipping auth for Zoho webhook")
         return await call_next(request)
 
     # --------------------------------------------------
