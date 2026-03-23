@@ -2,6 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -9,6 +10,7 @@ from database import get_db
 from models import User
 from schemas import RecommendationCreate, RecommendationUpdate, RecommendationResponse
 from services.recommendation_service import RecommendationService
+from services.recommendation_pdf_service import RecommendationPDFService
 
 router = APIRouter(
     prefix="/recommendations",
@@ -69,4 +71,23 @@ def update_recommendation(
     service = RecommendationService(db)
     return service.update_recommendation(
         recommendation_id, data.dict(exclude_unset=True), modified_by=current_user.id
+    )
+
+
+@router.get("/{recommendation_id}/pdf")
+def download_recommendation_pdf(
+    recommendation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate and download PDF report for a recommendation with approver information"""
+    pdf_service = RecommendationPDFService(db)
+    pdf_buffer = pdf_service.generate_pdf(str(recommendation_id))
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=recommendation_{recommendation_id}.pdf"
+        }
     )
