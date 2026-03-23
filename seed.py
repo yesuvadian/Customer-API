@@ -1834,6 +1834,7 @@ def seed_kptcl_organization(session):
     plan_id = basic_plan.id if basic_plan else None
 
     # Create KPTCL organization
+    now = datetime.now(datetime.now().astimezone().tzinfo)
     org = Organization(
         id=uuid.uuid4(),
         name="Karnataka Power Transmission Corporation Limited",
@@ -1852,9 +1853,17 @@ def seed_kptcl_organization(session):
         is_active=True,
         is_verified=True,
         plan_id=plan_id,
+        subscription_start_date=now,
+        subscription_end_date=now + timedelta(days=365),
         settings={},
-        cts=datetime.now(datetime.now().astimezone().tzinfo),
-        mts=datetime.now(datetime.now().astimezone().tzinfo)
+        created_by=None,
+        modified_by=None,
+        cts=now,
+        mts=now,
+        erp_sync_status="pending",
+        erp_last_sync_at=None,
+        erp_error_message=None,
+        erp_external_id=None
     )
     session.add(org)
     session.flush()
