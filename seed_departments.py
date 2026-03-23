@@ -187,7 +187,11 @@ def get_auth_token(base_url: str, email: str, password: str) -> Optional[str]:
 def main():
     # Configuration
     BASE_URL = "http://localhost:8000"
-    EXCEL_PATH = r"C:\Users\yesuv\Downloads\KPTCL_Substation_Mapping.xlsx"
+
+    # Excel file path - default to project root
+    import os
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    EXCEL_PATH = os.path.join(project_root, "KPTCL_Substation_Mapping.xlsx")
 
     # Get credentials from command line or prompt
     if len(sys.argv) >= 4:

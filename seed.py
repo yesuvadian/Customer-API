@@ -1997,7 +1997,7 @@ def seed_kptcl_organization(session):
     return org
 
 
-def seed_kptcl_departments(session, org_id: str, excel_path: str = r"C:\Users\yesuv\Downloads\KPTCL_Substation_Mapping.xlsx"):
+def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     """
     Seed KPTCL department hierarchy from Excel file.
     Creates 6-level hierarchy: Zone → Circle → Division → Sub Division → Section → Substation
@@ -2009,6 +2009,15 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = r"C:\Users\ye
     if not org:
         print(f"[ERROR] Organization {org_id} not found")
         return
+
+    # Determine Excel file path
+    if excel_path is None:
+        import os
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        excel_path = os.path.join(project_root, "KPTCL_Substation_Mapping.xlsx")
+
+    if not os.path.exists(excel_path):
+        raise FileNotFoundError(f"Excel file not found: {excel_path}")
 
     # Delete existing departments for this organization
     print(f"[INFO] Deleting existing departments for organization: {org.name}")

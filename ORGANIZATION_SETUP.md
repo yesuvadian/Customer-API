@@ -493,9 +493,9 @@ A specialized seeding function is available to populate department hierarchy fro
 pip install pandas openpyxl
 ```
 
-2. Place the Excel file at:
+2. Place the Excel file in the project root:
 ```
-C:\Users\yesuv\Downloads\KPTCL_Substation_Mapping.xlsx
+C:\Yesu\CustomerAPI\Customer-API\KPTCL_Substation_Mapping.xlsx
 ```
 
 ### Usage
@@ -583,14 +583,10 @@ Found 27 unique Circle departments
 
 ### Customization
 
-To use a different Excel file path, edit the default path in `seed.py`:
+The Excel file is automatically detected in the project root directory. To use a different path, pass it explicitly:
 
 ```python
-def seed_kptcl_departments(
-    session,
-    org_id: str,
-    excel_path: str = r"C:\Users\yesuv\Downloads\KPTCL_Substation_Mapping.xlsx"
-):
+seed_kptcl_departments(session, org_id, excel_path="/path/to/file.xlsx")
 ```
 
 ### Troubleshooting
