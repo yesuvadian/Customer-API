@@ -117,6 +117,13 @@ class Organization(Base):
     primary_email = Column(String(255))
     primary_phone = Column(String(50))
 
+    # Address fields
+    address = Column(Text)
+    city = Column(String(100))
+    state = Column(String(100))
+    country = Column(String(100))
+    pincode = Column(String(20))
+
     settings = Column(JSONB, default={})
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -132,9 +139,41 @@ class Organization(Base):
     # Relationships
     plan = relationship("Plan", back_populates="organizations", foreign_keys=[plan_id])
     users = relationship("User", back_populates="organization", foreign_keys=lambda: [User.organization_id])
+    department_types = relationship("OrgDepartmentType", back_populates="organization", cascade="all, delete-orphan")
     departments = relationship("OrgDepartment", back_populates="organization", cascade="all, delete-orphan")
     roles = relationship("OrgRole", back_populates="organization", cascade="all, delete-orphan")
     invitations = relationship("OrgInvitation", back_populates="organization", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Organization Department Type Model
+# ------------------------------
+class OrgDepartmentType(Base):
+    __tablename__ = "org_department_types"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "type_code", name="uq_org_dept_type_code"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+
+    type_name = Column(String(100), nullable=False)
+    type_code = Column(String(50), nullable=False)
+    description = Column(Text)
+    icon = Column(String(100))
+    color = Column(String(50))
+    display_order = Column(Integer, default=0)
+
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", back_populates="department_types")
 
 
 # ------------------------------
@@ -1791,7 +1830,7 @@ class PermissionMatrix(Base, UTCDateTimeMixin):
     workflow = relationship("Workflow", back_populates="permission_entries")
     transition = relationship("WorkflowTransition", back_populates="permissions")
     role = relationship("OrgRole", foreign_keys=[role_id])
-    # department_type = relationship("OrgDepartmentType", foreign_keys=[department_type_id])  # Model doesn't exist
+    department_type = relationship("OrgDepartmentType", foreign_keys=[department_type_id])
     creator = relationship("User", foreign_keys=[created_by])
 
 
