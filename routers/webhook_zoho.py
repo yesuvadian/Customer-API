@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from services.websocket_manager import send_to_user
+from services.websocket_service import send_to_user
 import os, json, hmac, hashlib
 
 from services.redis_cache import RedisCacheService as cache

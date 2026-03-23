@@ -4,7 +4,7 @@ from fastapi.security import HTTPBearer
 from database import Base, engine
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
-from routes import websocket_routes
+from routers import websocket_routes
 
 
 
