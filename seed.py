@@ -338,10 +338,10 @@ def seed_country_india(session):
         
 def seed_modules(session):
     modules_data = [
-        {"name": "Roles", "description": "Manage roles", "path": "roles", "group_name": "User & Access"},
+        {"name": "Roles", "description": "Manage roles (Legacy)", "path": "roles", "group_name": "User & Access", "is_active": False},
         {"name": "App Modules", "description": "Manage application modules", "path": "modules", "group_name": "User & Access"},
-        {"name": "User Roles", "description": "Assign roles to users", "path": "roles", "group_name": "User & Access", "is_active": False},
-        {"name": "Role Permissions", "description": "Configure role-based privileges", "path": "role_module_privileges", "group_name": "User & Access"},
+        {"name": "User Roles", "description": "Assign roles to users (Legacy)", "path": "roles", "group_name": "User & Access", "is_active": False},
+        {"name": "Role Permissions", "description": "Configure role-based privileges (Legacy)", "path": "role_module_privileges", "group_name": "User & Access", "is_active": False},
        {"name": "Login Sessions", "description": "Track user login sessions", "path": "user_sessions", "group_name": "User & Access", "is_active": False},
         {"name": "Countries", "description": "Manage country list", "path": "countries", "group_name": "Geography"},
         {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography"},
@@ -356,7 +356,7 @@ def seed_modules(session):
         {"name": "Company Products", "description": "Company-specific product inventory", "path": "company_products", "group_name": "Inventory"},
         {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access"},
          {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory"},
-         {"name": "Assign User Roles", "description": "Assign roles to users", "path": "user_roles", "group_name": "User & Access"},
+         {"name": "Assign User Roles", "description": "Assign organization roles to users", "path": "user_roles", "group_name": "User & Access"},
          {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access", "is_active": False},
          {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
         {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company", "is_active": False},
@@ -389,9 +389,11 @@ def seed_modules(session):
 {"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 {"name": "Validation Requests", "description": "Create and manage validation requests", "path": "validation_requests", "group_name": "Testing"},
-{"name": "Tester Mapping", "description": "Map testers to locations (zone/circle/division)", "path": "tester_mapping", "group_name": "Testing"},
+{"name": "Tester Mapping", "description": "Map testers to locations (DEPRECATED - use org departments)", "path": "tester_mapping", "group_name": "Testing", "is_active": False},
 # ✅ ORGANIZATION MANAGEMENT MODULE
 {"name": "Organizations", "description": "Manage organizations, departments, roles, and users", "path": "organizations", "group_name": "User & Access"},
+# ✅ WORKFLOW MANAGEMENT MODULE
+{"name": "Workflows", "description": "Manage workflow definitions, states, transitions, and permissions", "path": "workflows", "group_name": "Administration"},
 
     ]
 
@@ -429,15 +431,16 @@ def seed_modules(session):
 
 def seed_privileges(session, role_ids, module_ids):
     module_names = [
-    "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+    # Legacy modules disabled: "Roles", "User Roles", "Role Permissions", "Login Sessions",
+    "App Modules",
     "Countries", "States", "Cities","Addresses", "Tax Information", "Tax Documents",
     "Product Categories", "Product Subcategories", "Products", "Users",
     "Company Products", "Plans", "Dashboard", "Assign User Roles",
     "User Product Search", "Bank Information", "Bank Documents",
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
-    "Category Master", "Category Details", 
-    "Sync ERP Vendor","KYC Status" , "zohocontacts"      
+    "Category Master", "Category Details",
+    "Sync ERP Vendor","KYC Status" , "zohocontacts"
     ]
 
 
@@ -455,7 +458,8 @@ def seed_privileges(session, role_ids, module_ids):
     # ALL MODULES
     # -------------------------------------------------------
     module_names = [
-        "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+        # Legacy modules disabled: "Roles", "User Roles", "Role Permissions", "Login Sessions",
+        "App Modules",
         "Countries", "States", "Cities", "Addresses", "Tax Information", "Tax Documents",
         "Product Categories", "Product Subcategories", "Products", "Users",
         "Company Products", "Plans", "Dashboard", "Assign User Roles",
@@ -471,7 +475,9 @@ def seed_privileges(session, role_ids, module_ids):
         # ✅ TESTING REQUEST SYSTEM MODULES
         "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests",
         # ✅ ORGANIZATION MANAGEMENT MODULE
-        "Organizations"
+        "Organizations",
+        # ✅ WORKFLOW MANAGEMENT MODULE
+        "Workflows"
     ]
 
     # -------------------------------------------------------
@@ -630,13 +636,13 @@ def seed_privileges(session, role_ids, module_ids):
         },
         {"role": "Approver", "module": "Dashboard", "can_view": True},
 
-        # TESTER MAPPING — Admin full, Originator view-only
-        {
-            "role": "Admin", "module": "Tester Mapping",
-            "can_view": True, "can_add": True, "can_edit": True,
-            "can_delete": True, "can_search": True
-        },
-        {"role": "Originator", "module": "Tester Mapping", "can_view": True},
+        # TESTER MAPPING — DEPRECATED (use org departments instead)
+        # {
+        #     "role": "Admin", "module": "Tester Mapping",
+        #     "can_view": True, "can_add": True, "can_edit": True,
+        #     "can_delete": True, "can_search": True
+        # },
+        # {"role": "Originator", "module": "Tester Mapping", "can_view": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -1810,6 +1816,187 @@ def seed_sample_organization(session):
         print(f"[OK] Sample organization created and linked to existing admin: {admin_email}")
 
 
+def seed_kptcl_organization(session):
+    """
+    Create KPTCL organization with admin user and roles.
+    Returns the created organization object or existing one.
+    """
+    org_code = "KPTCL"
+
+    # Check if organization already exists
+    existing_org = session.query(Organization).filter_by(code=org_code).first()
+    if existing_org:
+        print(f"[INFO] KPTCL organization already exists: {org_code}")
+        return existing_org
+
+    # Get a basic plan if available
+    basic_plan = session.query(Plan).filter_by(planname="Basic").first()
+    plan_id = basic_plan.id if basic_plan else None
+
+    # Create KPTCL organization
+    org = Organization(
+        id=uuid.uuid4(),
+        name="Karnataka Power Transmission Corporation Limited",
+        code=org_code,
+        display_name="KPTCL",
+        organization_type="utility",
+        industry="Power Transmission",
+        primary_email="info@kptcl.com",
+        primary_phone="+91-80-25801500",
+        website="https://kptcl.karnataka.gov.in",
+        address="Cauvery Bhavan, K.G. Road",
+        city="Bengaluru",
+        state="Karnataka",
+        country="India",
+        pincode="560009",
+        is_active=True,
+        is_verified=True,
+        plan_id=plan_id,
+        settings={},
+        cts=datetime.now(datetime.now().astimezone().tzinfo),
+        mts=datetime.now(datetime.now().astimezone().tzinfo)
+    )
+    session.add(org)
+    session.flush()
+
+    # Provision default roles from templates
+    templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
+
+    org_admin_role = None
+    engineer_role = None
+    tester_role = None
+    dept_head_role = None
+
+    for template in templates:
+        role = OrgRole(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name=template.name,
+            description=template.description,
+            role_type="default",
+            is_org_admin=template.is_org_admin,
+            is_dept_admin=template.is_dept_admin,
+            is_active=True,
+            cts=datetime.now(datetime.now().astimezone().tzinfo),
+            mts=datetime.now(datetime.now().astimezone().tzinfo)
+        )
+        session.add(role)
+        session.flush()
+
+        # Save specific roles for user assignment
+        if role.is_org_admin:
+            org_admin_role = role
+        elif template.name == "Originator":
+            engineer_role = role
+        elif template.name == "Tester":
+            tester_role = role
+        elif template.name == "Department Manager":
+            dept_head_role = role
+
+        # Create permissions from template
+        if template.permissions_template:
+            for perm_data in template.permissions_template:
+                permission = OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=perm_data.get("module_id"),
+                    can_view=perm_data.get("can_view", False),
+                    can_add=perm_data.get("can_add", False),
+                    can_edit=perm_data.get("can_edit", False),
+                    can_delete=perm_data.get("can_delete", False),
+                    can_approve=perm_data.get("can_approve", False),
+                    can_assign=perm_data.get("can_assign", False),
+                    can_export=perm_data.get("can_export", False),
+                    can_import=perm_data.get("can_import", False),
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                )
+                session.add(permission)
+
+    # Create KPTCL users with roles
+    kptcl_users = [
+        {
+            "email": "orgadmin@kptcl.com",
+            "password": "admin123",
+            "firstname": "Org",
+            "lastname": "Admin",
+            "phone": "+91-9900000001",
+            "role": org_admin_role,
+            "employee_id": "KPTCL-ADM-001",
+        },
+        {
+            "email": "engineer@kptcl.com",
+            "password": "admin123",
+            "firstname": "Test",
+            "lastname": "Engineer",
+            "phone": "+91-9900000002",
+            "role": engineer_role,
+            "employee_id": "KPTCL-ENG-001",
+        },
+        {
+            "email": "tester1@kptcl.com",
+            "password": "admin123",
+            "firstname": "Field",
+            "lastname": "Tester",
+            "phone": "+91-9900000003",
+            "role": tester_role,
+            "employee_id": "KPTCL-TEST-001",
+        },
+        {
+            "email": "depthead@kptcl.com",
+            "password": "admin123",
+            "firstname": "Department",
+            "lastname": "Head",
+            "phone": "+91-9900000004",
+            "role": dept_head_role,
+            "employee_id": "KPTCL-DH-001",
+        },
+    ]
+
+    for user_data in kptcl_users:
+        # Check if user already exists
+        existing_user = session.query(User).filter_by(email=user_data["email"]).first()
+        if existing_user:
+            continue
+
+        # Create user
+        user = User(
+            id=uuid.uuid4(),
+            email=user_data["email"],
+            password_hash=get_password_hash(user_data["password"]),
+            firstname=user_data["firstname"],
+            lastname=user_data["lastname"],
+            phone_number=user_data["phone"],
+            employee_id=user_data.get("employee_id"),
+            organization_id=org.id,
+            isactive=True,
+            email_confirmed=True,
+            phone_confirmed=True,
+            cts=datetime.now(datetime.now().astimezone().tzinfo),
+            mts=datetime.now(datetime.now().astimezone().tzinfo)
+        )
+        session.add(user)
+        session.flush()
+
+        # Assign role to user
+        if user_data["role"]:
+            user_role = OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=user_data["role"].id,
+                organization_id=org.id,
+                is_active=True,
+                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                cts=datetime.now(datetime.now().astimezone().tzinfo),
+                mts=datetime.now(datetime.now().astimezone().tzinfo)
+            )
+            session.add(user_role)
+
+    session.commit()
+    print(f"[OK] KPTCL organization created with admin user and roles")
+    return org
+
+
 def seed_kptcl_departments(session, org_id: str, excel_path: str = r"C:\Users\yesuv\Downloads\KPTCL_Substation_Mapping.xlsx"):
     """
     Seed KPTCL department hierarchy from Excel file.
@@ -1997,7 +2184,7 @@ def run_seed():
         master_ids=seed_category_master(session)
         seed_category_details(session, master_ids)
         seed_test_type_categories(session, master_ids)
-        seed_tester_locations(session)
+        # seed_tester_locations(session)  # DEPRECATED - using org departments instead
         seed_sample_testing_request(session)
 
         # Organization Multi-Tenancy System
@@ -2006,13 +2193,30 @@ def run_seed():
         seed_super_admin(session)
         seed_sample_organization(session)
 
+        # Seed KPTCL Organization with Departments
+        kptcl_org = seed_kptcl_organization(session)
+        if kptcl_org:
+            print("\n--- KPTCL Department Hierarchy Seeding ---")
+            try:
+                seed_kptcl_departments(session, str(kptcl_org.id))
+            except FileNotFoundError:
+                print("[WARN] KPTCL Excel file not found. Skipping department seeding.")
+                print("[INFO] You can seed KPTCL departments later with:")
+                print(f"       python seed.py --kptcl {kptcl_org.id}")
+            except Exception as e:
+                print(f"[WARN] KPTCL department seeding failed: {e}")
+                print("[INFO] You can retry with:")
+                print(f"       python seed.py --kptcl {kptcl_org.id}")
+
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")
         print("=" * 80)
         print("\nQuick Start:")
         print("  1. Super Admin: superadmin@system.com / Admin123!")
         print("  2. Sample Org Admin: orgadmin@sampleorg.com / OrgAdmin123!")
-        print("  3. View API docs: http://localhost:8000/docs")
+        if kptcl_org:
+            print("  3. KPTCL Org Admin: orgadmin@kptcl.com / admin123")
+        print(f"  {4 if kptcl_org else 3}. View API docs: http://localhost:8000/docs")
         print("\n" + "=" * 80 + "\n")
 
 
