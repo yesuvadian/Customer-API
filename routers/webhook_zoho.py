@@ -26,6 +26,14 @@ def verify_zoho_signature(raw_body: bytes, signature: str) -> bool:
 
     return hmac.compare_digest(calculated, signature)
 
+def get_zoho_erp_id(zoho_contact_id: str):
+    try:
+        contact = contact_service.get_contact_by_id(zoho_contact_id)
+        return contact.get("zoho_erp_id")
+    except Exception as e:
+        print(" Failed to get zoho_erp_id:", e)
+        return None
+    
 
 # -------------------------------------------------
 # 🚀 Webhook Endpoint
@@ -121,16 +129,25 @@ async def zoho_webhook(module: str, request: Request):
         print("⚠️ contact_id missing")
         return {"status": "ignored"}
 
-    # 🔥 Convert to email (IMPORTANT)
     try:
         contact = contact_service.get_contact_by_id(zoho_contact_id)
-        contact_id = contact.get("email")  # use email for WebSocket
+        email = contact.get("email")
+        zoho_erp_id = contact.get("zoho_erp_id")
+
+        # ✅ unified key
+        user_key = zoho_erp_id or email
+
+        if not user_key:
+            print("⚠️ No valid user identifier")
+            return {"status": "ignored"}
+
+        if not zoho_erp_id:
+            print("⚠️ zoho_erp_id missing")
+        else:
+            print("✅ ERP ID:", zoho_erp_id)
+
     except Exception as e:
         print("❌ Failed to resolve contact email:", e)
-        return {"status": "ignored"}
-
-    if not contact_id:
-        print("⚠️ contact_id missing")
         return {"status": "ignored"}
 
     # -------------------------------------------------
@@ -149,7 +166,7 @@ async def zoho_webhook(module: str, request: Request):
             }
 
             # ✅ store in Redis
-            cache_key = f"notifications:{contact_id}"
+            cache_key = f"notifications:{user_key}"
             existing = cache.get(cache_key) or []
 
             if not isinstance(existing, list):
@@ -159,13 +176,13 @@ async def zoho_webhook(module: str, request: Request):
             cache.set(cache_key, existing)
 
             # 🚀 NEW: send real-time via WebSocket
-            await send_to_user(contact_id, notification)
+            await send_to_user(user_key, notification)
 
     # -------------------------------------------------
     # 8. Invalidate cache
     # -------------------------------------------------
     for ns in cache_namespaces:
-        key = f"zoho:{ns}:{contact_id}"
+        key = f"zoho:{ns}:{user_key}"
         cache.delete(key)
         deleted_keys.append(key)
 
@@ -175,7 +192,7 @@ async def zoho_webhook(module: str, request: Request):
         "code": 0,
         "message": "cache invalidated",
         "module": module,
-        "contact_id": contact_id,
+        "contact_id": user_key,
         "event_type": event_type,
         "keys": deleted_keys,
     }
