@@ -190,13 +190,13 @@ class RecommendationPDFService:
 
         # Status indicator box
         if recommendation.approval_status == 'approved':
-            status_text = "✓ APPROVED"
+            status_text = "APPROVED"
             status_color = colors.green
         elif recommendation.approval_status == 'rejected':
-            status_text = "✗ REJECTED"
+            status_text = "REJECTED"
             status_color = colors.red
         else:
-            status_text = "⏳ PENDING APPROVAL"
+            status_text = "PENDING APPROVAL"
             status_color = colors.orange
 
         status_table = Table([[status_text]], colWidths=[6*inch])
