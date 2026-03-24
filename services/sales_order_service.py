@@ -20,17 +20,25 @@ class SalesOrderService:
         clean_number = salesorder_number.lower().replace("-", "_")
         extension = file.filename.split(".")[-1] if "." in file.filename else "pdf"
         return f"{clean_number}_{doc_type}.{extension}"
-
+    
     def upload_po_attachment(
         self,
         access_token: str,
         salesorder_id: str,
         file: UploadFile,
+        po_number: str,
         uploaded_by: str | None = None
     ):
         # ✅ Fetch current order status properly
         salesorder = self._get_order_status(access_token, salesorder_id)
         self._validate_status_for_po(salesorder.get("status"))
+
+        # ✅ STEP 1: Update PO custom field
+        self.update_po_number_field(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            po_number=po_number
+        )
 
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
@@ -52,6 +60,7 @@ class SalesOrderService:
             )
         }
 
+        # ✅ STEP 2: Upload file
         response = requests.post(
             f"{self.base_url}/salesorders/{salesorder_id}/attachment",
             headers=headers,
@@ -714,6 +723,14 @@ class SalesOrderService:
             )
 
         orders = response.json().get("salesorders", [])
+
+        for order in orders:
+            supplier_data = self.get_supplier_details(
+                access_token,
+                order.get("salesorder_id")
+            )
+            order["supplier"] = supplier_data
+
         cache.set(cache_key, orders)
         return orders
 
@@ -737,7 +754,16 @@ class SalesOrderService:
                 detail="Failed to fetch sales order"
             )
 
-        return response.json().get("salesorder", {})
+        salesorder = response.json().get("salesorder", {})
+
+        supplier_data = self.get_supplier_details(
+            access_token,
+            salesorder_id
+        )
+
+        salesorder["supplier"] = supplier_data
+
+        return salesorder
 
     # -------------------------------------------------
     # Review / Approve
@@ -1415,6 +1441,58 @@ class SalesOrderService:
             "message": "PO updated and new attachment sent to supplier",
             "purchaseorder_id": po_id
         }
+    
+    def update_po_number_field(
+        self,
+        access_token: str,
+        salesorder_id: str,
+        po_number: str
+    ):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.put(
+            f"{self.base_url}/salesorders/{salesorder_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            json={
+                "custom_fields": [
+                    {
+                        "api_name": "cf_customer_po_no",  # ✅ your PO field
+                        "value": po_number
+                    }
+                ]
+            },
+            timeout=15
+        )
+
+        data = response.json()
+
+        if response.status_code != 200 or data.get("code") not in (0, None):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Failed to update PO number field",
+                    "zoho_response": data
+                }
+            )
+
+        self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
+
+        return data
+    
+    def delete_po_number_field(
+        self,
+        access_token: str,
+        salesorder_id: str
+    ):
+        return self.update_po_number_field(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            po_number=None
+        )
 
     def _delete_po_attachments(self, access_token: str, po_id: str):
         headers = {
