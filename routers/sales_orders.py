@@ -78,6 +78,7 @@ def upload_grn(
 @router.post("/{salesorder_id}/po", status_code=status.HTTP_201_CREATED)
 def upload_po(
     salesorder_id: str,
+    cf_customer_po_no: str = Form(...),   # ✅ ADD THIS
     file: UploadFile = File(...),
     current_user=Depends(get_current_user)
 ):
@@ -87,18 +88,21 @@ def upload_po(
         access_token=access_token,
         salesorder_id=salesorder_id,
         file=file,
+        po_number=cf_customer_po_no,   # ✅ PASS THIS
         uploaded_by=current_user.email
     )
 
     return {
         "message": "PO uploaded successfully",
         "salesorder_id": salesorder_id,
+        "po_number": cf_customer_po_no,   # ✅ optional but useful
         "file_name": file.filename
     }
 
 @router.put("/{salesorder_id}/po", status_code=status.HTTP_200_OK)
 def update_po(
     salesorder_id: str,
+    cf_customer_po_no: str = Form(...),   # ✅ ADD THIS
     file: UploadFile = File(...),
     current_user=Depends(get_current_user)
 ):
@@ -109,6 +113,7 @@ def update_po(
             access_token=access_token,
             salesorder_id=salesorder_id,
             file=file,
+            po_number=cf_customer_po_no,   # ✅ PASS THIS
             uploaded_by=current_user.email
         )
     except HTTPException as e:
@@ -122,6 +127,7 @@ def update_po(
     return {
         "message": "PO updated successfully",
         "salesorder_id": salesorder_id,
+        "po_number": cf_customer_po_no,   # ✅ optional but useful
         "file_name": file.filename
     }
 
@@ -333,11 +339,19 @@ def delete_po(salesorder_id: str, current_user=Depends(get_current_user)):
     access_token = get_zoho_access_token()
 
     try:
+        # ✅ 1. Delete PO file
         sales_order_service.delete_attachment_by_prefix(
             access_token=access_token,
             salesorder_id=salesorder_id,
             prefix="_po"
         )
+
+        # ✅ 2. ALSO clear PO number (IMPORTANT)
+        sales_order_service.delete_po_number_field(
+            access_token=access_token,
+            salesorder_id=salesorder_id
+        )
+
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -347,6 +361,26 @@ def delete_po(salesorder_id: str, current_user=Depends(get_current_user)):
         )
 
     return {"message": "PO deleted successfully"}
+
+# =====================================================
+# DELETE ONLY PO NUMBER  ✅ ADD THIS
+# =====================================================
+@router.delete("/{salesorder_id}/po/number", status_code=status.HTTP_200_OK)
+def delete_po_number(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    try:
+        sales_order_service.delete_po_number_field(
+            access_token=access_token,
+            salesorder_id=salesorder_id
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting PO number: {str(e)}"
+        )
+
+    return {"message": "PO number deleted successfully"}
 
 @router.delete("/{salesorder_id}/grn", status_code=status.HTTP_200_OK)
 def delete_grn(salesorder_id: str, current_user=Depends(get_current_user)):
@@ -574,28 +608,6 @@ def get_eway_bill(salesorder_id: str, current_user=Depends(get_current_user)):
 
     return Response(content=pdf_bytes, media_type="application/pdf")
 
-@router.get("/{salesorder_id}/supplier", status_code=status.HTTP_200_OK)
-def get_supplier(
-    salesorder_id: str,
-    current_user=Depends(get_current_user)
-):
-    access_token = get_zoho_access_token()
-
-    try:
-        supplier = sales_order_service.get_supplier_details(
-            access_token=access_token,
-            salesorder_id=salesorder_id
-        )
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching supplier: {str(e)}"
-        )
-
-    return supplier
-
 @router.post("/{salesorder_id}/create-po", status_code=status.HTTP_201_CREATED)
 def create_po_from_salesorder(
     salesorder_id: str,
@@ -650,4 +662,20 @@ def create_salesorder_from_quote(
         raise HTTPException(
             status_code=500,
             detail="Internal server error while creating sales order"
+        )
+    
+@router.get("/{salesorder_id}/supplier", status_code=status.HTTP_200_OK)
+def get_supplier(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    try:
+        supplier = sales_order_service.get_supplier_details(
+            access_token=access_token,
+            salesorder_id=salesorder_id
+        )
+        return supplier
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching supplier: {str(e)}"
         )
