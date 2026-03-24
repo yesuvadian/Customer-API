@@ -2805,21 +2805,13 @@ def seed_zoho_import_mapping(session, kptcl_org):
         print("[SKIP] No KPTCL org — skipping Zoho import mapping")
         return
 
-    # Check if mapping already exists
-    existing = session.query(ZohoImportMapping).filter_by(
-        organization_id=kptcl_org.id, is_default=True
-    ).first()
-    if existing:
-        print("[INFO] Zoho import mapping already exists for KPTCL")
-        return
-
     # Find the Originator org role for KPTCL
     originator_role = session.query(OrgRole).filter_by(
         organization_id=kptcl_org.id, name="Originator"
     ).first()
 
     if not originator_role:
-        print("[WARN] Originator org role not found for KPTCL — mapping created without role")
+        print("[WARN] Originator org role not found for KPTCL -- mapping created without role")
 
     # Find "RT North SD3 Devanahalli" department
     dept = session.query(OrgDepartment).filter(
@@ -2828,7 +2820,18 @@ def seed_zoho_import_mapping(session, kptcl_org):
     ).first()
 
     if not dept:
-        print("[WARN] 'RT North SD3 Devanahalli' department not found — mapping created without dept")
+        print("[WARN] 'RT North SD3 Devanahalli' department not found -- mapping created without dept")
+
+    # Check if mapping already exists -- update it with current dept/role IDs
+    existing = session.query(ZohoImportMapping).filter_by(
+        organization_id=kptcl_org.id, is_default=True
+    ).first()
+    if existing:
+        existing.department_id = dept.id if dept else None
+        existing.org_role_id = originator_role.id if originator_role else None
+        session.commit()
+        print(f"[OK] Zoho import mapping updated: KPTCL -> Originator, dept={dept.name if dept else 'None'}")
+        return
 
     mapping = ZohoImportMapping(
         id=uuid.uuid4(),
