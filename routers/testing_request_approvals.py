@@ -4,7 +4,7 @@ Handles approval workflow with tester role selection and assignment
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from uuid import UUID
 
@@ -52,7 +52,14 @@ def get_pending_approvals(
     Get all testing requests pending approval.
     Filters by organization and department based on user's permissions.
     """
-    query = db.query(TestingRequest).filter(
+    query = db.query(TestingRequest).options(
+        joinedload(TestingRequest.equipment_type),
+        joinedload(TestingRequest.test_type),
+        joinedload(TestingRequest.department),
+        joinedload(TestingRequest.originator),
+        joinedload(TestingRequest.assigned_tester),
+        joinedload(TestingRequest.organization),
+    ).filter(
         TestingRequest.status == TestingRequestStatus.submitted  # Using submitted for testing (pending_approval requires migration)
     )
 
