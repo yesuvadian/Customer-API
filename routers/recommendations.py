@@ -44,8 +44,11 @@ def list_recommendations(
     current_user: User = Depends(get_current_user),
 ):
     service = RecommendationService(db)
+    # Filter by organization to prevent cross-organization data leakage
+    organization_id = current_user.organization_id
     return service.get_recommendations(
         testing_request_id=testing_request_id,
+        organization_id=organization_id,
         skip=skip,
         limit=limit,
     )

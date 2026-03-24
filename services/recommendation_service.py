@@ -40,6 +40,7 @@ class RecommendationService:
 
         recommendation = Recommendation(
             testing_request_id=testing_request_id,
+            organization_id=request.organization_id,  # Set from testing request
             recommendation_type=rec_type,
             summary=summary,
             detailed_notes=detailed_notes,
@@ -67,12 +68,15 @@ class RecommendationService:
     def get_recommendations(
         self,
         testing_request_id: Optional[UUID] = None,
+        organization_id: Optional[UUID] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> List[Recommendation]:
         query = self.db.query(Recommendation)
         if testing_request_id:
             query = query.filter(Recommendation.testing_request_id == testing_request_id)
+        if organization_id:
+            query = query.filter(Recommendation.organization_id == organization_id)
         return query.order_by(Recommendation.cts.desc()).offset(skip).limit(limit).all()
 
     def update_recommendation(self, recommendation_id: UUID, data: dict, modified_by: UUID) -> Recommendation:
