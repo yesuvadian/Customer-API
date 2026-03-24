@@ -1,8 +1,17 @@
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
+import pandas as pd
+from typing import Dict, Optional
 from database import VendorSessionLocal
-from models import CategoryDetails, CategoryMaster, Country, Division, Plan, Product, ProductCategory, ProductSubCategory, Role, RoleModulePrivilege, State,City, User, UserRole, Module ,City
+from models import (
+    CategoryDetails, CategoryMaster, Country, Division, Plan, Product,
+    ProductCategory, ProductSubCategory, Role, RoleModulePrivilege,
+    State, City, User, UserRole, Module,
+    # Organization models
+    Organization, OrgDepartment, OrgRole, OrgUserRole,
+    OrgRolePermission, RoleTemplate, OrgInvitation, TesterRoleModuleRequirement
+)
 from security_utils import get_password_hash  # password hashing utils
 
 # Context manager for DB session
@@ -329,10 +338,10 @@ def seed_country_india(session):
         
 def seed_modules(session):
     modules_data = [
-        {"name": "Roles", "description": "Manage roles", "path": "roles", "group_name": "User & Access"},
+        {"name": "Roles", "description": "Manage roles (Legacy)", "path": "roles", "group_name": "User & Access", "is_active": False},
         {"name": "App Modules", "description": "Manage application modules", "path": "modules", "group_name": "User & Access"},
-        {"name": "User Roles", "description": "Assign roles to users", "path": "roles", "group_name": "User & Access", "is_active": False},
-        {"name": "Role Permissions", "description": "Configure role-based privileges", "path": "role_module_privileges", "group_name": "User & Access"},
+        {"name": "User Roles", "description": "Assign roles to users (Legacy)", "path": "roles", "group_name": "User & Access", "is_active": False},
+        {"name": "Role Permissions", "description": "Configure role-based privileges (Legacy)", "path": "role_module_privileges", "group_name": "User & Access", "is_active": False},
        {"name": "Login Sessions", "description": "Track user login sessions", "path": "user_sessions", "group_name": "User & Access", "is_active": False},
         {"name": "Countries", "description": "Manage country list", "path": "countries", "group_name": "Geography"},
         {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography"},
@@ -347,7 +356,7 @@ def seed_modules(session):
         {"name": "Company Products", "description": "Company-specific product inventory", "path": "company_products", "group_name": "Inventory"},
         {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access"},
          {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory"},
-         {"name": "Assign User Roles", "description": "Assign roles to users", "path": "user_roles", "group_name": "User & Access"},
+         {"name": "Assign User Roles", "description": "Assign organization roles to users", "path": "user_roles", "group_name": "User & Access"},
          {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access", "is_active": False},
          {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
         {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company", "is_active": False},
@@ -379,8 +388,15 @@ def seed_modules(session):
 {"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
 {"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
+{"name": "Testing Request Approvals", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
 {"name": "Validation Requests", "description": "Create and manage validation requests", "path": "validation_requests", "group_name": "Testing"},
-{"name": "Tester Mapping", "description": "Map testers to locations (zone/circle/division)", "path": "tester_mapping", "group_name": "Testing"},
+{"name": "Tester Mapping", "description": "Map testers to locations (DEPRECATED - use org departments)", "path": "tester_mapping", "group_name": "Testing", "is_active": False},
+# ✅ ORGANIZATION MANAGEMENT MODULES
+{"name": "Organizations", "description": "Manage organizations, departments, roles, and users", "path": "organizations", "group_name": "Organization"},
+{"name": "Organization User Roles", "description": "Assign organization-specific roles to users within your organization", "path": "org_user_roles", "group_name": "Organization"},
+{"name": "Organization Role Permissions", "description": "Configure permissions for organization roles", "path": "org_role_permissions", "group_name": "Organization"},
+# ✅ WORKFLOW MANAGEMENT MODULE
+{"name": "Workflows", "description": "Manage workflow definitions, states, transitions, and permissions", "path": "workflows", "group_name": "Administration"},
 
     ]
 
@@ -418,15 +434,16 @@ def seed_modules(session):
 
 def seed_privileges(session, role_ids, module_ids):
     module_names = [
-    "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+    # Legacy modules disabled: "Roles", "User Roles", "Role Permissions", "Login Sessions",
+    "App Modules",
     "Countries", "States", "Cities","Addresses", "Tax Information", "Tax Documents",
     "Product Categories", "Product Subcategories", "Products", "Users",
     "Company Products", "Plans", "Dashboard", "Assign User Roles",
     "User Product Search", "Bank Information", "Bank Documents",
     "Divisions", "User Documents",
     "Company Product Certificates", "Company Product Supply References",
-    "Category Master", "Category Details", 
-    "Sync ERP Vendor","KYC Status" , "zohocontacts"      
+    "Category Master", "Category Details",
+    "Sync ERP Vendor","KYC Status" , "zohocontacts"
     ]
 
 
@@ -444,7 +461,8 @@ def seed_privileges(session, role_ids, module_ids):
     # ALL MODULES
     # -------------------------------------------------------
     module_names = [
-        "Roles", "App Modules", "User Roles", "Role Permissions", "Login Sessions",
+        # Legacy modules disabled: "Roles", "User Roles", "Role Permissions", "Login Sessions",
+        "App Modules",
         "Countries", "States", "Cities", "Addresses", "Tax Information", "Tax Documents",
         "Product Categories", "Product Subcategories", "Products", "Users",
         "Company Products", "Plans", "Dashboard", "Assign User Roles",
@@ -458,7 +476,11 @@ def seed_privileges(session, role_ids, module_ids):
         "Invoices", "Retainer Invoices", "Payments Made", "Statements",
         "Enquiry", "Contact Us", "RQ with Vendor",
         # ✅ TESTING REQUEST SYSTEM MODULES
-        "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests"
+        "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests",
+        # ✅ ORGANIZATION MANAGEMENT MODULE
+        "Organizations",
+        # ✅ WORKFLOW MANAGEMENT MODULE
+        "Workflows"
     ]
 
     # -------------------------------------------------------
@@ -617,13 +639,13 @@ def seed_privileges(session, role_ids, module_ids):
         },
         {"role": "Approver", "module": "Dashboard", "can_view": True},
 
-        # TESTER MAPPING — Admin full, Originator view-only
-        {
-            "role": "Admin", "module": "Tester Mapping",
-            "can_view": True, "can_add": True, "can_edit": True,
-            "can_delete": True, "can_search": True
-        },
-        {"role": "Originator", "module": "Tester Mapping", "can_view": True},
+        # TESTER MAPPING — DEPRECATED (use org departments instead)
+        # {
+        #     "role": "Admin", "module": "Tester Mapping",
+        #     "can_view": True, "can_add": True, "can_edit": True,
+        #     "can_delete": True, "can_search": True
+        # },
+        # {"role": "Originator", "module": "Tester Mapping", "can_view": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -1409,10 +1431,1302 @@ def seed_tester_locations(session):
     print("[OK] Tester-location mappings seeded successfully.")
 
 
+# ----------------- Organization System Seed -----------------
+
+def seed_role_templates(session):
+    """
+    Seed role templates for auto-provisioning default roles to new organizations.
+    """
+    # Get all modules with their details
+    all_modules = session.query(Module).filter(Module.is_active == True).all()
+
+    if not all_modules:
+        print("[WARN] No modules found. Role templates will be created without permission templates.")
+
+    # Build module lookup by group and name
+    modules_by_group = {}
+    modules_by_name = {}
+    for mod in all_modules:
+        if mod.group_name:
+            modules_by_group.setdefault(mod.group_name, []).append(mod.id)
+        if mod.name:
+            modules_by_name[mod.name] = mod.id
+
+    # Get all module IDs (for Admin role only)
+    all_module_ids = [m.id for m in all_modules]
+
+    # Define module sets for different roles
+    # Testing group modules
+    testing_modules = modules_by_group.get("Testing", [])
+
+    # Procurement modules (by name)
+    procurement_module_names = [
+        "Request Quote", "RQ with Vendor", "Request Product", "Quotes",
+        "Sales Orders", "Invoices", "Retainer Invoices", "Payments Made",
+        "Statements", "Enquiry", "Contact Us"
+    ]
+    procurement_modules = [modules_by_name.get(name) for name in procurement_module_names if modules_by_name.get(name)]
+
+    # Organization modules
+    org_modules = modules_by_group.get("Organization", [])
+
+    # Dashboard (should be accessible to everyone)
+    dashboard_module = [modules_by_name.get("Dashboard")] if modules_by_name.get("Dashboard") else []
+
+    templates_data = [
+        {
+            "name": "Admin",
+            "description": "Full administrative access to the organization. Can manage users, roles, departments, and all organization resources.",
+            "is_org_admin": True,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": True,
+                    "can_approve": True,
+                    "can_assign": True,
+                    "can_export": True,
+                    "can_import": True
+                }
+                for mid in all_module_ids  # Admin gets access to everything
+            ]
+        },
+        {
+            "name": "Originator",
+            "description": "Creates testing requests and raises procurement. Full access to testing requests and procurement modules.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": True,
+                    "can_approve": False,
+                    "can_assign": True,
+                    "can_export": True,
+                    "can_import": False
+                }
+                for mid in (testing_modules + procurement_modules + dashboard_module)  # Only testing, procurement, dashboard
+            ]
+        },
+        {
+            "name": "Tester",
+            "description": "Performs transformer testing and uploads results. Full access to testing and recommendations modules.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "can_export": True,
+                    "can_import": False
+                }
+                for mid in (testing_modules + dashboard_module)  # Only testing modules and dashboard
+            ]
+        },
+        {
+            "name": "Approver",
+            "description": "Reviews and approves or rejects recommendations. Approval access to testing workflow.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": False,
+                    "can_edit": False,
+                    "can_delete": False,
+                    "can_approve": True,
+                    "can_assign": False,
+                    "can_export": True,
+                    "can_import": False
+                }
+                for mid in (testing_modules + dashboard_module)  # Only testing modules (for approvals) and dashboard
+            ]
+        },
+        {
+            "name": "Department Manager",
+            "description": "Manage department users and departmental resources. Can view and manage users within their department.",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": False,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": False,
+                    "can_approve": True,
+                    "can_assign": True,
+                    "can_export": True,
+                    "can_import": False
+                }
+                for mid in (testing_modules + procurement_modules + org_modules + dashboard_module)  # Testing, procurement, org, dashboard
+            ]
+        },
+        {
+            "name": "Employee",
+            "description": "Standard employee access. Can view organization resources and manage their own data.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": False,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": False,
+                    "can_edit": False,
+                    "can_delete": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "can_export": False,
+                    "can_import": False
+                }
+                for mid in (testing_modules + procurement_modules + dashboard_module)  # View-only access to testing, procurement, dashboard
+            ]
+        },
+        {
+            "name": "Viewer",
+            "description": "Read-only access to organization resources.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": False,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": False,
+                    "can_edit": False,
+                    "can_delete": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "can_export": False,
+                    "can_import": False
+                }
+                for mid in (testing_modules + procurement_modules + dashboard_module)  # View-only access to testing, procurement, dashboard
+            ]
+        },
+        {
+            "name": "Contributor",
+            "description": "Can add and edit resources but cannot delete or approve.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": False,
+            "permissions_template": [
+                {
+                    "module_id": mid,
+                    "can_view": True,
+                    "can_add": True,
+                    "can_edit": True,
+                    "can_delete": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "can_export": True,
+                    "can_import": True
+                }
+                for mid in (testing_modules + procurement_modules + dashboard_module)  # Can contribute to testing, procurement, dashboard
+            ]
+        }
+    ]
+
+    created_count = 0
+    updated_count = 0
+
+    for template_data in templates_data:
+        existing = session.query(RoleTemplate).filter_by(name=template_data["name"]).first()
+
+        if existing:
+            existing.description = template_data["description"]
+            existing.is_org_admin = template_data["is_org_admin"]
+            existing.is_dept_admin = template_data["is_dept_admin"]
+            existing.auto_provision = template_data["auto_provision"]
+            existing.permissions_template = template_data["permissions_template"]
+            existing.mts = datetime.now(datetime.now().astimezone().tzinfo)
+            updated_count += 1
+        else:
+            template = RoleTemplate(
+                id=uuid.uuid4(),
+                name=template_data["name"],
+                description=template_data["description"],
+                is_org_admin=template_data["is_org_admin"],
+                is_dept_admin=template_data["is_dept_admin"],
+                auto_provision=template_data["auto_provision"],
+                permissions_template=template_data["permissions_template"],
+                cts=datetime.now(datetime.now().astimezone().tzinfo),
+                mts=datetime.now(datetime.now().astimezone().tzinfo)
+            )
+            session.add(template)
+            created_count += 1
+
+    session.commit()
+    print(f"[OK] Role templates seeded: {created_count} created, {updated_count} updated")
+
+
+def seed_super_admin(session):
+    """
+    Create a super admin user if it doesn't exist.
+    """
+    super_admin_email = "superadmin@system.com"
+
+    existing = session.query(User).filter_by(email=super_admin_email).first()
+    if existing:
+        # Update existing user to super admin
+        existing.usertype = "super_admin"
+        existing.isactive = True
+        session.commit()
+        print(f"[OK] Super admin user updated: {super_admin_email}")
+        return existing.id
+
+    # Create new super admin
+    super_admin = User(
+        id=uuid.uuid4(),
+        email=super_admin_email,
+        password_hash=get_password_hash("Admin123!"),
+        firstname="Super",
+        lastname="Admin",
+        phone_number="+1234567890",
+        usertype="super_admin",
+        isactive=True,
+        email_confirmed=True,
+        phone_confirmed=True
+    )
+    session.add(super_admin)
+    session.commit()
+    print(f"[OK] Super admin user created: {super_admin_email} / Admin123!")
+    return super_admin.id
+
+
+def seed_tester_role_module_requirements(session):
+    """
+    Seed global default configuration for tester role module requirements.
+    Defines which modules a role must have FULL permissions on to appear in tester assignment dropdown.
+    """
+    # Check if global default already exists
+    existing_config = session.query(TesterRoleModuleRequirement).filter_by(
+        organization_id=None
+    ).first()
+
+    if existing_config:
+        print(f"[INFO] Global tester role module requirements already exist")
+        return existing_config.id
+
+    # Create global default configuration
+    # Modules: 45=Testing Requests, 46=Testing, 49=Testing Request Approvals, 51=Tester Mapping
+    config = TesterRoleModuleRequirement(
+        id=uuid.uuid4(),
+        organization_id=None,  # Global default
+        required_module_ids=[45, 46, 49, 51],
+        description="Global default: Roles must have full permissions on Testing Requests, Testing, Testing Request Approvals, and Tester Mapping modules",
+        is_active=True,
+        cts=datetime.now(datetime.now().astimezone().tzinfo),
+        mts=datetime.now(datetime.now().astimezone().tzinfo)
+    )
+    session.add(config)
+    session.commit()
+
+    print(f"[OK] Global tester role module requirements seeded: {config.required_module_ids}")
+    return config.id
+
+
+def seed_sample_organization(session):
+    """
+    Create a sample organization with admin user for testing.
+    """
+    org_code = "SAMPLE_ORG"
+
+    # Check if organization already exists
+    existing_org = session.query(Organization).filter_by(code=org_code).first()
+    if existing_org:
+        print(f"[INFO] Sample organization already exists: {org_code}")
+        org = existing_org
+        # Skip organization creation but continue with tester roles/users
+        skip_org_creation = True
+    else:
+        skip_org_creation = False
+
+    now = datetime.now(datetime.now().astimezone().tzinfo)
+
+    if not skip_org_creation:
+        # Get a basic plan if available
+        basic_plan = session.query(Plan).filter_by(planname="Basic").first()
+        plan_id = basic_plan.id if basic_plan else None
+
+        # Create organization
+    org = Organization(
+        id=uuid.uuid4(),
+        name="Sample Organization",
+        code=org_code,
+        display_name="Sample Org",
+        organization_type="vendor",
+        industry="Technology",
+        primary_email="info@sampleorg.com",
+        primary_phone="+1234567890",
+        website="https://sampleorg.com",
+        address="123 Sample Street",
+        city="Sample City",
+        state="Sample State",
+        country="USA",
+        pincode="12345",
+        is_active=True,
+        is_verified=False,
+        plan_id=plan_id,
+        subscription_start_date=now,
+        subscription_end_date=now + timedelta(days=365),
+        settings={},
+        created_by=None,
+        modified_by=None,
+        cts=now,
+        mts=now,
+        erp_sync_status="pending",
+        erp_last_sync_at=None,
+        erp_error_message=None,
+        erp_external_id=None
+    )
+    session.add(org)
+    session.flush()
+
+    # Provision default roles from templates
+    templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
+
+    provisioned_roles = []
+    for template in templates:
+        role = OrgRole(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name=template.name,
+            description=template.description,
+            role_type="default",
+            is_org_admin=template.is_org_admin,
+            is_dept_admin=template.is_dept_admin,
+            is_active=True,
+            cts=datetime.now(datetime.now().astimezone().tzinfo),
+            mts=datetime.now(datetime.now().astimezone().tzinfo)
+        )
+        session.add(role)
+        session.flush()
+
+        # Save all provisioned roles for later assignment
+        provisioned_roles.append(role)
+
+        # Create permissions from template
+        if template.permissions_template:
+            for perm_data in template.permissions_template:
+                permission = OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=perm_data.get("module_id"),
+                    can_view=perm_data.get("can_view", False),
+                    can_add=perm_data.get("can_add", False),
+                    can_edit=perm_data.get("can_edit", False),
+                    can_delete=perm_data.get("can_delete", False),
+                    can_approve=perm_data.get("can_approve", False),
+                    can_assign=perm_data.get("can_assign", False),
+                    can_export=perm_data.get("can_export", False),
+                    can_import=perm_data.get("can_import", False),
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                )
+                session.add(permission)
+
+    # Create org admin user
+    admin_email = "orgadmin@sampleorg.com"
+    existing_admin = session.query(User).filter_by(email=admin_email).first()
+
+    if not existing_admin:
+        admin_user = User(
+            id=uuid.uuid4(),
+            email=admin_email,
+            password_hash=get_password_hash("OrgAdmin123!"),
+            firstname="Organization",
+            lastname="Admin",
+            phone_number="+1987654321",
+            organization_id=org.id,
+            isactive=True,
+            email_confirmed=True,
+            phone_confirmed=True
+        )
+        session.add(admin_user)
+        session.flush()
+
+        # Assign Admin role to admin user
+        admin_role = next((r for r in provisioned_roles if r.is_org_admin), None)
+        if admin_role:
+            user_role = OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=admin_user.id,
+                org_role_id=admin_role.id,
+                assigned_by=admin_user.id,
+                is_active=True
+            )
+            session.add(user_role)
+
+        session.commit()
+        print(f"[OK] Sample organization created: {org_code}")
+        print(f"    Admin User: {admin_email} / OrgAdmin123!")
+    else:
+        # Update existing user and assign Admin role
+        existing_admin.organization_id = org.id
+        admin_role = next((r for r in provisioned_roles if r.is_org_admin), None)
+        if admin_role:
+            existing_role = session.query(OrgUserRole).filter_by(
+                user_id=existing_admin.id,
+                org_role_id=admin_role.id
+            ).first()
+            if not existing_role:
+                user_role = OrgUserRole(
+                    id=uuid.uuid4(),
+                    user_id=existing_admin.id,
+                    org_role_id=admin_role.id,
+                    assigned_by=existing_admin.id,
+                    is_active=True
+                )
+                session.add(user_role)
+        session.commit()
+        print(f"[OK] Sample organization created and linked to existing admin: {admin_email}")
+
+        # Create sample departments
+        print(f"[INFO] Creating sample departments for {org_code}")
+
+    # Check if departments already exist
+    existing_depts = session.query(OrgDepartment).filter_by(organization_id=org.id).count()
+    if existing_depts == 0:
+        now = datetime.now(datetime.now().astimezone().tzinfo)
+
+        # Engineering department (root)
+        engineering_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Engineering",
+            code="ENG",
+            description="Engineering and Development",
+            parent_department_id=None,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(engineering_dept)
+        session.flush()
+
+        # Backend team (child of Engineering)
+        backend_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Backend Team",
+            code="BACKEND",
+            description="Backend Development Team",
+            parent_department_id=engineering_dept.id,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(backend_dept)
+
+        # Frontend team (child of Engineering)
+        frontend_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Frontend Team",
+            code="FRONTEND",
+            description="Frontend Development Team",
+            parent_department_id=engineering_dept.id,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(frontend_dept)
+
+        # Sales department (root)
+        sales_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Sales",
+            code="SALES",
+            description="Sales and Business Development",
+            parent_department_id=None,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(sales_dept)
+        session.flush()
+
+        # Inside Sales (child of Sales)
+        inside_sales_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Inside Sales",
+            code="INSIDE_SALES",
+            description="Inside Sales Team",
+            parent_department_id=sales_dept.id,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(inside_sales_dept)
+
+        # Human Resources (root)
+        hr_dept = OrgDepartment(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Human Resources",
+            code="HR",
+            description="Human Resources Department",
+            parent_department_id=None,
+            is_active=True,
+            cts=now,
+            mts=now
+        )
+        session.add(hr_dept)
+
+        session.commit()
+        print(f"[OK] Created 6 sample departments (3 root, 3 child)")
+    else:
+        print(f"[INFO] Sample organization already has {existing_depts} departments")
+
+    # END of organization creation block
+
+    # Create sample tester roles with EXACT module permissions (always run)
+    print(f"[INFO] Creating sample tester roles for {org_code}")
+
+    # Required modules for testers: [45, 46, 49, 51]
+    # 45=Testing Requests, 46=Testing, 49=Testing Request Approvals, 51=Tester Mapping
+    TESTER_REQUIRED_MODULES = [45, 46, 49, 51]
+
+    tester_roles_config = [
+        {
+            "name": "Field Tester",
+            "description": "Field tester role with exact module permissions for tester assignment"
+        },
+        {
+            "name": "Lab Tester",
+            "description": "Laboratory tester role with exact module permissions for tester assignment"
+        }
+    ]
+
+    tester_roles = []
+    for role_config in tester_roles_config:
+        # Check if role already exists
+        existing_role = session.query(OrgRole).filter_by(
+            organization_id=org.id,
+            name=role_config["name"]
+        ).first()
+
+        if existing_role:
+            role = existing_role
+            # Clear existing permissions
+            session.query(OrgRolePermission).filter_by(org_role_id=role.id).delete()
+        else:
+            # Create new role
+            role = OrgRole(
+                id=uuid.uuid4(),
+                organization_id=org.id,
+                name=role_config["name"],
+                description=role_config["description"],
+                is_org_admin=False,
+                is_dept_admin=False,
+                is_active=True,
+                cts=now,
+                mts=now
+            )
+            session.add(role)
+            session.flush()
+
+        # Add FULL permissions for EXACT modules
+        for module_id in TESTER_REQUIRED_MODULES:
+            perm = OrgRolePermission(
+                id=uuid.uuid4(),
+                org_role_id=role.id,
+                module_id=module_id,
+                can_view=True,
+                can_add=True,
+                can_edit=True,
+                can_delete=True,
+                can_approve=True,
+                can_assign=True
+            )
+            session.add(perm)
+
+        tester_roles.append(role)
+
+    session.commit()
+    print(f"[OK] Created {len(tester_roles)} sample tester roles with exact module permissions {TESTER_REQUIRED_MODULES}")
+
+    # Create sample tester users
+    print(f"[INFO] Creating sample tester users for {org_code}")
+
+    tester_users_config = [
+        {
+            "email": "fieldtester1@sampleorg.com",
+            "password": "Tester123!",
+            "role_name": "Field Tester",
+            "firstname": "Field",
+            "lastname": "Tester One",
+            "phone": "9999999001"
+        },
+        {
+            "email": "fieldtester2@sampleorg.com",
+            "password": "Tester123!",
+            "role_name": "Field Tester",
+            "firstname": "Field",
+            "lastname": "Tester Two",
+            "phone": "9999999002"
+        },
+        {
+            "email": "labtester1@sampleorg.com",
+            "password": "Tester123!",
+            "role_name": "Lab Tester",
+            "firstname": "Lab",
+            "lastname": "Tester One",
+            "phone": "9999999003"
+        },
+        {
+            "email": "labtester2@sampleorg.com",
+            "password": "Tester123!",
+            "role_name": "Lab Tester",
+            "firstname": "Lab",
+            "lastname": "Tester Two",
+            "phone": "9999999004"
+        }
+    ]
+
+    created_users = 0
+    for user_config in tester_users_config:
+        # Check if user exists
+        existing_user = session.query(User).filter_by(email=user_config["email"]).first()
+
+        if existing_user:
+            user = existing_user
+        else:
+            # Create user
+            hashed_password = get_password_hash(user_config["password"])
+            user = User(
+                id=uuid.uuid4(),
+                email=user_config["email"],
+                password_hash=hashed_password,
+                firstname=user_config["firstname"],
+                lastname=user_config["lastname"],
+                phone_number=user_config["phone"],
+                organization_id=org.id,
+                isactive=True,
+                cts=now,
+                mts=now
+            )
+            session.add(user)
+            session.flush()
+            created_users += 1
+
+        # Get the role
+        role = next((r for r in tester_roles if r.name == user_config["role_name"]), None)
+        if not role:
+            print(f"[WARN] Role '{user_config['role_name']}' not found for user {user_config['email']}")
+            continue
+
+        # Check if user already has this role
+        existing_assignment = session.query(OrgUserRole).filter_by(
+            user_id=user.id,
+            org_role_id=role.id
+        ).first()
+
+        if not existing_assignment:
+            # Assign role to user
+            user_role = OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                is_active=True
+            )
+            session.add(user_role)
+
+    session.commit()
+    print(f"[OK] Created {created_users} sample tester users and assigned roles")
+
+
+def seed_kptcl_organization(session):
+    """
+    Create KPTCL organization with admin user and roles.
+    Returns the created organization object or existing one.
+    """
+    org_code = "KPTCL"
+
+    # Check if organization already exists
+    existing_org = session.query(Organization).filter_by(code=org_code).first()
+    if existing_org:
+        print(f"[INFO] KPTCL organization already exists: {org_code}")
+        return existing_org
+
+    # Get a basic plan if available
+    basic_plan = session.query(Plan).filter_by(planname="Basic").first()
+    plan_id = basic_plan.id if basic_plan else None
+
+    # Create KPTCL organization
+    now = datetime.now(datetime.now().astimezone().tzinfo)
+    org = Organization(
+        id=uuid.uuid4(),
+        name="Karnataka Power Transmission Corporation Limited",
+        code=org_code,
+        display_name="KPTCL",
+        organization_type="utility",
+        industry="Power Transmission",
+        primary_email="info@kptcl.com",
+        primary_phone="+91-80-25801500",
+        website="https://kptcl.karnataka.gov.in",
+        address="Cauvery Bhavan, K.G. Road",
+        city="Bengaluru",
+        state="Karnataka",
+        country="India",
+        pincode="560009",
+        is_active=True,
+        is_verified=True,
+        plan_id=plan_id,
+        subscription_start_date=now,
+        subscription_end_date=now + timedelta(days=365),
+        settings={},
+        created_by=None,
+        modified_by=None,
+        cts=now,
+        mts=now,
+        erp_sync_status="pending",
+        erp_last_sync_at=None,
+        erp_error_message=None,
+        erp_external_id=None
+    )
+    session.add(org)
+    session.flush()
+
+    # Provision default roles from templates
+    templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
+
+    org_admin_role = None
+    engineer_role = None
+    tester_role = None
+    dept_head_role = None
+
+    for template in templates:
+        role = OrgRole(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name=template.name,
+            description=template.description,
+            role_type="default",
+            is_org_admin=template.is_org_admin,
+            is_dept_admin=template.is_dept_admin,
+            is_active=True,
+            cts=datetime.now(datetime.now().astimezone().tzinfo),
+            mts=datetime.now(datetime.now().astimezone().tzinfo)
+        )
+        session.add(role)
+        session.flush()
+
+        # Save specific roles for user assignment
+        if role.is_org_admin:
+            org_admin_role = role
+        elif template.name == "Originator":
+            engineer_role = role
+        elif template.name == "Tester":
+            tester_role = role
+
+        # Create permissions from template
+        if template.permissions_template:
+            for perm_data in template.permissions_template:
+                permission = OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=perm_data.get("module_id"),
+                    can_view=perm_data.get("can_view", False),
+                    can_add=perm_data.get("can_add", False),
+                    can_edit=perm_data.get("can_edit", False),
+                    can_delete=perm_data.get("can_delete", False),
+                    can_approve=perm_data.get("can_approve", False),
+                    can_assign=perm_data.get("can_assign", False),
+                    can_export=perm_data.get("can_export", False),
+                    can_import=perm_data.get("can_import", False),
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                )
+                session.add(permission)
+
+    # Create Department Head role manually (not auto-provisioned)
+    dept_manager_template = session.query(RoleTemplate).filter_by(name="Department Manager").first()
+    if dept_manager_template:
+        dept_head_role = OrgRole(
+            id=uuid.uuid4(),
+            organization_id=org.id,
+            name="Department Head",  # Using "Department Head" instead of "Department Manager"
+            description="Manage department operations and approve requests",
+            role_type="default",
+            is_org_admin=False,
+            is_dept_admin=True,
+            is_active=True,
+            cts=datetime.now(datetime.now().astimezone().tzinfo),
+            mts=datetime.now(datetime.now().astimezone().tzinfo)
+        )
+        session.add(dept_head_role)
+        session.flush()
+
+        # Create permissions for Department Head from template
+        if dept_manager_template.permissions_template:
+            for perm_data in dept_manager_template.permissions_template:
+                permission = OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=dept_head_role.id,
+                    module_id=perm_data.get("module_id"),
+                    can_view=perm_data.get("can_view", False),
+                    can_add=perm_data.get("can_add", False),
+                    can_edit=perm_data.get("can_edit", False),
+                    can_delete=perm_data.get("can_delete", False),
+                    can_approve=perm_data.get("can_approve", False),
+                    can_assign=perm_data.get("can_assign", False),
+                    can_export=perm_data.get("can_export", False),
+                    can_import=perm_data.get("can_import", False),
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                )
+                session.add(permission)
+
+    # Create KPTCL users with roles
+    kptcl_users = [
+        {
+            "email": "orgadmin@kptcl.com",
+            "password": "admin123",
+            "firstname": "Org",
+            "lastname": "Admin",
+            "phone": "+91-9900000001",
+            "role": org_admin_role,
+            "employee_id": "KPTCL-ADM-001",
+        },
+        {
+            "email": "engineer@kptcl.com",
+            "password": "admin123",
+            "firstname": "Test",
+            "lastname": "Engineer",
+            "phone": "+91-9900000002",
+            "role": engineer_role,
+            "employee_id": "KPTCL-ENG-001",
+        },
+        {
+            "email": "tester1@kptcl.com",
+            "password": "admin123",
+            "firstname": "Field",
+            "lastname": "Tester",
+            "phone": "+91-9900000003",
+            "role": tester_role,
+            "employee_id": "KPTCL-TEST-001",
+        },
+        {
+            "email": "depthead@kptcl.com",
+            "password": "admin123",
+            "firstname": "Department",
+            "lastname": "Head",
+            "phone": "+91-9900000004",
+            "role": dept_head_role,
+            "employee_id": "KPTCL-DH-001",
+        },
+    ]
+
+    for user_data in kptcl_users:
+        # Check if user already exists
+        existing_user = session.query(User).filter_by(email=user_data["email"]).first()
+
+        if existing_user:
+            user = existing_user
+            # Ensure existing user is linked to KPTCL org
+            if user.organization_id != org.id:
+                user.organization_id = org.id
+        else:
+            # Create user
+            user = User(
+                id=uuid.uuid4(),
+                email=user_data["email"],
+                password_hash=get_password_hash(user_data["password"]),
+                firstname=user_data["firstname"],
+                lastname=user_data["lastname"],
+                phone_number=user_data["phone"],
+                employee_id=user_data.get("employee_id"),
+                organization_id=org.id,
+                isactive=True,
+                email_confirmed=True,
+                phone_confirmed=True,
+                cts=datetime.now(datetime.now().astimezone().tzinfo),
+                mts=datetime.now(datetime.now().astimezone().tzinfo)
+            )
+            session.add(user)
+            session.flush()
+
+        # Assign role to user (both new and existing users)
+        if user_data["role"]:
+            # Check if user already has this role
+            existing_role = session.query(OrgUserRole).filter_by(
+                user_id=user.id,
+                org_role_id=user_data["role"].id,
+                is_active=True
+            ).first()
+
+            if not existing_role:
+                user_role = OrgUserRole(
+                    id=uuid.uuid4(),
+                    user_id=user.id,
+                    org_role_id=user_data["role"].id,
+                    department_id=None,
+                    is_active=True,
+                    assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                    assigned_by=None
+                )
+                session.add(user_role)
+
+    session.commit()
+    print(f"[OK] KPTCL organization created with admin user and roles")
+
+    # Create sample tester roles with EXACT module permissions
+    print(f"[INFO] Creating sample tester roles for KPTCL")
+
+    # Required modules for testers: [45, 46, 49, 51]
+    TESTER_REQUIRED_MODULES = [45, 46, 49, 51]
+
+    tester_roles_config = [
+        {
+            "name": "Field Tester",
+            "description": "Field tester role with exact module permissions for tester assignment"
+        },
+        {
+            "name": "Lab Tester",
+            "description": "Laboratory tester role with exact module permissions for tester assignment"
+        }
+    ]
+
+    tester_roles = []
+    for role_config in tester_roles_config:
+        # Check if role already exists
+        existing_role = session.query(OrgRole).filter_by(
+            organization_id=org.id,
+            name=role_config["name"]
+        ).first()
+
+        if existing_role:
+            role = existing_role
+        else:
+            # Create tester role
+            role = OrgRole(
+                id=uuid.uuid4(),
+                organization_id=org.id,
+                name=role_config["name"],
+                description=role_config["description"],
+                role_type="tester",
+                is_org_admin=False,
+                is_dept_admin=False,
+                is_active=True,
+                cts=now,
+                mts=now
+            )
+            session.add(role)
+            session.flush()
+
+            # Add FULL permissions for EXACT modules only
+            for module_id in TESTER_REQUIRED_MODULES:
+                perm = OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=module_id,
+                    can_view=True,
+                    can_add=True,
+                    can_edit=True,
+                    can_delete=True,
+                    can_approve=True,
+                    can_assign=True,
+                    can_export=True,
+                    can_import=True,
+                    cts=now,
+                    mts=now
+                )
+                session.add(perm)
+
+        tester_roles.append(role)
+
+    session.commit()
+    print(f"[OK] Created {len(tester_roles)} sample tester roles with exact module permissions {TESTER_REQUIRED_MODULES}")
+
+    # Create sample tester users
+    print(f"[INFO] Creating sample tester users for KPTCL")
+
+    tester_users_config = [
+        {
+            "email": "fieldtester1@kptcl.com",
+            "password": "Tester123!",
+            "role_name": "Field Tester",
+            "firstname": "KPTCL Field",
+            "lastname": "Tester One",
+            "phone": "9999999101"
+        },
+        {
+            "email": "fieldtester2@kptcl.com",
+            "password": "Tester123!",
+            "role_name": "Field Tester",
+            "firstname": "KPTCL Field",
+            "lastname": "Tester Two",
+            "phone": "9999999102"
+        },
+        {
+            "email": "labtester1@kptcl.com",
+            "password": "Tester123!",
+            "role_name": "Lab Tester",
+            "firstname": "KPTCL Lab",
+            "lastname": "Tester One",
+            "phone": "9999999103"
+        },
+        {
+            "email": "labtester2@kptcl.com",
+            "password": "Tester123!",
+            "role_name": "Lab Tester",
+            "firstname": "KPTCL Lab",
+            "lastname": "Tester Two",
+            "phone": "9999999104"
+        }
+    ]
+
+    created_users = 0
+    for user_config in tester_users_config:
+        # Check if user exists
+        existing_user = session.query(User).filter_by(email=user_config["email"]).first()
+
+        if existing_user:
+            user = existing_user
+        else:
+            # Create user
+            hashed_password = get_password_hash(user_config["password"])
+            user = User(
+                id=uuid.uuid4(),
+                email=user_config["email"],
+                password_hash=hashed_password,
+                firstname=user_config["firstname"],
+                lastname=user_config["lastname"],
+                phone_number=user_config["phone"],
+                organization_id=org.id,
+                isactive=True,
+                cts=now,
+                mts=now
+            )
+            session.add(user)
+            session.flush()
+            created_users += 1
+
+        # Get the role
+        role = next((r for r in tester_roles if r.name == user_config["role_name"]), None)
+        if not role:
+            print(f"[WARN] Role '{user_config['role_name']}' not found for user {user_config['email']}")
+            continue
+
+        # Check if user already has this role
+        existing_assignment = session.query(OrgUserRole).filter_by(
+            user_id=user.id,
+            org_role_id=role.id
+        ).first()
+
+        if not existing_assignment:
+            # Assign role to user
+            user_role = OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                is_active=True
+            )
+            session.add(user_role)
+
+    session.commit()
+    print(f"[OK] Created {created_users} sample tester users and assigned roles")
+
+    return org
+
+
+def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
+    """
+    Seed KPTCL department hierarchy from Excel file.
+    Creates 6-level hierarchy: Zone → Circle → Division → Sub Division → Section → Substation
+    """
+    print("\n--- KPTCL Department Hierarchy Seeding ---")
+
+    # Check if organization exists
+    org = session.query(Organization).filter(Organization.id == uuid.UUID(org_id)).first()
+    if not org:
+        print(f"[ERROR] Organization {org_id} not found")
+        return
+
+    # Determine Excel file path
+    if excel_path is None:
+        import os
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        excel_path = os.path.join(project_root, "KPTCL_Substation_Mapping.xlsx")
+
+    if not os.path.exists(excel_path):
+        raise FileNotFoundError(f"Excel file not found: {excel_path}")
+
+    # Delete existing departments for this organization
+    print(f"[INFO] Deleting existing departments for organization: {org.name}")
+    existing_depts = session.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == uuid.UUID(org_id)
+    ).all()
+    for dept in existing_depts:
+        session.delete(dept)
+    session.commit()
+    print(f"[OK] Deleted {len(existing_depts)} existing departments")
+
+    # Read Excel file
+    try:
+        print(f"[INFO] Reading Excel file: {excel_path}")
+        df = pd.read_excel(excel_path)
+        print(f"[OK] Loaded {len(df)} rows with columns: {df.columns.tolist()}")
+    except Exception as e:
+        print(f"[ERROR] Failed to read Excel file: {e}")
+        return
+
+    # Hierarchy levels in order
+    levels = ['Zone', 'Circle', 'Division', 'Sub Division', 'Section', 'Substation']
+
+    # Track created departments by full path
+    department_map: Dict[str, str] = {}
+
+    def generate_code(name: str) -> str:
+        """Generate a department code from the name."""
+        clean_name = name.replace(' Zone', '').replace(' Circle', '').replace(' Division', '')
+        clean_name = clean_name.replace(' Section', '').replace('kV', '').strip()
+        words = clean_name.split()
+        if len(words) > 1:
+            code = ''.join([w[0].upper() for w in words[:3]])
+        else:
+            code = clean_name[:3].upper()
+        return code
+
+    # Create root "Zone" parent department
+    print(f"\n{'='*60}")
+    print(f"Creating root Zone parent department...")
+    print(f"{'='*60}")
+
+    root_zone_id = str(uuid.uuid4())
+    root_zone = OrgDepartment(
+        id=uuid.UUID(root_zone_id),
+        organization_id=uuid.UUID(org_id),
+        name="Zone",
+        code="ZONE",
+        description="Root parent for all zones",
+        parent_department_id=None,
+        manager_id=None,
+        is_active=True,
+        cts=datetime.utcnow(),
+        mts=datetime.utcnow()
+    )
+    session.add(root_zone)
+    session.commit()
+    print(f"[OK] Created root Zone department")
+
+    # Process each level
+    for level_idx, level in enumerate(levels):
+        print(f"\n{'='*60}")
+        print(f"Creating {level} departments...")
+        print(f"{'='*60}")
+
+        parent_level = levels[level_idx - 1] if level_idx > 0 else None
+
+        # Get unique combinations at this level
+        if parent_level:
+            parent_cols = levels[:level_idx]
+            current_cols = parent_cols + [level]
+            unique_combos = df[current_cols].drop_duplicates()
+        else:
+            unique_combos = df[[level]].drop_duplicates()
+
+        print(f"Found {len(unique_combos)} unique {level} departments")
+
+        # Create each department at this level
+        created_count = 0
+        skipped_count = 0
+        for _, row in unique_combos.iterrows():
+            dept_name = str(row[level]).strip()
+
+            # Build full path for tracking
+            if parent_level:
+                parent_path = '|'.join([str(row[pl]).strip() for pl in parent_cols])
+                full_path = f"{parent_path}|{dept_name}"
+
+                # Get parent ID
+                parent_id = department_map.get(parent_path)
+                if not parent_id:
+                    print(f"  [WARNING] Parent not found for {dept_name}")
+                    skipped_count += 1
+                    continue
+            else:
+                # First level (Zone) - use root Zone as parent
+                full_path = dept_name
+                parent_id = root_zone_id
+
+            # Check if department with this name already exists in this org
+            existing = session.query(OrgDepartment).filter(
+                OrgDepartment.organization_id == uuid.UUID(org_id),
+                OrgDepartment.name == dept_name
+            ).first()
+
+            if existing:
+                # Use existing department ID
+                department_map[full_path] = str(existing.id)
+                skipped_count += 1
+                continue
+
+            # Generate code
+            code = generate_code(dept_name)
+
+            # Create department - commit immediately to handle unique constraint
+            dept_id = str(uuid.uuid4())
+            new_dept = OrgDepartment(
+                id=uuid.UUID(dept_id),
+                organization_id=uuid.UUID(org_id),
+                name=dept_name,
+                code=code,
+                description=None,
+                parent_department_id=uuid.UUID(parent_id) if parent_id else None,
+                manager_id=None,
+                is_active=True,
+                cts=datetime.utcnow(),
+                mts=datetime.utcnow()
+            )
+            session.add(new_dept)
+
+            try:
+                session.commit()
+                department_map[full_path] = dept_id
+                created_count += 1
+            except Exception as e:
+                session.rollback()
+                print(f"  [ERROR] Failed to create {dept_name}: {e}")
+                skipped_count += 1
+
+        print(f"[OK] Created {created_count} {level} departments (skipped {skipped_count} duplicates)")
+
+    print(f"\n{'='*60}")
+    print(f"[OK] COMPLETED: Created {len(department_map) + 1} total departments (including root Zone)")
+    print(f"{'='*60}\n")
+
+
 # ----------------- Run Seed -----------------
 
 def run_seed():
     with get_db_session() as session:
+        print("\n" + "=" * 80)
+        print("  DATABASE SEEDING STARTED")
+        print("=" * 80 + "\n")
+
+        # Core System
         migrate_testing_request_columns(session)
         role_ids = seed_roles(session)
         new_user_ids = seed_users(session)  # 👈 capture new users
@@ -1421,26 +2735,88 @@ def run_seed():
         seed_user_roles(session, role_ids)
         assign_viewer_role_to_new_users(session, new_user_ids, role_ids)
         seed_plans(session)
-        #category_ids = seed_product_categories(session)
-        #subcategory_ids = seed_product_subcategories(session, category_ids)
-        #seed_products(session, category_ids, subcategory_ids)
-            # Geography
+
+        # Geography
         seed_country_india
         india = seed_india_country(session)
         state_ids=seed_indian_states(session, india)
         seed_cities(session,state_ids)
+
+        # Company Structure
         seed_divisions(session)
         master_ids=seed_category_master(session)
         seed_category_details(session, master_ids)
         seed_test_type_categories(session, master_ids)
-        seed_tester_locations(session)
+        # seed_tester_locations(session)  # DEPRECATED - using org departments instead
         seed_sample_testing_request(session)
-        print("[OK] All seed data inserted successfully.")
+
+        # Organization Multi-Tenancy System
+        print("\n--- Organization System Seeding ---")
+        seed_role_templates(session)
+        seed_super_admin(session)
+        seed_tester_role_module_requirements(session)
+        seed_sample_organization(session)
+
+        # Seed KPTCL Organization with Departments
+        kptcl_org = seed_kptcl_organization(session)
+        if kptcl_org:
+            print("\n--- KPTCL Department Hierarchy Seeding ---")
+            try:
+                seed_kptcl_departments(session, str(kptcl_org.id))
+            except FileNotFoundError:
+                print("[WARN] KPTCL Excel file not found. Skipping department seeding.")
+                print("[INFO] You can seed KPTCL departments later with:")
+                print(f"       python seed.py --kptcl {kptcl_org.id}")
+            except Exception as e:
+                print(f"[WARN] KPTCL department seeding failed: {e}")
+                print("[INFO] You can retry with:")
+                print(f"       python seed.py --kptcl {kptcl_org.id}")
+
+        print("\n" + "=" * 80)
+        print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")
+        print("=" * 80)
+        print("\nQuick Start:")
+        print("  1. Super Admin: superadmin@system.com / Admin123!")
+        print("  2. Sample Org Admin: orgadmin@sampleorg.com / OrgAdmin123!")
+        if kptcl_org:
+            print("  3. KPTCL Org Admin: orgadmin@kptcl.com / admin123")
+        print(f"  {4 if kptcl_org else 3}. View API docs: http://localhost:8000/docs")
+        print("\n" + "=" * 80 + "\n")
+
+
+def seed_kptcl_only(org_id: str):
+    """
+    Run only KPTCL department seeding for a specific organization.
+    Usage: python seed.py --kptcl <org_id>
+    """
+    with get_db_session() as session:
+        print("\n" + "=" * 80)
+        print("  KPTCL DEPARTMENT SEEDING")
+        print("=" * 80 + "\n")
+        seed_kptcl_departments(session, org_id)
+        print("\n" + "=" * 80)
+        print("  [OK] KPTCL DEPARTMENTS SEEDED SUCCESSFULLY")
+        print("=" * 80 + "\n")
 
 
 if __name__ == "__main__":
+    import sys
+
     try:
-        run_seed()
+        # Check for --kptcl flag for KPTCL-only seeding
+        if len(sys.argv) > 2 and sys.argv[1] == "--kptcl":
+            org_id = sys.argv[2]
+            seed_kptcl_only(org_id)
+        else:
+            # Run full seed
+            run_seed()
+
+            # Optionally seed KPTCL if --with-kptcl flag is provided with org_id
+            if len(sys.argv) > 2 and sys.argv[1] == "--with-kptcl":
+                org_id = sys.argv[2]
+                print("\n[INFO] Seeding KPTCL departments...")
+                with get_db_session() as session:
+                    seed_kptcl_departments(session, org_id)
     except Exception as e:
         import traceback
         traceback.print_exc()

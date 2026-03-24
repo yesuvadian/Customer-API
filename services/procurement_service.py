@@ -50,6 +50,7 @@ class ProcurementService:
             procurement_number=self._generate_procurement_number(),
             testing_request_id=testing_request_id,
             recommendation_id=recommendation_id,
+            organization_id=request.organization_id,  # Auto-populate from testing_request
             title=data["title"],
             description=data.get("description"),
             estimated_cost=data.get("estimated_cost"),

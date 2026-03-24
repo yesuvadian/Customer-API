@@ -35,8 +35,11 @@ class RoleService:
         return role
 
     # ----------------- LIST -----------------
-    def list_roles(self, skip: int = 0, limit: int = 100) -> List[Role]:
-        return self.db.query(Role).offset(skip).limit(limit).all()
+    def list_roles(self, skip: int = 0, limit: int | None = None) -> List[Role]:
+        query = self.db.query(Role).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
 
     # ----------------- UPDATE -----------------
     def update_role(self, role_id: int, name: Optional[str] = None, description: Optional[str] = None, modified_by: Optional[UUID] = None) -> Role:

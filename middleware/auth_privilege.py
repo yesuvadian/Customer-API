@@ -190,35 +190,39 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             )
 
         # --------------------------------------------------
-        # USER ROLES
+        # USER ROLES (try old system, skip if not available)
         # --------------------------------------------------
-        user_roles = db.query(UserRole).filter_by(user_id=user.id).all()
-        if not user_roles:
-            raise HTTPException(
-                status_code=403,
-                detail="User has no assigned roles",
+        try:
+            user_roles = db.query(UserRole).filter_by(user_id=user.id).all()
+            if not user_roles:
+                # Skip privilege check for organization users
+                return await call_next(request)
+
+            role_ids = [r.role_id for r in user_roles]
+
+            # --------------------------------------------------
+            # PRIVILEGE CHECK
+            # --------------------------------------------------
+            allowed = (
+                db.query(RoleModulePrivilege)
+                .filter(
+                    RoleModulePrivilege.role_id.in_(role_ids),
+                    RoleModulePrivilege.module_id == module.id,
+                    getattr(RoleModulePrivilege, action) == True,
+                )
+                .first()
             )
 
-        role_ids = [r.role_id for r in user_roles]
-
-        # --------------------------------------------------
-        # PRIVILEGE CHECK
-        # --------------------------------------------------
-        allowed = (
-            db.query(RoleModulePrivilege)
-            .filter(
-                RoleModulePrivilege.role_id.in_(role_ids),
-                RoleModulePrivilege.module_id == module.id,
-                getattr(RoleModulePrivilege, action) == True,
-            )
-            .first()
-        )
-
-        if not allowed:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Access denied for '{action}' on '{module_name}'",
-            )
+            if not allowed:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Access denied for '{action}' on '{module_name}'",
+                )
+        except Exception as e:
+            # Old role system not available, skip privilege check for org users
+            print(f"[INFO] Old role system not available in middleware: {e}")
+            db.rollback()
+            return await call_next(request)
 
         # --------------------------------------------------
         # ALL GOOD

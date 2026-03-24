@@ -98,8 +98,11 @@ class UserRoleService:
         self.assign_role_to_user(user_id, target_role_id)
 
     # ----------------- LIST / FETCH -----------------
-    def list_user_roles(self, skip: int = 0, limit: int = 100) -> List[UserRole]:
-        return self.db.query(UserRole).offset(skip).limit(limit).all()
+    def list_user_roles(self, skip: int = 0, limit: int | None = None) -> List[UserRole]:
+        query = self.db.query(UserRole).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
 
     def fetch_user_role_mappings(self):
         rows = self.db.query(UserRole).join(UserRole.user).join(UserRole.role).all()

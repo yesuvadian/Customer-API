@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User, CategoryMaster, CategoryDetails, Role, UserRole, TesterLocation
+from models import User, CategoryMaster, CategoryDetails, Role, UserRole, TesterLocation, OrgDepartment, Organization
 from sqlalchemy import or_
 from schemas import (
     TestingRequestCreate,
@@ -38,6 +38,7 @@ def _enrich(req):
     """Attach computed display names to ORM object."""
     req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
     req.test_type_name = req.test_type.name if req.test_type else None
+    req.department_name = req.department.name if req.department else None
     if req.originator:
         req.originator_name = f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip() or req.originator.email
     else:
@@ -47,6 +48,60 @@ def _enrich(req):
     else:
         req.assigned_tester_name = None
     return req
+
+
+# ─── Department Hierarchy (for location dropdowns) ───────────────────
+@router.get("/department_hierarchy")
+def get_department_hierarchy(
+    org_id: Optional[UUID] = None,
+    parent_id: Optional[UUID] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Returns department hierarchy for location selection.
+    Can be filtered by organization_id and parent_department_id.
+
+    Use cases:
+    - Get all organizations: /department_hierarchy
+    - Get root departments for an org: /department_hierarchy?org_id=<uuid>
+    - Get children of a department: /department_hierarchy?org_id=<uuid>&parent_id=<uuid>
+    """
+    if org_id is None:
+        # Return list of organizations
+        orgs = db.query(Organization).filter(Organization.is_active == True).order_by(Organization.name).all()
+        return [{
+            "id": str(org.id),
+            "name": org.name,
+            "code": org.code,
+            "type": "organization"
+        } for org in orgs]
+
+    # Return departments for the organization
+    query = db.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == org_id,
+        OrgDepartment.is_active == True
+    )
+
+    if parent_id is None:
+        # Root level departments (no parent)
+        query = query.filter(OrgDepartment.parent_department_id == None)
+    else:
+        # Children of specified parent
+        query = query.filter(OrgDepartment.parent_department_id == parent_id)
+
+    departments = query.order_by(OrgDepartment.name).all()
+
+    return [{
+        "id": str(dept.id),
+        "name": dept.name,
+        "code": dept.code,
+        "parent_department_id": str(dept.parent_department_id) if dept.parent_department_id else None,
+        "has_children": db.query(OrgDepartment).filter(
+            OrgDepartment.parent_department_id == dept.id,
+            OrgDepartment.is_active == True
+        ).count() > 0,
+        "type": "department"
+    } for dept in departments]
 
 
 # ─── Equipment Types (for form dropdowns) ───────────────────
@@ -180,12 +235,11 @@ def get_testing_request_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return testing request counts by status for the current user."""
+    """Return testing request counts by status for the organization."""
     service = TestingRequestService(db)
-    roles = _user_role_names(db, current_user.id)
-    # Admin sees all stats, others see only their own
-    user_id = None if "Admin" in roles else current_user.id
-    return service.get_stats(user_id=user_id)
+    # Filter by organization if user belongs to one
+    organization_id = current_user.organization_id
+    return service.get_stats(organization_id=organization_id)
 
 
 @router.post("/", response_model=TestingRequestResponse)
@@ -209,37 +263,23 @@ def list_testing_requests(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    roles = _user_role_names(db, current_user.id)
+    print(f"[DEBUG] list_testing_requests called by user {current_user.email}")
+    print(f"[DEBUG] Query params: originator_id={originator_id}, tester_id={tester_id}, status={status}")
+    print(f"[DEBUG] User organization_id: {current_user.organization_id}")
 
-    # Admin sees everything; others get role-based filtering
-    if "Admin" not in roles:
-        if "Tester" in roles and "Originator" in roles:
-            # dual-role: see own + assigned
-            originator_id = originator_id  # keep explicit filter if provided
-            tester_id = tester_id
-        elif "Tester" in roles:
-            tester_id = current_user.id
-        elif "Originator" in roles:
-            originator_id = current_user.id
+    # Filter by organization if user belongs to one
+    organization_id = current_user.organization_id
 
     service = TestingRequestService(db)
-
-    # For dual-role (Originator+Tester) without explicit filters, use OR logic
-    if "Admin" not in roles and "Tester" in roles and "Originator" in roles:
-        requests = service.get_requests_for_user(
-            user_id=current_user.id,
-            skip=skip,
-            limit=limit,
-            status_filter=status,
-        )
-    else:
-        requests = service.get_requests(
-            skip=skip,
-            limit=limit,
-            status_filter=status,
-            originator_id=originator_id,
-            tester_id=tester_id,
-        )
+    requests = service.get_requests(
+        skip=skip,
+        limit=limit,
+        status_filter=status,
+        originator_id=originator_id,
+        tester_id=tester_id,
+        organization_id=organization_id,
+    )
+    print(f"[DEBUG] Returning {len(requests)} testing requests (filters: org={organization_id}, originator={originator_id}, tester={tester_id})")
     return [_enrich(r) for r in requests]
 
 

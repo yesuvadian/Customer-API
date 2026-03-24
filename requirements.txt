@@ -17,6 +17,7 @@ pytest
 httpx
 requests
 pandas
+openpyxl
 asyncpg
 pymongo==3.13.0
 PyJWT

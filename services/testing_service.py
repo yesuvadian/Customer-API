@@ -2,7 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from models import TestingRequest, TestingRequestStatus, TestResult, TestResultImage, CategoryDetails, Recommendation, RecommendationType
 from utils.common_service import UTCDateTimeMixin
@@ -106,6 +106,7 @@ class TestingService:
         else:
             recommendation = Recommendation(
                 testing_request_id=request_id,
+                organization_id=request.organization_id,  # Auto-populate from testing_request
                 recommendation_type=rec_type,
                 summary=summary,
                 detailed_notes=None,
@@ -153,6 +154,13 @@ class TestingService:
     def get_my_assignments(self, tester_id: UUID, skip: int = 0, limit: int = 100) -> List[TestingRequest]:
         return (
             self.db.query(TestingRequest)
+            .options(
+                joinedload(TestingRequest.equipment_type),
+                joinedload(TestingRequest.test_type),
+                joinedload(TestingRequest.department),
+                joinedload(TestingRequest.originator),
+                joinedload(TestingRequest.organization),
+            )
             .filter(TestingRequest.assigned_tester_id == tester_id)
             .order_by(TestingRequest.cts.desc())
             .offset(skip)
@@ -219,6 +227,7 @@ class TestingService:
         else:
             result = TestResult(
                 testing_request_id=request_id,
+                organization_id=request.organization_id,  # Auto-populate from testing_request
                 test_name=test_name,
                 template_key=template_key,
                 test_data=test_data,

@@ -2,13 +2,15 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User
+from models import User, Recommendation
 from schemas import RecommendationCreate, RecommendationUpdate, RecommendationResponse
 from services.recommendation_service import RecommendationService
+from services.recommendation_pdf_service import RecommendationPDFService
 
 router = APIRouter(
     prefix="/recommendations",
@@ -42,8 +44,11 @@ def list_recommendations(
     current_user: User = Depends(get_current_user),
 ):
     service = RecommendationService(db)
+    # Filter by organization to prevent cross-organization data leakage
+    organization_id = current_user.organization_id
     return service.get_recommendations(
         testing_request_id=testing_request_id,
+        organization_id=organization_id,
         skip=skip,
         limit=limit,
     )
@@ -69,4 +74,24 @@ def update_recommendation(
     service = RecommendationService(db)
     return service.update_recommendation(
         recommendation_id, data.dict(exclude_unset=True), modified_by=current_user.id
+    )
+
+
+@router.get("/{recommendation_id}/pdf")
+def download_recommendation_pdf(
+    recommendation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate and download test report PDF with approval details"""
+    # Generate test report PDF with approval information
+    pdf_service = RecommendationPDFService(db)
+    pdf_buffer = pdf_service.generate_pdf(str(recommendation_id))
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=test_report_{recommendation_id}.pdf"
+        }
     )
