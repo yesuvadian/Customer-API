@@ -235,12 +235,11 @@ def get_testing_request_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return testing request counts by status for the current user."""
+    """Return testing request counts by status for the organization."""
     service = TestingRequestService(db)
-    roles = _user_role_names(db, current_user.id)
-    # Admin and DeptHead see all stats, others see only their own
-    user_id = None if ("Admin" in roles or "DeptHead" in roles) else current_user.id
-    return service.get_stats(user_id=user_id)
+    # Filter by organization if user belongs to one
+    organization_id = current_user.organization_id
+    return service.get_stats(organization_id=organization_id)
 
 
 @router.post("/", response_model=TestingRequestResponse)
@@ -264,49 +263,12 @@ def list_testing_requests(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    roles = _user_role_names(db, current_user.id)
-    print(f"[DEBUG] list_testing_requests called by user {current_user.email} (roles: {roles})")
+    print(f"[DEBUG] list_testing_requests called by user {current_user.email}")
     print(f"[DEBUG] Query params: originator_id={originator_id}, tester_id={tester_id}, status={status}")
+    print(f"[DEBUG] User organization_id: {current_user.organization_id}")
 
-    # Only apply role-based filtering if no explicit filters are provided
-    if originator_id is None and tester_id is None:
-        # Admin and DeptHead see everything; others get role-based filtering
-        if "Admin" in roles or "DeptHead" in roles:
-            # No filtering - see all requests
-            pass
-        elif "Tester" in roles and "Originator" in roles:
-            # dual-role: see own + assigned (use OR logic via get_requests_for_user)
-            print(f"[DEBUG] Dual-role (Tester+Originator): fetching user's requests (originated OR assigned)")
-            service = TestingRequestService(db)
-            requests = service.get_requests_for_user(
-                user_id=current_user.id,
-                skip=skip,
-                limit=limit,
-                status_filter=status,
-            )
-            print(f"[DEBUG] Returning {len(requests)} requests for dual-role user")
-            return [_enrich(r) for r in requests]
-        elif "Tester" in roles:
-            # Tester only: see assigned requests
-            print(f"[DEBUG] Tester role: applying filter tester_id={current_user.id}")
-            tester_id = current_user.id
-        elif "Originator" in roles:
-            # Originator only: see own requests
-            print(f"[DEBUG] Originator role: applying filter originator_id={current_user.id}")
-            originator_id = current_user.id
-        else:
-            # No recognized global role: default to showing only assigned or originated requests
-            # This handles organization-based roles
-            print(f"[DEBUG] No recognized role: fetching user's requests (originated OR assigned)")
-            service = TestingRequestService(db)
-            requests = service.get_requests_for_user(
-                user_id=current_user.id,
-                skip=skip,
-                limit=limit,
-                status_filter=status,
-            )
-            print(f"[DEBUG] Returning {len(requests)} requests for user with org-based roles")
-            return [_enrich(r) for r in requests]
+    # Filter by organization if user belongs to one
+    organization_id = current_user.organization_id
 
     service = TestingRequestService(db)
     requests = service.get_requests(
@@ -315,8 +277,9 @@ def list_testing_requests(
         status_filter=status,
         originator_id=originator_id,
         tester_id=tester_id,
+        organization_id=organization_id,
     )
-    print(f"[DEBUG] Returning {len(requests)} testing requests (after filtering: originator={originator_id}, tester={tester_id})")
+    print(f"[DEBUG] Returning {len(requests)} testing requests (filters: org={organization_id}, originator={originator_id}, tester={tester_id})")
     return [_enrich(r) for r in requests]
 
 
