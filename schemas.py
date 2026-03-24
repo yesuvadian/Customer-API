@@ -1024,6 +1024,7 @@ class TestingRequestResponse(BaseModel):
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
     equipment_type_name: Optional[str] = None
+    equipment_name: Optional[str] = None  # Alias for Flutter UI
     test_type_name: Optional[str] = None
 
     # New department-based location
@@ -1043,6 +1044,7 @@ class TestingRequestResponse(BaseModel):
     priority: Optional[str] = None
     originator_id: UUID
     originator_name: Optional[str] = None
+    requester_email: Optional[str] = None  # For Flutter UI (originator email)
     assigned_tester_id: Optional[UUID] = None
     assigned_tester_name: Optional[str] = None
     assigned_at: Optional[datetime] = None

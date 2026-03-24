@@ -22,6 +22,25 @@ from services.testing_request_workflow_service import TestingRequestWorkflowServ
 router = APIRouter(prefix="/testing-requests/approvals", tags=["Testing Request Approvals"])
 
 
+def _enrich(req):
+    """Attach computed display names to ORM object for approval workflow."""
+    req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
+    req.equipment_name = req.equipment_type.name if req.equipment_type else None  # Alias for Flutter
+    req.test_type_name = req.test_type.name if req.test_type else None
+    req.department_name = req.department.name if req.department else None
+    if req.originator:
+        req.originator_name = f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip() or req.originator.email
+        req.requester_email = req.originator.email  # For Flutter UI
+    else:
+        req.originator_name = None
+        req.requester_email = None
+    if req.assigned_tester:
+        req.assigned_tester_name = f"{req.assigned_tester.firstname or ''} {req.assigned_tester.lastname or ''}".strip() or req.assigned_tester.email
+    else:
+        req.assigned_tester_name = None
+    return req
+
+
 @router.get("/pending", response_model=List[TestingRequestOut])
 def get_pending_approvals(
     organization_id: Optional[UUID] = None,
@@ -50,9 +69,14 @@ def get_pending_approvals(
 
     requests = query.order_by(TestingRequest.cts.desc()).all()
     print(f"[DEBUG] Found {len(requests)} pending approvals")
-    for req in requests:
-        print(f"[DEBUG] Request: {req.id}, Status: {req.status}, Org: {req.organization_id}")
-    return requests
+
+    # Enrich requests with display names for UI
+    enriched_requests = [_enrich(req) for req in requests]
+
+    for req in enriched_requests:
+        print(f"[DEBUG] Request: {req.id}, Status: {req.status}, Equipment: {req.equipment_name}, Dept: {req.department_name}")
+
+    return enriched_requests
 
 
 @router.get("/{request_id}/tester-roles", response_model=List[dict])
