@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User
+from models import User, Recommendation
 from schemas import RecommendationCreate, RecommendationUpdate, RecommendationResponse
 from services.recommendation_service import RecommendationService
-from services.recommendation_pdf_service import RecommendationPDFService
+from services.testing_request_pdf_service import TestingRequestPDFService
 
 router = APIRouter(
     prefix="/recommendations",
@@ -80,14 +80,27 @@ def download_recommendation_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate and download PDF report for a recommendation with approver information"""
-    pdf_service = RecommendationPDFService(db)
-    pdf_buffer = pdf_service.generate_pdf(str(recommendation_id))
+    """Generate and download testing request form PDF for a recommendation"""
+    # Get recommendation to find the testing_request_id
+    recommendation = db.query(Recommendation).filter(
+        Recommendation.id == recommendation_id
+    ).first()
+
+    if not recommendation:
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recommendation not found"
+        )
+
+    # Generate testing request form PDF (same as approval screen)
+    pdf_service = TestingRequestPDFService(db)
+    pdf_buffer = pdf_service.generate_pdf(str(recommendation.testing_request_id))
 
     return StreamingResponse(
         pdf_buffer,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=recommendation_{recommendation_id}.pdf"
+            "Content-Disposition": f"inline; filename=testing_request_{recommendation.testing_request_id}.pdf"
         }
     )
