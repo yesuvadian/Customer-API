@@ -1912,6 +1912,14 @@ class ApproverTesterSelection(BaseModel):
         from_attributes = True
 
 
+class RejectionRequest(BaseModel):
+    """Request body for rejecting a testing request"""
+    rejection_comment: str  # Required rejection reason
+
+    class Config:
+        from_attributes = True
+
+
 class ApprovalResponse(BaseModel):
     """Response from approval/rejection action"""
     success: bool

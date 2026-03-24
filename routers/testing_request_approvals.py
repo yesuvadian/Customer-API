@@ -13,6 +13,7 @@ from models import User, TestingRequest, OrgRole, OrgUserRole, OrgRolePermission
 from schemas import (
     TestingRequestOut,
     ApproverTesterSelection,
+    RejectionRequest,
     ApprovalResponse,
     TesterInfo
 )
@@ -322,13 +323,13 @@ def approve_and_assign_tester(
 @router.post("/{request_id}/reject", response_model=ApprovalResponse)
 def reject_testing_request(
     request_id: UUID,
-    rejection_comment: str,
+    rejection: RejectionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Reject a testing request during approval stage.
-    Requires a rejection comment.
+    Requires a rejection comment in the request body.
     """
     # Get the testing request
     testing_request = db.query(TestingRequest).filter(
@@ -349,7 +350,7 @@ def reject_testing_request(
             detail=f"Request must be in 'pending_approval' or 'submitted' state"
         )
 
-    if not rejection_comment or len(rejection_comment.strip()) == 0:
+    if not rejection.rejection_comment or len(rejection.rejection_comment.strip()) == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Rejection comment is required"
@@ -361,7 +362,7 @@ def reject_testing_request(
     success, message = workflow_service.reject_testing_request(
         testing_request=testing_request,
         user=current_user,
-        comment=rejection_comment
+        comment=rejection.rejection_comment
     )
 
     if not success:
