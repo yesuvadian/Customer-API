@@ -19,6 +19,8 @@ class TestingRequestPDFService:
 
     def generate_pdf(self, request_id: str) -> BytesIO:
         """Generate PDF for a testing request"""
+        print(f"[DEBUG] Starting PDF generation for request_id: {request_id}")
+
         testing_request = self.db.query(TestingRequest).options(
             joinedload(TestingRequest.equipment_type),
             joinedload(TestingRequest.test_type),
@@ -29,7 +31,10 @@ class TestingRequestPDFService:
         ).filter(TestingRequest.id == request_id).first()
 
         if not testing_request:
+            print(f"[ERROR] Testing request not found: {request_id}")
             raise ValueError(f"Testing request {request_id} not found")
+
+        print(f"[DEBUG] Testing request found: {testing_request.request_number}")
 
         # Create PDF buffer
         buffer = BytesIO()

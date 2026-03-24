@@ -393,6 +393,8 @@ def download_testing_request_pdf(
     Download testing request form as PDF.
     Provides a printable version of the testing request for approval review.
     """
+    import traceback
+
     # Verify request exists
     testing_request = db.query(TestingRequest).filter(
         TestingRequest.id == request_id
@@ -407,8 +409,12 @@ def download_testing_request_pdf(
     # Generate PDF
     pdf_service = TestingRequestPDFService(db)
     try:
+        print(f"[DEBUG] Generating PDF for request_id: {request_id}")
         pdf_buffer = pdf_service.generate_pdf(str(request_id))
+        print(f"[DEBUG] PDF generated successfully")
     except Exception as e:
+        print(f"[ERROR] PDF generation failed: {str(e)}")
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate PDF: {str(e)}"
