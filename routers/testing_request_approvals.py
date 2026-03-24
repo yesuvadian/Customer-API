@@ -3,6 +3,7 @@ Testing Request Approval Endpoints
 Handles approval workflow with tester role selection and assignment
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
@@ -19,6 +20,7 @@ from schemas import (
 )
 from auth_utils import get_current_user
 from services.testing_request_workflow_service import TestingRequestWorkflowService
+from services.testing_request_pdf_service import TestingRequestPDFService
 
 router = APIRouter(prefix="/testing-requests/approvals", tags=["Testing Request Approvals"])
 
@@ -378,4 +380,44 @@ def reject_testing_request(
         assigned_tester_id=None,
         assigned_tester_email=None,
         new_status=testing_request.status
+    )
+
+
+@router.get("/{request_id}/pdf")
+def download_testing_request_pdf(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Download testing request form as PDF.
+    Provides a printable version of the testing request for approval review.
+    """
+    # Verify request exists
+    testing_request = db.query(TestingRequest).filter(
+        TestingRequest.id == request_id
+    ).first()
+
+    if not testing_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Testing request not found"
+        )
+
+    # Generate PDF
+    pdf_service = TestingRequestPDFService(db)
+    try:
+        pdf_buffer = pdf_service.generate_pdf(str(request_id))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate PDF: {str(e)}"
+        )
+
+    # Return as downloadable file
+    filename = f"testing_request_{testing_request.request_number or request_id}.pdf"
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
