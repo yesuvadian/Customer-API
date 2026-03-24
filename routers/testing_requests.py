@@ -265,6 +265,8 @@ def list_testing_requests(
     current_user: User = Depends(get_current_user),
 ):
     roles = _user_role_names(db, current_user.id)
+    print(f"[DEBUG] list_testing_requests called by user {current_user.email} (roles: {roles})")
+    print(f"[DEBUG] Query params: originator_id={originator_id}, tester_id={tester_id}, status={status}")
 
     # Only apply role-based filtering if no explicit filters are provided
     if originator_id is None and tester_id is None:
@@ -274,6 +276,7 @@ def list_testing_requests(
             pass
         elif "Tester" in roles and "Originator" in roles:
             # dual-role: see own + assigned (use OR logic via get_requests_for_user)
+            print(f"[DEBUG] Dual-role (Tester+Originator): fetching user's requests (originated OR assigned)")
             service = TestingRequestService(db)
             requests = service.get_requests_for_user(
                 user_id=current_user.id,
@@ -281,16 +284,20 @@ def list_testing_requests(
                 limit=limit,
                 status_filter=status,
             )
+            print(f"[DEBUG] Returning {len(requests)} requests for dual-role user")
             return [_enrich(r) for r in requests]
         elif "Tester" in roles:
             # Tester only: see assigned requests
+            print(f"[DEBUG] Tester role: applying filter tester_id={current_user.id}")
             tester_id = current_user.id
         elif "Originator" in roles:
             # Originator only: see own requests
+            print(f"[DEBUG] Originator role: applying filter originator_id={current_user.id}")
             originator_id = current_user.id
         else:
             # No recognized global role: default to showing only assigned or originated requests
             # This handles organization-based roles
+            print(f"[DEBUG] No recognized role: fetching user's requests (originated OR assigned)")
             service = TestingRequestService(db)
             requests = service.get_requests_for_user(
                 user_id=current_user.id,
@@ -298,6 +305,7 @@ def list_testing_requests(
                 limit=limit,
                 status_filter=status,
             )
+            print(f"[DEBUG] Returning {len(requests)} requests for user with org-based roles")
             return [_enrich(r) for r in requests]
 
     service = TestingRequestService(db)
@@ -308,6 +316,7 @@ def list_testing_requests(
         originator_id=originator_id,
         tester_id=tester_id,
     )
+    print(f"[DEBUG] Returning {len(requests)} testing requests (after filtering: originator={originator_id}, tester={tester_id})")
     return [_enrich(r) for r in requests]
 
 
