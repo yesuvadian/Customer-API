@@ -86,7 +86,7 @@ class TestingRequestPDFService:
         request_data = [
             ['Request ID:', str(testing_request.id)],
             ['Title:', testing_request.title or '-'],
-            ['Priority:', (testing_request.priority or '-').upper()],
+            ['Priority:', (testing_request.priority or '-').upper() if isinstance(testing_request.priority, str) else (testing_request.priority.value.upper() if testing_request.priority else '-')],
         ]
 
         if testing_request.description:
@@ -191,7 +191,7 @@ class TestingRequestPDFService:
             story.append(Spacer(1, 0.3*inch))
 
         # Status indicator box
-        status_text, status_color = self._get_status_display(testing_request.status)
+        status_text, status_color = self._get_status_display(testing_request.status.value if testing_request.status else 'draft')
 
         status_table = Table([[status_text]], colWidths=[6*inch])
         status_table.setStyle(TableStyle([
