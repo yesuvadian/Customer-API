@@ -86,8 +86,8 @@ class RecommendationPDFService:
             ['Request ID:', str(testing_request.id)],
             ['Request Number:', testing_request.request_number or '-'],
             ['Status:', testing_request.status or '-'],
-            ['Sample Name:', testing_request.sample_name or '-'],
-            ['Test Type:', testing_request.test_type or '-'],
+            ['Title:', testing_request.title or '-'],
+            ['Test Type:', testing_request.test_type.name if testing_request.test_type else '-'],
         ]
         request_table = Table(request_data, colWidths=[2*inch, 4*inch])
         request_table.setStyle(TableStyle([
