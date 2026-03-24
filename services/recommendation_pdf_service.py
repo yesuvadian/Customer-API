@@ -85,7 +85,7 @@ class RecommendationPDFService:
         request_data = [
             ['Request ID:', str(testing_request.id)],
             ['Request Number:', testing_request.request_number or '-'],
-            ['Status:', testing_request.status or '-'],
+            ['Status:', testing_request.status.value if testing_request.status else '-'],
             ['Title:', testing_request.title or '-'],
             ['Test Type:', testing_request.test_type.name if testing_request.test_type else '-'],
         ]
