@@ -266,37 +266,39 @@ def list_testing_requests(
 ):
     roles = _user_role_names(db, current_user.id)
 
-    # Admin and DeptHead see everything; others get role-based filtering
-    if "Admin" in roles or "DeptHead" in roles:
-        # No filtering - see all requests
-        pass
-    elif "Tester" in roles and "Originator" in roles:
-        # dual-role: see own + assigned (use OR logic via get_requests_for_user)
-        service = TestingRequestService(db)
-        requests = service.get_requests_for_user(
-            user_id=current_user.id,
-            skip=skip,
-            limit=limit,
-            status_filter=status,
-        )
-        return [_enrich(r) for r in requests]
-    elif "Tester" in roles:
-        # Tester only: see assigned requests
-        tester_id = current_user.id
-    elif "Originator" in roles:
-        # Originator only: see own requests
-        originator_id = current_user.id
-    else:
-        # No recognized global role: default to showing only assigned or originated requests
-        # This handles organization-based roles
-        service = TestingRequestService(db)
-        requests = service.get_requests_for_user(
-            user_id=current_user.id,
-            skip=skip,
-            limit=limit,
-            status_filter=status,
-        )
-        return [_enrich(r) for r in requests]
+    # Only apply role-based filtering if no explicit filters are provided
+    if originator_id is None and tester_id is None:
+        # Admin and DeptHead see everything; others get role-based filtering
+        if "Admin" in roles or "DeptHead" in roles:
+            # No filtering - see all requests
+            pass
+        elif "Tester" in roles and "Originator" in roles:
+            # dual-role: see own + assigned (use OR logic via get_requests_for_user)
+            service = TestingRequestService(db)
+            requests = service.get_requests_for_user(
+                user_id=current_user.id,
+                skip=skip,
+                limit=limit,
+                status_filter=status,
+            )
+            return [_enrich(r) for r in requests]
+        elif "Tester" in roles:
+            # Tester only: see assigned requests
+            tester_id = current_user.id
+        elif "Originator" in roles:
+            # Originator only: see own requests
+            originator_id = current_user.id
+        else:
+            # No recognized global role: default to showing only assigned or originated requests
+            # This handles organization-based roles
+            service = TestingRequestService(db)
+            requests = service.get_requests_for_user(
+                user_id=current_user.id,
+                skip=skip,
+                limit=limit,
+                status_filter=status,
+            )
+            return [_enrich(r) for r in requests]
 
     service = TestingRequestService(db)
     requests = service.get_requests(
