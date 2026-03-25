@@ -2,28 +2,27 @@ from fastapi import WebSocket
 
 active_connections: dict[str, list[WebSocket]] = {}
 
-
+def normalize(value: str) -> str:
+    return value.lower().strip()
 # -------------------------------------------------
 # 🔌 Connect (store under email + erp_id)
 # -------------------------------------------------
 async def connect(websocket: WebSocket, contact_id: str, erp_id: str = None):
     await websocket.accept()
 
-    keys = [contact_id]
+    keys = [normalize(contact_id)]
 
     if erp_id:
-        keys.append(erp_id)
+        keys.append(normalize(erp_id))
 
     for key in keys:
         if key not in active_connections:
             active_connections[key] = []
 
-        # ✅ prevent duplicate connections
         if websocket not in active_connections[key]:
             active_connections[key].append(websocket)
 
     print("✅ WS CONNECTED:", keys)
-
 
 # -------------------------------------------------
 # ❌ Disconnect
@@ -49,13 +48,14 @@ def disconnect(websocket: WebSocket, contact_id: str, erp_id: str = None):
 # 📡 Send Message (SAFE + CLEANUP)
 # -------------------------------------------------
 async def send_to_user(contact_id: str, data: dict):
+    contact_id = normalize(contact_id)
+
     if contact_id not in active_connections:
         print("⚠️ No active WS for:", contact_id)
         return
 
     dead_connections = []
 
-    # ✅ iterate over copy to avoid runtime issues
     for ws in active_connections[contact_id][:]:
         try:
             await ws.send_json(data)
@@ -65,11 +65,9 @@ async def send_to_user(contact_id: str, data: dict):
             print("❌ WS send failed:", e)
             dead_connections.append(ws)
 
-    # ✅ cleanup dead sockets
     for ws in dead_connections:
         if ws in active_connections.get(contact_id, []):
             active_connections[contact_id].remove(ws)
 
-    # ✅ remove key if empty
     if contact_id in active_connections and not active_connections[contact_id]:
         del active_connections[contact_id]

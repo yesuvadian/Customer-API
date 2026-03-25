@@ -3,12 +3,13 @@ from fastapi.responses import JSONResponse
 from services.websocket_service import send_to_user
 import os, json, hmac, hashlib
 
+from pydantic import EmailStr, ValidationError
+
 from services.redis_cache import RedisCacheService as cache
 from services.zoho_cache_map import ZOHO_MODULE_CACHE_KEYS
 from services.zoho_contact_service import ZohoContactService
 
 contact_service = ZohoContactService()
-
 router = APIRouter()
 
 ZOHO_WEBHOOK_SECRET = os.getenv("ZOHO_WEBHOOK_SECRET")
@@ -26,14 +27,39 @@ def verify_zoho_signature(raw_body: bytes, signature: str) -> bool:
 
     return hmac.compare_digest(calculated, signature)
 
-def get_zoho_erp_id(zoho_contact_id: str):
-    try:
-        contact = contact_service.get_contact_by_id(zoho_contact_id)
-        return contact.get("zoho_erp_id")
-    except Exception as e:
-        print(" Failed to get zoho_erp_id:", e)
+
+# -------------------------------------------------
+# 📧 Extract Email from Zoho Contact
+# -------------------------------------------------
+def extract_email(contact: dict) -> str | None:
+    contact_persons = contact.get("contact_persons", [])
+
+    # Prefer primary contact
+    for person in contact_persons:
+        if person.get("is_primary_contact"):
+            return person.get("email")
+
+    # fallback
+    if contact_persons:
+        return contact_persons[0].get("email")
+
+    return None
+
+
+# -------------------------------------------------
+# 🧠 Normalize User Key (email or fallback)
+# -------------------------------------------------
+def normalize_user_key(value: str | None) -> str | None:
+    if not value:
         return None
-    
+
+    try:
+        # if valid email → normalize
+        return EmailStr(value).lower().strip()
+    except ValidationError:
+        # not email → return as-is
+        return value
+
 
 # -------------------------------------------------
 # 🚀 Webhook Endpoint
@@ -45,8 +71,6 @@ async def zoho_webhook(module: str, request: Request):
     raw_body = await request.body()
 
     print("🚀 ZOHO WEBHOOK HIT:", module)
-    print("Content-Type:", headers.get("content-type"))
-    print("RAW BODY:", raw_body[:500])
 
     # -------------------------------------------------
     # 1. Zoho validation ping
@@ -64,23 +88,22 @@ async def zoho_webhook(module: str, request: Request):
         return {"status": "ignored"}
 
     if not verify_zoho_signature(raw_body, signature):
-        print("❌ Zoho webhook signature mismatch")
+        print("❌ Signature mismatch")
         return {"status": "ignored"}
 
     # -------------------------------------------------
-    # 3. Parse JSON
+    # 3. Parse payload
     # -------------------------------------------------
     try:
         payload = json.loads(raw_body.decode())
     except Exception:
-        print("⚠️ Invalid JSON payload")
+        print("⚠️ Invalid JSON")
         return {"status": "ignored"}
 
-    # 👉 NEW: extract event type
     event_type = payload.get("event_type", "")
 
     # -------------------------------------------------
-    # 4. Resolve cache namespaces
+    # 4. Resolve module cache
     # -------------------------------------------------
     cache_namespaces = ZOHO_MODULE_CACHE_KEYS.get(module)
     if not cache_namespaces:
@@ -95,20 +118,16 @@ async def zoho_webhook(module: str, request: Request):
         for ns in cache_namespaces:
             if ns == "items":
                 cache.delete_pattern("zoho:items:*")
-                deleted_keys.append("zoho:items:*")
             elif ns == "taxes":
                 cache.delete("zoho:taxes")
-                deleted_keys.append("zoho:taxes")
 
         return {
             "code": 0,
-            "message": "global cache invalidated",
-            "module": module,
-            "keys": deleted_keys,
+            "message": "global cache invalidated"
         }
 
     # -------------------------------------------------
-    # 6. Resolve contact_id
+    # 6. Extract contact_id
     # -------------------------------------------------
     ROOT_KEYS = {
         "quotes": "estimate",
@@ -129,35 +148,37 @@ async def zoho_webhook(module: str, request: Request):
         print("⚠️ contact_id missing")
         return {"status": "ignored"}
 
+    # -------------------------------------------------
+    # 7. Fetch contact + resolve user key
+    # -------------------------------------------------
     try:
         contact = contact_service.get_contact_by_id(zoho_contact_id)
-        email = contact.get("email")
+
+        email = extract_email(contact)
         zoho_erp_id = contact.get("zoho_erp_id")
 
-        # ✅ unified key
-        user_key = zoho_erp_id or email
+        # priority: email → fallback ERP ID
+        raw_key = email or zoho_erp_id
+        user_key = normalize_user_key(raw_key)
 
         if not user_key:
-            print("⚠️ No valid user identifier")
+            print("⚠️ No valid identifier")
             return {"status": "ignored"}
 
-        if not zoho_erp_id:
-            print("⚠️ zoho_erp_id missing")
-        else:
-            print("✅ ERP ID:", zoho_erp_id)
+        print("✅ User Key:", user_key)
 
     except Exception as e:
-        print("❌ Failed to resolve contact email:", e)
+        print("❌ Contact fetch failed:", e)
         return {"status": "ignored"}
 
     # -------------------------------------------------
-    # 🔔 7. Notification Logic (NEW)
+    # 🔔 8. Notification Logic
     # -------------------------------------------------
     if module == "quotes":
         estimate_id = root_obj.get("estimate_id")
 
         if event_type == "estimate.created":
-            print(f"🟢 New Quote Created: {estimate_id}")
+            print(f"🟢 Quote Created: {estimate_id}")
 
             notification = {
                 "type": "quote_created",
@@ -165,7 +186,7 @@ async def zoho_webhook(module: str, request: Request):
                 "message": f"New quote {estimate_id} created"
             }
 
-            # ✅ store in Redis
+            # store in Redis
             cache_key = f"notifications:{user_key}"
             existing = cache.get(cache_key) or []
 
@@ -175,11 +196,11 @@ async def zoho_webhook(module: str, request: Request):
             existing.append(notification)
             cache.set(cache_key, existing)
 
-            # 🚀 NEW: send real-time via WebSocket
+            # send via WebSocket
             await send_to_user(user_key, notification)
 
     # -------------------------------------------------
-    # 8. Invalidate cache
+    # 9. Cache invalidation
     # -------------------------------------------------
     for ns in cache_namespaces:
         key = f"zoho:{ns}:{user_key}"
@@ -190,9 +211,8 @@ async def zoho_webhook(module: str, request: Request):
 
     return {
         "code": 0,
-        "message": "cache invalidated",
-        "module": module,
-        "contact_id": user_key,
+        "message": "success",
+        "user_key": user_key,
         "event_type": event_type,
         "keys": deleted_keys,
     }
