@@ -1,75 +1,70 @@
 from fastapi import WebSocket
 
+# key = customer_id
 active_connections: dict[str, list[WebSocket]] = {}
 
 
 # -------------------------------------------------
-# 🔌 Connect (store under email + erp_id)
+# 🔌 Connect (store under customer_id)
 # -------------------------------------------------
-async def connect(websocket: WebSocket, contact_id: str, erp_id: str = None):
+async def connect(websocket: WebSocket, customer_id: str):
     await websocket.accept()
 
-    keys = [contact_id]
+    customer_id = str(customer_id).strip()
 
-    if erp_id:
-        keys.append(erp_id)
+    if customer_id not in active_connections:
+        active_connections[customer_id] = []
 
-    for key in keys:
-        if key not in active_connections:
-            active_connections[key] = []
+    if websocket not in active_connections[customer_id]:
+        active_connections[customer_id].append(websocket)
 
-        # ✅ prevent duplicate connections
-        if websocket not in active_connections[key]:
-            active_connections[key].append(websocket)
-
-    print("✅ WS CONNECTED:", keys)
+    print("✅ WS CONNECTED:", customer_id)
 
 
 # -------------------------------------------------
 # ❌ Disconnect
 # -------------------------------------------------
-def disconnect(websocket: WebSocket, contact_id: str, erp_id: str = None):
-    keys = [contact_id]
+def disconnect(websocket: WebSocket, customer_id: str):
+    customer_id = str(customer_id).strip()
 
-    if erp_id:
-        keys.append(erp_id)
+    if customer_id in active_connections:
+        if websocket in active_connections[customer_id]:
+            active_connections[customer_id].remove(websocket)
 
-    for key in keys:
-        if key in active_connections and websocket in active_connections[key]:
-            active_connections[key].remove(websocket)
+        # cleanup empty list
+        if not active_connections[customer_id]:
+            del active_connections[customer_id]
 
-            # ✅ cleanup empty lists
-            if not active_connections[key]:
-                del active_connections[key]
-
-    print("❌ WS DISCONNECTED:", keys)
+    print("❌ WS DISCONNECTED:", customer_id)
 
 
 # -------------------------------------------------
 # 📡 Send Message (SAFE + CLEANUP)
 # -------------------------------------------------
-async def send_to_user(contact_id: str, data: dict):
-    if contact_id not in active_connections:
-        print("⚠️ No active WS for:", contact_id)
+async def send_to_user(customer_id: str, data: dict):
+    customer_id = str(customer_id).strip()
+
+    if customer_id not in active_connections:
+        print("⚠️ No active WS for:", customer_id)
         return
 
     dead_connections = []
 
-    # ✅ iterate over copy to avoid runtime issues
-    for ws in active_connections[contact_id][:]:
+    # iterate safely
+    for ws in active_connections[customer_id][:]:
         try:
             await ws.send_json(data)
-            print("📡 Sent WS:", contact_id, data)
+            print("📡 Sent WS:", customer_id, data)
 
         except Exception as e:
             print("❌ WS send failed:", e)
             dead_connections.append(ws)
 
-    # ✅ cleanup dead sockets
+    # cleanup dead sockets
     for ws in dead_connections:
-        if ws in active_connections.get(contact_id, []):
-            active_connections[contact_id].remove(ws)
+        if ws in active_connections.get(customer_id, []):
+            active_connections[customer_id].remove(ws)
 
-    # ✅ remove key if empty
-    if contact_id in active_connections and not active_connections[contact_id]:
-        del active_connections[contact_id]
+    # remove key if empty
+    if customer_id in active_connections and not active_connections[customer_id]:
+        del active_connections[customer_id]

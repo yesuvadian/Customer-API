@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy.orm import Session
 
-from models import Role, User, UserRole
+from models import Role, User, UserRole, ZohoImportMapping, OrgUserRole
 from security_utils import get_password_hash
 from services.contact_service import ContactService
 from utils.email_service import EmailService
@@ -25,6 +25,7 @@ class ZohoUserSyncService:
         self.access_token = access_token
         self.contact_service = ContactService()
         self._viewer_role_id = None
+        self._import_mapping = None  # cached ZohoImportMapping
         self.email_service = EmailService()  # ✅ instantiate ONCE
 
     # -------------------------------------------------
@@ -57,6 +58,56 @@ class ZohoUserSyncService:
             })
 
         return data
+
+    # -------------------------------------------------
+    # Import mapping lookup
+    # -------------------------------------------------
+    def _get_import_mapping(self, zoho_org_id: str = None):
+        """Return the active ZohoImportMapping for this Zoho org (or the default)."""
+        if self._import_mapping is not None:
+            return self._import_mapping
+
+        q = self.db.query(ZohoImportMapping).filter(ZohoImportMapping.is_active == True)
+
+        # Try exact match first
+        if zoho_org_id:
+            mapping = q.filter(ZohoImportMapping.zoho_org_id == zoho_org_id).first()
+            if mapping:
+                self._import_mapping = mapping
+                return mapping
+
+        # Fall back to default
+        mapping = q.filter(ZohoImportMapping.is_default == True).first()
+        self._import_mapping = mapping  # may be None
+        return mapping
+
+    def _assign_org_dept_role(self, user: User, mapping):
+        """Assign organization, department, and org role from the import mapping."""
+        if not mapping:
+            return
+
+        user.organization_id = mapping.organization_id
+        if mapping.department_id:
+            user.department_id = mapping.department_id
+
+        if mapping.org_role_id:
+            # Check if org_user_role already exists
+            existing = (
+                self.db.query(OrgUserRole)
+                .filter(
+                    OrgUserRole.user_id == user.id,
+                    OrgUserRole.org_role_id == mapping.org_role_id,
+                )
+                .first()
+            )
+            if not existing:
+                self.db.add(OrgUserRole(
+                    user_id=user.id,
+                    org_role_id=mapping.org_role_id,
+                    department_id=mapping.department_id,
+                    assigned_by=None,
+                    is_active=True,
+                ))
 
     # -------------------------------------------------
     # Role lookup
@@ -163,7 +214,7 @@ class ZohoUserSyncService:
         self.db.add(user)
         self.db.flush()
 
-        # ✅ Assign VIEWER role
+        # ✅ Assign VIEWER role (global)
         viewer_role_id = self._get_viewer_role_id()
         self.db.add(
             UserRole(
@@ -173,6 +224,10 @@ class ZohoUserSyncService:
                 modified_by=None
             )
         )
+
+        # ✅ Assign org / department / org-role from import mapping
+        mapping = self._get_import_mapping()
+        self._assign_org_dept_role(user, mapping)
 
         return user, "created"
 

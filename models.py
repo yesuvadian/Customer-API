@@ -1970,3 +1970,35 @@ class TesterRoleModuleRequirement(Base):
     organization = relationship("Organization", foreign_keys=[organization_id])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
+
+
+# ------------------------------
+# Zoho Import Mapping
+# ------------------------------
+class ZohoImportMapping(Base):
+    __tablename__ = "zoho_import_mappings"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Zoho identifier (e.g. Zoho org id or a label like "default")
+    zoho_org_id = Column(String(255), nullable=True)
+    label = Column(String(255), nullable=True)  # friendly name for this mapping
+
+    # Where imported users land
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+    org_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+
+    is_default = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
+    org_role = relationship("OrgRole", foreign_keys=[org_role_id])

@@ -10,7 +10,8 @@ from models import (
     State, City, User, UserRole, Module,
     # Organization models
     Organization, OrgDepartment, OrgRole, OrgUserRole,
-    OrgRolePermission, RoleTemplate, OrgInvitation, TesterRoleModuleRequirement
+    OrgRolePermission, RoleTemplate, OrgInvitation, TesterRoleModuleRequirement,
+    ZohoImportMapping
 )
 from security_utils import get_password_hash  # password hashing utils
 
@@ -1767,44 +1768,52 @@ def seed_sample_organization(session):
         plan_id = basic_plan.id if basic_plan else None
 
         # Create organization
-    org = Organization(
-        id=uuid.uuid4(),
-        name="Sample Organization",
-        code=org_code,
-        display_name="Sample Org",
-        organization_type="vendor",
-        industry="Technology",
-        primary_email="info@sampleorg.com",
-        primary_phone="+1234567890",
-        website="https://sampleorg.com",
-        address="123 Sample Street",
-        city="Sample City",
-        state="Sample State",
-        country="USA",
-        pincode="12345",
-        is_active=True,
-        is_verified=False,
-        plan_id=plan_id,
-        subscription_start_date=now,
-        subscription_end_date=now + timedelta(days=365),
-        settings={},
-        created_by=None,
-        modified_by=None,
-        cts=now,
-        mts=now,
-        erp_sync_status="pending",
-        erp_last_sync_at=None,
-        erp_error_message=None,
-        erp_external_id=None
-    )
-    session.add(org)
-    session.flush()
+        org = Organization(
+            id=uuid.uuid4(),
+            name="Sample Organization",
+            code=org_code,
+            display_name="Sample Org",
+            organization_type="vendor",
+            industry="Technology",
+            primary_email="info@sampleorg.com",
+            primary_phone="+1234567890",
+            website="https://sampleorg.com",
+            address="123 Sample Street",
+            city="Sample City",
+            state="Sample State",
+            country="USA",
+            pincode="12345",
+            is_active=True,
+            is_verified=False,
+            plan_id=plan_id,
+            subscription_start_date=now,
+            subscription_end_date=now + timedelta(days=365),
+            settings={},
+            created_by=None,
+            modified_by=None,
+            cts=now,
+            mts=now,
+            erp_sync_status="pending",
+            erp_last_sync_at=None,
+            erp_error_message=None,
+            erp_external_id=None
+        )
+        session.add(org)
+        session.flush()
 
     # Provision default roles from templates
     templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
 
     provisioned_roles = []
     for template in templates:
+        # Skip if role already exists for this org
+        existing_role = session.query(OrgRole).filter_by(
+            organization_id=org.id, name=template.name
+        ).first()
+        if existing_role:
+            provisioned_roles.append(existing_role)
+            continue
+
         role = OrgRole(
             id=uuid.uuid4(),
             organization_id=org.id,
@@ -2772,6 +2781,9 @@ def run_seed():
                 print("[INFO] You can retry with:")
                 print(f"       python seed.py --kptcl {kptcl_org.id}")
 
+        # Zoho Import Mapping (after KPTCL org + departments exist)
+        seed_zoho_import_mapping(session, kptcl_org)
+
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")
         print("=" * 80)
@@ -2782,6 +2794,58 @@ def run_seed():
             print("  3. KPTCL Org Admin: orgadmin@kptcl.com / admin123")
         print(f"  {4 if kptcl_org else 3}. View API docs: http://localhost:8000/docs")
         print("\n" + "=" * 80 + "\n")
+
+
+def seed_zoho_import_mapping(session, kptcl_org):
+    """
+    Create default Zoho import mapping for KPTCL.
+    Maps Zoho-imported users → KPTCL org, Originator role, RT North SD3 Devanahalli dept.
+    """
+    if not kptcl_org:
+        print("[SKIP] No KPTCL org — skipping Zoho import mapping")
+        return
+
+    # Find the Originator org role for KPTCL
+    originator_role = session.query(OrgRole).filter_by(
+        organization_id=kptcl_org.id, name="Originator"
+    ).first()
+
+    if not originator_role:
+        print("[WARN] Originator org role not found for KPTCL -- mapping created without role")
+
+    # Find "RT North SD3 Devanahalli" department
+    dept = session.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == kptcl_org.id,
+        OrgDepartment.name.ilike("%RT North SD3 Devanahalli%")
+    ).first()
+
+    if not dept:
+        print("[WARN] 'RT North SD3 Devanahalli' department not found -- mapping created without dept")
+
+    # Check if mapping already exists -- update it with current dept/role IDs
+    existing = session.query(ZohoImportMapping).filter_by(
+        organization_id=kptcl_org.id, is_default=True
+    ).first()
+    if existing:
+        existing.department_id = dept.id if dept else None
+        existing.org_role_id = originator_role.id if originator_role else None
+        session.commit()
+        print(f"[OK] Zoho import mapping updated: KPTCL -> Originator, dept={dept.name if dept else 'None'}")
+        return
+
+    mapping = ZohoImportMapping(
+        id=uuid.uuid4(),
+        zoho_org_id=None,
+        label="KPTCL Default — Zoho Customers",
+        organization_id=kptcl_org.id,
+        department_id=dept.id if dept else None,
+        org_role_id=originator_role.id if originator_role else None,
+        is_default=True,
+        is_active=True,
+    )
+    session.add(mapping)
+    session.commit()
+    print(f"[OK] Zoho import mapping created: KPTCL -> Originator, dept={dept.name if dept else 'None'}")
 
 
 def seed_kptcl_only(org_id: str):
