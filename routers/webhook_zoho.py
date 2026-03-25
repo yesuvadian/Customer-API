@@ -3,13 +3,9 @@ from fastapi.responses import JSONResponse
 from services.websocket_service import send_to_user
 import os, json, hmac, hashlib
 
-from pydantic import EmailStr, ValidationError
-
 from services.redis_cache import RedisCacheService as cache
 from services.zoho_cache_map import ZOHO_MODULE_CACHE_KEYS
-from services.zoho_contact_service import ZohoContactService
 
-contact_service = ZohoContactService()
 router = APIRouter()
 
 ZOHO_WEBHOOK_SECRET = os.getenv("ZOHO_WEBHOOK_SECRET")
@@ -26,39 +22,6 @@ def verify_zoho_signature(raw_body: bytes, signature: str) -> bool:
     ).hexdigest()
 
     return hmac.compare_digest(calculated, signature)
-
-
-# -------------------------------------------------
-# 📧 Extract Email from Zoho Contact
-# -------------------------------------------------
-def extract_email(contact: dict) -> str | None:
-    contact_persons = contact.get("contact_persons", [])
-
-    # Prefer primary contact
-    for person in contact_persons:
-        if person.get("is_primary_contact"):
-            return person.get("email")
-
-    # fallback
-    if contact_persons:
-        return contact_persons[0].get("email")
-
-    return None
-
-
-# -------------------------------------------------
-# 🧠 Normalize User Key (email or fallback)
-# -------------------------------------------------
-def normalize_user_key(value: str | None) -> str | None:
-    if not value:
-        return None
-
-    try:
-        # if valid email → normalize
-        return EmailStr(value).lower().strip()
-    except ValidationError:
-        # not email → return as-is
-        return value
 
 
 # -------------------------------------------------
@@ -127,7 +90,7 @@ async def zoho_webhook(module: str, request: Request):
         }
 
     # -------------------------------------------------
-    # 6. Extract contact_id
+    # 6. Extract contact_id (customer_id)
     # -------------------------------------------------
     ROOT_KEYS = {
         "quotes": "estimate",
@@ -139,6 +102,10 @@ async def zoho_webhook(module: str, request: Request):
     root_key = ROOT_KEYS.get(module)
     root_obj = payload.get(root_key, {})
 
+    if not root_obj:
+        print("⚠️ Missing root object")
+        return {"status": "ignored"}
+
     zoho_contact_id = (
         root_obj.get("customer_id")
         or root_obj.get("contact_id")
@@ -148,31 +115,12 @@ async def zoho_webhook(module: str, request: Request):
         print("⚠️ contact_id missing")
         return {"status": "ignored"}
 
-    # -------------------------------------------------
-    # 7. Fetch contact + resolve user key
-    # -------------------------------------------------
-    try:
-        contact = contact_service.get_contact_by_id(zoho_contact_id)
-
-        email = extract_email(contact)
-        zoho_erp_id = contact.get("zoho_erp_id")
-
-        # priority: email → fallback ERP ID
-        raw_key = email or zoho_erp_id
-        user_key = normalize_user_key(raw_key)
-
-        if not user_key:
-            print("⚠️ No valid identifier")
-            return {"status": "ignored"}
-
-        print("✅ User Key:", user_key)
-
-    except Exception as e:
-        print("❌ Contact fetch failed:", e)
-        return {"status": "ignored"}
+    # ✅ FINAL: use customer_id directly
+    user_key = str(zoho_contact_id)
+    print("✅ User Key (customer_id):", user_key)
 
     # -------------------------------------------------
-    # 🔔 8. Notification Logic
+    # 🔔 7. Notification Logic
     # -------------------------------------------------
     if module == "quotes":
         estimate_id = root_obj.get("estimate_id")
@@ -200,7 +148,7 @@ async def zoho_webhook(module: str, request: Request):
             await send_to_user(user_key, notification)
 
     # -------------------------------------------------
-    # 9. Cache invalidation
+    # 8. Cache invalidation
     # -------------------------------------------------
     for ns in cache_namespaces:
         key = f"zoho:{ns}:{user_key}"
@@ -212,7 +160,7 @@ async def zoho_webhook(module: str, request: Request):
     return {
         "code": 0,
         "message": "success",
-        "user_key": user_key,
+        "customer_id": user_key,
         "event_type": event_type,
         "keys": deleted_keys,
     }
