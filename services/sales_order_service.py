@@ -1000,7 +1000,7 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # 1️⃣ First verify sales order exists
+        # 1️⃣ Fetch Sales Order
         so_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
@@ -1013,52 +1013,21 @@ class SalesOrderService:
 
         salesorder = so_resp.json().get("salesorder", {})
 
-        # Security check
+        # 2️⃣ Security check
         if salesorder.get("customer_id") != contact_id:
             raise HTTPException(status_code=403, detail="Unauthorized access")
 
-        # 2️⃣ Fetch packages separately
-        pkg_resp = requests.get(
-            f"{self.base_url}/packages",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
+        # 3️⃣ Extract shipment status from custom field
+        shipment_status = "Pending"  # default
 
-        if pkg_resp.status_code != 200:
-            raise HTTPException(status_code=400, detail=pkg_resp.text)
-
-        all_packages = pkg_resp.json().get("packages", [])
-
-        # 3️⃣ Filter packages for this salesorder
-        related_packages = [
-            p for p in all_packages
-            if p.get("salesorder_id") == salesorder_id
-        ]
-
-        if not related_packages:
-            return {"message": "No shipment created for this Sales Order"}
-
-        # 4️⃣ Filter shipped
-        valid_status = ["shipped", "delivered", "partially_shipped"]
-
-        shipped_packages = [
-            p for p in related_packages
-            if p.get("status", "").lower() in valid_status
-        ]
-
-        if not shipped_packages:
-            return {"message": "Sales Order not shipped yet"}
-
-        latest_package = shipped_packages[-1]
+        for field in salesorder.get("custom_fields", []):
+            if field.get("api_name") == "cf_shipment_status":
+                shipment_status = field.get("value") or "Pending"
+                break
 
         return {
             "salesorder_id": salesorder_id,
-            "package_id": latest_package.get("package_id"),
-            "shipment_date": latest_package.get("shipment_date"),
-            "carrier": latest_package.get("carrier"),
-            "tracking_number": latest_package.get("tracking_number"),
-            "status": latest_package.get("status")
+            "status": shipment_status
         }
 
     # -------------------------------------------------
