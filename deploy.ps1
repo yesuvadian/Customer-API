@@ -82,7 +82,6 @@ tar --exclude="venv" `
     --exclude=".git" `
     --exclude=".github" `
     --exclude=".vscode" `
-    --exclude="*.xlsx" `
     --exclude="output_*.csv" `
     --exclude="$ArchiveName" `
     -czf $ArchiveName *

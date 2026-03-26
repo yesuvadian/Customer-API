@@ -580,6 +580,10 @@ class UserResponse(BaseModel):
     email_confirmed: bool
     phone_confirmed: bool
 
+    usertype: Optional[str] = None
+    organization_id: Optional[str] = None
+    department_id: Optional[str] = None  # User's assigned department
+
     cts: datetime
     mts: datetime
 
@@ -958,12 +962,19 @@ class TestingRequestCreate(BaseModel):
     serial_number: Optional[str] = None
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
+
+    # New department-based location
+    organization_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+
+    # Legacy location fields (optional for backward compatibility)
     zone: Optional[str] = None
     ce_circle: Optional[str] = None
     se_division: Optional[str] = None
     ee_subdivision: Optional[str] = None
     aee_section: Optional[str] = None
     ae_je: Optional[str] = None
+
     assigned_tester_id: Optional[UUID] = None
     priority: Optional[str] = "normal"
     requested_date: Optional[datetime] = None
@@ -980,12 +991,19 @@ class TestingRequestUpdate(BaseModel):
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
     assigned_tester_id: Optional[UUID] = None
+
+    # New department-based location
+    organization_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+
+    # Legacy location fields
     zone: Optional[str] = None
     ce_circle: Optional[str] = None
     se_division: Optional[str] = None
     ee_subdivision: Optional[str] = None
     aee_section: Optional[str] = None
     ae_je: Optional[str] = None
+
     priority: Optional[str] = None
     requested_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
@@ -1006,17 +1024,27 @@ class TestingRequestResponse(BaseModel):
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
     equipment_type_name: Optional[str] = None
+    equipment_name: Optional[str] = None  # Alias for Flutter UI
     test_type_name: Optional[str] = None
+
+    # New department-based location
+    organization_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+    department_name: Optional[str] = None  # Computed field
+
+    # Legacy location fields
     zone: Optional[str] = None
     ce_circle: Optional[str] = None
     se_division: Optional[str] = None
     ee_subdivision: Optional[str] = None
     aee_section: Optional[str] = None
     ae_je: Optional[str] = None
+
     status: str
     priority: Optional[str] = None
     originator_id: UUID
     originator_name: Optional[str] = None
+    requester_email: Optional[str] = None  # For Flutter UI (originator email)
     assigned_tester_id: Optional[UUID] = None
     assigned_tester_name: Optional[str] = None
     assigned_at: Optional[datetime] = None
@@ -1046,10 +1074,12 @@ class TestResultCreate(BaseModel):
     result_unit: Optional[str] = None
     pass_fail: Optional[str] = None
     remarks: Optional[str] = None
+    organization_id: Optional[UUID] = None
 
 class TestResultResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    organization_id: Optional[UUID] = None
     test_name: str
     test_category: Optional[str] = None
     result_value: Optional[str] = None
@@ -1084,6 +1114,7 @@ class TestResultStructuredCreate(BaseModel):
     overall_result: Optional[str] = None
     remarks: Optional[str] = None
     replacement_products: Optional[list] = None
+    organization_id: Optional[UUID] = None
 
 class TestResultImageResponse(BaseModel):
     id: UUID
@@ -1100,6 +1131,7 @@ class TestResultImageResponse(BaseModel):
 class TestResultStructuredResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    organization_id: Optional[UUID] = None
     test_name: str
     template_key: Optional[str] = None
     test_data: Optional[dict] = None
@@ -1125,6 +1157,7 @@ class RecommendationCreate(BaseModel):
     recommendation_type: str
     summary: str
     detailed_notes: Optional[str] = None
+    organization_id: Optional[UUID] = None
 
 class RecommendationUpdate(BaseModel):
     recommendation_type: Optional[str] = None
@@ -1141,6 +1174,7 @@ class SubmitTestResultsBody(BaseModel):
 class RecommendationResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    organization_id: Optional[UUID] = None
     recommendation_type: str
     summary: str
     detailed_notes: Optional[str] = None
@@ -1167,6 +1201,7 @@ class RecommendationResponse(BaseModel):
 class ProcurementRequestCreate(BaseModel):
     testing_request_id: UUID
     recommendation_id: Optional[UUID] = None
+    organization_id: Optional[UUID] = None
     title: str
     description: Optional[str] = None
     estimated_cost: Optional[float] = None
@@ -1186,6 +1221,7 @@ class ProcurementRequestResponse(BaseModel):
     procurement_number: str
     testing_request_id: UUID
     recommendation_id: Optional[UUID] = None
+    organization_id: Optional[UUID] = None
     title: str
     description: Optional[str] = None
     status: Optional[str] = None
@@ -1198,6 +1234,700 @@ class ProcurementRequestResponse(BaseModel):
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization Schemas
+# ==========================================
+
+class OrganizationBase(BaseModel):
+    name: str
+    code: str
+    display_name: Optional[str] = None
+    organization_type: Optional[str] = None
+    industry: Optional[str] = None
+    website: Optional[str] = None
+    primary_email: Optional[str] = None
+    primary_phone: Optional[str] = None
+
+class OrganizationCreate(OrganizationBase):
+    plan_id: Optional[UUID] = None
+    is_active: bool = True
+    settings: Optional[Dict] = {}
+
+class OrganizationUpdate(BaseModel):
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    organization_type: Optional[str] = None
+    industry: Optional[str] = None
+    website: Optional[str] = None
+    primary_email: Optional[str] = None
+    primary_phone: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_verified: Optional[bool] = None
+    plan_id: Optional[UUID] = None
+    subscription_start_date: Optional[datetime] = None
+    subscription_end_date: Optional[datetime] = None
+    settings: Optional[Dict] = None
+
+class OrganizationOut(OrganizationBase):
+    id: UUID
+    is_active: bool
+    is_verified: bool
+    plan_id: Optional[UUID] = None
+    subscription_start_date: Optional[datetime] = None
+    subscription_end_date: Optional[datetime] = None
+    settings: Optional[Dict] = None
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+    erp_sync_status: Optional[str] = None
+    erp_external_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization Department Schemas
+# ==========================================
+
+class OrgDepartmentBase(BaseModel):
+    name: str
+    code: Optional[str] = None
+    description: Optional[str] = None
+    parent_department_id: Optional[UUID] = None
+    manager_id: Optional[UUID] = None
+
+class OrgDepartmentCreate(OrgDepartmentBase):
+    organization_id: UUID
+    is_active: bool = True
+
+class OrgDepartmentUpdate(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    description: Optional[str] = None
+    parent_department_id: Optional[UUID] = None
+    manager_id: Optional[UUID] = None
+    is_active: Optional[bool] = None
+
+class OrgDepartmentOut(OrgDepartmentBase):
+    id: UUID
+    organization_id: UUID
+    is_active: bool
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+    erp_sync_status: Optional[str] = None
+    erp_external_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization Role Schemas
+# ==========================================
+
+class OrgRoleBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_org_admin: bool = False
+    is_dept_admin: bool = False
+
+class OrgRoleCreate(OrgRoleBase):
+    organization_id: UUID
+    role_type: str = "custom"
+    is_active: bool = True
+
+class OrgRoleUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_org_admin: Optional[bool] = None
+    is_dept_admin: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+class OrgRoleOut(OrgRoleBase):
+    id: UUID
+    organization_id: UUID
+    role_type: str
+    is_active: bool
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization User Role Schemas
+# ==========================================
+
+class OrgUserRoleBase(BaseModel):
+    user_id: UUID
+    org_role_id: UUID
+    department_id: Optional[UUID] = None
+
+class OrgUserRoleCreate(OrgUserRoleBase):
+    assigned_by: Optional[UUID] = None
+    is_active: bool = True
+
+class OrgUserRoleUpdate(BaseModel):
+    is_active: Optional[bool] = None
+
+class OrgUserRoleOut(OrgUserRoleBase):
+    id: UUID
+    assigned_at: Optional[datetime] = None
+    assigned_by: Optional[UUID] = None
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization Role Permission Schemas
+# ==========================================
+
+class OrgRolePermissionBase(BaseModel):
+    org_role_id: UUID
+    module_id: int
+    can_view: bool = False
+    can_add: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
+    can_approve: bool = False
+    can_assign: bool = False
+    can_export: bool = False
+    can_import: bool = False
+
+class OrgRolePermissionCreate(OrgRolePermissionBase):
+    pass
+
+class OrgRolePermissionUpdate(BaseModel):
+    can_view: Optional[bool] = None
+    can_add: Optional[bool] = None
+    can_edit: Optional[bool] = None
+    can_delete: Optional[bool] = None
+    can_approve: Optional[bool] = None
+    can_assign: Optional[bool] = None
+    can_export: Optional[bool] = None
+    can_import: Optional[bool] = None
+
+class OrgRolePermissionOut(OrgRolePermissionBase):
+    id: UUID
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Bulk Permission Set Schema
+# ==========================================
+
+class PermissionSet(BaseModel):
+    module_id: int
+    can_view: bool = False
+    can_add: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
+    can_approve: bool = False
+    can_assign: bool = False
+    can_export: bool = False
+    can_import: bool = False
+
+class BulkPermissionUpdate(BaseModel):
+    permissions: List[PermissionSet]
+
+
+# ==========================================
+# Organization User Create Schema
+# ==========================================
+
+class OrgUserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    firstname: str
+    lastname: Optional[str] = None
+    phone_number: str
+    employee_id: Optional[str] = None
+    department_id: Optional[UUID] = None
+    role_ids: Optional[List[UUID]] = []
+    isactive: bool = True
+
+class OrgUserUpdate(BaseModel):
+    firstname: Optional[str] = None
+    lastname: Optional[str] = None
+    phone_number: Optional[str] = None
+    employee_id: Optional[str] = None
+    department_id: Optional[UUID] = None
+    isactive: Optional[bool] = None
+
+
+# ==========================================
+# Role Assignment Schema
+# ==========================================
+
+class RoleAssignment(BaseModel):
+    org_role_id: UUID
+    department_id: Optional[UUID] = None
+
+
+# ==========================================
+# Organization User with Roles Schema
+# ==========================================
+
+class OrgUserRoleInfo(BaseModel):
+    """Role information for user display"""
+    role_id: UUID
+    role_name: str
+    is_org_admin: bool
+    is_dept_admin: bool
+    department_id: Optional[UUID] = None
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class OrgUserWithRoles(BaseModel):
+    """User schema with role information"""
+    id: UUID
+    email: str
+    firstname: Optional[str] = None
+    lastname: Optional[str] = None
+    phone_number: str
+    organization_id: Optional[UUID] = None
+    employee_id: Optional[str] = None
+    department_id: Optional[UUID] = None
+    isactive: bool
+    usertype: Optional[str] = None
+    email_confirmed: bool
+    phone_confirmed: bool
+    cts: datetime
+    mts: datetime
+    roles: List[OrgUserRoleInfo] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization Invitation Schemas
+# ==========================================
+
+class OrgInvitationCreate(BaseModel):
+    email: EmailStr
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    org_role_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+    expires_in_days: int = 7
+
+class OrgInvitationOut(BaseModel):
+    id: UUID
+    organization_id: UUID
+    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    org_role_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+    invitation_token: str
+    expires_at: datetime
+    status: str
+    accepted_at: Optional[datetime] = None
+    accepted_by_user_id: Optional[UUID] = None
+    invited_by: UUID
+    cts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Role Template Schemas
+# ==========================================
+
+class RoleTemplateCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_org_admin: bool = False
+    is_dept_admin: bool = False
+    auto_provision: bool = False
+    permissions_template: Optional[List[Dict]] = []
+
+class RoleTemplateOut(BaseModel):
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    is_org_admin: bool
+    is_dept_admin: bool
+    auto_provision: bool
+    permissions_template: Optional[List[Dict]] = []
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Organization with Admin User (for creation)
+# ==========================================
+
+class OrganizationWithAdmin(BaseModel):
+    organization: OrganizationCreate
+    admin_email: EmailStr
+    admin_password: str
+    admin_firstname: str
+    admin_lastname: Optional[str] = None
+    admin_phone: str
+
+
+# ==========================================
+# WORKFLOW ENGINE SCHEMAS
+# ==========================================
+
+# ---------- Workflow Schemas ----------
+
+class WorkflowCreate(BaseModel):
+    """Schema for creating a workflow"""
+    name: str
+    description: Optional[str] = None
+    workflow_type: str  # 'testing_request', 'approval', 'procurement'
+    organization_id: Optional[UUID] = None
+    is_active: bool = True
+    version: int = 1
+
+
+class WorkflowUpdate(BaseModel):
+    """Schema for updating a workflow"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class WorkflowResponse(BaseModel):
+    """Schema for workflow response"""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    workflow_type: str
+    organization_id: Optional[UUID] = None
+    is_active: bool
+    version: int
+    created_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Workflow State Schemas ----------
+
+class WorkflowStateCreate(BaseModel):
+    """Schema for creating a workflow state"""
+    workflow_id: UUID
+    state_code: str  # 'draft', 'submitted', 'approved'
+    state_name: str
+    description: Optional[str] = None
+    state_type: str = 'intermediate'  # 'initial', 'intermediate', 'final', 'cancelled'
+    color: str = '#3FA9F5'
+    icon: str = 'circle'
+    display_order: int = 0
+    is_active: bool = True
+
+
+class WorkflowStateUpdate(BaseModel):
+    """Schema for updating a workflow state"""
+    state_name: Optional[str] = None
+    description: Optional[str] = None
+    state_type: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    display_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class WorkflowStateResponse(BaseModel):
+    """Schema for workflow state response"""
+    id: UUID
+    workflow_id: UUID
+    state_code: str
+    state_name: str
+    description: Optional[str] = None
+    state_type: str
+    color: str
+    icon: str
+    display_order: int
+    is_active: bool
+    created_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Workflow Transition Schemas ----------
+
+class WorkflowTransitionCreate(BaseModel):
+    """Schema for creating a workflow transition"""
+    workflow_id: UUID
+    from_state_id: UUID
+    to_state_id: UUID
+    transition_name: str  # 'Submit', 'Approve', 'Reject'
+    action_code: str  # 'submit', 'approve', 'reject'
+    description: Optional[str] = None
+    conditions: Optional[Dict] = None
+    button_label: Optional[str] = None
+    button_color: str = '#3FA9F5'
+    icon: str = 'arrow_forward'
+    requires_comment: bool = False
+    display_order: int = 0
+    is_active: bool = True
+
+
+class WorkflowTransitionUpdate(BaseModel):
+    """Schema for updating a workflow transition"""
+    transition_name: Optional[str] = None
+    action_code: Optional[str] = None
+    description: Optional[str] = None
+    conditions: Optional[Dict] = None
+    button_label: Optional[str] = None
+    button_color: Optional[str] = None
+    icon: Optional[str] = None
+    requires_comment: Optional[bool] = None
+    display_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class WorkflowTransitionResponse(BaseModel):
+    """Schema for workflow transition response"""
+    id: UUID
+    workflow_id: UUID
+    from_state_id: UUID
+    to_state_id: UUID
+    transition_name: str
+    action_code: str
+    description: Optional[str] = None
+    conditions: Optional[Dict] = None
+    button_label: Optional[str] = None
+    button_color: str
+    icon: str
+    requires_comment: bool
+    display_order: int
+    is_active: bool
+    created_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Permission Matrix Schemas ----------
+
+class PermissionMatrixCreate(BaseModel):
+    """Schema for creating a permission matrix entry"""
+    workflow_id: UUID
+    transition_id: UUID
+    role_id: UUID
+    scope_type: str = 'exact'  # 'exact', 'department_tree', 'organization', 'any'
+    department_type_id: Optional[UUID] = None
+    can_execute: bool = True
+    can_view: bool = True
+    requires_approval: bool = False
+    conditions: Optional[Dict] = None
+    priority: int = 0
+    is_active: bool = True
+
+
+class PermissionMatrixUpdate(BaseModel):
+    """Schema for updating a permission matrix entry"""
+    scope_type: Optional[str] = None
+    department_type_id: Optional[UUID] = None
+    can_execute: Optional[bool] = None
+    can_view: Optional[bool] = None
+    requires_approval: Optional[bool] = None
+    conditions: Optional[Dict] = None
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class PermissionMatrixResponse(BaseModel):
+    """Schema for permission matrix response"""
+    id: UUID
+    workflow_id: UUID
+    transition_id: UUID
+    role_id: UUID
+    scope_type: str
+    department_type_id: Optional[UUID] = None
+    can_execute: bool
+    can_view: bool
+    requires_approval: bool
+    conditions: Optional[Dict] = None
+    priority: int
+    is_active: bool
+    created_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Workflow Audit Log Schemas ----------
+
+class WorkflowAuditLogCreate(BaseModel):
+    """Schema for creating a workflow audit log entry"""
+    workflow_id: UUID
+    entity_type: str  # 'testing_request', 'purchase_order'
+    entity_id: UUID
+    transition_id: Optional[UUID] = None
+    from_state_id: Optional[UUID] = None
+    to_state_id: Optional[UUID] = None
+    action_code: Optional[str] = None
+    performed_by: Optional[UUID] = None
+    user_role_id: Optional[UUID] = None
+    user_department_id: Optional[UUID] = None
+    comment: Optional[str] = None
+    metadata: Optional[Dict] = None
+    success: bool = True
+    error_message: Optional[str] = None
+
+
+class WorkflowAuditLogResponse(BaseModel):
+    """Schema for workflow audit log response"""
+    id: UUID
+    workflow_id: UUID
+    entity_type: str
+    entity_id: UUID
+    transition_id: Optional[UUID] = None
+    from_state_id: Optional[UUID] = None
+    to_state_id: Optional[UUID] = None
+    action_code: Optional[str] = None
+    performed_by: Optional[UUID] = None
+    performed_at: Optional[datetime] = None
+    user_role_id: Optional[UUID] = None
+    user_department_id: Optional[UUID] = None
+    comment: Optional[str] = None
+    metadata: Optional[Dict] = None
+    success: bool
+    error_message: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Complex Workflow Schemas ----------
+
+class WorkflowWithStates(WorkflowResponse):
+    """Workflow with its states included"""
+    states: List[WorkflowStateResponse] = []
+
+
+class WorkflowWithTransitions(WorkflowResponse):
+    """Workflow with its states and transitions"""
+    states: List[WorkflowStateResponse] = []
+    transitions: List[WorkflowTransitionResponse] = []
+
+
+class WorkflowFullDetail(WorkflowResponse):
+    """Complete workflow with states, transitions, and permissions"""
+    states: List[WorkflowStateResponse] = []
+    transitions: List[WorkflowTransitionResponse] = []
+    permission_entries: List[PermissionMatrixResponse] = []
+
+
+class AvailableTransitionResponse(BaseModel):
+    """Schema for available transitions for a user"""
+    transition_id: UUID
+    transition_name: str
+    action_code: str
+    to_state_code: str
+    to_state_name: str
+    button_label: Optional[str] = None
+    button_color: str
+    icon: str
+    requires_comment: bool
+
+
+class PerformTransitionRequest(BaseModel):
+    """Schema for performing a transition"""
+    entity_type: str  # 'testing_request'
+    entity_id: UUID
+    transition_id: UUID
+    comment: Optional[str] = None
+    metadata: Optional[Dict] = None
+
+
+class PerformTransitionResponse(BaseModel):
+    """Schema for transition execution response"""
+    success: bool
+    message: str
+    new_state: Optional[WorkflowStateResponse] = None
+    audit_log_id: Optional[UUID] = None
+
+
+# ==========================================
+# Testing Request Approval Workflow Schemas
+# ==========================================
+
+# Alias for testing request output in approval workflow
+TestingRequestOut = TestingRequestResponse
+
+
+class TesterInfo(BaseModel):
+    """Information about a tester user for assignment"""
+    user_id: str
+    email: str
+    name: str
+    department_id: Optional[str] = None
+    active_requests: int  # Current workload
+
+    class Config:
+        from_attributes = True
+
+
+class ApproverTesterSelection(BaseModel):
+    """Request body for approver selecting a tester"""
+    tester_role_id: UUID  # Which tester role was selected
+    tester_id: UUID       # Which specific user was chosen
+    comment: Optional[str] = None  # Optional approval comment
+
+    class Config:
+        from_attributes = True
+
+
+class RejectionRequest(BaseModel):
+    """Request body for rejecting a testing request"""
+    rejection_comment: str  # Required rejection reason
+
+    class Config:
+        from_attributes = True
+
+
+class ApprovalResponse(BaseModel):
+    """Response from approval/rejection action"""
+    success: bool
+    message: str
+    testing_request_id: str
+    assigned_tester_id: Optional[str] = None
+    assigned_tester_email: Optional[str] = None
+    new_status: str
 
     class Config:
         from_attributes = True

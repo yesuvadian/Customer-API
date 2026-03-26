@@ -10,15 +10,14 @@ from fastapi import BackgroundTasks
 from services.zoho_auth_service import get_zoho_access_token
 
 # We reuse your existing UserService for email/phone checks
-from services.user_service import UserService 
+from services.user_service import UserService
 
 router = APIRouter(prefix="/zoho-register", tags=["zoho_registration"])
 user_service_instance = UserService()
-# zoho_service = ContactService()
 contact_service = ContactService()
 
 # ------------------------------------------------------------------
-# STEP 0: SHARED VALIDATION (Reused from register.py)
+# SHARED VALIDATION
 # ------------------------------------------------------------------
 @router.get("/check-email")
 def check_email_exists(email: str = Query(...), db: Session = Depends(get_db)):
@@ -32,7 +31,7 @@ def check_mobile_exists(mobile: str = Query(...), db: Session = Depends(get_db))
     return {"exists": exists}
 
 # ------------------------------------------------------------------
-# THE 3-STEP FLOW & FINAL COMPLETION
+# ZOHO CONTACT CREATION
 # ------------------------------------------------------------------
 
 @router.post("/zohocontacts", response_model=zohoschemas.ContactResponse, status_code=status.HTTP_201_CREATED)
@@ -58,6 +57,10 @@ def create_contact(payload: zohoschemas.CreateContact):
     )
 
 
+# ------------------------------------------------------------------
+# ZOHO CUSTOMER SYNC (cron job)
+# Reads zoho_import_mappings table internally to assign org/dept/role
+# ------------------------------------------------------------------
 
 @router.post("/sync-customers")
 def sync_zoho_customers(
@@ -75,6 +78,7 @@ def sync_zoho_customers(
     return {
         "message": "Zoho customer sync started"
     }
+
 def run_customer_sync(access_token: str):
     db = SessionLocal()
     try:
