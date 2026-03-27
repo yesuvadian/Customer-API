@@ -111,33 +111,21 @@ def create_quotes_for_vendors(
 ):
     access_token = get_zoho_access_token()
 
-    # ✅ Validate
     if not payload.vendors:
         raise HTTPException(400, "Vendors list cannot be empty")
 
     try:
-        # ✅ Resolve contact
         contact_id = quote_service._resolve_contact_id(payload.contact_id)
 
         headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
         }
 
-        # ✅ Build line items
+        # Use cached item fetches — collapses N Zoho calls for repeated catalog items
         line_items = []
         for item in payload.items:
-            item_resp = requests.get(
-                f"{quote_service.base_url}/items/{item.item_id}",
-                headers=headers,
-                params={"organization_id": quote_service.org_id},
-                timeout=15
-            )
-
-            if item_resp.status_code != 200:
-                raise HTTPException(400, f"Item fetch failed: {item.item_id}")
-
-            item_data = item_resp.json()["item"]
-
+            item_data = quote_service._get_item_cached(headers, item.item_id)
             line_items.append({
                 "item_id": item.item_id,
                 "quantity": item.quantity,
@@ -145,7 +133,6 @@ def create_quotes_for_vendors(
                 "name": item_data.get("name", "")
             })
 
-        # ✅ Base payload
         base_payload = {
             "customer_id": contact_id,
             "line_items": line_items,
@@ -154,10 +141,7 @@ def create_quotes_for_vendors(
 
         created_quotes = []
 
-        # 🔥 LOOP vendors → create quote per vendor
         for v in payload.vendors:
-
-            # ✅ Get vendor id
             if v.get("zoho_erp_id"):
                 supplier_id = v["zoho_erp_id"]
             else:
@@ -166,22 +150,18 @@ def create_quotes_for_vendors(
                     f"{v.get('firstname', '')} {v.get('lastname', '')}".strip()
                 )
 
-            # ✅ Attach supplier
-            payload_copy = base_payload.copy()
-            payload_copy["custom_fields"] = [
-                {
-                    "api_name": "cf_supplier",
-                    "value": supplier_id
-                }
-            ]
+            payload_copy = {
+                **base_payload,
+                # Include the RFQ custom field so quotes are consistently tagged
+                "custom_fields": [
+                    *quote_service._build_rfq_field(access_token),
+                    {"api_name": "cf_supplier", "value": supplier_id}
+                ]
+            }
 
-            # ✅ Create quote
             create_resp = requests.post(
                 f"{quote_service.base_url}/estimates",
-                headers={
-                    "Authorization": f"Zoho-oauthtoken {access_token}",
-                    "Content-Type": "application/json"
-                },
+                headers=headers,
                 params={"organization_id": quote_service.org_id},
                 json=payload_copy,
                 timeout=15
@@ -193,7 +173,12 @@ def create_quotes_for_vendors(
             estimate = create_resp.json()["estimate"]
             estimate_id = estimate["estimate_id"]
 
-            # ✅ Mark as sent
+            # Invalidate caches via the service so the list view stays consistent
+            quote_service._invalidate_quote_caches(
+                contact_id=contact_id,
+                estimate_id=estimate_id
+            )
+
             send_resp = requests.post(
                 f"{quote_service.base_url}/estimates/{estimate_id}/status/sent",
                 headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
@@ -217,7 +202,6 @@ def create_quotes_for_vendors(
 
     except HTTPException as e:
         raise e
-
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -382,12 +366,8 @@ def send_quote_with_supplier(
             email=current_user.email
         )
 
-        # Fetch updated quote
-        quote = quote_service.get_quote(
-            access_token=access_token,
-            estimate_id=estimate_id,
-            contact_id=current_user.email
-        )
+        # mark_estimate_as_sent_with_supplier now returns estimate_number —
+        # no extra get_quote fetch needed
 
     except HTTPException as e:
         raise e
@@ -400,9 +380,9 @@ def send_quote_with_supplier(
 
     return zohoschemas.QuoteResponse(
         message="Quote sent successfully",
-        estimate_id=quote["estimate_id"],
-        estimate_number=quote["estimate_number"],
-        status=quote["status"]
+        estimate_id=result.get("estimate_id"),
+        estimate_number=result.get("estimate_number", ""),
+        status=result.get("status")
     )
 # -----------------------------
 # Customer Approval
@@ -465,11 +445,7 @@ def decline_quote(estimate_id: str, current_user=Depends(get_current_user)):
             email=current_user.email
         )
 
-        quote = quote_service.get_quote(
-            access_token,
-            estimate_id,
-            current_user.email
-        )
+        # update_quote_status now returns estimate_number — no extra get_quote call needed
 
     except HTTPException as e:
         raise e
@@ -481,9 +457,9 @@ def decline_quote(estimate_id: str, current_user=Depends(get_current_user)):
 
     return zohoschemas.QuoteResponse(
         message="Quote declined successfully",
-        estimate_id=quote["estimate_id"],
-        estimate_number=quote["estimate_number"],
-        status=quote["status"]
+        estimate_id=result.get("estimate_id"),
+        estimate_number=result.get("estimate_number", ""),
+        status=result.get("status")
     )
 
 @router.put("/{estimate_id}/accept")
@@ -494,6 +470,28 @@ def accept_quote(
     access_token = get_zoho_access_token()
 
     try:
+        # Fetch the quote first to check current status and get estimate_number
+        quote = quote_service.get_quote(
+            access_token=access_token,
+            estimate_id=estimate_id,
+            contact_id=current_user.email
+        )
+
+        # Idempotency guard: if already accepted, a sales order may already exist.
+        # Attempt to find it before creating a new one to prevent duplicates on retry.
+        if quote.get("status", "").lower() == "accepted":
+            existing_so = sales_order_service._find_so_by_estimate_number(
+                access_token,
+                quote.get("estimate_number", "")
+            )
+            if existing_so:
+                return {
+                    "message": "Quote already accepted and Sales Order exists",
+                    "estimate_id": estimate_id,
+                    "salesorder_id": existing_so.get("salesorder_id"),
+                    "salesorder_number": existing_so.get("salesorder_number")
+                }
+
         result = quote_service.update_quote_status(
             access_token,
             estimate_id,

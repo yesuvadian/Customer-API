@@ -78,24 +78,32 @@ def upload_grn(
 @router.post("/{salesorder_id}/po", status_code=status.HTTP_201_CREATED)
 def upload_po(
     salesorder_id: str,
-    cf_customer_po_no: str = Form(...),   # ✅ ADD THIS
+    cf_customer_po_no: str = Form(...),
     file: UploadFile = File(...),
     current_user=Depends(get_current_user)
 ):
     access_token = get_zoho_access_token()
 
-    result = sales_order_service.upload_po_attachment(
-        access_token=access_token,
-        salesorder_id=salesorder_id,
-        file=file,
-        po_number=cf_customer_po_no,   # ✅ PASS THIS
-        uploaded_by=current_user.email
-    )
+    try:
+        result = sales_order_service.upload_po_attachment(
+            access_token=access_token,
+            salesorder_id=salesorder_id,
+            file=file,
+            po_number=cf_customer_po_no,
+            uploaded_by=current_user.email
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error uploading PO: {str(e)}"
+        )
 
     return {
         "message": "PO uploaded successfully",
         "salesorder_id": salesorder_id,
-        "po_number": cf_customer_po_no,   # ✅ optional but useful
+        "po_number": cf_customer_po_no,
         "file_name": file.filename
     }
 
@@ -503,7 +511,8 @@ def update_comment(salesorder_id: str, comment_id: str, payload: dict, current_u
             access_token=access_token,
             salesorder_id=salesorder_id,
             comment_id=comment_id,
-            description=desc
+            description=desc,
+            email=current_user.email
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating comment: {str(e)}")
