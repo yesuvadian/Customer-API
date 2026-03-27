@@ -60,6 +60,7 @@ from routers.customer_care import router as customer_care_router
 # Testing Request System
 from routers import testing_requests, testing, recommendations, approvals, procurement
 from routers import tester_locations
+from routers import org_test_templates
 
 # Optional: create all database tables (uncomment if needed)
 # Base.metadata.create_all(bind=engine)
@@ -177,6 +178,7 @@ app.include_router(recommendations.router)
 app.include_router(approvals.router)
 app.include_router(procurement.router)
 app.include_router(tester_locations.router)
+app.include_router(org_test_templates.router)
 
 # Optional: enable auto-create database tables at startup
 # @app.on_event("startup")

@@ -1328,3 +1328,31 @@ class ProcurementRequest(Base):
     raiser = relationship("User", foreign_keys=[raised_by])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
+
+
+# ------------------------------
+# OrgTestTemplate Model
+# ------------------------------
+class OrgTestTemplate(Base):
+    __tablename__ = "org_test_templates"
+    __table_args__ = (
+        UniqueConstraint("org_id", "template_key", name="uq_org_template_key"),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=True)   # NULL = global default
+    template_key = Column(String(100), nullable=False)
+    test_type_id = Column(Integer, nullable=True)            # soft ref to CategoryDetails.id
+    template_data = Column(JSONB, nullable=False)            # full template JSON
+    is_system = Column(Boolean, default=True)
+    version = Column(Integer, default=1)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])

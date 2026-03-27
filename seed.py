@@ -381,6 +381,7 @@ def seed_modules(session):
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 {"name": "Validation Requests", "description": "Create and manage validation requests", "path": "validation_requests", "group_name": "Testing"},
 {"name": "Tester Mapping", "description": "Map testers to locations (zone/circle/division)", "path": "tester_mapping", "group_name": "Testing"},
+{"name": "Test Template Management", "description": "Design and customise per-org test form templates", "path": "test_templates", "group_name": "Testing"},
 
     ]
 
@@ -458,7 +459,8 @@ def seed_privileges(session, role_ids, module_ids):
         "Invoices", "Retainer Invoices", "Payments Made", "Statements",
         "Enquiry", "Contact Us", "RQ with Vendor",
         # ✅ TESTING REQUEST SYSTEM MODULES
-        "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests"
+        "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests",
+        "Test Template Management"
     ]
 
     # -------------------------------------------------------
@@ -624,6 +626,9 @@ def seed_privileges(session, role_ids, module_ids):
             "can_delete": True, "can_search": True
         },
         {"role": "Originator", "module": "Tester Mapping", "can_view": True},
+
+        # TEST TEMPLATE MANAGEMENT — Originator view-only (Admin already gets full via bulk)
+        {"role": "Originator", "module": "Test Template Management", "can_view": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -1435,6 +1440,11 @@ def run_seed():
         seed_test_type_categories(session, master_ids)
         seed_tester_locations(session)
         seed_sample_testing_request(session)
+        # Provision global test templates from static dict
+        from services.org_test_template_service import OrgTestTemplateService
+        svc = OrgTestTemplateService(session)
+        n = svc.provision_global_defaults()
+        print(f"[OK] Provisioned {n} global test templates.")
         print("[OK] All seed data inserted successfully.")
 
 

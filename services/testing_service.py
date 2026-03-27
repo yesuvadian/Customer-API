@@ -162,16 +162,34 @@ class TestingService:
 
     # ─── Template & Structured Results ──────────────────────
 
-    def get_template(self, test_type_id: int) -> dict:
-        """Look up the form template for a given test type ID."""
-        from test_templates import get_template_for_test_type
+    def get_template(self, test_type_id: int, org_id=None) -> dict:
+        """
+        Return the form template for a test type.
+        Prefers OrgTestTemplate row (org-specific > global default).
+        Falls back to the static test_templates.py dict for backwards-compat.
+        """
         detail = self.db.query(CategoryDetails).filter(CategoryDetails.id == test_type_id).first()
         if not detail:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test type not found")
+
+        # Database-backed template (org-specific or global default)
+        from services.org_test_template_service import OrgTestTemplateService
+        from fastapi import HTTPException as FHE
+        svc = OrgTestTemplateService(self.db)
+        try:
+            tmpl = svc.get_for_test_type(test_type_id=test_type_id, org_id=org_id)
+            return tmpl.template_data
+        except FHE:
+            pass
+
+        # Fallback: static dict (legacy / before provisioning)
+        from test_templates import get_template_for_test_type
         template = get_template_for_test_type(detail.name)
         if not template:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                                detail=f"No template defined for test type: {detail.name}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No template defined for test type: {detail.name}",
+            )
         return template
 
     def create_structured_result(

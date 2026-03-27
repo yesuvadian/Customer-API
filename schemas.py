@@ -1201,3 +1201,31 @@ class ProcurementRequestResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==========================================
+# OrgTestTemplate Schemas
+# ==========================================
+
+class OrgTestTemplateCreate(BaseModel):
+    template_key: str
+    test_type_id: Optional[int] = None
+    template_data: dict
+    org_id: Optional[UUID] = None
+
+class OrgTestTemplateUpdate(BaseModel):
+    template_data: dict
+
+class OrgTestTemplateResponse(BaseModel):
+    id: UUID
+    org_id: Optional[UUID] = None
+    template_key: str
+    test_type_id: Optional[int] = None
+    template_data: dict
+    is_system: bool = True
+    version: int = 1
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
