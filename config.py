@@ -193,3 +193,11 @@ APP_ENV="production"
 DEBUG=False
 
 INTERNAL_SERVICE_SECRET=os.getenv("INTERNAL_SERVICE_SECRET", "super_vendor_secret_123")
+
+
+# ==============================
+# ZOHO BOOKS BILL CONFIGURATION
+# ==============================
+
+ZOHO_DEFAULT_VENDOR_ID = os.getenv("ZOHO_DEFAULT_VENDOR_ID")
+ZOHO_EXPENSE_ACCOUNT_ID = os.getenv("ZOHO_EXPENSE_ACCOUNT_ID")

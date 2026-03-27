@@ -264,6 +264,10 @@ class RequestPayment(BaseModel):
         None,
         description="Optional notes for payment"
     )
+    vendor_id: Optional[str] = Field(
+        None,
+        description="Zoho vendor ID to create bill for this specific vendor"
+    )
 
     @field_validator("invoices")
     @classmethod
@@ -306,6 +310,8 @@ class PaymentResponse(BaseModel):
     payment_number: str
     status: str
     message: Optional[str] = None
+    bill_id: Optional[str] = None      # added
+    bill_number: Optional[str] = None  # added
 
 
 class RequestQuoteEnquiry(BaseModel):

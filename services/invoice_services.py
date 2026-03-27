@@ -30,7 +30,7 @@ class InvoiceService:
                 f"{self.base_url}/items/{item.item_id}",
                 headers=headers,
                 params={"organization_id": self.org_id},
-                timeout=15
+                timeout=30
             )
             if item_response.status_code != 200:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
@@ -54,7 +54,7 @@ class InvoiceService:
             headers=headers,
             json=body,
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=30
         )
         if response.status_code != 201:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
@@ -67,10 +67,16 @@ class InvoiceService:
     
     def _invalidate_invoice_caches(self, contact_id: str | None = None, invoice_id: str | None = None):
         if contact_id:
-            cache.delete(f"zoho:invoices:{contact_id}")
-            cache.delete(f"zoho:dashboard:{contact_id}")
+            try:
+                cache.delete(f"zoho:invoices:{contact_id}")
+                cache.delete(f"zoho:dashboard:{contact_id}")
+            except:
+                pass  # Redis not available
         if invoice_id:
-            cache.delete(f"zoho:invoice:{invoice_id}")
+            try:
+                cache.delete(f"zoho:invoice:{invoice_id}")
+            except:
+                pass  # Redis not available
 
 
     # -----------------------------
@@ -78,11 +84,15 @@ class InvoiceService:
     # -----------------------------
     def list_invoices_for_customer(self, access_token: str, contact_id: str):
         contact_id = self._resolve_contact_id(contact_id)
-        cache_key = f"zoho:invoices:{contact_id}"
-
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
+        
+        # Skip Redis cache for now
+        # cache_key = f"zoho:invoices:{contact_id}"
+        # try:
+        #     cached = cache.get(cache_key)
+        #     if cached:
+        #         return cached
+        # except:
+        #     pass  # Redis not available
 
         headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
 
@@ -93,7 +103,7 @@ class InvoiceService:
                 "organization_id": self.org_id,
                 "customer_id": contact_id
             },
-            timeout=15
+            timeout=30
         )
 
         if response.status_code != 200:
@@ -107,12 +117,81 @@ class InvoiceService:
 
         invoices = response.json().get("invoices", [])
 
-        # MAP SALES ORDER NUMBER FROM ZOHO FIELD
+        # MAP SALES ORDER NUMBER AND FETCH VENDOR ID FROM PURCHASE ORDER
         for inv in invoices:
             inv["salesorder_number"] = inv.get("reference_number")
+            
+            # Try to get vendor_id from custom fields first
+            custom_field_hash = inv.get("custom_field_hash", {})
+            vendor_id = custom_field_hash.get("cf_vendor_id")
+            
+            # If not found in custom fields, try to get through PO chain
+            if not vendor_id:
+                so_number = inv.get("reference_number")
+                
+                if so_number:
+                    try:
+                        print(f"Fetching vendor for SO: {so_number}")
+                        
+                        # Fetch sales order by number
+                        so_response = requests.get(
+                            f"{self.base_url}/salesorders",
+                            headers=headers,
+                            params={
+                                "organization_id": self.org_id,
+                                "salesorder_number": so_number
+                            },
+                            timeout=30
+                        )
+                        
+                        if so_response.status_code == 200:
+                            sales_orders = so_response.json().get("salesorders", [])
+                            if sales_orders:
+                                so = sales_orders[0]
+                                
+                                # Check if sales order has vendor_id directly
+                                if so.get("vendor_id"):
+                                    vendor_id = so.get("vendor_id")
+                                    print(f"Found vendor_id in SO: {vendor_id}")
+                                else:
+                                    # Get purchase order number from sales order
+                                    po_number = so.get("purchaseorder_number")
+                                    if po_number:
+                                        print(f"Fetching PO: {po_number}")
+                                        
+                                        # Fetch purchase order to get vendor
+                                        po_response = requests.get(
+                                            f"{self.base_url}/purchaseorders",
+                                            headers=headers,
+                                            params={
+                                                "organization_id": self.org_id,
+                                                "purchaseorder_number": po_number
+                                            },
+                                            timeout=30
+                                        )
+                                        
+                                        if po_response.status_code == 200:
+                                            pos = po_response.json().get("purchaseorders", [])
+                                            if pos:
+                                                vendor_id = pos[0].get("vendor_id")
+                                                print(f"Found vendor_id in PO: {vendor_id}")
+                                    else:
+                                        print(f"No PO number found in SO: {so_number}")
+                            else:
+                                print(f"No sales orders found for: {so_number}")
+                        else:
+                            print(f"SO fetch failed: {so_response.status_code}")
+                            
+                    except Exception as e:
+                        print(f"Error fetching vendor from PO chain for {so_number}: {e}")
+            
+            inv["vendor_id"] = vendor_id
 
-        # CACHE RESULT
-        cache.set(cache_key, invoices)
+        # Skip Redis cache set
+        # try:
+        #     cache.set(cache_key, invoices)
+        # except:
+        #     pass
 
         return invoices
 
@@ -122,18 +201,22 @@ class InvoiceService:
     # -----------------------------
     def get_invoice(self, access_token: str, invoice_id: str, contact_id: str):
         contact_id = self._resolve_contact_id(contact_id)
-        cache_key = f"zoho:invoice:{invoice_id}"
-
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
+        
+        # Skip Redis cache for now
+        # cache_key = f"zoho:invoice:{invoice_id}"
+        # try:
+        #     cached = cache.get(cache_key)
+        #     if cached:
+        #         return cached
+        # except:
+        #     pass
 
         headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
         response = requests.get(
             f"{self.base_url}/invoices/{invoice_id}",
             headers=headers,
             params={"organization_id": self.org_id, "customer_id": contact_id},
-            timeout=15
+            timeout=30
         )
 
         if response.status_code != 200:
@@ -146,7 +229,20 @@ class InvoiceService:
             )
 
         invoice = response.json().get("invoice", {})
-        cache.set(cache_key, invoice)
+        
+        # ADD VENDOR ID FROM CUSTOM FIELDS for single invoice as well
+        custom_field_hash = invoice.get("custom_field_hash", {})
+        vendor_id = custom_field_hash.get("cf_vendor_id")
+        if not vendor_id:
+            vendor_id = custom_field_hash.get("vendor_id")
+        invoice["vendor_id"] = vendor_id
+        
+        # Skip Redis cache set
+        # try:
+        #     cache.set(cache_key, invoice)
+        # except:
+        #     pass
+        
         return invoice
 
 
@@ -162,7 +258,7 @@ class InvoiceService:
             headers=headers,
             json=body,
             params={"organization_id": self.org_id, "customer_id": contact_id},
-            timeout=15
+            timeout=30
         )
         
         if response.status_code != 200:
@@ -185,7 +281,7 @@ class InvoiceService:
             headers=headers,
             json=body,
             params={"organization_id": self.org_id, "customer_id": contact_id},
-            timeout=15
+            timeout=30
         )
         if response.status_code != 200:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
@@ -219,6 +315,7 @@ class InvoiceService:
             )
 
         return response.content  # raw PDF bytes
+    
     # ----------------------------------------------
     # GET COMMENTS FOR INVOICE
     # ----------------------------------------------
@@ -229,7 +326,7 @@ class InvoiceService:
             f"{self.base_url}/invoices/{invoice_id}/comments",
             headers=headers,
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=30
         )
 
         if resp.status_code != 200:
@@ -249,8 +346,6 @@ class InvoiceService:
             description = c.get("description", "")
             if "[CUSTOM_META]" not in description:
                 continue
-            # 🔴 EXCLUDE SYSTEM COMMENTS
-           
 
             result.append({
                 "comment_id": c.get("comment_id", ""),
@@ -268,8 +363,6 @@ class InvoiceService:
         return result
 
 
-
-
     # ----------------------------------------------
     # ADD NEW COMMENT
     # ----------------------------------------------
@@ -285,7 +378,6 @@ class InvoiceService:
             "Content-Type": "application/json"
         }
 
-        # Centralized meta handling (email → contact → meta)
         meta_block = build_comment_meta(email=email)
 
         payload = {
@@ -297,7 +389,7 @@ class InvoiceService:
             headers=headers,
             params={"organization_id": self.org_id},
             json=payload,
-            timeout=15
+            timeout=30
         )
 
         if resp.status_code not in (200, 201):
@@ -310,7 +402,6 @@ class InvoiceService:
             )
 
         return resp.json()
-
 
 
     # ----------------------------------------------
@@ -327,7 +418,7 @@ class InvoiceService:
             headers=headers,
             params={"organization_id": self.org_id},
             json=payload,
-            timeout=15
+            timeout=30
         )
 
         if resp.status_code != 200:
@@ -352,7 +443,7 @@ class InvoiceService:
             f"{self.base_url}/invoices/{invoice_id}/comments/{comment_id}",
             headers=headers,
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=30
         )
 
         if resp.status_code != 200:
@@ -372,7 +463,7 @@ class InvoiceService:
             f"{self.base_url}/invoices/{invoice_id}",
             headers=headers,
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=30
         )
 
         if resp.status_code != 200:

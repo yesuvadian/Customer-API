@@ -19,6 +19,7 @@ def create_payment(payload: zohoschemas.RequestPayment, current_user=Depends(get
     """
     Create Customer Payment:
     - Records a payment against an invoice in Zoho Books
+    - Creates a corresponding bill in Zoho Books
     """
     access_token = get_zoho_access_token()
     try:
@@ -32,7 +33,9 @@ def create_payment(payload: zohoschemas.RequestPayment, current_user=Depends(get
         message="Payment created successfully",
         payment_id=payment["payment_id"],
         payment_number=payment["payment_number"],
-        status=payment["payment_status"]
+        status=payment["payment_status"],
+        bill_id=payment.get("bill", {}).get("bill_id"),
+        bill_number=payment.get("bill", {}).get("bill_number")
     )
 
 
@@ -118,6 +121,8 @@ def approve_payment(payment_id: str, payload: zohoschemas.ApprovePayment, curren
         payment_number=result["payment_number"],
         status=result["status"]
     )
+
+
 @router.get("/payment/{payment_id}/pdf", status_code=status.HTTP_200_OK)
 def get_payment_pdf(payment_id: str, current_user=Depends(get_current_user)):
     access_token = get_zoho_access_token()
