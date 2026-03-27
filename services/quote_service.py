@@ -29,6 +29,34 @@ class QuoteService:
         if estimate_id:
             cache.delete(f"zoho:quote:{estimate_id}")
 
+    def _get_item_cached(self, headers: dict, item_id: str) -> dict:
+        """Fetch a Zoho item with a 1-hour cache. Items rarely change,
+        so this collapses N serial calls to 0 on repeat quote creation."""
+        cache_key = f"zoho:item:{item_id}"
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        resp = requests.get(
+            f"{self.base_url}/items/{item_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to fetch item {item_id}",
+                    "zoho_response": resp.json()
+                }
+            )
+
+        item = resp.json().get("item", {})
+        cache.set(cache_key, item, ttl=3600)
+        return item
+
     # -------------------------------------------------
     # Utility
     # -------------------------------------------------
@@ -149,25 +177,14 @@ class QuoteService:
         contact_id = self._resolve_contact_id(payload.contact_id)
         line_items = []
 
-        # Fetch item details from Zoho
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        # Use cached item fetches — collapses N Zoho calls to 0 on repeat catalog items
         for item in payload.items:
-            item_resp = requests.get(
-                f"{self.base_url}/items/{item.item_id}",
-                headers=headers,
-                params={"organization_id": self.org_id},
-                timeout=15
-            )
-
-            if item_resp.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "message": f"Failed to fetch item {item.item_id}",
-                        "zoho_response": item_resp.json()
-                    }
-                )
-
-            item_data = item_resp.json()["item"]
+            item_data = self._get_item_cached(headers, item.item_id)
 
             line_items.append({
                 "item_id": item.item_id,
@@ -535,9 +552,17 @@ class QuoteService:
                 }
             )
 
+        # Resolve estimate_number from cache or a single lightweight fetch
+        try:
+            quote = self.get_quote(access_token, estimate_id, contact_id="")
+            estimate_number = quote.get("estimate_number", "")
+        except Exception:
+            estimate_number = ""
+
         return {
             "message": data.get("message", "Estimate marked as sent"),
             "estimate_id": estimate_id,
+            "estimate_number": estimate_number,
             "status": "sent",
             "supplier_id": supplier_id
         }
@@ -567,9 +592,18 @@ class QuoteService:
         if response.status_code != 200 or data.get("code") != 0:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, data)
 
+        # Fetch the estimate_number so callers don't need an extra get_quote call.
+        # We use the cache-aware get_quote to avoid a raw Zoho hit when possible.
+        try:
+            quote = self.get_quote(access_token, estimate_id, contact_id="")
+            estimate_number = quote.get("estimate_number", "")
+        except Exception:
+            estimate_number = ""
+
         return {
             "message": data.get("message"),
             "estimate_id": estimate_id,
+            "estimate_number": estimate_number,
             "status": action
         }
 

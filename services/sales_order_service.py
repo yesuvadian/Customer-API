@@ -29,7 +29,7 @@ class SalesOrderService:
         po_number: str,
         uploaded_by: str | None = None
     ):
-        # ✅ Fetch current order status properly
+        # Single fetch — reused by both validation and helper calls below
         salesorder = self._get_order_status(access_token, salesorder_id)
         self._validate_status_for_po(salesorder.get("status"))
 
@@ -101,6 +101,7 @@ class SalesOrderService:
         file: UploadFile,
         uploaded_by: str | None = None
     ):
+        # Single fetch — reused by validation and filename building below
         salesorder = self._get_order_status(access_token, salesorder_id)
         self._validate_status_for_grn(salesorder)
 
@@ -202,18 +203,19 @@ class SalesOrderService:
         file: UploadFile,
         uploaded_by: str | None = None
     ):
-        # 1️⃣ Fetch order
+        # 1️⃣ Fetch order once — passed into helpers to avoid re-fetching
         salesorder = self._get_order_status(access_token, salesorder_id)
 
         # 2️⃣ Validate GRN rules
         self._validate_status_for_grn(salesorder)
 
-        # 3️⃣ Delete old GRN file (if exists)
+        # 3️⃣ Delete old GRN file (if exists) — pass salesorder to avoid re-fetch
         try:
             self.delete_attachment_by_prefix(
                 access_token=access_token,
                 salesorder_id=salesorder_id,
-                prefix="_grn"
+                prefix="_grn",
+                salesorder=salesorder
             )
         except HTTPException:
             # Ignore if no file exists
@@ -331,27 +333,29 @@ class SalesOrderService:
 
         return response.json()
 
-    def get_grn_data(self, access_token: str, salesorder_id: str, contact_id: str):
+    def get_grn_data(self, access_token: str, salesorder_id: str, contact_id: str, salesorder: dict | None = None):
         contact_id = self._resolve_contact_id(contact_id)
 
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
+        # Re-use already-fetched salesorder if provided — avoids an extra GET
+        if salesorder is None:
+            headers = {
+                "Authorization": f"Zoho-oauthtoken {access_token}"
+            }
 
-        response = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={
-                "organization_id": self.org_id,
-                "customer_id": contact_id
-            },
-            timeout=15
-        )
+            response = requests.get(
+                f"{self.base_url}/salesorders/{salesorder_id}",
+                headers=headers,
+                params={
+                    "organization_id": self.org_id,
+                    "customer_id": contact_id
+                },
+                timeout=15
+            )
 
-        if response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to fetch sales order")
+            if response.status_code != 200:
+                raise HTTPException(status_code=400, detail="Failed to fetch sales order")
 
-        salesorder = response.json().get("salesorder", {})
+            salesorder = response.json().get("salesorder", {})
 
         # 1️⃣ Extract GRN number
         grn_number = ""
@@ -382,6 +386,13 @@ class SalesOrderService:
         }
 
     def _get_order_status(self, access_token: str, salesorder_id: str) -> dict:
+        # Short-lived cache (60s) collapses duplicate fetches within a single
+        # request lifecycle (upload_po → validate → get_attachment_pdf_by_prefix etc.)
+        cache_key = f"zoho:salesorder:{salesorder_id}"
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
@@ -402,6 +413,10 @@ class SalesOrderService:
         salesorder = response.json().get("salesorder", {})
 
         print("🔥 status:", salesorder.get("status"))
+
+        # Cache with a 60-second TTL — short enough to reflect status changes,
+        # long enough to serve multiple helper calls within one request
+        cache.set(cache_key, salesorder, ttl=60)
         return salesorder
 
     def _validate_status_for_po(self, order_status: str | None):
@@ -441,24 +456,17 @@ class SalesOrderService:
         self,
         access_token: str,
         salesorder_id: str,
-        prefix: str
+        prefix: str,
+        salesorder: dict | None = None
     ):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # Step 1: Fetch sales order
-        response = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
+        # Re-use already-fetched salesorder if provided — avoids an extra GET
+        if salesorder is None:
+            salesorder = self._get_order_status(access_token, salesorder_id)
 
-        if response.status_code != 200:
-            raise HTTPException(status_code=404, detail="Sales order not found")
-
-        salesorder = response.json().get("salesorder", {})
         documents = salesorder.get("documents", [])
 
         document_id = None
@@ -526,24 +534,17 @@ class SalesOrderService:
         self,
         access_token: str,
         salesorder_id: str,
-        prefix: str
+        prefix: str,
+        salesorder: dict | None = None
     ):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # 1️⃣ Fetch sales order to get documents
-        response = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
+        # Re-use already-fetched salesorder if provided — avoids an extra GET
+        if salesorder is None:
+            salesorder = self._get_order_status(access_token, salesorder_id)
 
-        if response.status_code != 200:
-            raise HTTPException(status_code=404, detail="Sales order not found")
-
-        salesorder = response.json().get("salesorder", {})
         documents = salesorder.get("documents", [])
 
         document_id = None
@@ -603,9 +604,6 @@ class SalesOrderService:
 
         return {"message": "Attachment deleted successfully"}
 
-    # -------------------------------------------------
-    # Cache helpers
-    # -------------------------------------------------
     def _invalidate_salesorder_caches(
         self,
         contact_id: str | None = None,
@@ -617,6 +615,27 @@ class SalesOrderService:
 
         if salesorder_id:
             cache.delete(f"zoho:salesorder:{salesorder_id}")
+
+    # -------------------------------------------------
+    # Extract supplier from custom_fields already in hand
+    # Avoids an extra GET /salesorders/{id} call
+    # -------------------------------------------------
+    def _extract_supplier_from_custom_fields(self, custom_fields: list) -> dict:
+        supplier_details = None
+
+        for field in custom_fields:
+            if field.get("api_name") == "cf_supplier_details":
+                supplier_details = field.get("value")
+                break
+
+        if not supplier_details:
+            return {"company_name": "No Supplier", "address": ""}
+
+        lines = supplier_details.split("\n")
+        return {
+            "company_name": lines[0] if lines else "",
+            "address": "\n".join(lines[1:]) if len(lines) > 1 else ""
+        }
 
     # -------------------------------------------------
     # Utility
@@ -639,24 +658,14 @@ class SalesOrderService:
         contact_id = self._resolve_contact_id(payload.contact_id)
         line_items = []
 
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        # Use cached item fetches — collapses N Zoho calls to 0 on repeat catalog items
         for item in payload.items:
-            item_resp = requests.get(
-                f"{self.base_url}/items/{item.item_id}",
-                headers=headers,
-                params={"organization_id": self.org_id},
-                timeout=15
-            )
-
-            if item_resp.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "message": f"Failed to fetch item {item.item_id}",
-                        "zoho_response": item_resp.json()
-                    }
-                )
-
-            item_data = item_resp.json()["item"]
+            item_data = self._get_item_cached(headers, item.item_id)
             line_items.append({
                 "item_id": item.item_id,
                 "quantity": item.quantity,
@@ -724,12 +733,12 @@ class SalesOrderService:
 
         orders = response.json().get("salesorders", [])
 
+        # Extract supplier details inline from already-fetched custom_fields
+        # instead of calling get_supplier_details() which re-fetches each order
         for order in orders:
-            supplier_data = self.get_supplier_details(
-                access_token,
-                order.get("salesorder_id")
+            order["supplier"] = self._extract_supplier_from_custom_fields(
+                order.get("custom_fields", [])
             )
-            order["supplier"] = supplier_data
 
         cache.set(cache_key, orders)
         return orders
@@ -756,12 +765,10 @@ class SalesOrderService:
 
         salesorder = response.json().get("salesorder", {})
 
-        supplier_data = self.get_supplier_details(
-            access_token,
-            salesorder_id
+        # Extract supplier inline from already-fetched data — no extra API call needed
+        salesorder["supplier"] = self._extract_supplier_from_custom_fields(
+            salesorder.get("custom_fields", [])
         )
-
-        salesorder["supplier"] = supplier_data
 
         return salesorder
 
@@ -934,17 +941,22 @@ class SalesOrderService:
         access_token: str,
         salesorder_id: str,
         comment_id: str,
-        description: str
+        description: str,
+        email: str | None = None
     ):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
             "Content-Type": "application/json"
         }
 
+        # Re-attach the meta block so the comment stays visible after editing.
+        # Without this, get_comments() filters it out (requires [CUSTOM_META]).
+        meta_block = build_comment_meta(email=email)
+
         response = requests.put(
             f"{self.base_url}/salesorders/{salesorder_id}/comments/{comment_id}",
             headers=headers,
-            json={"description": description},
+            json={"description": meta_block + description},
             params={"organization_id": self.org_id},
             timeout=15
         )
@@ -1017,24 +1029,22 @@ class SalesOrderService:
         if salesorder.get("customer_id") != contact_id:
             raise HTTPException(status_code=403, detail="Unauthorized access")
 
-        # 2️⃣ Fetch packages separately
+        # 2️⃣ Fetch packages filtered by salesorder_id — avoids loading all org packages
+        # and silently truncating at Zoho's pagination limit
         pkg_resp = requests.get(
             f"{self.base_url}/packages",
             headers=headers,
-            params={"organization_id": self.org_id},
+            params={
+                "organization_id": self.org_id,
+                "salesorder_id": salesorder_id
+            },
             timeout=15
         )
 
         if pkg_resp.status_code != 200:
             raise HTTPException(status_code=400, detail=pkg_resp.text)
 
-        all_packages = pkg_resp.json().get("packages", [])
-
-        # 3️⃣ Filter packages for this salesorder
-        related_packages = [
-            p for p in all_packages
-            if p.get("salesorder_id") == salesorder_id
-        ]
+        related_packages = pkg_resp.json().get("packages", [])
 
         if not related_packages:
             return {"message": "No shipment created for this Sales Order"}
@@ -1338,6 +1348,58 @@ class SalesOrderService:
             "message": "Purchase Order created with user uploaded PO attachment",
             "purchaseorder_id": po_id
         }
+
+    def _find_so_by_estimate_number(self, access_token: str, estimate_number: str) -> dict | None:
+        """Look up an existing sales order by its reference_number (= estimate_number).
+        Used by accept_quote to guard against duplicate sales order creation on retry."""
+        if not estimate_number:
+            return None
+
+        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+        resp = requests.get(
+            f"{self.base_url}/salesorders",
+            headers=headers,
+            params={
+                "organization_id": self.org_id,
+                "reference_number": estimate_number
+            },
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            return None
+
+        orders = resp.json().get("salesorders", [])
+        return orders[0] if orders else None
+
+    def _get_item_cached(self, headers: dict, item_id: str) -> dict:
+        """Fetch a Zoho item with a 1-hour cache. Items rarely change,
+        so this collapses N serial calls to 0 on repeat order/quote creation."""
+        cache_key = f"zoho:item:{item_id}"
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        resp = requests.get(
+            f"{self.base_url}/items/{item_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to fetch item {item_id}",
+                    "zoho_response": resp.json()
+                }
+            )
+
+        item = resp.json().get("item", {})
+        cache.set(cache_key, item, ttl=3600)
+        return item
 
     def _find_po_by_salesorder(self, access_token: str, salesorder_number: str):
         headers = {
