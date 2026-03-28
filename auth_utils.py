@@ -138,7 +138,7 @@ def get_registration_user(token: str = Depends(oauth2_scheme)) -> str:
         )
 def build_user_privileges(db: Session, user_id) -> dict:
     """
-    Build the merged privilege dict for a user from all their roles.
+    Build the merged privilege dict for a user from all their roles (old + org system).
     Returns: { "ModuleName": { "can_view": bool, ... , "is_active": bool }, ... }
     """
     modules_map = {
@@ -151,41 +151,91 @@ def build_user_privileges(db: Session, user_id) -> dict:
 
     filtered_privileges = {}
 
-    raw_privs = db.query(RoleModulePrivilege).filter(
-        RoleModulePrivilege.role_id.in_(
-            [r.role_id for r in db.query(UserRole).filter_by(user_id=user_id)]
-        )
-    ).all()
+    # Old role system privileges (try-except in case table doesn't exist)
+    try:
+        raw_privs = db.query(RoleModulePrivilege).filter(
+            RoleModulePrivilege.role_id.in_(
+                [r.role_id for r in db.query(UserRole).filter_by(user_id=user_id)]
+            )
+        ).all()
 
-    for priv in raw_privs:
-        module_info = modules_map.get(priv.module_id)
-        if not module_info:
-            continue
+        for priv in raw_privs:
+            module_info = modules_map.get(priv.module_id)
+            if not module_info:
+                continue
 
-        mod_name = module_info["name"]
+            mod_name = module_info["name"]
 
-        if mod_name not in filtered_privileges:
-            filtered_privileges[mod_name] = {
-                "can_view": False,
-                "can_add": False,
-                "can_edit": False,
-                "can_delete": False,
-                "can_search": False,
-                "can_import": False,
-                "can_export": False,
-                "is_active": module_info["is_active"],  # 🔥 IMPORTANT
-            }
+            if mod_name not in filtered_privileges:
+                filtered_privileges[mod_name] = {
+                    "can_view": False,
+                    "can_add": False,
+                    "can_edit": False,
+                    "can_delete": False,
+                    "can_search": False,
+                    "can_import": False,
+                    "can_export": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "is_active": module_info["is_active"],
+                }
 
-        for key in [
-            "can_view",
-            "can_add",
-            "can_edit",
-            "can_delete",
-            "can_search",
-            "can_import",
-            "can_export",
-        ]:
-            filtered_privileges[mod_name][key] |= getattr(priv, key)
+            for key in [
+                "can_view",
+                "can_add",
+                "can_edit",
+                "can_delete",
+                "can_search",
+                "can_import",
+                "can_export",
+            ]:
+                filtered_privileges[mod_name][key] |= getattr(priv, key, False)
+    except Exception as e:
+        print(f"[INFO] Old role system not available in build_user_privileges: {e}")
+        db.rollback()
+
+    # New organization role system privileges
+    from models import OrgUserRole, OrgRolePermission
+    org_user_roles = db.query(OrgUserRole).filter_by(user_id=user_id, is_active=True).all()
+    if org_user_roles:
+        org_role_ids = [ur.org_role_id for ur in org_user_roles]
+        org_privs = db.query(OrgRolePermission).filter(
+            OrgRolePermission.org_role_id.in_(org_role_ids)
+        ).all()
+
+        for priv in org_privs:
+            module_info = modules_map.get(priv.module_id)
+            if not module_info:
+                continue
+
+            mod_name = module_info["name"]
+
+            if mod_name not in filtered_privileges:
+                filtered_privileges[mod_name] = {
+                    "can_view": False,
+                    "can_add": False,
+                    "can_edit": False,
+                    "can_delete": False,
+                    "can_search": False,
+                    "can_import": False,
+                    "can_export": False,
+                    "can_approve": False,
+                    "can_assign": False,
+                    "is_active": module_info["is_active"],
+                }
+
+            # Merge org role permissions (OR logic)
+            for key in [
+                "can_view",
+                "can_add",
+                "can_edit",
+                "can_delete",
+                "can_import",
+                "can_export",
+                "can_approve",
+                "can_assign",
+            ]:
+                filtered_privileges[mod_name][key] |= getattr(priv, key, False)
 
     return filtered_privileges
 
@@ -264,16 +314,22 @@ def login_user(db: Session, email: str, password: str):
                 detail="Invalid credentials"
             )
 
-        # Step 6: Load roles
-        role_ids = [r.role_id for r in db.query(UserRole).filter_by(user_id=user.id).all()]
-        if not role_ids:
+        # Step 6: Load roles from organization role system
+        from models import OrgUserRole, OrgRole
+
+        role_names = []
+        org_user_roles = db.query(OrgUserRole).filter_by(user_id=user.id, is_active=True).all()
+        if org_user_roles:
+            org_role_ids = [ur.org_role_id for ur in org_user_roles]
+            org_roles = db.query(OrgRole).filter(OrgRole.id.in_(org_role_ids)).all()
+            role_names = [r.name for r in org_roles]
+
+        # Check if user has at least one role
+        if not role_names:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User has no roles assigned. Contact administrator."
             )
-
-        roles = db.query(Role).filter(Role.id.in_(role_ids)).all()
-        role_names = [r.name for r in roles]
 
         # -------------------------------------------------------
         # Step 7: Privileges (uses shared helper)
@@ -306,6 +362,7 @@ def login_user(db: Session, email: str, password: str):
                 "email_confirmed": user.email_confirmed,
                 "phone_confirmed": user.phone_confirmed,
                 "usertype": user.usertype,
+                "organization_id": str(user.organization_id) if user.organization_id else None,
                 "cts": UTCDateTimeMixin._make_aware(user.cts),
                 "mts": UTCDateTimeMixin._make_aware(user.mts),
                 "roles": role_names,

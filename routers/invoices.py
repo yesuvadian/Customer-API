@@ -234,7 +234,8 @@ def update_invoice_comment(
     access_token = get_zoho_access_token()
     try:
         updated = invoice_service.update_invoice_comment(
-            access_token, invoice_id, comment_id, payload
+            access_token, invoice_id, comment_id, payload,
+            email=current_user.email
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating comment: {str(e)}")

@@ -36,6 +36,8 @@ class TestingRequestService:
             serial_number=data.get("serial_number"),
             equipment_type_id=data.get("equipment_type_id"),
             test_type_id=data.get("test_type_id"),
+            organization_id=data.get("organization_id"),
+            department_id=data.get("department_id"),
             zone=data.get("zone"),
             ce_circle=data.get("ce_circle"),
             se_division=data.get("se_division"),
@@ -69,6 +71,7 @@ class TestingRequestService:
         status_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
+        organization_id: Optional[UUID] = None,
     ) -> List[TestingRequest]:
         query = self.db.query(TestingRequest)
         if status_filter:
@@ -77,6 +80,8 @@ class TestingRequestService:
             query = query.filter(TestingRequest.originator_id == originator_id)
         if tester_id:
             query = query.filter(TestingRequest.assigned_tester_id == tester_id)
+        if organization_id:
+            query = query.filter(TestingRequest.organization_id == organization_id)
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
 
     def get_requests_for_user(
@@ -160,10 +165,13 @@ class TestingRequestService:
         self.db.refresh(request)
         return request
 
-    def get_stats(self, user_id: UUID = None) -> dict:
+    def get_stats(self, user_id: UUID = None, organization_id: UUID = None) -> dict:
         """Return counts by testing request status."""
         query = self.db.query(TestingRequest)
-        if user_id:
+        if organization_id:
+            query = query.filter(TestingRequest.organization_id == organization_id)
+        elif user_id:
+            # Fallback for backward compatibility
             query = query.filter(
                 or_(
                     TestingRequest.originator_id == user_id,

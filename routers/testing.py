@@ -25,6 +25,25 @@ router = APIRouter(
 )
 
 
+def _enrich(req):
+    """Attach computed display names to ORM object for tester workflow."""
+    req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
+    req.equipment_name = req.equipment_type.name if req.equipment_type else None  # Alias for Flutter
+    req.test_type_name = req.test_type.name if req.test_type else None
+    req.department_name = req.department.name if req.department else None
+    if req.originator:
+        req.originator_name = f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip() or req.originator.email
+        req.requester_email = req.originator.email  # For Flutter UI
+    else:
+        req.originator_name = None
+        req.requester_email = None
+    if req.assigned_tester:
+        req.assigned_tester_name = f"{req.assigned_tester.firstname or ''} {req.assigned_tester.lastname or ''}".strip() or req.assigned_tester.email
+    else:
+        req.assigned_tester_name = None
+    return req
+
+
 @router.get("/my-assignments", response_model=List[TestingRequestResponse])
 def get_my_assignments(
     skip: int = Query(0, ge=0),
@@ -33,7 +52,8 @@ def get_my_assignments(
     current_user: User = Depends(get_current_user),
 ):
     service = TestingService(db)
-    return service.get_my_assignments(tester_id=current_user.id, skip=skip, limit=limit)
+    assignments = service.get_my_assignments(tester_id=current_user.id, skip=skip, limit=limit)
+    return [_enrich(req) for req in assignments]
 
 
 @router.put("/{request_id}/accept", response_model=TestingRequestResponse)
@@ -43,7 +63,8 @@ def accept_assignment(
     current_user: User = Depends(get_current_user),
 ):
     service = TestingService(db)
-    return service.accept_assignment(request_id, tester_id=current_user.id)
+    req = service.accept_assignment(request_id, tester_id=current_user.id)
+    return _enrich(req)
 
 
 @router.put("/{request_id}/start", response_model=TestingRequestResponse)
@@ -53,7 +74,8 @@ def start_testing(
     current_user: User = Depends(get_current_user),
 ):
     service = TestingService(db)
-    return service.start_testing(request_id, tester_id=current_user.id)
+    req = service.start_testing(request_id, tester_id=current_user.id)
+    return _enrich(req)
 
 
 @router.get("/{request_id}/results")
@@ -114,11 +136,12 @@ def submit_test_results(
     current_user: User = Depends(get_current_user),
 ):
     service = TestingService(db)
-    return service.submit_test_results(
+    req = service.submit_test_results(
         request_id,
         tester_id=current_user.id,
         replacement_products=body.replacement_products if body else None,
     )
+    return _enrich(req)
 
 
 # ─── Template & Structured Results ──────────────────────────

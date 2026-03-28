@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import (
     Column, Float, LargeBinary, Numeric, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
 )
-from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB
+from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB, ARRAY
 from sqlalchemy.orm import relationship
 from database import Base
 from utils.common_service import UTCDateTimeMixin
@@ -44,6 +44,7 @@ class BankStatusEnum(PyEnum):
 class TestingRequestStatus(PyEnum):
     draft = "draft"
     submitted = "submitted"
+    pending_approval = "pending_approval"
     assigned = "assigned"
     accepted = "accepted"
     in_progress = "in_progress"
@@ -83,6 +84,289 @@ class Plan(Base):
         back_populates="plan",
         foreign_keys=lambda: [User.plan_id]
     )
+    # Relationship: one plan can have many organizations
+    organizations = relationship(
+        "Organization",
+        back_populates="plan",
+        foreign_keys=lambda: [Organization.plan_id]
+    )
+
+
+# ------------------------------
+# Organization Model
+# ------------------------------
+class Organization(Base):
+    __tablename__ = "organizations"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    code = Column(String(50), unique=True, nullable=False)
+    display_name = Column(String(255))
+
+    organization_type = Column(String(50))  # "vendor", "customer", "partner", "internal"
+    industry = Column(String(100))
+    website = Column(String(255))
+
+    is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False)
+
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
+    subscription_start_date = Column(DateTime(timezone=True))
+    subscription_end_date = Column(DateTime(timezone=True))
+
+    primary_email = Column(String(255))
+    primary_phone = Column(String(50))
+
+    # Address fields
+    address = Column(Text)
+    city = Column(String(100))
+    state = Column(String(100))
+    country = Column(String(100))
+    pincode = Column(String(20))
+
+    settings = Column(JSONB, default={})
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True))
+    erp_error_message = Column(Text)
+    erp_external_id = Column(String(255))
+
+    # Relationships
+    plan = relationship("Plan", back_populates="organizations", foreign_keys=[plan_id])
+    users = relationship("User", back_populates="organization", foreign_keys=lambda: [User.organization_id])
+    department_types = relationship("OrgDepartmentType", back_populates="organization", cascade="all, delete-orphan")
+    departments = relationship("OrgDepartment", back_populates="organization", cascade="all, delete-orphan")
+    roles = relationship("OrgRole", back_populates="organization", cascade="all, delete-orphan")
+    invitations = relationship("OrgInvitation", back_populates="organization", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Organization Department Type Model
+# ------------------------------
+class OrgDepartmentType(Base):
+    __tablename__ = "org_department_types"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "type_code", name="uq_org_dept_type_code"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+
+    type_name = Column(String(100), nullable=False)
+    type_code = Column(String(50), nullable=False)
+    description = Column(Text)
+    icon = Column(String(100))
+    color = Column(String(50))
+    display_order = Column(Integer, default=0)
+
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", back_populates="department_types")
+
+
+# ------------------------------
+# Organization Department Model
+# ------------------------------
+class OrgDepartment(Base):
+    __tablename__ = "org_departments"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_org_dept_name"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+
+    name = Column(String(255), nullable=False)
+    code = Column(String(100))
+    description = Column(Text)
+
+    parent_department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"))
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
+
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    erp_sync_status = Column(String(10), default="pending")
+    erp_last_sync_at = Column(DateTime(timezone=True))
+    erp_error_message = Column(Text)
+    erp_external_id = Column(String(255))
+
+    # Relationships
+    organization = relationship("Organization", back_populates="departments")
+    users = relationship("User", back_populates="department", foreign_keys=lambda: [User.department_id])
+    manager = relationship("User", foreign_keys=[manager_id], post_update=True)
+    parent_department = relationship("OrgDepartment", remote_side=[id], foreign_keys=[parent_department_id])
+    sub_departments = relationship("OrgDepartment", back_populates="parent_department", foreign_keys=[parent_department_id], remote_side=[parent_department_id])
+    user_roles = relationship("OrgUserRole", back_populates="department", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Organization Role Model
+# ------------------------------
+class OrgRole(Base):
+    __tablename__ = "org_roles"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_org_role_name"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+
+    name = Column(String(100), nullable=False)
+    description = Column(Text)
+    role_type = Column(String(50), default="custom")  # "default", "custom", "system"
+
+    is_org_admin = Column(Boolean, default=False)
+    is_dept_admin = Column(Boolean, default=False)
+    is_tester_assignable = Column(Boolean, default=False)  # Can this role be assigned as tester in testing requests
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", back_populates="roles")
+    user_roles = relationship("OrgUserRole", back_populates="org_role", cascade="all, delete-orphan")
+    permissions = relationship("OrgRolePermission", back_populates="org_role", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Organization User Role Model
+# ------------------------------
+class OrgUserRole(Base):
+    __tablename__ = "org_user_roles"
+    __table_args__ = (
+        UniqueConstraint("user_id", "org_role_id", "department_id", name="uq_user_org_role"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
+    org_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="CASCADE"))
+
+    assigned_at = Column(DateTime(timezone=True), server_default=func.now())
+    assigned_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
+    is_active = Column(Boolean, default=True)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id], back_populates="org_user_roles")
+    org_role = relationship("OrgRole", back_populates="user_roles")
+    department = relationship("OrgDepartment", back_populates="user_roles", foreign_keys=[department_id])
+    assigner = relationship("User", foreign_keys=[assigned_by], post_update=True)
+
+
+# ------------------------------
+# Organization Role Permission Model
+# ------------------------------
+class OrgRolePermission(Base):
+    __tablename__ = "org_role_permissions"
+    __table_args__ = (
+        UniqueConstraint("org_role_id", "module_id", name="uq_org_role_module"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+    module_id = Column(Integer, ForeignKey("public.modules.id", ondelete="CASCADE"), nullable=False)
+
+    can_view = Column(Boolean, default=False)
+    can_add = Column(Boolean, default=False)
+    can_edit = Column(Boolean, default=False)
+    can_delete = Column(Boolean, default=False)
+    can_approve = Column(Boolean, default=False)
+    can_assign = Column(Boolean, default=False)
+    can_export = Column(Boolean, default=False)
+    can_import = Column(Boolean, default=False)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    org_role = relationship("OrgRole", back_populates="permissions")
+    module = relationship("Module", foreign_keys=[module_id])
+
+
+# ------------------------------
+# Role Template Model (System-level)
+# ------------------------------
+class RoleTemplate(Base):
+    __tablename__ = "role_templates"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), unique=True, nullable=False)
+    description = Column(Text)
+
+    is_org_admin = Column(Boolean, default=False)
+    is_dept_admin = Column(Boolean, default=False)
+    auto_provision = Column(Boolean, default=False)
+
+    permissions_template = Column(JSONB, default=[])
+
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ------------------------------
+# Organization Invitation Model
+# ------------------------------
+class OrgInvitation(Base):
+    __tablename__ = "org_invitations"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "email", "status", name="uq_org_invitation_email"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+
+    email = Column(String(255), nullable=False)
+    first_name = Column(String(100))
+    last_name = Column(String(100))
+
+    org_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id"), nullable=True)
+
+    invitation_token = Column(String(255), unique=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    status = Column(String(20), default="pending")  # pending, accepted, expired, revoked
+    accepted_at = Column(DateTime(timezone=True))
+    accepted_by_user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
+
+    invited_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    organization = relationship("Organization", back_populates="invitations")
+    org_role = relationship("OrgRole", foreign_keys=[org_role_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
+    inviter = relationship("User", foreign_keys=[invited_by], post_update=True)
+    accepted_by_user = relationship("User", foreign_keys=[accepted_by_user_id], post_update=True)
 
 
 class UserAddress(Base):
@@ -158,12 +442,22 @@ class User(Base):
     # ✅ Plan FK
     plan_id = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
 
+    # ✅ Organization Multi-Tenancy Columns
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=True)
+    employee_id = Column(String(50), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+
     # ✅ Relationship: Plan → Users
     plan = relationship(
         "Plan",
         back_populates="users",
         foreign_keys=lambda: [User.plan_id]
     )
+
+    # ✅ Organization Relationships
+    organization = relationship("Organization", back_populates="users", foreign_keys=[organization_id])
+    department = relationship("OrgDepartment", back_populates="users", foreign_keys=[department_id])
+    org_user_roles = relationship("OrgUserRole", back_populates="user", cascade="all, delete-orphan", foreign_keys="OrgUserRole.user_id")
 
     # === Existing Auth Relationships ===
     sessions = relationship(
@@ -349,9 +643,10 @@ class UserRole(Base):
     __tablename__ = "user_roles"
     __table_args__ = {"schema": "public"}
 
-    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), primary_key=True)
-    role_id = Column(Integer, ForeignKey("public.roles.id", ondelete="CASCADE"), primary_key=True)
-    assigned_at = Column(DateTime(timezone=True), server_default=func.now())
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"))
+    role_id = Column(Integer, ForeignKey("public.roles.id", ondelete="CASCADE"))
+    is_active = Column(Boolean, default=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
@@ -1128,7 +1423,11 @@ class TestingRequest(Base):
     equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=True)
     test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id"), nullable=True)
 
-    # Organizational hierarchy
+    # Organization & Department (new multi-tenancy approach)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id"), nullable=True)
+
+    # Organizational hierarchy (legacy - kept for backward compatibility)
     zone = Column(String(255), nullable=True)
     ce_circle = Column(String(255), nullable=True)
     se_division = Column(String(255), nullable=True)
@@ -1168,6 +1467,8 @@ class TestingRequest(Base):
     modifier = relationship("User", foreign_keys=[modified_by])
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
     test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
     test_results = relationship("TestResult", back_populates="testing_request", cascade="all, delete-orphan")
     recommendations = relationship("Recommendation", back_populates="testing_request", cascade="all, delete-orphan")
 
@@ -1181,6 +1482,14 @@ class TesterLocation(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+
+    # Multi-tenancy
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
+
+    # New department-based location
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id"), nullable=True)
+
+    # Legacy string-based locations (kept for backward compatibility)
     zone = Column(String(255), nullable=True)
     ce_circle = Column(String(255), nullable=True)
     se_division = Column(String(255), nullable=True)
@@ -1188,6 +1497,8 @@ class TesterLocation(Base):
     is_active = Column(Boolean, default=True)
 
     user = relationship("User", foreign_keys=[user_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
 
 
 # ------------------------------
@@ -1199,6 +1510,9 @@ class TestResult(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
+
+    # Multi-tenancy
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
 
     test_name = Column(String(255), nullable=False)
     test_category = Column(String(100), nullable=True)
@@ -1229,6 +1543,7 @@ class TestResult(Base):
 
     # Relationships
     testing_request = relationship("TestingRequest", back_populates="test_results")
+    organization = relationship("Organization", foreign_keys=[organization_id])
     images = relationship("TestResultImage", back_populates="test_result", cascade="all, delete-orphan")
     tester = relationship("User", foreign_keys=[tested_by])
     creator = relationship("User", foreign_keys=[created_by])
@@ -1267,6 +1582,9 @@ class Recommendation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
 
+    # Multi-tenancy
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
+
     recommendation_type = Column(Enum(RecommendationType), nullable=False)
     summary = Column(Text, nullable=False)
     detailed_notes = Column(Text, nullable=True)
@@ -1288,6 +1606,7 @@ class Recommendation(Base):
 
     # Relationships
     testing_request = relationship("TestingRequest", back_populates="recommendations")
+    organization = relationship("Organization", foreign_keys=[organization_id])
     submitter = relationship("User", foreign_keys=[submitted_by])
     approver = relationship("User", foreign_keys=[approved_by])
     creator = relationship("User", foreign_keys=[created_by])
@@ -1305,6 +1624,9 @@ class ProcurementRequest(Base):
     procurement_number = Column(String(50), unique=True, nullable=False)
     testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id"), nullable=False)
     recommendation_id = Column(UUID(as_uuid=True), ForeignKey("public.recommendations.id"), nullable=True)
+
+    # Multi-tenancy
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
 
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
@@ -1325,6 +1647,7 @@ class ProcurementRequest(Base):
     # Relationships
     testing_request = relationship("TestingRequest", foreign_keys=[testing_request_id])
     recommendation = relationship("Recommendation", foreign_keys=[recommendation_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
     raiser = relationship("User", foreign_keys=[raised_by])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
@@ -1348,6 +1671,347 @@ class OrgTestTemplate(Base):
     is_system = Column(Boolean, default=True)
     version = Column(Integer, default=1)
 
+
+# ============================================================
+# WORKFLOW ENGINE MODELS
+# ============================================================
+
+class Workflow(Base, UTCDateTimeMixin):
+    """
+    Workflow definition model - stores workflow configurations
+    """
+    __tablename__ = "workflows"
+    __table_args__ = (
+        UniqueConstraint('organization_id', 'workflow_type', 'version', name='uq_workflow_org_type_version'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Basic Info
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    workflow_type = Column(String(100), nullable=False)  # 'testing_request', 'approval', etc.
+
+    # Multi-tenancy
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=True)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+    version = Column(Integer, default=1)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    states = relationship("WorkflowState", back_populates="workflow", cascade="all, delete-orphan")
+    transitions = relationship("WorkflowTransition", back_populates="workflow", cascade="all, delete-orphan")
+    permission_entries = relationship("PermissionMatrix", back_populates="workflow", cascade="all, delete-orphan")
+    audit_logs = relationship("WorkflowAuditLog", back_populates="workflow")
+
+
+class WorkflowState(Base, UTCDateTimeMixin):
+    """
+    Workflow state model - represents individual states within a workflow
+    """
+    __tablename__ = "workflow_states"
+    __table_args__ = (
+        UniqueConstraint('workflow_id', 'state_code', name='uq_workflow_state_code'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Relationship
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("public.workflows.id", ondelete="CASCADE"), nullable=False)
+
+    # State Info
+    state_code = Column(String(50), nullable=False)  # 'draft', 'submitted', 'approved'
+    state_name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+
+    # State Type
+    state_type = Column(String(50), default='intermediate')  # 'initial', 'intermediate', 'final', 'cancelled'
+
+    # Display
+    color = Column(String(20), default='#3FA9F5')
+    icon = Column(String(50), default='circle')
+    display_order = Column(Integer, default=0)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    workflow = relationship("Workflow", back_populates="states")
+    creator = relationship("User", foreign_keys=[created_by])
+    transitions_from = relationship("WorkflowTransition", foreign_keys="WorkflowTransition.from_state_id", back_populates="from_state")
+    transitions_to = relationship("WorkflowTransition", foreign_keys="WorkflowTransition.to_state_id", back_populates="to_state")
+
+
+class WorkflowTransition(Base, UTCDateTimeMixin):
+    """
+    Workflow transition model - defines allowed state changes
+    """
+    __tablename__ = "workflow_transitions"
+    __table_args__ = (
+        UniqueConstraint('workflow_id', 'from_state_id', 'to_state_id', 'action_code', name='uq_workflow_transition'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Relationship
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("public.workflows.id", ondelete="CASCADE"), nullable=False)
+    from_state_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_states.id", ondelete="CASCADE"), nullable=False)
+    to_state_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_states.id", ondelete="CASCADE"), nullable=False)
+
+    # Transition Info
+    transition_name = Column(String(200), nullable=False)  # 'Submit', 'Approve', 'Reject'
+    action_code = Column(String(50), nullable=False)  # 'submit', 'approve', 'reject'
+    description = Column(Text, nullable=True)
+
+    # Conditions
+    conditions = Column(JSONB, nullable=True)
+
+    # Display
+    button_label = Column(String(100), nullable=True)
+    button_color = Column(String(20), default='#3FA9F5')
+    icon = Column(String(50), default='arrow_forward')
+    requires_comment = Column(Boolean, default=False)
+    display_order = Column(Integer, default=0)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    workflow = relationship("Workflow", back_populates="transitions")
+    from_state = relationship("WorkflowState", foreign_keys=[from_state_id], back_populates="transitions_from")
+    to_state = relationship("WorkflowState", foreign_keys=[to_state_id], back_populates="transitions_to")
+    creator = relationship("User", foreign_keys=[created_by])
+    permissions = relationship("PermissionMatrix", back_populates="transition", cascade="all, delete-orphan")
+
+
+class PermissionMatrix(Base, UTCDateTimeMixin):
+    """
+    Permission matrix model - role-based permissions for transitions
+    """
+    __tablename__ = "permission_matrix"
+    __table_args__ = (
+        UniqueConstraint('transition_id', 'role_id', 'scope_type', name='uq_permission_transition_role_scope'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Relationship
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("public.workflows.id", ondelete="CASCADE"), nullable=False)
+    transition_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_transitions.id", ondelete="CASCADE"), nullable=False)
+
+    # Role-Based Access
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+
+    # Department Scope
+    scope_type = Column(String(50), nullable=False, default='exact')  # 'exact', 'department_tree', 'organization', 'any'
+    department_type_id = Column(UUID(as_uuid=True), ForeignKey("public.org_department_types.id", ondelete="SET NULL"), nullable=True)
+
+    # Permission Level
+    can_execute = Column(Boolean, default=True)
+    can_view = Column(Boolean, default=True)
+    requires_approval = Column(Boolean, default=False)
+
+    # Additional Conditions
+    conditions = Column(JSONB, nullable=True)
+
+    # Priority
+    priority = Column(Integer, default=0)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    workflow = relationship("Workflow", back_populates="permission_entries")
+    transition = relationship("WorkflowTransition", back_populates="permissions")
+    role = relationship("OrgRole", foreign_keys=[role_id])
+    department_type = relationship("OrgDepartmentType", foreign_keys=[department_type_id])
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class WorkflowAuditLog(Base, UTCDateTimeMixin):
+    """
+    Workflow audit log - tracks all state transitions
+    """
+    __tablename__ = "workflow_audit_log"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Relationship
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("public.workflows.id", ondelete="CASCADE"), nullable=False)
+    entity_type = Column(String(100), nullable=False)  # 'testing_request', 'purchase_order'
+    entity_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # Transition Details
+    transition_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_transitions.id", ondelete="SET NULL"), nullable=True)
+    from_state_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_states.id", ondelete="SET NULL"), nullable=True)
+    to_state_id = Column(UUID(as_uuid=True), ForeignKey("public.workflow_states.id", ondelete="SET NULL"), nullable=True)
+    action_code = Column(String(50), nullable=True)
+
+    # User & Context
+    performed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    performed_at = Column(DateTime(timezone=True), server_default=func.now())
+    user_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+    user_department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+
+    # Additional Data
+    comment = Column(Text, nullable=True)
+    audit_metadata = Column(JSONB, nullable=True)  # Renamed from 'metadata' to avoid SQLAlchemy conflict
+
+    # Result
+    success = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
+
+    # Relationships
+    workflow = relationship("Workflow", back_populates="audit_logs")
+    transition = relationship("WorkflowTransition", foreign_keys=[transition_id])
+    from_state = relationship("WorkflowState", foreign_keys=[from_state_id])
+    to_state = relationship("WorkflowState", foreign_keys=[to_state_id])
+    performer = relationship("User", foreign_keys=[performed_by])
+    user_role = relationship("OrgRole", foreign_keys=[user_role_id])
+    user_department = relationship("OrgDepartment", foreign_keys=[user_department_id])
+
+# ------------------------------
+# WorkflowRoleConfig Model
+# ------------------------------
+class WorkflowRoleConfig(Base):
+    """
+    Configuration for role assignment in workflows.
+    Defines which module permissions are required for a role to be assignable in a workflow.
+    Only roles with FULL permissions on the specified module will appear in assignment dropdowns.
+    """
+    __tablename__ = "workflow_role_configs"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Workflow type (e.g., "testing_request", "inspection_request", "approval_workflow")
+    workflow_type = Column(String(100), nullable=False, index=True)
+
+    # Role assignment type (e.g., "tester", "inspector", "reviewer")
+    assignment_type = Column(String(100), nullable=False)
+
+    # Module that must have FULL permissions
+    module_id = Column(Integer, ForeignKey("public.modules.id", ondelete="CASCADE"), nullable=False)
+
+    # Required permissions on the module (role must have ALL of these set to TRUE)
+    requires_can_view = Column(Boolean, default=True)
+    requires_can_add = Column(Boolean, default=True)
+    requires_can_edit = Column(Boolean, default=True)
+    requires_can_delete = Column(Boolean, default=True)
+    requires_can_approve = Column(Boolean, default=True)
+    requires_can_assign = Column(Boolean, default=True)
+
+    # Description
+    description = Column(Text)
+
+    # Active flag
+    is_active = Column(Boolean, default=True)
+
+    # Audit fields
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    module = relationship("Module")
+
+
+# ------------------------------
+# Tester Role Configuration Model
+# ------------------------------
+class TesterRoleModuleRequirement(Base):
+    """
+    Configuration for tester role selection in testing request approvals.
+    Defines which modules a role must have FULL permissions on to appear
+    in the tester assignment dropdown.
+
+    Role must have ALL 6 permissions (view, add, edit, delete, approve, assign)
+    on EXACTLY the modules listed in required_module_ids.
+    """
+    __tablename__ = "tester_role_module_requirements"
+    __table_args__ = (
+        UniqueConstraint('organization_id', name='uq_tester_role_config_org'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Organization (NULL = global default)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True
+    )
+
+    # Required module IDs (EXACT match required)
+    required_module_ids = Column(ARRAY(Integer), nullable=False)
+
+    # Metadata
+    description = Column(Text)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    # Audit fields
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
+    cts = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+
+
+# ------------------------------
+# Zoho Import Mapping
+# ------------------------------
+class ZohoImportMapping(Base):
+    __tablename__ = "zoho_import_mappings"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Zoho identifier (e.g. Zoho org id or a label like "default")
+    zoho_org_id = Column(String(255), nullable=True)
+    label = Column(String(255), nullable=True)  # friendly name for this mapping
+
+    # Where imported users land
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+    org_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+
+    is_default = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
@@ -1356,3 +2020,6 @@ class OrgTestTemplate(Base):
     # Relationships
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
+    org_role = relationship("OrgRole", foreign_keys=[org_role_id])
