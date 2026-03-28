@@ -177,9 +177,10 @@ class TestingService:
         from fastapi import HTTPException as FHE
         import copy
         svc = OrgTestTemplateService(self.db)
+        _org_tmpl = None
         try:
-            tmpl = svc.get_for_test_type(test_type_id=test_type_id, org_id=org_id)
-            template_data = copy.deepcopy(tmpl.template_data)
+            _org_tmpl = svc.get_for_test_type(test_type_id=test_type_id, org_id=org_id)
+            template_data = copy.deepcopy(_org_tmpl.template_data)
         except FHE:
             # Fallback: static dict (legacy / before provisioning)
             from test_templates import get_template_for_test_type
@@ -189,6 +190,29 @@ class TestingService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"No template defined for test type: {detail.name}",
                 )
+
+        # Inject template_key so the frontend can use it for result submission
+        if _org_tmpl and "key" not in template_data:
+            template_data["key"] = _org_tmpl.template_key
+
+        # Normalise field types so the result form understands them:
+        #   toggle  → boolean  (designer calls it toggle; form renders boolean)
+        #   columns: List[str] → List[{key, label, type}]  (designer saves str list)
+        for section in template_data.get("sections", []):
+            for field in section.get("fields", []):
+                if field.get("type") == "toggle":
+                    field["type"] = "boolean"
+                if field.get("type") == "table":
+                    cols = field.get("columns", [])
+                    if cols and isinstance(cols[0], str):
+                        field["columns"] = [
+                            {
+                                "key": c.lower().replace(" ", "_"),
+                                "label": c,
+                                "type": "text",
+                            }
+                            for c in cols
+                        ]
 
         # Append overall assessment sections
         try:
@@ -222,7 +246,17 @@ class TestingService:
             )
 
         template = get_template_by_key(template_key)
-        test_name = template["name"] if template else template_key
+        if template:
+            test_name = template["name"]
+        else:
+            # Try org template (created via Template Designer)
+            try:
+                from services.org_test_template_service import OrgTestTemplateService as _OTSvc
+                _otsvc = _OTSvc(self.db)
+                _ot = _otsvc.get_by_template_key(template_key)
+                test_name = (_ot.template_data or {}).get("name") or template_key
+            except Exception:
+                test_name = template_key
 
         # Upsert: update existing result if same request + template_key, else create
         existing = (

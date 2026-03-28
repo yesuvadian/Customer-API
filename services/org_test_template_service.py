@@ -101,6 +101,20 @@ class OrgTestTemplateService:
             detail=f"No template found for test_type_id={test_type_id}",
         )
 
+    def get_by_template_key(self, template_key: str) -> OrgTestTemplate:
+        """Lookup an org template by its template_key (any org or global)."""
+        tmpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.template_key == template_key)
+            .first()
+        )
+        if tmpl:
+            return tmpl
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No template found for key={template_key}",
+        )
+
     # ─── Write ───────────────────────────────────────────────
 
     def create_template(
