@@ -35,6 +35,36 @@ class OrgTestTemplateService:
             q = q.filter(OrgTestTemplate.org_id == org_id)
         return q.order_by(OrgTestTemplate.template_key).all()
 
+    OVERALL_KEY = "overall_assessment"
+
+    def get_overall_assessment(self, org_id: Optional[UUID] = None) -> OrgTestTemplate:
+        """Return the overall assessment template (org-specific → global fallback)."""
+        if org_id:
+            tmpl = (
+                self.db.query(OrgTestTemplate)
+                .filter(
+                    OrgTestTemplate.org_id == org_id,
+                    OrgTestTemplate.template_key == self.OVERALL_KEY,
+                )
+                .first()
+            )
+            if tmpl:
+                return tmpl
+        tmpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(
+                OrgTestTemplate.org_id == None,  # noqa: E711
+                OrgTestTemplate.template_key == self.OVERALL_KEY,
+            )
+            .first()
+        )
+        if tmpl:
+            return tmpl
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Overall assessment template not found — run /provision/global first",
+        )
+
     def get_for_test_type(self, test_type_id: int, org_id: Optional[UUID] = None) -> OrgTestTemplate:
         """
         Return the best-match template:
@@ -165,6 +195,77 @@ class OrgTestTemplateService:
         self.db.commit()
 
     # ─── Provisioning ────────────────────────────────────────
+
+    def provision_overall_assessment(self) -> bool:
+        """Seed the global 'overall_assessment' template if it doesn't exist. Returns True if inserted."""
+        exists = (
+            self.db.query(OrgTestTemplate)
+            .filter(
+                OrgTestTemplate.org_id == None,  # noqa: E711
+                OrgTestTemplate.template_key == self.OVERALL_KEY,
+            )
+            .first()
+        )
+        if exists:
+            return False
+
+        default_data = {
+            "name": "Overall Assessment",
+            "sections": [
+                {
+                    "title": "Overall Assessment",
+                    "fields": [
+                        {
+                            "key": "overall_result",
+                            "label": "Result",
+                            "type": "dropdown",
+                            "required": True,
+                            "read_only": False,
+                            "options": ["Pass", "Fail", "Conditional Pass", "Refer for Retesting"],
+                        },
+                        {
+                            "key": "overall_remarks",
+                            "label": "Remarks",
+                            "type": "textarea",
+                            "required": False,
+                            "read_only": False,
+                        },
+                        {
+                            "key": "overall_recommendation",
+                            "label": "Recommendation",
+                            "type": "textarea",
+                            "required": False,
+                            "read_only": False,
+                        },
+                        {
+                            "key": "tested_by",
+                            "label": "Tested By",
+                            "type": "text",
+                            "required": False,
+                            "read_only": False,
+                        },
+                        {
+                            "key": "date_of_testing",
+                            "label": "Date of Testing",
+                            "type": "date",
+                            "required": False,
+                            "read_only": False,
+                        },
+                    ],
+                }
+            ],
+        }
+
+        self.db.add(OrgTestTemplate(
+            template_key=self.OVERALL_KEY,
+            org_id=None,
+            test_type_id=None,
+            template_data=default_data,
+            is_system=True,
+            version=1,
+        ))
+        self.db.commit()
+        return True
 
     def provision_global_defaults(self) -> int:
         """

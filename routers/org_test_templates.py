@@ -5,10 +5,13 @@ Endpoints for managing per-org test templates (designer CRUD + provisioning).
 Protected by auth; privilege-check is handled by auth_privilege middleware
 against the "Test Template Management" module.
 """
+import io
+import uuid as _uuid
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -23,6 +26,12 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
+# Separate router for browser-accessible endpoints (auth via query token)
+browser_router = APIRouter(
+    prefix="/org-test-templates",
+    tags=["org-test-templates"],
+)
+
 
 # ─── List ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +43,30 @@ def list_templates(
 ):
     svc = OrgTestTemplateService(db)
     return svc.list_templates(org_id=org_id)
+
+
+# ─── Overall Assessment (global appended section) ────────────────────────────
+
+@router.get("/overall-assessment", response_model=OrgTestTemplateResponse)
+def get_overall_assessment(
+    org_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the overall assessment template (org-specific → global fallback)."""
+    svc = OrgTestTemplateService(db)
+    return svc.get_overall_assessment(org_id=org_id)
+
+
+@router.post("/overall-assessment/provision", status_code=200)
+def provision_overall_assessment(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Seed the global overall assessment template if not yet created."""
+    svc = OrgTestTemplateService(db)
+    inserted = svc.provision_overall_assessment()
+    return {"inserted": inserted, "message": "Provisioned" if inserted else "Already exists"}
 
 
 # ─── Fetch for tester form (by test_type_id, best-match) ─────────────────────
@@ -148,3 +181,351 @@ def provision_for_org(
     svc = OrgTestTemplateService(db)
     count = svc.provision_for_org(org_id=org_id, created_by=current_user.id)
     return {"inserted": count, "message": f"Provisioned {count} templates for org {org_id}"}
+
+
+# ─── Preview (HTML) ──────────────────────────────────────────────────────────
+
+def _auth_from_query_token(token: str, db: Session) -> User:
+    """Verify a raw JWT token passed as a query param (for browser URL access)."""
+    import os
+    import jwt as pyjwt
+    from models import User as UserModel
+    SECRET_KEY = os.getenv("SECRET_KEY", "change_this_secret")
+    ALGORITHM = "HS256"
+    try:
+        payload = pyjwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = _uuid.UUID(payload.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+@browser_router.get("/{template_id}/preview", response_class=HTMLResponse)
+def preview_template(
+    template_id: UUID,
+    token: str = Query(..., description="JWT access token"),
+    db: Session = Depends(get_db),
+):
+    """Render the template as a styled HTML form (browser-friendly preview)."""
+    _auth_from_query_token(token, db)
+    svc = OrgTestTemplateService(db)
+    tmpl = svc.get_by_id(template_id)
+    data = tmpl.template_data or {}
+    name = data.get("name", tmpl.template_key or "Template")
+    sections = data.get("sections", [])
+
+    def _to_html_date(val: str) -> str:
+        """Convert DD-MM-YYYY or DD/MM/YYYY → YYYY-MM-DD for <input type=date>."""
+        if not val:
+            return ""
+        for sep in ("-", "/"):
+            parts = val.split(sep)
+            if len(parts) == 3:
+                d, m, y = parts
+                if len(y) == 4:          # DD-MM-YYYY
+                    return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                if len(d) == 4:          # YYYY-MM-DD already
+                    return val
+        return val
+
+    def field_html(f: dict) -> str:
+        ftype = f.get("type", "text")
+        label = f.get("label", f.get("key", ""))
+        unit = f.get("unit", "") or ""
+        default = str(f.get("default", "") or "")
+        required = f.get("required", False)
+        read_only = f.get("read_only", False)
+        opts = f.get("options", [])
+        cols = f.get("columns", [])
+        default_rows = f.get("default_rows", [])
+
+        req_badge = '<span class="req">*</span>' if required else ""
+        ro_badge = '<span class="ro">🔒 Read-only</span>' if read_only else ""
+        unit_txt = f' <span class="unit">{unit}</span>' if unit else ""
+        ro_class = ' ro-field' if read_only else ""
+        ro_attr = 'readonly' if read_only else ""
+
+        html = f'<div class="field{ro_class}"><label>{label}{req_badge}{ro_badge}</label>'
+
+        if ftype == "textarea":
+            html += f'<textarea rows="3" {ro_attr}>{default}</textarea>'
+        elif ftype == "dropdown":
+            disabled = "disabled" if read_only else ""
+            html += f'<select {disabled}>'
+            html += '<option value="">-- Select --</option>'
+            for o in opts:
+                html += f'<option>{o}</option>'
+            html += "</select>"
+        elif ftype == "boolean":
+            checked = "checked" if default.lower() in ("true", "1", "yes") else ""
+            disabled = "disabled" if read_only else ""
+            html += f'<label class="toggle"><input type="checkbox" {checked} {disabled}><span class="slider"></span></label>'
+        elif ftype == "date":
+            html_date = _to_html_date(default)
+            html += f'<input type="date" value="{html_date}" {ro_attr}>'
+        elif ftype == "number":
+            html += f'<input type="number" value="{default}" placeholder="0" {ro_attr}>{unit_txt}'
+        elif ftype == "table":
+            html += '<div class="tbl-wrap"><table><thead><tr>'
+            for c in cols:
+                html += f'<th>{c.get("label", c.get("key", ""))}</th>'
+            html += "</tr></thead><tbody>"
+            for row in default_rows:
+                html += "<tr>"
+                for c in cols:
+                    cell_val = row.get(c.get("key", ""), "")
+                    html += f'<td><input type="text" value="{cell_val}" {ro_attr}></td>'
+                html += "</tr>"
+            if not default_rows:
+                html += '<tr>' + ''.join(f'<td><input type="text"></td>' for _ in cols) + '</tr>'
+            html += "</tbody></table></div>"
+        else:
+            html += f'<input type="text" value="{default}" placeholder="{label}"{unit_txt} {"readonly" if read_only else ""}>{unit_txt}'
+
+        html += "</div>"
+        return html
+
+    sections_html = ""
+    for sec in sections:
+        title = sec.get("title", "Section")
+        fields_html = "".join(field_html(f) for f in sec.get("fields", []))
+        sections_html += f"""
+        <div class="section">
+          <div class="sec-title">{title}</div>
+          <div class="fields">{fields_html}</div>
+        </div>"""
+
+    html_page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{name} — Preview</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0a1929;
+      color: #e0e6f0;
+      min-height: 100vh;
+      padding: 32px 16px;
+    }}
+    .container {{ max-width: 820px; margin: 0 auto; }}
+    h1 {{
+      font-size: 22px; font-weight: 700; color: #3fa9f5;
+      margin-bottom: 4px;
+    }}
+    .subtitle {{
+      font-size: 12px; color: #ffffff55; margin-bottom: 28px;
+      text-transform: uppercase; letter-spacing: 1px;
+    }}
+    .section {{
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }}
+    .sec-title {{
+      padding: 12px 18px;
+      font-size: 13px; font-weight: 700;
+      background: rgba(63,169,245,0.1);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      color: #3fa9f5;
+      text-transform: uppercase; letter-spacing: 0.8px;
+    }}
+    .fields {{ padding: 16px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
+    .field {{ display: flex; flex-direction: column; gap: 5px; }}
+    .field.ro-field {{
+      background: rgba(255,165,0,0.06);
+      border: 1px solid rgba(255,165,0,0.25);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }}
+    label {{
+      font-size: 11.5px; color: #ffffff99;
+      display: flex; align-items: center; gap: 6px;
+    }}
+    .req {{ color: #f55; font-size: 14px; }}
+    .ro {{ color: #ffb347; font-size: 10px; background: rgba(255,165,0,0.15);
+           padding: 1px 6px; border-radius: 4px; }}
+    .unit {{ color: #3fa9f555; font-size: 11px; }}
+    input[type=text], input[type=number], input[type=date], select, textarea {{
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      color: #e0e6f0;
+      padding: 8px 10px;
+      font-size: 13px;
+      width: 100%;
+      outline: none;
+    }}
+    input:focus, select:focus, textarea:focus {{
+      border-color: #3fa9f5;
+    }}
+    input[readonly], textarea[readonly] {{
+      color: #ffb347;
+      border-color: rgba(255,165,0,0.3);
+      cursor: default;
+    }}
+    select option {{ background: #0f2233; }}
+    .toggle {{ display: inline-flex; align-items: center; cursor: pointer; }}
+    .toggle input {{ display: none; }}
+    .slider {{
+      width: 42px; height: 22px; background: #334; border-radius: 11px;
+      position: relative; transition: background 0.2s;
+    }}
+    .slider::after {{
+      content: ''; position: absolute; top: 3px; left: 3px;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #fff; transition: left 0.2s;
+    }}
+    .toggle input:checked + .slider {{ background: #3fa9f5; }}
+    .toggle input:checked + .slider::after {{ left: 23px; }}
+    .tbl-wrap {{ overflow-x: auto; grid-column: 1 / -1; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+    th, td {{
+      padding: 8px 10px;
+      border: 1px solid rgba(255,255,255,0.1);
+      text-align: left;
+    }}
+    th {{ background: rgba(63,169,245,0.12); color: #3fa9f5; font-weight: 600; }}
+    td input {{ background: transparent; border: none; color: #e0e6f0; width: 100%; outline: none; }}
+    .preview-badge {{
+      text-align: center; margin-top: 32px;
+      color: #ffffff33; font-size: 11px; letter-spacing: 1px;
+    }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>{name}</h1>
+    <div class="subtitle">Template Preview &nbsp;·&nbsp; Read-only</div>
+    {sections_html}
+    <div class="preview-badge">PREVIEW ONLY — NOT A LIVE FORM</div>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html_page)
+
+
+# ─── PDF ─────────────────────────────────────────────────────────────────────
+
+@browser_router.get("/{template_id}/pdf")
+def pdf_template(
+    template_id: UUID,
+    token: str = Query(..., description="JWT access token"),
+    db: Session = Depends(get_db),
+):
+    """Generate and stream a PDF rendering of the template."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    )
+
+    _auth_from_query_token(token, db)
+    svc = OrgTestTemplateService(db)
+    tmpl = svc.get_by_id(template_id)
+    data = tmpl.template_data or {}
+    name = data.get("name", tmpl.template_key or "Template")
+    sections = data.get("sections", [])
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=20 * mm, bottomMargin=20 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    DARK = colors.HexColor("#0a1929")
+    ACCENT = colors.HexColor("#3fa9f5")
+    LIGHT = colors.HexColor("#e0e6f0")
+    MUTED = colors.HexColor("#7a9ab5")
+    ORANGE = colors.HexColor("#ffb347")
+
+    title_style = ParagraphStyle("title", fontSize=16, textColor=ACCENT,
+                                  fontName="Helvetica-Bold", spaceAfter=2)
+    sub_style = ParagraphStyle("sub", fontSize=8, textColor=MUTED,
+                                fontName="Helvetica", spaceAfter=14, leading=12)
+    sec_style = ParagraphStyle("sec", fontSize=10, textColor=ACCENT,
+                                fontName="Helvetica-Bold", spaceBefore=10, spaceAfter=6)
+    label_style = ParagraphStyle("lbl", fontSize=8, textColor=MUTED, fontName="Helvetica")
+    value_style = ParagraphStyle("val", fontSize=10, textColor=LIGHT, fontName="Helvetica")
+    ro_style = ParagraphStyle("ro", fontSize=10, textColor=ORANGE, fontName="Helvetica")
+
+    story = [
+        Paragraph(name, title_style),
+        Paragraph("Test Template  ·  Read-only Preview", sub_style),
+        HRFlowable(width="100%", color=ACCENT, thickness=0.5, spaceAfter=10),
+    ]
+
+    for sec in sections:
+        story.append(Paragraph(sec.get("title", "Section").upper(), sec_style))
+        story.append(HRFlowable(width="100%", color=colors.HexColor("#1e3a55"),
+                                 thickness=0.4, spaceAfter=6))
+
+        fields = sec.get("fields", [])
+        # Render fields in a 2-column grid
+        cells = []
+        for f in fields:
+            label = f.get("label", f.get("key", ""))
+            ftype = f.get("type", "text")
+            default = str(f.get("default", "") or "")
+            unit = f.get("unit", "") or ""
+            read_only = f.get("read_only", False)
+            required = f.get("required", False)
+            opts = f.get("options", [])
+
+            req_mark = " *" if required else ""
+            lbl_para = Paragraph(f"{label}{req_mark}", label_style)
+
+            if ftype == "boolean":
+                val_text = "✓ Yes" if default.lower() in ("true", "1", "yes") else "○ No"
+            elif ftype == "dropdown":
+                val_text = f"[{' / '.join(opts[:4])}{'...' if len(opts) > 4 else ''}]" if opts else "[Dropdown]"
+            elif ftype == "table":
+                cols = f.get("columns", [])
+                val_text = "Table: " + ", ".join(c.get("label", c.get("key", "")) for c in cols)
+            else:
+                disp = f"{default} {unit}".strip() if default else f"___ {unit}".strip()
+                val_text = disp
+
+            val_style = ro_style if read_only else value_style
+            val_para = Paragraph(val_text, val_style)
+            cells.append([lbl_para, val_para])
+
+        # Pair into 2 columns
+        rows = []
+        for i in range(0, len(cells), 2):
+            left = cells[i]
+            right = cells[i + 1] if i + 1 < len(cells) else [Paragraph("", label_style), Spacer(1, 1)]
+            rows.append([left[0], left[1], right[0], right[1]])
+
+        if rows:
+            col_w = doc.width / 4
+            tbl = Table(rows, colWidths=[col_w * 0.6, col_w * 1.4, col_w * 0.6, col_w * 1.4])
+            tbl.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor("#1e3a55")),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0d1f35")),
+            ]))
+            story.append(tbl)
+        story.append(Spacer(1, 6))
+
+    doc.build(story)
+    buf.seek(0)
+    safe_name = name.replace(" ", "_").replace("/", "-")
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.pdf"'},
+    )

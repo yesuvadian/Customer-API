@@ -175,22 +175,32 @@ class TestingService:
         # Database-backed template (org-specific or global default)
         from services.org_test_template_service import OrgTestTemplateService
         from fastapi import HTTPException as FHE
+        import copy
         svc = OrgTestTemplateService(self.db)
         try:
             tmpl = svc.get_for_test_type(test_type_id=test_type_id, org_id=org_id)
-            return tmpl.template_data
+            template_data = copy.deepcopy(tmpl.template_data)
         except FHE:
-            pass
+            # Fallback: static dict (legacy / before provisioning)
+            from test_templates import get_template_for_test_type
+            template_data = get_template_for_test_type(detail.name)
+            if not template_data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"No template defined for test type: {detail.name}",
+                )
 
-        # Fallback: static dict (legacy / before provisioning)
-        from test_templates import get_template_for_test_type
-        template = get_template_for_test_type(detail.name)
-        if not template:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No template defined for test type: {detail.name}",
-            )
-        return template
+        # Append overall assessment sections
+        try:
+            overall = svc.get_overall_assessment(org_id=org_id)
+            overall_sections = (overall.template_data or {}).get("sections", [])
+            if overall_sections:
+                template_data.setdefault("sections", [])
+                template_data["sections"].extend(copy.deepcopy(overall_sections))
+        except FHE:
+            pass  # No overall assessment template yet — skip silently
+
+        return template_data
 
     def create_structured_result(
         self, request_id: UUID, template_key: str, test_data: dict,

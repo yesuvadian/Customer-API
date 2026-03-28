@@ -1445,6 +1445,8 @@ def run_seed():
         svc = OrgTestTemplateService(session)
         n = svc.provision_global_defaults()
         print(f"[OK] Provisioned {n} global test templates.")
+        inserted = svc.provision_overall_assessment()
+        print(f"[OK] Overall assessment template: {'provisioned' if inserted else 'already exists'}.")
         print("[OK] All seed data inserted successfully.")
 
 
