@@ -215,7 +215,16 @@ def preview_template(
     tmpl = svc.get_by_id(template_id)
     data = tmpl.template_data or {}
     name = data.get("name", tmpl.template_key or "Template")
-    sections = data.get("sections", [])
+    import copy
+    sections = copy.deepcopy(data.get("sections", []))
+
+    # Append Overall Assessment sections
+    try:
+        overall = svc.get_overall_assessment(org_id=tmpl.org_id)
+        overall_sections = (overall.template_data or {}).get("sections", [])
+        sections.extend(copy.deepcopy(overall_sections))
+    except Exception:
+        pass
 
     def _to_html_date(val: str) -> str:
         """Convert DD-MM-YYYY or DD/MM/YYYY → YYYY-MM-DD for <input type=date>."""
@@ -434,7 +443,16 @@ def pdf_template(
     tmpl = svc.get_by_id(template_id)
     data = tmpl.template_data or {}
     name = data.get("name", tmpl.template_key or "Template")
-    sections = data.get("sections", [])
+    import copy
+    sections = copy.deepcopy(data.get("sections", []))
+
+    # Append Overall Assessment sections
+    try:
+        overall = svc.get_overall_assessment(org_id=tmpl.org_id)
+        overall_sections = (overall.template_data or {}).get("sections", [])
+        sections.extend(copy.deepcopy(overall_sections))
+    except Exception:
+        pass
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
