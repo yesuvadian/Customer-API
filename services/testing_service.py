@@ -222,8 +222,15 @@ class TestingService:
                             for c in cols
                         ]
 
-        # NOTE: Overall Assessment is NOT appended here — the Flutter form renders
-        # it as a hardcoded section. Appending is only done for PDF/HTML previews.
+        # Append overall assessment sections (template-driven)
+        try:
+            overall = svc.get_overall_assessment(org_id=org_id)
+            overall_sections = (overall.template_data or {}).get("sections", [])
+            if overall_sections:
+                template_data.setdefault("sections", [])
+                template_data["sections"].extend(copy.deepcopy(overall_sections))
+        except FHE:
+            pass  # No overall assessment template yet — skip silently
 
         return template_data
 

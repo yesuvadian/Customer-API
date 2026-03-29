@@ -160,8 +160,14 @@ def get_test_template_by_key(
     data = copy.deepcopy(tmpl.template_data or {})
     if "key" not in data:
         data["key"] = tmpl.template_key
-    # NOTE: Overall Assessment is NOT appended here — the Flutter form renders
-    # it as a hardcoded section. Appending is only done for PDF/HTML previews.
+    # Append Overall Assessment sections (template-driven)
+    try:
+        overall = svc.get_overall_assessment(org_id=tmpl.org_id)
+        overall_sections = (overall.template_data or {}).get("sections", [])
+        data.setdefault("sections", [])
+        data["sections"].extend(copy.deepcopy(overall_sections))
+    except Exception:
+        pass
     return data
 
 
