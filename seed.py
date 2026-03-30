@@ -2368,45 +2368,10 @@ def seed_kptcl_organization(session):
                 )
                 session.add(permission)
 
-    # Create Department Head role manually (not auto-provisioned)
-    dept_manager_template = session.query(RoleTemplate).filter_by(name="Department Manager").first()
-    if dept_manager_template:
-        dept_head_role = OrgRole(
-            id=uuid.uuid4(),
-            organization_id=org.id,
-            name="Department Head",  # Using "Department Head" instead of "Department Manager"
-            description="Manage department operations and approve requests",
-            role_type="default",
-            is_org_admin=False,
-            is_dept_admin=True,
-            is_active=True,
-            cts=datetime.now(datetime.now().astimezone().tzinfo),
-            mts=datetime.now(datetime.now().astimezone().tzinfo)
-        )
-        session.add(dept_head_role)
-        session.flush()
+    # Build a lookup of provisioned roles by name for easy access
+    provisioned_by_name = {r.name: r for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
 
-        # Create permissions for Department Head from template
-        if dept_manager_template.permissions_template:
-            for perm_data in dept_manager_template.permissions_template:
-                permission = OrgRolePermission(
-                    id=uuid.uuid4(),
-                    org_role_id=dept_head_role.id,
-                    module_id=perm_data.get("module_id"),
-                    can_view=perm_data.get("can_view", False),
-                    can_add=perm_data.get("can_add", False),
-                    can_edit=perm_data.get("can_edit", False),
-                    can_delete=perm_data.get("can_delete", False),
-                    can_approve=perm_data.get("can_approve", False),
-                    can_assign=perm_data.get("can_assign", False),
-                    can_export=perm_data.get("can_export", False),
-                    can_import=perm_data.get("can_import", False),
-                    cts=datetime.now(datetime.now().astimezone().tzinfo),
-                    mts=datetime.now(datetime.now().astimezone().tzinfo)
-                )
-                session.add(permission)
-
-    # Create KPTCL users with roles
+    # Create KPTCL users — one per org role
     kptcl_users = [
         {
             "email": "orgadmin@kptcl.com",
@@ -2414,26 +2379,26 @@ def seed_kptcl_organization(session):
             "firstname": "Org",
             "lastname": "Admin",
             "phone": "+91-9900000001",
-            "role": org_admin_role,
+            "role_name": "Admin",
             "employee_id": "KPTCL-ADM-001",
         },
         {
-            "email": "engineer@kptcl.com",
+            "email": "originator@kptcl.com",
             "password": "admin123",
-            "firstname": "Test",
-            "lastname": "Engineer",
+            "firstname": "KPTCL",
+            "lastname": "Originator",
             "phone": "+91-9900000002",
-            "role": engineer_role,
-            "employee_id": "KPTCL-ENG-001",
+            "role_name": "Originator",
+            "employee_id": "KPTCL-ORIG-001",
         },
         {
-            "email": "tester1@kptcl.com",
+            "email": "testassigner@kptcl.com",
             "password": "admin123",
-            "firstname": "Field",
-            "lastname": "Tester",
-            "phone": "+91-9900000003",
-            "role": tester_role,
-            "employee_id": "KPTCL-TEST-001",
+            "firstname": "KPTCL Test",
+            "lastname": "Assigner",
+            "phone": "+91-9900000005",
+            "role_name": "Test Assigner",
+            "employee_id": "KPTCL-TA-001",
         },
         {
             "email": "depthead@kptcl.com",
@@ -2441,22 +2406,27 @@ def seed_kptcl_organization(session):
             "firstname": "Department",
             "lastname": "Head",
             "phone": "+91-9900000004",
-            "role": dept_head_role,
+            "role_name": "Department Head",
             "employee_id": "KPTCL-DH-001",
+        },
+        {
+            "email": "purchaser@kptcl.com",
+            "password": "admin123",
+            "firstname": "KPTCL",
+            "lastname": "Purchaser",
+            "phone": "+91-9900000006",
+            "role_name": "Purchaser",
+            "employee_id": "KPTCL-PUR-001",
         },
     ]
 
     for user_data in kptcl_users:
-        # Check if user already exists
         existing_user = session.query(User).filter_by(email=user_data["email"]).first()
-
         if existing_user:
             user = existing_user
-            # Ensure existing user is linked to KPTCL org
             if user.organization_id != org.id:
                 user.organization_id = org.id
         else:
-            # Create user
             user = User(
                 id=uuid.uuid4(),
                 email=user_data["email"],
@@ -2475,29 +2445,30 @@ def seed_kptcl_organization(session):
             session.add(user)
             session.flush()
 
-        # Assign role to user (both new and existing users)
-        if user_data["role"]:
-            # Check if user already has this role
-            existing_role = session.query(OrgUserRole).filter_by(
-                user_id=user.id,
-                org_role_id=user_data["role"].id,
-                is_active=True
-            ).first()
+        role = provisioned_by_name.get(user_data["role_name"])
+        if not role:
+            print(f"[WARN] OrgRole '{user_data['role_name']}' not found for {user_data['email']}")
+            continue
 
-            if not existing_role:
-                user_role = OrgUserRole(
-                    id=uuid.uuid4(),
-                    user_id=user.id,
-                    org_role_id=user_data["role"].id,
-                    department_id=None,
-                    is_active=True,
-                    assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-                    assigned_by=None
-                )
-                session.add(user_role)
+        existing_role = session.query(OrgUserRole).filter_by(
+            user_id=user.id, org_role_id=role.id, is_active=True
+        ).first()
+        if not existing_role:
+            session.add(OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                department_id=None,
+                is_active=True,
+                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                assigned_by=None
+            ))
 
     session.commit()
     print(f"[OK] KPTCL organization created with admin user and roles")
+    print("  KPTCL user credentials:")
+    for u in kptcl_users:
+        print(f"    {u['role_name']:20s}  {u['email']:35s}  {u['password']}")
 
     # Create sample tester roles with EXACT module permissions
     print(f"[INFO] Creating sample tester roles for KPTCL")
@@ -2624,6 +2595,8 @@ def seed_kptcl_organization(session):
                 phone_number=user_config["phone"],
                 organization_id=org.id,
                 isactive=True,
+                email_confirmed=True,
+                phone_confirmed=True,
                 cts=now,
                 mts=now
             )
@@ -2631,30 +2604,31 @@ def seed_kptcl_organization(session):
             session.flush()
             created_users += 1
 
-        # Get the role
+        # Get the role — first check tester_roles list, then fall back to org roles
         role = next((r for r in tester_roles if r.name == user_config["role_name"]), None)
+        if not role:
+            role = session.query(OrgRole).filter_by(
+                organization_id=org.id, name=user_config["role_name"]
+            ).first()
         if not role:
             print(f"[WARN] Role '{user_config['role_name']}' not found for user {user_config['email']}")
             continue
 
-        # Check if user already has this role
         existing_assignment = session.query(OrgUserRole).filter_by(
             user_id=user.id,
             org_role_id=role.id
         ).first()
 
         if not existing_assignment:
-            # Assign role to user
-            user_role = OrgUserRole(
+            session.add(OrgUserRole(
                 id=uuid.uuid4(),
                 user_id=user.id,
                 org_role_id=role.id,
                 is_active=True
-            )
-            session.add(user_role)
+            ))
 
     session.commit()
-    print(f"[OK] Created {created_users} sample tester users and assigned roles")
+    print(f"[OK] Created {created_users} KPTCL field/lab tester users and assigned roles")
 
     return org
 
