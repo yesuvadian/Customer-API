@@ -588,57 +588,72 @@ def seed_privileges(session, role_ids, module_ids):
     privileges_data.extend(erp_service_privileges)
 
     # -------------------------------------------------------
-    # ⭐ TESTING REQUEST SYSTEM PRIVILEGES
+    # ⭐ TESTING REQUEST SYSTEM PRIVILEGES  (aligned with role-module map)
     # -------------------------------------------------------
     testing_privileges = [
-        # ORIGINATOR — full on Testing Requests + Procurement, view on others, can_assign
+        # ORIGINATOR — dashboard + procurement + testing requests (no Testing itself)
         {
             "role": "Originator", "module": "Testing Requests",
             "can_view": True, "can_add": True, "can_edit": True,
             "can_delete": True, "can_search": True, "can_assign": True
         },
-        {"role": "Originator", "module": "Testing", "can_view": True},
-        {"role": "Originator", "module": "Recommendations", "can_view": True},
-        {"role": "Originator", "module": "Approvals", "can_view": True},
         {
             "role": "Originator", "module": "Validation Requests",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
         {"role": "Originator", "module": "Dashboard", "can_view": True},
-        # Originator — Procurement modules
-        {"role": "Originator", "module": "Request Quote", "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "RQ with Vendor", "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "Request Product", "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "Quotes", "can_view": True},
-        {"role": "Originator", "module": "Sales Orders", "can_view": True},
-        {"role": "Originator", "module": "Invoices", "can_view": True},
-        {"role": "Originator", "module": "Retainer Invoices", "can_view": True},
-        {"role": "Originator", "module": "Payments Made", "can_view": True},
-        {"role": "Originator", "module": "Statements", "can_view": True},
-        {"role": "Originator", "module": "Enquiry", "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "Contact Us", "can_view": True},
+        # Originator — Procurement modules (full add/edit)
+        {"role": "Originator", "module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Originator", "module": "RQ with Vendor",      "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Originator", "module": "Request Product",     "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Originator", "module": "Quotes",              "can_view": True},
+        {"role": "Originator", "module": "Sales Orders",        "can_view": True},
+        {"role": "Originator", "module": "Invoices",            "can_view": True},
+        {"role": "Originator", "module": "Retainer Invoices",   "can_view": True},
+        {"role": "Originator", "module": "Payments Made",       "can_view": True},
+        {"role": "Originator", "module": "Statements",          "can_view": True},
+        {"role": "Originator", "module": "Enquiry",             "can_view": True, "can_add": True},
+        {"role": "Originator", "module": "Contact Us",          "can_view": True},
 
-        # TESTER — view Testing Requests, full on Testing + Recommendations
-        {"role": "Tester", "module": "Testing Requests", "can_view": True},
+        # FIELD TESTER — view Testing Requests, full on Testing
+        {"role": "Field Tester", "module": "Testing Requests", "can_view": True},
         {
-            "role": "Tester", "module": "Testing",
+            "role": "Field Tester", "module": "Testing",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
-        {
-            "role": "Tester", "module": "Recommendations",
-            "can_view": True, "can_add": True, "can_edit": True
-        },
-        {"role": "Tester", "module": "Dashboard", "can_view": True},
 
-        # APPROVER — view Testing Requests + Recommendations, approve on Approvals
-        {"role": "Approver", "module": "Testing Requests", "can_view": True},
-        {"role": "Approver", "module": "Testing", "can_view": True},
-        {"role": "Approver", "module": "Recommendations", "can_view": True},
+        # LAB TESTER — same as Field Tester
+        {"role": "Lab Tester", "module": "Testing Requests", "can_view": True},
         {
-            "role": "Approver", "module": "Approvals",
-            "can_view": True, "can_approve": True
+            "role": "Lab Tester", "module": "Testing",
+            "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
-        {"role": "Approver", "module": "Dashboard", "can_view": True},
+
+        # TEST ASSIGNER (Approver) — approve/assign on Testing Request Approvals
+        {
+            "role": "Test Assigner", "module": "Testing Request Approvals",
+            "can_view": True, "can_approve": True, "can_assign": True
+        },
+
+        # DEPARTMENT HEAD — approve on Recommendations + Approvals
+        {"role": "Department Head", "module": "Recommendations",
+         "can_view": True, "can_approve": True},
+        {"role": "Department Head", "module": "Approvals",
+         "can_view": True, "can_approve": True},
+
+        # PURCHASER — dashboard + full procurement
+        {"role": "Purchaser", "module": "Dashboard",            "can_view": True},
+        {"role": "Purchaser", "module": "Request Quote",        "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Purchaser", "module": "RQ with Vendor",       "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Purchaser", "module": "Request Product",      "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Purchaser", "module": "Quotes",               "can_view": True},
+        {"role": "Purchaser", "module": "Sales Orders",         "can_view": True},
+        {"role": "Purchaser", "module": "Invoices",             "can_view": True},
+        {"role": "Purchaser", "module": "Retainer Invoices",    "can_view": True},
+        {"role": "Purchaser", "module": "Payments Made",        "can_view": True},
+        {"role": "Purchaser", "module": "Statements",           "can_view": True},
+        {"role": "Purchaser", "module": "Enquiry",              "can_view": True, "can_add": True},
+        {"role": "Purchaser", "module": "Contact Us",           "can_view": True},
 
         # TESTER MAPPING — Admin full, Originator view-only
         {
@@ -648,7 +663,7 @@ def seed_privileges(session, role_ids, module_ids):
         },
         {"role": "Originator", "module": "Tester Mapping", "can_view": True},
 
-        # TEST TEMPLATE MANAGEMENT — Originator view-only (Admin already gets full via bulk)
+        # TEST TEMPLATE MANAGEMENT — Admin full (via bulk), Originator view-only
         {"role": "Originator", "module": "Test Template Management", "can_view": True},
     ]
 
@@ -1477,175 +1492,155 @@ def seed_role_templates(session):
     # Dashboard (should be accessible to everyone)
     dashboard_module = [modules_by_name.get("Dashboard")] if modules_by_name.get("Dashboard") else []
 
+    # ── Named module-set shortcuts ─────────────────────────────────────────
+    # Procurement modules (without Dashboard — added individually where needed)
+    procurement_module_names = [
+        "Request Quote", "RQ with Vendor", "Request Product", "Quotes",
+        "Sales Orders", "Invoices", "Retainer Invoices", "Payments Made",
+        "Statements", "Enquiry", "Contact Us"
+    ]
+    procurement_modules = [modules_by_name[n] for n in procurement_module_names if n in modules_by_name]
+
+    # Org-management modules
+    org_module_names = ["Organizations", "Organization User Roles", "Organization Role Permissions"]
+    org_modules = [modules_by_name[n] for n in org_module_names if n in modules_by_name]
+
+    # Testing-specific modules (by name, so we can pick individual ones)
+    testing_requests_module  = [mid for mid in [modules_by_name.get("Testing Requests")] if mid]
+    testing_module           = [mid for mid in [modules_by_name.get("Testing")] if mid]
+    testing_request_approvals_module = [mid for mid in [modules_by_name.get("Testing Request Approvals")] if mid]
+    recommendations_module   = [mid for mid in [modules_by_name.get("Recommendations")] if mid]
+    approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
+    workflows_module         = [mid for mid in [modules_by_name.get("Workflows")] if mid]
+
+    dashboard_module = [mid for mid in [modules_by_name.get("Dashboard")] if mid]
+
+    def _full(mids):
+        """Full read/write/delete/approve/assign permissions for a list of module_ids."""
+        return [{"module_id": m, "can_view": True, "can_add": True, "can_edit": True,
+                 "can_delete": True, "can_approve": True, "can_assign": True,
+                 "can_export": True, "can_import": True} for m in mids]
+
+    def _readwrite(mids):
+        """Read + write (no delete / approve / assign) permissions."""
+        return [{"module_id": m, "can_view": True, "can_add": True, "can_edit": True,
+                 "can_delete": False, "can_approve": False, "can_assign": False,
+                 "can_export": True, "can_import": False} for m in mids]
+
+    def _readonly(mids):
+        """View-only permissions."""
+        return [{"module_id": m, "can_view": True, "can_add": False, "can_edit": False,
+                 "can_delete": False, "can_approve": False, "can_assign": False,
+                 "can_export": False, "can_import": False} for m in mids]
+
+    def _approve(mids):
+        """View + approve permissions (for approval-workflow roles)."""
+        return [{"module_id": m, "can_view": True, "can_add": False, "can_edit": False,
+                 "can_delete": False, "can_approve": True, "can_assign": True,
+                 "can_export": True, "can_import": False} for m in mids]
+
+    # Super Admin modules: everything the Excel column lists
+    super_admin_modules = list({
+        *dashboard_module,
+        *procurement_modules,
+        *testing_requests_module,
+        *testing_module,
+        *recommendations_module,
+        *approvals_module,
+        *testing_request_approvals_module,
+        *org_modules,
+        *workflows_module,
+    })
+
     templates_data = [
+        # ── 1. Admin (Super Admin) — full access to all modules ──────────────
         {
             "name": "Admin",
-            "description": "Full administrative access to the organization. Can manage users, roles, departments, and all organization resources.",
+            "description": "Super admin with full access to all modules including org management, testing, procurement, and workflows.",
             "is_org_admin": True,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": True,
-                    "can_approve": True,
-                    "can_assign": True,
-                    "can_export": True,
-                    "can_import": True
-                }
-                for mid in all_module_ids  # Admin gets access to everything
-            ]
+            "permissions_template": _full(all_module_ids),
         },
+        # ── 2. Org Admin — manages org structure only ─────────────────────────
+        {
+            "name": "Org Admin",
+            "description": "Manages organization structure: users, roles, and departments. No access to testing or procurement.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": _full(org_modules),
+        },
+        # ── 3. Originator — procurement + testing requests ────────────────────
         {
             "name": "Originator",
-            "description": "Creates testing requests and raises procurement. Full access to testing requests and procurement modules.",
+            "description": "Creates testing requests and raises procurement. Access to dashboard, all procurement modules, and testing requests.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": True,
-                    "can_approve": False,
-                    "can_assign": True,
-                    "can_export": True,
-                    "can_import": False
-                }
-                for mid in (testing_modules + procurement_modules + dashboard_module)  # Only testing, procurement, dashboard
-            ]
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _readwrite(procurement_modules) +
+                _readwrite(testing_requests_module)
+            ),
         },
+        # ── 4. Test Assigner (Approver) — testing request approvals only ──────
         {
-            "name": "Tester",
-            "description": "Performs transformer testing and uploads results. Full access to testing and recommendations modules.",
+            "name": "Test Assigner",
+            "description": "Approves testing requests and assigns testers. Access to Testing Request Approvals module only.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": False,
-                    "can_approve": False,
-                    "can_assign": False,
-                    "can_export": True,
-                    "can_import": False
-                }
-                for mid in (testing_modules + dashboard_module)  # Only testing modules and dashboard
-            ]
+            "permissions_template": _approve(testing_request_approvals_module),
         },
+        # ── 5. Field Tester ───────────────────────────────────────────────────
         {
-            "name": "Approver",
-            "description": "Reviews and approves or rejects recommendations. Approval access to testing workflow.",
+            "name": "Field Tester",
+            "description": "Performs on-site transformer testing and uploads results. View testing requests; full access to testing module.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": False,
-                    "can_edit": False,
-                    "can_delete": False,
-                    "can_approve": True,
-                    "can_assign": False,
-                    "can_export": True,
-                    "can_import": False
-                }
-                for mid in (testing_modules + dashboard_module)  # Only testing modules (for approvals) and dashboard
-            ]
+            "permissions_template": (
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module)
+            ),
         },
+        # ── 6. Lab Tester ─────────────────────────────────────────────────────
         {
-            "name": "Department Manager",
-            "description": "Manage department users and departmental resources. Can view and manage users within their department.",
+            "name": "Lab Tester",
+            "description": "Performs laboratory testing and uploads results. View testing requests; full access to testing module.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module)
+            ),
+        },
+        # ── 7. Department Head — recommendations & approvals ─────────────────
+        {
+            "name": "Department Head",
+            "description": "Reviews and approves recommendations from testers. Access to Recommendations and Approvals modules.",
             "is_org_admin": False,
             "is_dept_admin": True,
-            "auto_provision": False,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": False,
-                    "can_approve": True,
-                    "can_assign": True,
-                    "can_export": True,
-                    "can_import": False
-                }
-                for mid in (testing_modules + procurement_modules + org_modules + dashboard_module)  # Testing, procurement, org, dashboard
-            ]
+            "auto_provision": True,
+            "permissions_template": (
+                _approve(recommendations_module) +
+                _approve(approvals_module)
+            ),
         },
+        # ── 8. Purchaser — dashboard + procurement ────────────────────────────
         {
-            "name": "Employee",
-            "description": "Standard employee access. Can view organization resources and manage their own data.",
+            "name": "Purchaser",
+            "description": "Manages procurement activities. Access to dashboard and all procurement modules.",
             "is_org_admin": False,
             "is_dept_admin": False,
-            "auto_provision": False,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": False,
-                    "can_edit": False,
-                    "can_delete": False,
-                    "can_approve": False,
-                    "can_assign": False,
-                    "can_export": False,
-                    "can_import": False
-                }
-                for mid in (testing_modules + procurement_modules + dashboard_module)  # View-only access to testing, procurement, dashboard
-            ]
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _readwrite(procurement_modules)
+            ),
         },
-        {
-            "name": "Viewer",
-            "description": "Read-only access to organization resources.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": False,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": False,
-                    "can_edit": False,
-                    "can_delete": False,
-                    "can_approve": False,
-                    "can_assign": False,
-                    "can_export": False,
-                    "can_import": False
-                }
-                for mid in (testing_modules + procurement_modules + dashboard_module)  # View-only access to testing, procurement, dashboard
-            ]
-        },
-        {
-            "name": "Contributor",
-            "description": "Can add and edit resources but cannot delete or approve.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": False,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": False,
-                    "can_approve": False,
-                    "can_assign": False,
-                    "can_export": True,
-                    "can_import": True
-                }
-                for mid in (testing_modules + procurement_modules + dashboard_module)  # Can contribute to testing, procurement, dashboard
-            ]
-        }
     ]
 
     created_count = 0
