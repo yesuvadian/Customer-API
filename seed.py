@@ -41,12 +41,10 @@ def seed_users(session):
          "phone_number": "6666666666", "password": "Auditor@123"},
         {"first_name": "Vendor", "last_name": "User", "email": "vendor@relu.com",
          "phone_number": "5555555555", "password": "vendor@123"},
-                # ✅ ERP SERVICE USER
         {"first_name": "ERP", "last_name": "Service", "email": "erp_bot@relu.com",
          "phone_number": "4444444444", "password": "ErpBot@123"},
-        # ✅ TESTING REQUEST SYSTEM USERS
-        {"first_name": "Originator", "last_name": "User", "email": "dakshanamurthy@hotmail.com",
-         "phone_number": "3333333333", "password": "Originator@123"},
+        # {"first_name": "Originator", "last_name": "User", "email": "dakshanamurthy@hotmail.com",
+        #  "phone_number": "3333333333", "password": "Originator@123"},
         {"first_name": "Tester", "last_name": "User", "email": "tester@relu.com",
          "phone_number": "2222222222", "password": "Tester@123"},
         {"first_name": "Approver", "last_name": "User", "email": "approver@relu.com",
