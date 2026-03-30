@@ -429,16 +429,13 @@ class SalesOrderService:
                 detail=f"PO cannot be updated when order status is '{order_status}'"
             )
 
-    def _validate_status_for_grn(self, salesorder: dict):
+    def _validate_status_for_grn(self, salesorder):
         packages = salesorder.get("packages", [])
 
-        if not packages:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="GRN allowed only after package is created"
-            )
+        # ✅ Allow even if no package
+        print("📦 Packages:", packages)
 
-        # Check if at least one package is shipped
+        # Keep shipment validation (optional)
         valid_status = ["shipped", "delivered", "partially_shipped", "fulfilled"]
 
         is_shipped = any(
@@ -446,9 +443,9 @@ class SalesOrderService:
             for p in packages
         )
 
-        if not is_shipped:
+        if packages and not is_shipped:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=403,
                 detail="GRN allowed only when package status is shipped"
             )
 
@@ -1012,7 +1009,7 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # 1️⃣ First verify sales order exists
+        # 1️⃣ Fetch Sales Order
         so_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
@@ -1025,7 +1022,7 @@ class SalesOrderService:
 
         salesorder = so_resp.json().get("salesorder", {})
 
-        # Security check
+        # 2️⃣ Security check
         if salesorder.get("customer_id") != contact_id:
             raise HTTPException(status_code=403, detail="Unauthorized access")
 
@@ -1064,10 +1061,6 @@ class SalesOrderService:
 
         return {
             "salesorder_id": salesorder_id,
-            "package_id": latest_package.get("package_id"),
-            "shipment_date": latest_package.get("shipment_date"),
-            "carrier": latest_package.get("carrier"),
-            "tracking_number": latest_package.get("tracking_number"),
             "status": latest_package.get("status")
         }
 
@@ -1124,52 +1117,6 @@ class SalesOrderService:
             )
 
         return file_response.content
-
-    def get_supplier_details(self, access_token: str, salesorder_id: str):
-
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
-        # Fetch Sales Order
-        so_resp = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if so_resp.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to fetch sales order"
-            )
-
-        salesorder = so_resp.json().get("salesorder", {})
-
-        supplier_details = None
-
-        # Extract supplier custom field
-        for field in salesorder.get("custom_fields", []):
-            if field.get("api_name") == "cf_supplier_details":
-                supplier_details = field.get("value")
-                break
-
-        if not supplier_details:
-            return {
-                "company_name": "No Supplier",
-                "address": ""
-            }
-
-        lines = supplier_details.split("\n")
-
-        company = lines[0] if len(lines) > 0 else ""
-        address = "\n".join(lines[1:]) if len(lines) > 1 else ""
-
-        return {
-            "company_name": company,
-            "address": address
-        }
 
     # -------------------------------------------------
     # Create PO with GRN
