@@ -2162,6 +2162,107 @@ def seed_sample_organization(session):
     session.commit()
     print(f"[OK] Created {created_users} sample tester users and assigned roles")
 
+    # -------------------------------------------------------
+    # Create sample users for remaining org roles
+    # (Originator, Test Assigner, Department Head, Purchaser, Org Admin)
+    # -------------------------------------------------------
+    print(f"[INFO] Creating sample users for remaining org roles in {org_code}")
+
+    other_users_config = [
+        {
+            "email": "originator@sampleorg.com",
+            "password": "Originator123!",
+            "role_name": "Originator",
+            "firstname": "Sample",
+            "lastname": "Originator",
+            "phone": "9999999010"
+        },
+        {
+            "email": "testassigner@sampleorg.com",
+            "password": "Assigner123!",
+            "role_name": "Test Assigner",
+            "firstname": "Test",
+            "lastname": "Assigner",
+            "phone": "9999999011"
+        },
+        {
+            "email": "depthead@sampleorg.com",
+            "password": "DeptHead123!",
+            "role_name": "Department Head",
+            "firstname": "Department",
+            "lastname": "Head",
+            "phone": "9999999012"
+        },
+        {
+            "email": "purchaser@sampleorg.com",
+            "password": "Purchaser123!",
+            "role_name": "Purchaser",
+            "firstname": "Sample",
+            "lastname": "Purchaser",
+            "phone": "9999999013"
+        },
+        {
+            "email": "orgadmin@sampleorg.com",
+            "password": "OrgAdmin123!",
+            "role_name": "Org Admin",
+            "firstname": "Org",
+            "lastname": "Admin",
+            "phone": "9999999014"
+        },
+    ]
+
+    created_other = 0
+    for user_config in other_users_config:
+        existing_user = session.query(User).filter_by(email=user_config["email"]).first()
+        if existing_user:
+            user = existing_user
+            user.organization_id = org.id
+        else:
+            user = User(
+                id=uuid.uuid4(),
+                email=user_config["email"],
+                password_hash=get_password_hash(user_config["password"]),
+                firstname=user_config["firstname"],
+                lastname=user_config["lastname"],
+                phone_number=user_config["phone"],
+                organization_id=org.id,
+                isactive=True,
+                email_confirmed=True,
+                phone_confirmed=True,
+                cts=now,
+                mts=now
+            )
+            session.add(user)
+            session.flush()
+            created_other += 1
+
+        # Find the OrgRole for this user
+        role = session.query(OrgRole).filter_by(
+            organization_id=org.id,
+            name=user_config["role_name"]
+        ).first()
+        if not role:
+            print(f"[WARN] OrgRole '{user_config['role_name']}' not found for {user_config['email']}")
+            continue
+
+        existing_assignment = session.query(OrgUserRole).filter_by(
+            user_id=user.id,
+            org_role_id=role.id
+        ).first()
+        if not existing_assignment:
+            session.add(OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                is_active=True
+            ))
+
+    session.commit()
+    print(f"[OK] Created {created_other} additional sample org users")
+    print("  Credentials summary:")
+    for u in other_users_config:
+        print(f"    {u['role_name']:20s}  {u['email']:35s}  {u['password']}")
+
 
 def seed_kptcl_organization(session):
     """
