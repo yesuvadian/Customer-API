@@ -17,6 +17,34 @@ class InvoiceService:
             return contact["contact_id"]
         return contact_id
 
+    def _get_item_cached(self, headers: dict, item_id: str) -> dict:
+        """Fetch a Zoho item with a 1-hour cache. Items rarely change,
+        so this collapses N serial calls to 0 on repeat invoice creation."""
+        cache_key = f"zoho:item:{item_id}"
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        resp = requests.get(
+            f"{self.base_url}/items/{item_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": f"Failed to fetch item {item_id}",
+                    "zoho_response": resp.json()
+                }
+            )
+
+        item = resp.json().get("item", {})
+        cache.set(cache_key, item, ttl=3600)
+        return item
+
     # -----------------------------
     # Create Invoice
     # -----------------------------
@@ -26,17 +54,8 @@ class InvoiceService:
 
         line_items = []
         for item in payload.items:
-            item_response = requests.get(
-                f"{self.base_url}/items/{item.item_id}",
-                headers=headers,
-                params={"organization_id": self.org_id},
-                timeout=15
-            )
-            if item_response.status_code != 200:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                    detail={"message": f"Failed to fetch item {item.item_id}",
-                                            "zoho_response": item_response.json()})
-            item_data = item_response.json().get("item", {})
+            # Use cached item fetches — collapses N Zoho calls to 0 on repeat catalog items
+            item_data = self._get_item_cached(headers, item.item_id)
             line_items.append({
                 "item_id": item.item_id,
                 "quantity": item.quantity,
@@ -146,6 +165,20 @@ class InvoiceService:
             )
 
         invoice = response.json().get("invoice", {})
+
+        # Embed attachments directly from the invoice's documents field.
+        # This lets the Flutter client skip the separate /attachments call,
+        # saving one full invoice re-fetch per detail page load.
+        invoice["attachments"] = [
+            {
+                "attachment_id": doc.get("document_id"),
+                "file_name": doc.get("file_name"),
+                "file_type": doc.get("file_type"),
+                "file_size": doc.get("file_size"),
+            }
+            for doc in invoice.get("documents", [])
+        ]
+
         cache.set(cache_key, invoice)
         return invoice
 
@@ -316,17 +349,23 @@ class InvoiceService:
     # ----------------------------------------------
     # UPDATE A COMMENT
     # ----------------------------------------------
-    def update_invoice_comment(self, access_token: str, invoice_id: str, comment_id: str, payload: dict):
+    def update_invoice_comment(self, access_token: str, invoice_id: str, comment_id: str, payload: dict, email: str | None = None):
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
             "content-type": "application/json"
         }
 
+        # Re-attach the meta block so the comment stays visible after editing.
+        # Without this, get_invoice_comments() filters it out (requires [CUSTOM_META]).
+        description = payload.get("description", "")
+        meta_block = build_comment_meta(email=email)
+        updated_payload = {**payload, "description": meta_block + description}
+
         resp = requests.put(
             f"{self.base_url}/invoices/{invoice_id}/comments/{comment_id}",
             headers=headers,
             params={"organization_id": self.org_id},
-            json=payload,
+            json=updated_payload,
             timeout=15
         )
 
