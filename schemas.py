@@ -1,4 +1,5 @@
 import uuid
+from enum import Enum as PyEnum
 from pydantic import BaseModel, EmailStr, Field, constr
 from typing import Annotated, Dict, List, Optional
 from uuid import UUID
@@ -1058,6 +1059,63 @@ class TestingRequestResponse(BaseModel):
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Test Request Schedule Schemas
+# ==========================================
+
+class ScheduleFrequencyEnum(str, PyEnum):
+    daily = "daily"
+    weekly = "weekly"
+    biweekly = "biweekly"
+    monthly = "monthly"
+    quarterly = "quarterly"
+    yearly = "yearly"
+
+
+class TestRequestScheduleCreate(BaseModel):
+    frequency: ScheduleFrequencyEnum
+    end_date: Optional[datetime] = None
+    advance_days: int = 1
+
+
+class TestRequestScheduleUpdate(BaseModel):
+    frequency: Optional[ScheduleFrequencyEnum] = None
+    end_date: Optional[datetime] = None
+    advance_days: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class TestRequestScheduleResponse(BaseModel):
+    id: UUID
+    test_request_id: UUID
+    organization_id: UUID
+    frequency: str
+    start_date: datetime
+    end_date: Optional[datetime] = None
+    next_run_date: datetime
+    last_run_date: Optional[datetime] = None
+    advance_days: int
+    is_active: bool
+    cts: datetime
+    mts: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TestRequestScheduleLogResponse(BaseModel):
+    id: UUID
+    schedule_id: UUID
+    generated_request_id: Optional[UUID] = None
+    run_date: datetime
+    status: str
+    error_message: Optional[str] = None
+    cts: datetime
 
     class Config:
         from_attributes = True

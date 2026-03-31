@@ -1,10 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
-from database import Base, engine
+from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
 from routers import websocket_routes
+from apscheduler.schedulers.background import BackgroundScheduler
+from services.test_request_schedule_service import TestRequestScheduleService
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -62,6 +67,7 @@ from routers.customer_care import router as customer_care_router
 from routers import testing_requests, testing, recommendations, approvals, procurement, testing_request_approvals, admin_tester_config
 from routers import tester_assignment
 from routers import org_test_templates
+from routers import test_request_schedules
 
 # Organization Multi-Tenancy
 from routers import organizations, org_departments, org_users, org_roles
@@ -71,6 +77,22 @@ from routers import workflows
 
 # Optional: create all database tables (uncomment if needed)
 # Base.metadata.create_all(bind=engine)
+
+# ── APScheduler: daily test request scheduler ────────────────────────────────
+scheduler = BackgroundScheduler(timezone="UTC")
+
+def _run_schedule_job():
+    db = SessionLocal()
+    try:
+        result = TestRequestScheduleService.run_daily_scheduler(db)
+        logger.info(f"[Scheduler] Test request schedule job: created={result['created']} failed={result['failed']}")
+    except Exception as e:
+        logger.error(f"[Scheduler] Job error: {e}")
+    finally:
+        db.close()
+
+scheduler.add_job(_run_schedule_job, trigger="cron", hour=0, minute=0, id="daily_test_scheduler")
+
 
 # Initialize FastAPI app
 app = FastAPI(title="Vendor API")
@@ -189,6 +211,7 @@ app.include_router(procurement.router)
 app.include_router(tester_assignment.router)
 app.include_router(org_test_templates.router)
 app.include_router(org_test_templates.browser_router)
+app.include_router(test_request_schedules.router)
 
 # Organization Multi-Tenancy
 app.include_router(organizations.router)
@@ -201,7 +224,13 @@ app.include_router(workflows.router)
 
 app.include_router(websocket_routes.router)
 
-# Optional: enable auto-create database tables at startup
-# @app.on_event("startup")
-# async def startup_event():
-#     Base.metadata.create_all(bind=engine)
+# ── Lifecycle events ─────────────────────────────────────────────────────────
+@app.on_event("startup")
+async def startup_event():
+    scheduler.start()
+    logger.info("[Scheduler] APScheduler started — daily test request job scheduled at 00:00 UTC")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    scheduler.shutdown(wait=False)
+    logger.info("[Scheduler] APScheduler stopped")
