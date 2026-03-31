@@ -67,8 +67,15 @@ class OrgDepartmentService(UTCDateTimeMixin):
             duplicate_query = duplicate_query.filter(
                 OrgDepartment.parent_department_id == None
             )
-        if duplicate_query.first():
-            parent_label = "at the root level" if not dept_data.parent_department_id else "under the same parent"
+        existing = duplicate_query.first()
+        if existing:
+            if dept_data.parent_department_id:
+                parent = self.db.query(OrgDepartment).filter(
+                    OrgDepartment.id == dept_data.parent_department_id
+                ).first()
+                parent_label = f"under '{parent.name}'" if parent else "under the same parent"
+            else:
+                parent_label = "at the root level"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"A department named '{dept_data.name}' already exists {parent_label}"
@@ -173,7 +180,13 @@ class OrgDepartmentService(UTCDateTimeMixin):
         else:
             dup_query = dup_query.filter(OrgDepartment.parent_department_id == None)
         if dup_query.first():
-            parent_label = "at the root level" if not new_parent_id else "under the same parent"
+            if new_parent_id:
+                parent_obj = self.db.query(OrgDepartment).filter(
+                    OrgDepartment.id == new_parent_id
+                ).first()
+                parent_label = f"under '{parent_obj.name}'" if parent_obj else "under the same parent"
+            else:
+                parent_label = "at the root level"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"A department named '{new_name}' already exists {parent_label}"
