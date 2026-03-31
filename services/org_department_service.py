@@ -53,6 +53,27 @@ class OrgDepartmentService(UTCDateTimeMixin):
                     detail="Manager not found in this organization"
                 )
 
+        # Duplicate name check: same name under same parent within the org
+        duplicate_query = self.db.query(OrgDepartment).filter(
+            OrgDepartment.organization_id == dept_data.organization_id,
+            OrgDepartment.name.ilike(dept_data.name),
+            OrgDepartment.is_active == True
+        )
+        if dept_data.parent_department_id:
+            duplicate_query = duplicate_query.filter(
+                OrgDepartment.parent_department_id == dept_data.parent_department_id
+            )
+        else:
+            duplicate_query = duplicate_query.filter(
+                OrgDepartment.parent_department_id == None
+            )
+        if duplicate_query.first():
+            parent_label = "at the root level" if not dept_data.parent_department_id else "under the same parent"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A department named '{dept_data.name}' already exists {parent_label}"
+            )
+
         try:
             dept = OrgDepartment(
                 organization_id=dept_data.organization_id,
@@ -137,6 +158,26 @@ class OrgDepartmentService(UTCDateTimeMixin):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Manager not found in this organization"
                 )
+
+        # Duplicate name check on update: same name, same parent level, same org, different dept
+        new_name = dept_data.name if dept_data.name is not None else dept.name
+        new_parent_id = dept_data.parent_department_id if hasattr(dept_data, 'parent_department_id') and 'parent_department_id' in dept_data.dict(exclude_unset=True) else dept.parent_department_id
+        dup_query = self.db.query(OrgDepartment).filter(
+            OrgDepartment.organization_id == dept.organization_id,
+            OrgDepartment.name.ilike(new_name),
+            OrgDepartment.id != dept_id,
+            OrgDepartment.is_active == True
+        )
+        if new_parent_id:
+            dup_query = dup_query.filter(OrgDepartment.parent_department_id == new_parent_id)
+        else:
+            dup_query = dup_query.filter(OrgDepartment.parent_department_id == None)
+        if dup_query.first():
+            parent_label = "at the root level" if not new_parent_id else "under the same parent"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A department named '{new_name}' already exists {parent_label}"
+            )
 
         # Verify parent department if provided
         if dept_data.parent_department_id:
