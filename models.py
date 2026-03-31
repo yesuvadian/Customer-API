@@ -183,7 +183,7 @@ class OrgDepartmentType(Base):
 class OrgDepartment(Base):
     __tablename__ = "org_departments"
     __table_args__ = (
-        UniqueConstraint("organization_id", "name", name="uq_org_dept_name"),
+        UniqueConstraint("organization_id", "parent_department_id", "name", name="uq_org_dept_name_per_parent"),
         {"schema": "public"}
     )
 

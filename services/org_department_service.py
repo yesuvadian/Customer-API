@@ -100,10 +100,10 @@ class OrgDepartmentService(UTCDateTimeMixin):
             return dept
         except IntegrityError as e:
             self.db.rollback()
-            if "uq_org_dept_name" in str(e):
+            if "uq_org_dept_name_per_parent" in str(e):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Department with name '{dept_data.name}' already exists in this organization"
+                    detail=f"A department named '{dept_data.name}' already exists under the same parent"
                 )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
