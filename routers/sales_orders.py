@@ -65,12 +65,7 @@ def upload_grn(
             detail=f"Unexpected error uploading GRN: {str(e)}"
         )
 
-    return {
-        "message": "GRN uploaded successfully",
-        "salesorder_id": salesorder_id,
-        "cf_grn_number": cf_grn_number,
-        "file_name": file.filename
-    }
+    return result
 
 # =====================================================
 # UPLOAD PO (Sales Order)
@@ -679,3 +674,12 @@ def get_supplier(salesorder_id: str, current_user=Depends(get_current_user)):
             status_code=500,
             detail=f"Error fetching supplier: {str(e)}"
         )
+    
+@router.get("/{salesorder_id}/tracking", status_code=200)
+def get_tracking(salesorder_id: str, current_user=Depends(get_current_user)):
+    access_token = get_zoho_access_token()
+
+    return sales_order_service.get_tracking_data(
+        access_token=access_token,
+        salesorder_id=salesorder_id
+    )

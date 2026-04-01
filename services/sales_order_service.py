@@ -101,10 +101,11 @@ class SalesOrderService:
         file: UploadFile,
         uploaded_by: str | None = None
     ):
+        # 1️⃣ Fetch sales order
         salesorder = self._get_order_status(access_token, salesorder_id)
         self._validate_status_for_grn(salesorder)
 
-        # 1️⃣ Update GRN custom field
+        # 2️⃣ Update GRN custom field
         self.update_grn_number_field(
             access_token=access_token,
             salesorder_id=salesorder_id,
@@ -115,6 +116,7 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
+        # 3️⃣ Prepare file
         file.file.seek(0)
 
         new_filename = self._build_filename(
@@ -131,6 +133,7 @@ class SalesOrderService:
             )
         }
 
+        # 4️⃣ Upload GRN to Sales Order
         response = requests.post(
             f"{self.base_url}/salesorders/{salesorder_id}/attachment",
             headers=headers,
@@ -156,40 +159,72 @@ class SalesOrderService:
                 }
             )
 
-        # 2️⃣ Add comment
+        # 5️⃣ Add comment
         if uploaded_by:
-            meta_block = build_comment_meta(email=uploaded_by)
+            try:
+                meta_block = build_comment_meta(email=uploaded_by)
 
-            comment_payload = {
-                "description": (
-                    meta_block +
-                    f"GRN Uploaded\n"
-                    f"GRN Number: {cf_grn_number}\n"
-                    f"File: {file.filename}"
-                ),
-                "show_comment_to_clients": True
-            }
+                comment_payload = {
+                    "description": (
+                        meta_block +
+                        f"GRN Uploaded\n"
+                        f"GRN Number: {cf_grn_number}\n"
+                        f"File: {file.filename}"
+                    ),
+                    "show_comment_to_clients": True
+                }
 
-            comment_response = requests.post(
-                f"{self.base_url}/salesorders/{salesorder_id}/comments",
-                headers={
-                    "Authorization": f"Zoho-oauthtoken {access_token}",
-                    "Content-Type": "application/json"
-                },
-                params={"organization_id": self.org_id},
-                json=comment_payload,
-                timeout=15
-            )
-
-            if comment_response.status_code not in (200, 201):
-                raise HTTPException(
-                    status_code=400,
-                    detail="GRN uploaded but comment failed"
+                comment_response = requests.post(
+                    f"{self.base_url}/salesorders/{salesorder_id}/comments",
+                    headers={
+                        "Authorization": f"Zoho-oauthtoken {access_token}",
+                        "Content-Type": "application/json"
+                    },
+                    params={"organization_id": self.org_id},
+                    json=comment_payload,
+                    timeout=15
                 )
 
+                if comment_response.status_code not in (200, 201):
+                    print("⚠️ Comment failed:", comment_response.text)
+
+            except Exception as e:
+                print("⚠️ Comment error:", str(e))
+
+        # 6️⃣ 🔥 SEND GRN TO SUPPLIER PO
+        po_sync_success = False
+
+        try:
+            # Refetch latest SO (important to get new attachment)
+            salesorder = self._get_order_status(access_token, salesorder_id)
+
+            self.send_grn_to_purchase_order(
+                access_token=access_token,
+                salesorder_id=salesorder_id,
+                salesorder=salesorder
+            )
+
+            po_sync_success = True
+
+        except Exception as e:
+            print("⚠️ GRN sync to PO failed:", str(e))
+
+        # 7️⃣ Clear cache
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
-        return data
+        # 8️⃣ Return proper response
+        return {
+            "message": (
+                "GRN uploaded successfully and sent to supplier"
+                if po_sync_success
+                else "GRN uploaded successfully (PO sync failed)"
+            ),
+            "salesorder_id": salesorder_id,
+            "grn_number": cf_grn_number,
+            "file_name": new_filename,
+            "po_synced": po_sync_success
+        }
+    
 
     # -------------------------------------------------
     # Update GRN Attachment (PUT)
@@ -216,8 +251,7 @@ class SalesOrderService:
                 prefix="_grn"
             )
         except HTTPException:
-            # Ignore if no file exists
-            pass
+            pass  # ignore if no GRN exists
 
         # 4️⃣ Update GRN number
         self.update_grn_number_field(
@@ -226,11 +260,11 @@ class SalesOrderService:
             grn_number=cf_grn_number
         )
 
-        # 5️⃣ Upload new file
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
+        # 5️⃣ Upload new GRN file
         file.file.seek(0)
 
         new_filename = self._build_filename(
@@ -261,34 +295,71 @@ class SalesOrderService:
                 detail="Failed to upload updated GRN file"
             )
 
-        # 6️⃣ Add update comment
+        # 6️⃣ Add comment (safe)
         if uploaded_by:
-            meta_block = build_comment_meta(email=uploaded_by)
+            try:
+                meta_block = build_comment_meta(email=uploaded_by)
 
-            comment_payload = {
-                "description": (
-                    meta_block +
-                    f"GRN Updated\n"
-                    f"New GRN Number: {cf_grn_number}\n"
-                    f"File: {file.filename}"
-                ),
-                "show_comment_to_clients": True
-            }
+                comment_payload = {
+                    "description": (
+                        meta_block +
+                        f"GRN Updated\n"
+                        f"New GRN Number: {cf_grn_number}\n"
+                        f"File: {file.filename}"
+                    ),
+                    "show_comment_to_clients": True
+                }
 
-            requests.post(
-                f"{self.base_url}/salesorders/{salesorder_id}/comments",
-                headers={
-                    "Authorization": f"Zoho-oauthtoken {access_token}",
-                    "Content-Type": "application/json"
-                },
-                params={"organization_id": self.org_id},
-                json=comment_payload,
-                timeout=15
+                comment_resp = requests.post(
+                    f"{self.base_url}/salesorders/{salesorder_id}/comments",
+                    headers={
+                        "Authorization": f"Zoho-oauthtoken {access_token}",
+                        "Content-Type": "application/json"
+                    },
+                    params={"organization_id": self.org_id},
+                    json=comment_payload,
+                    timeout=15
+                )
+
+                if comment_resp.status_code not in (200, 201):
+                    print("⚠️ Comment failed:", comment_resp.text)
+
+            except Exception as e:
+                print("⚠️ Comment error:", str(e))
+
+        # 7️⃣ 🔥 SEND UPDATED GRN TO SUPPLIER PO (CRITICAL FIX)
+        po_sync_success = False
+
+        try:
+            # Refetch to get latest GRN attachment
+            salesorder = self._get_order_status(access_token, salesorder_id)
+
+            self.send_grn_to_purchase_order(
+                access_token=access_token,
+                salesorder_id=salesorder_id,
+                salesorder=salesorder
             )
 
+            po_sync_success = True
+
+        except Exception as e:
+            print("⚠️ GRN update sync to PO failed:", str(e))
+
+        # 8️⃣ Clear cache
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
-        return {"message": "GRN updated successfully"}
+        # 9️⃣ Return proper response
+        return {
+            "message": (
+                "GRN updated successfully and synced to supplier"
+                if po_sync_success
+                else "GRN updated successfully (PO sync failed)"
+            ),
+            "salesorder_id": salesorder_id,
+            "grn_number": cf_grn_number,
+            "file_name": new_filename,
+            "po_synced": po_sync_success
+        }
 
     def update_grn_number_field(
         self,
@@ -338,15 +409,15 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        response = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={
-                "organization_id": self.org_id,
-                "customer_id": contact_id
-            },
-            timeout=15
-        )
+            response = requests.get(
+                f"{self.base_url}/salesorders/{salesorder_id}",
+                headers=headers,
+                params={
+                    "organization_id": self.org_id,
+                    "customer_id": contact_id,
+                },
+                timeout=15
+            )
 
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail="Failed to fetch sales order")
@@ -389,7 +460,9 @@ class SalesOrderService:
         response = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
-            params={"organization_id": self.org_id},
+            params={
+                "organization_id": self.org_id
+            },
             timeout=15
         )
 
@@ -414,28 +487,8 @@ class SalesOrderService:
                 detail=f"PO cannot be updated when order status is '{order_status}'"
             )
 
-    def _validate_status_for_grn(self, salesorder: dict):
-        packages = salesorder.get("packages", [])
-
-        if not packages:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="GRN allowed only after package is created"
-            )
-
-        # Check if at least one package is shipped
-        valid_status = ["shipped", "delivered", "partially_shipped", "fulfilled"]
-
-        is_shipped = any(
-            p.get("status", "").lower() in valid_status
-            for p in packages
-        )
-
-        if not is_shipped:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="GRN allowed only when package status is shipped"
-            )
+    def _validate_status_for_grn(self, salesorder):
+        return
 
     def get_attachment_pdf_by_prefix(
         self,
@@ -1000,7 +1053,7 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-        # 1️⃣ First verify sales order exists
+        # 1️⃣ Fetch Sales Order
         so_resp = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
             headers=headers,
@@ -1013,7 +1066,7 @@ class SalesOrderService:
 
         salesorder = so_resp.json().get("salesorder", {})
 
-        # Security check
+        # 2️⃣ Security check
         if salesorder.get("customer_id") != contact_id:
             raise HTTPException(status_code=403, detail="Unauthorized access")
 
@@ -1054,11 +1107,121 @@ class SalesOrderService:
 
         return {
             "salesorder_id": salesorder_id,
-            "package_id": latest_package.get("package_id"),
-            "shipment_date": latest_package.get("shipment_date"),
-            "carrier": latest_package.get("carrier"),
-            "tracking_number": latest_package.get("tracking_number"),
             "status": latest_package.get("status")
+        }
+    
+    def send_grn_to_purchase_order(
+        self,
+        access_token: str,
+        salesorder_id: str,
+        salesorder: dict
+    ):
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        # 1️⃣ Find Purchase Order using reference_number
+        salesorder_number = salesorder.get("salesorder_number")
+
+        po = self._find_po_by_salesorder(access_token, salesorder_number)
+
+        if not po:
+            raise HTTPException(404, "Purchase Order not found for this Sales Order")
+
+        po_id = po.get("purchaseorder_id")
+
+        # 2️⃣ Find GRN attachment in Sales Order
+        documents = salesorder.get("documents", [])
+
+        grn_doc = None
+        for doc in reversed(documents):  # latest first
+            file_name = (doc.get("file_name") or "").lower()
+            if "_grn" in file_name:
+                grn_doc = doc
+                break
+
+        if not grn_doc:
+            raise HTTPException(404, "GRN attachment not found in Sales Order")
+
+        document_id = grn_doc.get("document_id")
+        file_name = grn_doc.get("file_name")
+
+        # 3️⃣ Download GRN file from Sales Order
+        file_resp = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=30
+        )
+
+        if file_resp.status_code != 200 or not file_resp.content:
+            raise HTTPException(400, "Failed to download GRN file")
+
+        # 4️⃣ 🔥 DELETE OLD GRN FILES FROM PO (IMPORTANT)
+        try:
+            po_details_resp = requests.get(
+                f"{self.base_url}/purchaseorders/{po_id}",
+                headers=headers,
+                params={"organization_id": self.org_id},
+                timeout=15
+            )
+
+            if po_details_resp.status_code == 200:
+                po_data = po_details_resp.json().get("purchaseorder", {})
+                po_documents = po_data.get("documents", [])
+
+                for doc in po_documents:
+                    existing_name = (doc.get("file_name") or "").lower()
+
+                    # delete only GRN files
+                    if "_grn" not in existing_name:
+                        continue
+
+                    doc_id = doc.get("document_id")
+
+                    del_resp = requests.delete(
+                        f"{self.base_url}/purchaseorders/{po_id}/documents/{doc_id}",
+                        headers=headers,
+                        params={"organization_id": self.org_id},
+                        timeout=15
+                    )
+
+                    print(f"🗑️ Deleted old GRN from PO: {existing_name}")
+                    print("Delete response:", del_resp.text)
+
+        except Exception as e:
+            print("⚠️ Failed deleting old GRN in PO:", str(e))
+
+        # 5️⃣ Upload new GRN to Purchase Order
+        files = {
+            "attachment": (
+                file_name,
+                file_resp.content,
+                "application/pdf"
+            )
+        }
+
+        upload_resp = requests.post(
+            f"{self.base_url}/purchaseorders/{po_id}/attachment",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            files=files,
+            timeout=30
+        )
+
+        if upload_resp.status_code not in (200, 201):
+            raise HTTPException(
+                400,
+                {
+                    "message": "Failed to upload GRN to Purchase Order",
+                    "zoho_response": upload_resp.text
+                }
+            )
+
+        return {
+            "message": "GRN sent to supplier Purchase Order",
+            "purchaseorder_id": po_id,
+            "file_name": file_name
         }
 
     # -------------------------------------------------
@@ -1114,52 +1277,6 @@ class SalesOrderService:
             )
 
         return file_response.content
-
-    def get_supplier_details(self, access_token: str, salesorder_id: str):
-
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
-        # Fetch Sales Order
-        so_resp = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if so_resp.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to fetch sales order"
-            )
-
-        salesorder = so_resp.json().get("salesorder", {})
-
-        supplier_details = None
-
-        # Extract supplier custom field
-        for field in salesorder.get("custom_fields", []):
-            if field.get("api_name") == "cf_supplier_details":
-                supplier_details = field.get("value")
-                break
-
-        if not supplier_details:
-            return {
-                "company_name": "No Supplier",
-                "address": ""
-            }
-
-        lines = supplier_details.split("\n")
-
-        company = lines[0] if len(lines) > 0 else ""
-        address = "\n".join(lines[1:]) if len(lines) > 1 else ""
-
-        return {
-            "company_name": company,
-            "address": address
-        }
 
     # -------------------------------------------------
     # Create PO with GRN
@@ -1705,3 +1822,76 @@ class SalesOrderService:
             )
 
         return resp.json()
+
+    def get_tracking_details(self, salesorder: dict):
+        tracking_id = None
+        carrier = None
+
+        for field in salesorder.get("custom_fields", []):
+            api_name = field.get("api_name")
+
+            if api_name == "cf_tracking":
+                tracking_id = field.get("value") or field.get("display_value")
+
+            elif api_name == "cf_carrier":
+                carrier = field.get("value") or field.get("display_value")
+
+        return {
+            "tracking_id": tracking_id,
+            "carrier": carrier
+        }
+    
+    def get_tracking_data(self, access_token: str, salesorder_id: str):
+
+        # 1️⃣ Get Sales Order
+        salesorder = self._get_order_status(access_token, salesorder_id)
+
+        status = (salesorder.get("status") or "").lower()
+
+        if "invoiced" not in status:
+            raise HTTPException(403, "Tracking available only after invoice")
+
+        # 2️⃣ Find Purchase Order
+        salesorder_number = salesorder.get("salesorder_number")
+
+        po = self._find_po_by_salesorder(access_token, salesorder_number)
+
+        if not po:
+            raise HTTPException(404, "Purchase Order not found")
+
+        po_id = po.get("purchaseorder_id")
+
+        # 3️⃣ Fetch Purchase Order details
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}"
+        }
+
+        po_resp = requests.get(
+            f"{self.base_url}/purchaseorders/{po_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15
+        )
+
+        if po_resp.status_code != 200:
+            raise HTTPException(400, "Failed to fetch Purchase Order")
+
+        purchaseorder = po_resp.json().get("purchaseorder", {})
+
+        # 4️⃣ Extract tracking from PO
+        tracking_id = None
+        carrier = None
+
+        for field in purchaseorder.get("custom_fields", []):
+            api_name = field.get("api_name")
+
+            if api_name == "cf_tracking":
+                tracking_id = field.get("value") or field.get("display_value")
+
+            elif api_name == "cf_carrier":
+                carrier = field.get("value") or field.get("display_value")
+
+        return {
+            "tracking_id": tracking_id,
+            "carrier": carrier
+        }
