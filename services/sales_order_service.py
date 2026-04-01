@@ -409,7 +409,7 @@ class SalesOrderService:
             "Authorization": f"Zoho-oauthtoken {access_token}"
         }
 
-            response = requests.get(
+        response = requests.get(
                 f"{self.base_url}/salesorders/{salesorder_id}",
                 headers=headers,
                 params={
