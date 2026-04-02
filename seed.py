@@ -2497,6 +2497,8 @@ def seed_kptcl_organization(session):
 
         if existing_role:
             role = existing_role
+            # FIX: Clear the limited template permissions so we can overwrite them
+            session.query(OrgRolePermission).filter_by(org_role_id=role.id).delete()
         else:
             # Create tester role
             role = OrgRole(
@@ -2514,24 +2516,24 @@ def seed_kptcl_organization(session):
             session.add(role)
             session.flush()
 
-            # Add FULL permissions for EXACT modules only
-            for module_id in TESTER_REQUIRED_MODULES:
-                perm = OrgRolePermission(
-                    id=uuid.uuid4(),
-                    org_role_id=role.id,
-                    module_id=module_id,
-                    can_view=True,
-                    can_add=True,
-                    can_edit=True,
-                    can_delete=True,
-                    can_approve=True,
-                    can_assign=True,
-                    can_export=True,
-                    can_import=True,
-                    cts=now,
-                    mts=now
-                )
-                session.add(perm)
+        # FIX: Move this OUTSIDE the else block to guarantee full permissions are added
+        for module_id in TESTER_REQUIRED_MODULES:
+            perm = OrgRolePermission(
+                id=uuid.uuid4(),
+                org_role_id=role.id,
+                module_id=module_id,
+                can_view=True,
+                can_add=True,
+                can_edit=True,
+                can_delete=True,
+                can_approve=True,
+                can_assign=True,
+                can_export=True,
+                can_import=True,
+                cts=now,
+                mts=now
+            )
+            session.add(perm)
 
         tester_roles.append(role)
 
