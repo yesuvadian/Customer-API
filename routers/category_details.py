@@ -77,17 +77,19 @@ def list_category_details(
     limit: int = 100,
     search: Optional[str] = None,
     master_id: Optional[int] = None,
-    is_active: Optional[bool] = None,   # ✅ ADD
+    is_active: Optional[bool] = None,
+    master_description: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """List Category Details. Optional filter by Master ID & is_active"""
+    """List Category Details. Filter by master_id, is_active, or master_description."""
     return CategoryDetailsService.get_category_details(
         db=db,
         skip=skip,
         limit=limit,
         search=search,
         master_id=master_id,
-        is_active=is_active               # ✅ PASS
+        is_active=is_active,
+        master_description=master_description,
     )
 
 # ---------------------------

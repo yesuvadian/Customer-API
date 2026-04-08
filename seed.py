@@ -389,7 +389,8 @@ def seed_modules(session):
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 {"name": "Testing Request Approvals", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
 {"name": "Validation Requests", "description": "Create and manage validation requests", "path": "validation_requests", "group_name": "Testing"},
-{"name": "Tester Mapping", "description": "Map testers to locations (DEPRECATED - use org departments)", "path": "tester_mapping", "group_name": "Testing", "is_active": False},
+{"name": "Tester Mapping", "description": "Map testers to locations (zone/circle/division)", "path": "tester_mapping", "group_name": "Testing"},
+{"name": "Test Template Management", "description": "Design and customise per-org test form templates", "path": "test_templates", "group_name": "Testing"},
 # ✅ ORGANIZATION MANAGEMENT MODULES
 {"name": "Organizations", "description": "Manage organizations, departments, roles, and users", "path": "organizations", "group_name": "Organization"},
 {"name": "Organization User Roles", "description": "Assign organization-specific roles to users within your organization", "path": "org_user_roles", "group_name": "Organization"},
@@ -476,6 +477,7 @@ def seed_privileges(session, role_ids, module_ids):
         "Enquiry", "Contact Us", "RQ with Vendor",
         # ✅ TESTING REQUEST SYSTEM MODULES
         "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests",
+        "Test Template Management",
         # ✅ ORGANIZATION MANAGEMENT MODULE
         "Organizations",
         # ✅ WORKFLOW MANAGEMENT MODULE
@@ -586,65 +588,83 @@ def seed_privileges(session, role_ids, module_ids):
     privileges_data.extend(erp_service_privileges)
 
     # -------------------------------------------------------
-    # ⭐ TESTING REQUEST SYSTEM PRIVILEGES
+    # ⭐ TESTING REQUEST SYSTEM PRIVILEGES  (aligned with role-module map)
     # -------------------------------------------------------
     testing_privileges = [
-        # ORIGINATOR — full on Testing Requests + Procurement, view on others, can_assign
+        # ORIGINATOR — dashboard + procurement + testing requests (no Testing itself)
         {
             "role": "Originator", "module": "Testing Requests",
             "can_view": True, "can_add": True, "can_edit": True,
             "can_delete": True, "can_search": True, "can_assign": True
         },
-        {"role": "Originator", "module": "Testing", "can_view": True},
-        {"role": "Originator", "module": "Recommendations", "can_view": True},
-        {"role": "Originator", "module": "Approvals", "can_view": True},
         {
             "role": "Originator", "module": "Validation Requests",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
         {"role": "Originator", "module": "Dashboard", "can_view": True},
-        # Originator — Procurement modules
-        {"role": "Originator", "module": "Request Quote", "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "RQ with Vendor", "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "Request Product", "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "Quotes", "can_view": True},
-        {"role": "Originator", "module": "Sales Orders", "can_view": True},
-        {"role": "Originator", "module": "Invoices", "can_view": True},
-        {"role": "Originator", "module": "Retainer Invoices", "can_view": True},
-        {"role": "Originator", "module": "Payments Made", "can_view": True},
-        {"role": "Originator", "module": "Statements", "can_view": True},
-        {"role": "Originator", "module": "Enquiry", "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "Contact Us", "can_view": True},
+        # Originator — Procurement modules (full add/edit)
+        {"role": "Originator", "module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Originator", "module": "RQ with Vendor",      "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Originator", "module": "Request Product",     "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Originator", "module": "Quotes",              "can_view": True},
+        {"role": "Originator", "module": "Sales Orders",        "can_view": True},
+        {"role": "Originator", "module": "Invoices",            "can_view": True},
+        {"role": "Originator", "module": "Retainer Invoices",   "can_view": True},
+        {"role": "Originator", "module": "Payments Made",       "can_view": True},
+        {"role": "Originator", "module": "Statements",          "can_view": True},
+        {"role": "Originator", "module": "Enquiry",             "can_view": True, "can_add": True},
+        {"role": "Originator", "module": "Contact Us",          "can_view": True},
 
-        # TESTER — view Testing Requests, full on Testing + Recommendations
-        {"role": "Tester", "module": "Testing Requests", "can_view": True},
+        # FIELD TESTER — view Testing Requests, full on Testing
+        {"role": "Field Tester", "module": "Testing Requests", "can_view": True},
         {
-            "role": "Tester", "module": "Testing",
+            "role": "Field Tester", "module": "Testing",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
-        {
-            "role": "Tester", "module": "Recommendations",
-            "can_view": True, "can_add": True, "can_edit": True
-        },
-        {"role": "Tester", "module": "Dashboard", "can_view": True},
 
-        # APPROVER — view Testing Requests + Recommendations, approve on Approvals
-        {"role": "Approver", "module": "Testing Requests", "can_view": True},
-        {"role": "Approver", "module": "Testing", "can_view": True},
-        {"role": "Approver", "module": "Recommendations", "can_view": True},
+        # LAB TESTER — same as Field Tester
+        {"role": "Lab Tester", "module": "Testing Requests", "can_view": True},
         {
-            "role": "Approver", "module": "Approvals",
-            "can_view": True, "can_approve": True
+            "role": "Lab Tester", "module": "Testing",
+            "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
-        {"role": "Approver", "module": "Dashboard", "can_view": True},
 
-        # TESTER MAPPING — DEPRECATED (use org departments instead)
-        # {
-        #     "role": "Admin", "module": "Tester Mapping",
-        #     "can_view": True, "can_add": True, "can_edit": True,
-        #     "can_delete": True, "can_search": True
-        # },
-        # {"role": "Originator", "module": "Tester Mapping", "can_view": True},
+        # TEST ASSIGNER (Approver) — approve/assign on Testing Request Approvals
+        {
+            "role": "Test Assigner", "module": "Testing Request Approvals",
+            "can_view": True, "can_approve": True, "can_assign": True
+        },
+
+        # DEPARTMENT HEAD — approve on Recommendations + Approvals
+        {"role": "Department Head", "module": "Recommendations",
+         "can_view": True, "can_approve": True},
+        {"role": "Department Head", "module": "Approvals",
+         "can_view": True, "can_approve": True},
+
+        # PURCHASER — dashboard + full procurement
+        {"role": "Purchaser", "module": "Dashboard",            "can_view": True},
+        {"role": "Purchaser", "module": "Request Quote",        "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Purchaser", "module": "RQ with Vendor",       "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Purchaser", "module": "Request Product",      "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Purchaser", "module": "Quotes",               "can_view": True},
+        {"role": "Purchaser", "module": "Sales Orders",         "can_view": True},
+        {"role": "Purchaser", "module": "Invoices",             "can_view": True},
+        {"role": "Purchaser", "module": "Retainer Invoices",    "can_view": True},
+        {"role": "Purchaser", "module": "Payments Made",        "can_view": True},
+        {"role": "Purchaser", "module": "Statements",           "can_view": True},
+        {"role": "Purchaser", "module": "Enquiry",              "can_view": True, "can_add": True},
+        {"role": "Purchaser", "module": "Contact Us",           "can_view": True},
+
+        # TESTER MAPPING — Admin full, Originator view-only
+        {
+            "role": "Admin", "module": "Tester Mapping",
+            "can_view": True, "can_add": True, "can_edit": True,
+            "can_delete": True, "can_search": True
+        },
+        {"role": "Originator", "module": "Tester Mapping", "can_view": True},
+
+        # TEST TEMPLATE MANAGEMENT — Admin full (via bulk), Originator view-only
+        {"role": "Originator", "module": "Test Template Management", "can_view": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -1472,175 +1492,155 @@ def seed_role_templates(session):
     # Dashboard (should be accessible to everyone)
     dashboard_module = [modules_by_name.get("Dashboard")] if modules_by_name.get("Dashboard") else []
 
+    # ── Named module-set shortcuts ─────────────────────────────────────────
+    # Procurement modules (without Dashboard — added individually where needed)
+    procurement_module_names = [
+        "Request Quote", "RQ with Vendor", "Request Product", "Quotes",
+        "Sales Orders", "Invoices", "Retainer Invoices", "Payments Made",
+        "Statements", "Enquiry", "Contact Us"
+    ]
+    procurement_modules = [modules_by_name[n] for n in procurement_module_names if n in modules_by_name]
+
+    # Org-management modules
+    org_module_names = ["Organizations", "Organization User Roles", "Organization Role Permissions"]
+    org_modules = [modules_by_name[n] for n in org_module_names if n in modules_by_name]
+
+    # Testing-specific modules (by name, so we can pick individual ones)
+    testing_requests_module  = [mid for mid in [modules_by_name.get("Testing Requests")] if mid]
+    testing_module           = [mid for mid in [modules_by_name.get("Testing")] if mid]
+    testing_request_approvals_module = [mid for mid in [modules_by_name.get("Testing Request Approvals")] if mid]
+    recommendations_module   = [mid for mid in [modules_by_name.get("Recommendations")] if mid]
+    approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
+    workflows_module         = [mid for mid in [modules_by_name.get("Workflows")] if mid]
+
+    dashboard_module = [mid for mid in [modules_by_name.get("Dashboard")] if mid]
+
+    def _full(mids):
+        """Full read/write/delete/approve/assign permissions for a list of module_ids."""
+        return [{"module_id": m, "can_view": True, "can_add": True, "can_edit": True,
+                 "can_delete": True, "can_approve": True, "can_assign": True,
+                 "can_export": True, "can_import": True} for m in mids]
+
+    def _readwrite(mids):
+        """Read + write (no delete / approve / assign) permissions."""
+        return [{"module_id": m, "can_view": True, "can_add": True, "can_edit": True,
+                 "can_delete": False, "can_approve": False, "can_assign": False,
+                 "can_export": True, "can_import": False} for m in mids]
+
+    def _readonly(mids):
+        """View-only permissions."""
+        return [{"module_id": m, "can_view": True, "can_add": False, "can_edit": False,
+                 "can_delete": False, "can_approve": False, "can_assign": False,
+                 "can_export": False, "can_import": False} for m in mids]
+
+    def _approve(mids):
+        """View + approve permissions (for approval-workflow roles)."""
+        return [{"module_id": m, "can_view": True, "can_add": False, "can_edit": False,
+                 "can_delete": False, "can_approve": True, "can_assign": True,
+                 "can_export": True, "can_import": False} for m in mids]
+
+    # Super Admin modules: everything the Excel column lists
+    super_admin_modules = list({
+        *dashboard_module,
+        *procurement_modules,
+        *testing_requests_module,
+        *testing_module,
+        *recommendations_module,
+        *approvals_module,
+        *testing_request_approvals_module,
+        *org_modules,
+        *workflows_module,
+    })
+
     templates_data = [
+        # ── 1. Admin (Super Admin) — full access to all modules ──────────────
         {
             "name": "Admin",
-            "description": "Full administrative access to the organization. Can manage users, roles, departments, and all organization resources.",
+            "description": "Super admin with full access to all modules including org management, testing, procurement, and workflows.",
             "is_org_admin": True,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": True,
-                    "can_approve": True,
-                    "can_assign": True,
-                    "can_export": True,
-                    "can_import": True
-                }
-                for mid in all_module_ids  # Admin gets access to everything
-            ]
+            "permissions_template": _full(all_module_ids),
         },
+        # ── 2. Org Admin — manages org structure only ─────────────────────────
+        {
+            "name": "Org Admin",
+            "description": "Manages organization structure: users, roles, and departments. No access to testing or procurement.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": _full(org_modules),
+        },
+        # ── 3. Originator — procurement + testing requests ────────────────────
         {
             "name": "Originator",
-            "description": "Creates testing requests and raises procurement. Full access to testing requests and procurement modules.",
+            "description": "Creates testing requests and raises procurement. Access to dashboard, all procurement modules, and testing requests.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": True,
-                    "can_approve": False,
-                    "can_assign": True,
-                    "can_export": True,
-                    "can_import": False
-                }
-                for mid in (testing_modules + procurement_modules + dashboard_module)  # Only testing, procurement, dashboard
-            ]
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _readwrite(procurement_modules) +
+                _readwrite(testing_requests_module)
+            ),
         },
+        # ── 4. Test Assigner (Approver) — testing request approvals only ──────
         {
-            "name": "Tester",
-            "description": "Performs transformer testing and uploads results. Full access to testing and recommendations modules.",
+            "name": "Test Assigner",
+            "description": "Approves testing requests and assigns testers. Access to Testing Request Approvals module only.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": False,
-                    "can_approve": False,
-                    "can_assign": False,
-                    "can_export": True,
-                    "can_import": False
-                }
-                for mid in (testing_modules + dashboard_module)  # Only testing modules and dashboard
-            ]
+            "permissions_template": _approve(testing_request_approvals_module),
         },
+        # ── 5. Field Tester ───────────────────────────────────────────────────
         {
-            "name": "Approver",
-            "description": "Reviews and approves or rejects recommendations. Approval access to testing workflow.",
+            "name": "Field Tester",
+            "description": "Performs on-site transformer testing and uploads results. View testing requests; full access to testing module.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": False,
-                    "can_edit": False,
-                    "can_delete": False,
-                    "can_approve": True,
-                    "can_assign": False,
-                    "can_export": True,
-                    "can_import": False
-                }
-                for mid in (testing_modules + dashboard_module)  # Only testing modules (for approvals) and dashboard
-            ]
+            "permissions_template": (
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module)
+            ),
         },
+        # ── 6. Lab Tester ─────────────────────────────────────────────────────
         {
-            "name": "Department Manager",
-            "description": "Manage department users and departmental resources. Can view and manage users within their department.",
+            "name": "Lab Tester",
+            "description": "Performs laboratory testing and uploads results. View testing requests; full access to testing module.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module)
+            ),
+        },
+        # ── 7. Department Head — recommendations & approvals ─────────────────
+        {
+            "name": "Department Head",
+            "description": "Reviews and approves recommendations from testers. Access to Recommendations and Approvals modules.",
             "is_org_admin": False,
             "is_dept_admin": True,
-            "auto_provision": False,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": False,
-                    "can_approve": True,
-                    "can_assign": True,
-                    "can_export": True,
-                    "can_import": False
-                }
-                for mid in (testing_modules + procurement_modules + org_modules + dashboard_module)  # Testing, procurement, org, dashboard
-            ]
+            "auto_provision": True,
+            "permissions_template": (
+                _approve(recommendations_module) +
+                _approve(approvals_module)
+            ),
         },
+        # ── 8. Purchaser — dashboard + procurement ────────────────────────────
         {
-            "name": "Employee",
-            "description": "Standard employee access. Can view organization resources and manage their own data.",
+            "name": "Purchaser",
+            "description": "Manages procurement activities. Access to dashboard and all procurement modules.",
             "is_org_admin": False,
             "is_dept_admin": False,
-            "auto_provision": False,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": False,
-                    "can_edit": False,
-                    "can_delete": False,
-                    "can_approve": False,
-                    "can_assign": False,
-                    "can_export": False,
-                    "can_import": False
-                }
-                for mid in (testing_modules + procurement_modules + dashboard_module)  # View-only access to testing, procurement, dashboard
-            ]
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _readwrite(procurement_modules)
+            ),
         },
-        {
-            "name": "Viewer",
-            "description": "Read-only access to organization resources.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": False,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": False,
-                    "can_edit": False,
-                    "can_delete": False,
-                    "can_approve": False,
-                    "can_assign": False,
-                    "can_export": False,
-                    "can_import": False
-                }
-                for mid in (testing_modules + procurement_modules + dashboard_module)  # View-only access to testing, procurement, dashboard
-            ]
-        },
-        {
-            "name": "Contributor",
-            "description": "Can add and edit resources but cannot delete or approve.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": False,
-            "permissions_template": [
-                {
-                    "module_id": mid,
-                    "can_view": True,
-                    "can_add": True,
-                    "can_edit": True,
-                    "can_delete": False,
-                    "can_approve": False,
-                    "can_assign": False,
-                    "can_export": True,
-                    "can_import": True
-                }
-                for mid in (testing_modules + procurement_modules + dashboard_module)  # Can contribute to testing, procurement, dashboard
-            ]
-        }
     ]
 
     created_count = 0
@@ -2162,6 +2162,107 @@ def seed_sample_organization(session):
     session.commit()
     print(f"[OK] Created {created_users} sample tester users and assigned roles")
 
+    # -------------------------------------------------------
+    # Create sample users for remaining org roles
+    # (Originator, Test Assigner, Department Head, Purchaser, Org Admin)
+    # -------------------------------------------------------
+    print(f"[INFO] Creating sample users for remaining org roles in {org_code}")
+
+    other_users_config = [
+        {
+            "email": "originator@sampleorg.com",
+            "password": "Originator123!",
+            "role_name": "Originator",
+            "firstname": "Sample",
+            "lastname": "Originator",
+            "phone": "9999999010"
+        },
+        {
+            "email": "testassigner@sampleorg.com",
+            "password": "Assigner123!",
+            "role_name": "Test Assigner",
+            "firstname": "Test",
+            "lastname": "Assigner",
+            "phone": "9999999011"
+        },
+        {
+            "email": "depthead@sampleorg.com",
+            "password": "DeptHead123!",
+            "role_name": "Department Head",
+            "firstname": "Department",
+            "lastname": "Head",
+            "phone": "9999999012"
+        },
+        {
+            "email": "purchaser@sampleorg.com",
+            "password": "Purchaser123!",
+            "role_name": "Purchaser",
+            "firstname": "Sample",
+            "lastname": "Purchaser",
+            "phone": "9999999013"
+        },
+        {
+            "email": "orgadmin@sampleorg.com",
+            "password": "OrgAdmin123!",
+            "role_name": "Org Admin",
+            "firstname": "Org",
+            "lastname": "Admin",
+            "phone": "9999999014"
+        },
+    ]
+
+    created_other = 0
+    for user_config in other_users_config:
+        existing_user = session.query(User).filter_by(email=user_config["email"]).first()
+        if existing_user:
+            user = existing_user
+            user.organization_id = org.id
+        else:
+            user = User(
+                id=uuid.uuid4(),
+                email=user_config["email"],
+                password_hash=get_password_hash(user_config["password"]),
+                firstname=user_config["firstname"],
+                lastname=user_config["lastname"],
+                phone_number=user_config["phone"],
+                organization_id=org.id,
+                isactive=True,
+                email_confirmed=True,
+                phone_confirmed=True,
+                cts=now,
+                mts=now
+            )
+            session.add(user)
+            session.flush()
+            created_other += 1
+
+        # Find the OrgRole for this user
+        role = session.query(OrgRole).filter_by(
+            organization_id=org.id,
+            name=user_config["role_name"]
+        ).first()
+        if not role:
+            print(f"[WARN] OrgRole '{user_config['role_name']}' not found for {user_config['email']}")
+            continue
+
+        existing_assignment = session.query(OrgUserRole).filter_by(
+            user_id=user.id,
+            org_role_id=role.id
+        ).first()
+        if not existing_assignment:
+            session.add(OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                is_active=True
+            ))
+
+    session.commit()
+    print(f"[OK] Created {created_other} additional sample org users")
+    print("  Credentials summary:")
+    for u in other_users_config:
+        print(f"    {u['role_name']:20s}  {u['email']:35s}  {u['password']}")
+
 
 def seed_kptcl_organization(session):
     """
@@ -2267,45 +2368,10 @@ def seed_kptcl_organization(session):
                 )
                 session.add(permission)
 
-    # Create Department Head role manually (not auto-provisioned)
-    dept_manager_template = session.query(RoleTemplate).filter_by(name="Department Manager").first()
-    if dept_manager_template:
-        dept_head_role = OrgRole(
-            id=uuid.uuid4(),
-            organization_id=org.id,
-            name="Department Head",  # Using "Department Head" instead of "Department Manager"
-            description="Manage department operations and approve requests",
-            role_type="default",
-            is_org_admin=False,
-            is_dept_admin=True,
-            is_active=True,
-            cts=datetime.now(datetime.now().astimezone().tzinfo),
-            mts=datetime.now(datetime.now().astimezone().tzinfo)
-        )
-        session.add(dept_head_role)
-        session.flush()
+    # Build a lookup of provisioned roles by name for easy access
+    provisioned_by_name = {r.name: r for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
 
-        # Create permissions for Department Head from template
-        if dept_manager_template.permissions_template:
-            for perm_data in dept_manager_template.permissions_template:
-                permission = OrgRolePermission(
-                    id=uuid.uuid4(),
-                    org_role_id=dept_head_role.id,
-                    module_id=perm_data.get("module_id"),
-                    can_view=perm_data.get("can_view", False),
-                    can_add=perm_data.get("can_add", False),
-                    can_edit=perm_data.get("can_edit", False),
-                    can_delete=perm_data.get("can_delete", False),
-                    can_approve=perm_data.get("can_approve", False),
-                    can_assign=perm_data.get("can_assign", False),
-                    can_export=perm_data.get("can_export", False),
-                    can_import=perm_data.get("can_import", False),
-                    cts=datetime.now(datetime.now().astimezone().tzinfo),
-                    mts=datetime.now(datetime.now().astimezone().tzinfo)
-                )
-                session.add(permission)
-
-    # Create KPTCL users with roles
+    # Create KPTCL users — one per org role
     kptcl_users = [
         {
             "email": "orgadmin@kptcl.com",
@@ -2313,26 +2379,26 @@ def seed_kptcl_organization(session):
             "firstname": "Org",
             "lastname": "Admin",
             "phone": "+91-9900000001",
-            "role": org_admin_role,
+            "role_name": "Admin",
             "employee_id": "KPTCL-ADM-001",
         },
         {
-            "email": "engineer@kptcl.com",
+            "email": "originator@kptcl.com",
             "password": "admin123",
-            "firstname": "Test",
-            "lastname": "Engineer",
+            "firstname": "KPTCL",
+            "lastname": "Originator",
             "phone": "+91-9900000002",
-            "role": engineer_role,
-            "employee_id": "KPTCL-ENG-001",
+            "role_name": "Originator",
+            "employee_id": "KPTCL-ORIG-001",
         },
         {
-            "email": "tester1@kptcl.com",
+            "email": "testassigner@kptcl.com",
             "password": "admin123",
-            "firstname": "Field",
-            "lastname": "Tester",
-            "phone": "+91-9900000003",
-            "role": tester_role,
-            "employee_id": "KPTCL-TEST-001",
+            "firstname": "KPTCL Test",
+            "lastname": "Assigner",
+            "phone": "+91-9900000005",
+            "role_name": "Test Assigner",
+            "employee_id": "KPTCL-TA-001",
         },
         {
             "email": "depthead@kptcl.com",
@@ -2340,22 +2406,27 @@ def seed_kptcl_organization(session):
             "firstname": "Department",
             "lastname": "Head",
             "phone": "+91-9900000004",
-            "role": dept_head_role,
+            "role_name": "Department Head",
             "employee_id": "KPTCL-DH-001",
+        },
+        {
+            "email": "purchaser@kptcl.com",
+            "password": "admin123",
+            "firstname": "KPTCL",
+            "lastname": "Purchaser",
+            "phone": "+91-9900000006",
+            "role_name": "Purchaser",
+            "employee_id": "KPTCL-PUR-001",
         },
     ]
 
     for user_data in kptcl_users:
-        # Check if user already exists
         existing_user = session.query(User).filter_by(email=user_data["email"]).first()
-
         if existing_user:
             user = existing_user
-            # Ensure existing user is linked to KPTCL org
             if user.organization_id != org.id:
                 user.organization_id = org.id
         else:
-            # Create user
             user = User(
                 id=uuid.uuid4(),
                 email=user_data["email"],
@@ -2374,29 +2445,30 @@ def seed_kptcl_organization(session):
             session.add(user)
             session.flush()
 
-        # Assign role to user (both new and existing users)
-        if user_data["role"]:
-            # Check if user already has this role
-            existing_role = session.query(OrgUserRole).filter_by(
-                user_id=user.id,
-                org_role_id=user_data["role"].id,
-                is_active=True
-            ).first()
+        role = provisioned_by_name.get(user_data["role_name"])
+        if not role:
+            print(f"[WARN] OrgRole '{user_data['role_name']}' not found for {user_data['email']}")
+            continue
 
-            if not existing_role:
-                user_role = OrgUserRole(
-                    id=uuid.uuid4(),
-                    user_id=user.id,
-                    org_role_id=user_data["role"].id,
-                    department_id=None,
-                    is_active=True,
-                    assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-                    assigned_by=None
-                )
-                session.add(user_role)
+        existing_role = session.query(OrgUserRole).filter_by(
+            user_id=user.id, org_role_id=role.id, is_active=True
+        ).first()
+        if not existing_role:
+            session.add(OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                department_id=None,
+                is_active=True,
+                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                assigned_by=None
+            ))
 
     session.commit()
     print(f"[OK] KPTCL organization created with admin user and roles")
+    print("  KPTCL user credentials:")
+    for u in kptcl_users:
+        print(f"    {u['role_name']:20s}  {u['email']:35s}  {u['password']}")
 
     # Create sample tester roles with EXACT module permissions
     print(f"[INFO] Creating sample tester roles for KPTCL")
@@ -2425,6 +2497,8 @@ def seed_kptcl_organization(session):
 
         if existing_role:
             role = existing_role
+            # FIX: Clear the limited template permissions so we can overwrite them
+            session.query(OrgRolePermission).filter_by(org_role_id=role.id).delete()
         else:
             # Create tester role
             role = OrgRole(
@@ -2442,24 +2516,24 @@ def seed_kptcl_organization(session):
             session.add(role)
             session.flush()
 
-            # Add FULL permissions for EXACT modules only
-            for module_id in TESTER_REQUIRED_MODULES:
-                perm = OrgRolePermission(
-                    id=uuid.uuid4(),
-                    org_role_id=role.id,
-                    module_id=module_id,
-                    can_view=True,
-                    can_add=True,
-                    can_edit=True,
-                    can_delete=True,
-                    can_approve=True,
-                    can_assign=True,
-                    can_export=True,
-                    can_import=True,
-                    cts=now,
-                    mts=now
-                )
-                session.add(perm)
+        # FIX: Move this OUTSIDE the else block to guarantee full permissions are added
+        for module_id in TESTER_REQUIRED_MODULES:
+            perm = OrgRolePermission(
+                id=uuid.uuid4(),
+                org_role_id=role.id,
+                module_id=module_id,
+                can_view=True,
+                can_add=True,
+                can_edit=True,
+                can_delete=True,
+                can_approve=True,
+                can_assign=True,
+                can_export=True,
+                can_import=True,
+                cts=now,
+                mts=now
+            )
+            session.add(perm)
 
         tester_roles.append(role)
 
@@ -2523,6 +2597,8 @@ def seed_kptcl_organization(session):
                 phone_number=user_config["phone"],
                 organization_id=org.id,
                 isactive=True,
+                email_confirmed=True,
+                phone_confirmed=True,
                 cts=now,
                 mts=now
             )
@@ -2530,30 +2606,31 @@ def seed_kptcl_organization(session):
             session.flush()
             created_users += 1
 
-        # Get the role
+        # Get the role — first check tester_roles list, then fall back to org roles
         role = next((r for r in tester_roles if r.name == user_config["role_name"]), None)
+        if not role:
+            role = session.query(OrgRole).filter_by(
+                organization_id=org.id, name=user_config["role_name"]
+            ).first()
         if not role:
             print(f"[WARN] Role '{user_config['role_name']}' not found for user {user_config['email']}")
             continue
 
-        # Check if user already has this role
         existing_assignment = session.query(OrgUserRole).filter_by(
             user_id=user.id,
             org_role_id=role.id
         ).first()
 
         if not existing_assignment:
-            # Assign role to user
-            user_role = OrgUserRole(
+            session.add(OrgUserRole(
                 id=uuid.uuid4(),
                 user_id=user.id,
                 org_role_id=role.id,
                 is_active=True
-            )
-            session.add(user_role)
+            ))
 
     session.commit()
-    print(f"[OK] Created {created_users} sample tester users and assigned roles")
+    print(f"[OK] Created {created_users} KPTCL field/lab tester users and assigned roles")
 
     return org
 
@@ -2756,6 +2833,13 @@ def run_seed():
         seed_test_type_categories(session, master_ids)
         # seed_tester_locations(session)  # DEPRECATED - using org departments instead
         seed_sample_testing_request(session)
+        # Provision global test templates from static dict
+        from services.org_test_template_service import OrgTestTemplateService
+        svc = OrgTestTemplateService(session)
+        n = svc.provision_global_defaults()
+        print(f"[OK] Provisioned {n} global test templates.")
+        inserted = svc.provision_overall_assessment()
+        print(f"[OK] Overall assessment template: {'provisioned' if inserted else 'already exists'}.")
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")

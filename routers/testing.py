@@ -146,6 +146,31 @@ def submit_test_results(
 
 # ─── Template & Structured Results ──────────────────────────
 
+@router.get("/templates/by-key/{template_key}")
+def get_test_template_by_key(
+    template_key: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns the dynamic form template looked up by template key (for requests without a test_type_id)."""
+    from services.org_test_template_service import OrgTestTemplateService
+    import copy
+    svc = OrgTestTemplateService(db)
+    tmpl = svc.get_by_template_key(template_key)
+    data = copy.deepcopy(tmpl.template_data or {})
+    if "key" not in data:
+        data["key"] = tmpl.template_key
+    # Append Overall Assessment sections (template-driven)
+    try:
+        overall = svc.get_overall_assessment(org_id=tmpl.org_id)
+        overall_sections = (overall.template_data or {}).get("sections", [])
+        data.setdefault("sections", [])
+        data["sections"].extend(copy.deepcopy(overall_sections))
+    except Exception:
+        pass
+    return data
+
+
 @router.get("/templates/{test_type_id}")
 def get_test_template(
     test_type_id: int,

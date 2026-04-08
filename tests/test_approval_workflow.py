@@ -116,7 +116,7 @@ def get_pending_approvals(token):
         data = response.json()
         print(f"\n[INFO] Found {len(data)} pending approvals")
         for req in data:
-            print(f"  - {req['request_number']}: {req['description'][:50]}")
+            print(f"  - {req['request_number']}: {(req.get('description') or req.get('title') or 'N/A')[:50]}")
         return data
     else:
         print(f"[ERROR] Failed to get pending approvals: {response.status_code}")

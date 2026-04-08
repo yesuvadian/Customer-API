@@ -318,11 +318,16 @@ def login_user(db: Session, email: str, password: str):
         from models import OrgUserRole, OrgRole
 
         role_names = []
-        org_user_roles = db.query(OrgUserRole).filter_by(user_id=user.id, is_active=True).all()
-        if org_user_roles:
-            org_role_ids = [ur.org_role_id for ur in org_user_roles]
-            org_roles = db.query(OrgRole).filter(OrgRole.id.in_(org_role_ids)).all()
-            role_names = [r.name for r in org_roles]
+
+        # Super-admin users bypass the org-role requirement
+        if getattr(user, "usertype", None) == "super_admin":
+            role_names = ["super_admin"]
+        else:
+            org_user_roles = db.query(OrgUserRole).filter_by(user_id=user.id, is_active=True).all()
+            if org_user_roles:
+                org_role_ids = [ur.org_role_id for ur in org_user_roles]
+                org_roles = db.query(OrgRole).filter(OrgRole.id.in_(org_role_ids)).all()
+                role_names = [r.name for r in org_roles]
 
         # Check if user has at least one role
         if not role_names:
