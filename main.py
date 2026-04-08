@@ -1,5 +1,11 @@
+from dotenv import load_dotenv
+load_dotenv()  # ✅ MUST be first before any other import
+
+import os
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer
 from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
@@ -7,11 +13,8 @@ from routers.file_download import router as file_download_router
 from routers import websocket_routes
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.test_request_schedule_service import TestRequestScheduleService
-import logging
 
 logger = logging.getLogger(__name__)
-
-
 
 # Routers
 from routers import (
@@ -62,12 +65,21 @@ from routers import (
 )
 from routers.kyc_router import router as kyc_router
 from routers.customer_care import router as customer_care_router
+from routers.vendor_directory import router as vendor_directory_router  # ✅ NEW
 
 # Testing Request System
-from routers import testing_requests, testing, recommendations, approvals, procurement, testing_request_approvals, admin_tester_config
-from routers import tester_assignment
-from routers import org_test_templates
-from routers import test_request_schedules
+from routers import (
+    testing_requests,
+    testing,
+    recommendations,
+    approvals,
+    procurement,
+    testing_request_approvals,
+    admin_tester_config,
+    tester_assignment,
+    org_test_templates,
+    test_request_schedules,
+)
 
 # Organization Multi-Tenancy
 from routers import organizations, org_departments, org_users, org_roles
@@ -75,63 +87,114 @@ from routers import organizations, org_departments, org_users, org_roles
 # Workflow Engine
 from routers import workflows
 
-# Optional: create all database tables (uncomment if needed)
-# Base.metadata.create_all(bind=engine)
-
-# ── APScheduler: daily test request scheduler ────────────────────────────────
+# ── APScheduler ──────────────────────────────────────────────────────────────
 scheduler = BackgroundScheduler(timezone="UTC")
 
 def _run_schedule_job():
     db = SessionLocal()
     try:
         result = TestRequestScheduleService.run_daily_scheduler(db)
-        logger.info(f"[Scheduler] Test request schedule job: created={result['created']} failed={result['failed']}")
+        logger.info(
+            f"[Scheduler] Test request schedule job: "
+            f"created={result['created']} failed={result['failed']}"
+        )
     except Exception as e:
         logger.error(f"[Scheduler] Job error: {e}")
     finally:
         db.close()
 
-scheduler.add_job(_run_schedule_job, trigger="cron", hour=0, minute=0, id="daily_test_scheduler")
+scheduler.add_job(
+    _run_schedule_job,
+    trigger="cron",
+    hour=0,
+    minute=0,
+    id="daily_test_scheduler",
+)
 
+# ── App Init ─────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="Customer Portal API",
+    docs_url=None,   # ✅ disable default /docs (we override below)
+    redoc_url=None,
+)
 
-# Initialize FastAPI app
-app = FastAPI(title="Vendor API")
+# ── Custom Swagger UI ─────────────────────────────────────────────────────────
+INTERNAL_SECRET = os.getenv("INTERNAL_SERVICE_SECRET", "")
+print(f"[STARTUP] INTERNAL_SERVICE_SECRET loaded: '{INTERNAL_SECRET}'")  # verify in terminal
+print(f"[STARTUP] VENDOR_APP_URL: '{os.getenv('VENDOR_APP_URL', 'NOT SET')}'")
 
-# ----------------------------
-# CORS configuration
-# ----------------------------
-origins = [
-    "http://localhost:65469",
-    "http://127.0.0.1:65469",
-    # Add your production frontends here
-]
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui():
+    return HTMLResponse(f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Customer Portal API - Swagger UI</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css"
+          href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+    SwaggerUIBundle({{
+        url: "/openapi.json",
+        dom_id: '#swagger-ui',
+        presets: [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIBundle.SwaggerUIStandalonePreset
+        ],
+        layout: "BaseLayout",
+        requestInterceptor: (request) => {{
+            request.headers['secret'] = '{INTERNAL_SECRET}';
+            return request;
+        }}
+    }});
+</script>
+</body>
+</html>
+""")
 
+@app.get("/redoc", include_in_schema=False)
+async def custom_redoc():
+    return HTMLResponse("""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Customer Portal API - ReDoc</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+    <redoc spec-url='/openapi.json'></redoc>
+    <script src="https://cdn.jsdelivr.net/npm/redoc/bundles/redoc.standalone.js"></script>
+</body>
+</html>
+""")
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-     allow_origins=[
+    allow_origins=[
         "http://localhost:53232",
         "http://127.0.0.1:53232",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "*"
-    ],  # For testing; restrict to origins in production
+        "*",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],  # Crucial: allows GET, POST, PUT, DELETE
-    allow_headers=["*"],  # Allows Authorization header for JWT
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# ----------------------------
-# Global middleware
-# ----------------------------
-# This must come after app initialization but before routers
+# ── Global Middleware ─────────────────────────────────────────────────────────
 app.middleware("http")(auth_and_privilege_middleware)
 
-# Security scheme (optional)
 security = HTTPBearer()
 
-# ----------------------------
-# Register routers
-# ----------------------------
+# ── Routers ───────────────────────────────────────────────────────────────────
 
 # Authentication & Token
 app.include_router(token.router)
@@ -195,7 +258,6 @@ app.include_router(retainerinvoices.router)
 app.include_router(sales_orders.router)
 app.include_router(zoho_dashboard.router)
 app.include_router(statements.router)
-
 app.include_router(zoho_register.router)
 app.include_router(webhook_zoho.router)
 app.include_router(customer_care_router)
@@ -222,13 +284,20 @@ app.include_router(org_roles.router)
 # Workflow Engine
 app.include_router(workflows.router)
 
+# WebSocket
 app.include_router(websocket_routes.router)
 
-# ── Lifecycle events ─────────────────────────────────────────────────────────
+# ✅ Vendor Directory — fetches vendors from supplier portal
+app.include_router(vendor_directory_router)
+
+# ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
     scheduler.start()
-    logger.info("[Scheduler] APScheduler started — daily test request job scheduled at 00:00 UTC")
+    logger.info(
+        "[Scheduler] APScheduler started — "
+        "daily test request job scheduled at 00:00 UTC"
+    )
 
 @app.on_event("shutdown")
 async def shutdown_event():
