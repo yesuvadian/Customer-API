@@ -61,6 +61,7 @@ class TestingRequestStatus(PyEnum):
     pending_approval = "pending_approval"
     assigned = "assigned"
     accepted = "accepted"
+    scheduled = "scheduled"  # NEW: Test is scheduled for future date
     in_progress = "in_progress"
     test_submitted = "test_submitted"
     under_approval = "under_approval"
@@ -1462,7 +1463,13 @@ class TestingRequest(Base):
     # Dates
     requested_date = Column(DateTime(timezone=True), nullable=True)
     due_date = Column(DateTime(timezone=True), nullable=True)
+    scheduled_start_date = Column(DateTime(timezone=True), nullable=True)  # NEW: For scheduled tests
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Multi-session support
+    is_multi_session = Column(Boolean, default=False)  # NEW: Indicates multi-day/multi-session test
+    total_sessions_planned = Column(Integer, nullable=True)  # NEW: Number of planned sessions
+    session_interval_days = Column(Integer, nullable=True)  # NEW: Days between sessions
 
     # Notes
     notes = Column(Text, nullable=True)
@@ -1485,6 +1492,7 @@ class TestingRequest(Base):
     department = relationship("OrgDepartment", foreign_keys=[department_id])
     test_results = relationship("TestResult", back_populates="testing_request", cascade="all, delete-orphan")
     recommendations = relationship("Recommendation", back_populates="testing_request", cascade="all, delete-orphan")
+    test_sessions = relationship("TestSession", back_populates="testing_request", cascade="all, delete-orphan")
 
 
 # ------------------------------
@@ -1635,6 +1643,119 @@ class TestResultImage(Base):
 
     # Relationships
     test_result = relationship("TestResult", back_populates="images")
+
+
+# ------------------------------
+# Test Session Model (Multi-day/Multi-session Testing)
+# ------------------------------
+class TestSession(Base):
+    __tablename__ = "test_sessions"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
+
+    session_number = Column(Integer, nullable=False)  # 1, 2, 3, etc.
+    session_name = Column(String(255), nullable=True)  # "Day 1 Morning", "Initial Reading", etc.
+    session_date = Column(DateTime(timezone=True), nullable=False)
+    scheduled_date = Column(DateTime(timezone=True), nullable=True)  # When it was planned
+
+    # Session status
+    status = Column(String(20), default="scheduled")  # scheduled, in_progress, completed, skipped
+
+    # Template reference
+    template_key = Column(String(100), nullable=True)  # Links to OrgTestTemplate
+
+    # Session notes
+    notes = Column(Text, nullable=True)
+    weather_conditions = Column(String(255), nullable=True)  # For outdoor tests
+    environmental_factors = Column(Text, nullable=True)  # Temperature, humidity, etc.
+
+    # Session team
+    conducted_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    witnessed_by = Column(String(255), nullable=True)  # External witness names
+
+    # Timing
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    testing_request = relationship("TestingRequest", back_populates="test_sessions")
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    conductor = relationship("User", foreign_keys=[conducted_by])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+    readings = relationship("TestSessionReading", back_populates="test_session", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Test Session Reading Model (Multiple readings per session)
+# ------------------------------
+class TestSessionReading(Base):
+    __tablename__ = "test_session_readings"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    test_session_id = Column(UUID(as_uuid=True), ForeignKey("public.test_sessions.id", ondelete="CASCADE"), nullable=False)
+
+    reading_number = Column(Integer, nullable=False)  # 1, 2, 3, etc. within the session
+    reading_time = Column(DateTime(timezone=True), nullable=False)
+
+    # Reading data (structured as JSONB for flexibility)
+    reading_data = Column(JSONB, nullable=False)  # Actual test measurements
+
+    # Additional metadata
+    equipment_serial = Column(String(100), nullable=True)
+    calibration_date = Column(DateTime(timezone=True), nullable=True)
+    remarks = Column(Text, nullable=True)
+
+    # Pass/fail for this specific reading
+    result_status = Column(String(20), nullable=True)  # pass, fail, conditional, warning
+
+    # Images/attachments for this specific reading
+    image_count = Column(Integer, default=0)
+
+    # Audit
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    test_session = relationship("TestSession", back_populates="readings")
+    recorder = relationship("User", foreign_keys=[recorded_by])
+    images = relationship("TestSessionReadingImage", back_populates="reading", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Test Session Reading Image Model
+# ------------------------------
+class TestSessionReadingImage(Base):
+    __tablename__ = "test_session_reading_images"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    reading_id = Column(UUID(as_uuid=True), ForeignKey("public.test_session_readings.id", ondelete="CASCADE"), nullable=False)
+
+    file_name = Column(String(255), nullable=False)
+    file_type = Column(String(100), nullable=True)
+    file_size = Column(Integer, nullable=True)
+    file_data = Column(LargeBinary, nullable=False)
+    caption = Column(String(500), nullable=True)
+    sort_order = Column(Integer, default=0)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    reading = relationship("TestSessionReading", back_populates="images")
+    creator = relationship("User", foreign_keys=[created_by])
 
 
 # ------------------------------

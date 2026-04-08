@@ -79,6 +79,7 @@ from routers import (
     tester_assignment,
     org_test_templates,
     test_request_schedules,
+    test_sessions,  # NEW: Multi-session testing
 )
 
 # Organization Multi-Tenancy
@@ -265,6 +266,7 @@ app.include_router(customer_care_router)
 # Testing Request System
 app.include_router(testing_requests.router)
 app.include_router(testing.router)
+app.include_router(test_sessions.router)  # NEW: Multi-session testing
 app.include_router(recommendations.router)
 app.include_router(approvals.router)
 app.include_router(testing_request_approvals.router)

@@ -5,6 +5,11 @@ Each template defines sections and fields that the Flutter UI renders dynamicall
 Test results are stored as JSONB in a single test_results table.
 
 Field types: text, number, dropdown, boolean, textarea, table
+
+Multi-session support:
+- supports_multi_session: Boolean indicating if this test type can have multiple sessions
+- typical_session_interval_days: Typical number of days between sessions
+- typical_total_sessions: Typical number of sessions for this test type
 """
 
 TEST_TEMPLATES = {
@@ -16,6 +21,9 @@ TEST_TEMPLATES = {
         "name": "Relay Testing Report",
         "equipment_type": "Feeder protection relays",
         "description": "Complete relay testing report with overcurrent and earth fault tests",
+        "supports_multi_session": False,  # Single session test
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
         "sections": [
             {
                 "title": "Relay Information",
