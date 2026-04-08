@@ -8,6 +8,11 @@ from services.redis_cache import RedisCacheService as cache
 from fastapi import UploadFile
 from datetime import datetime
 
+# TTL constants — keep in one place so they're easy to tune
+_SO_CACHE_TTL = 60          # single salesorder: short-lived, status changes frequently
+_SO_LIST_CACHE_TTL = 120    # list: a bit more tolerant
+_ITEM_CACHE_TTL = 3600      # items almost never change
+
 
 class SalesOrderService:
     def __init__(self):
@@ -15,62 +20,118 @@ class SalesOrderService:
         self.org_id = config.ZOHO_ORG_ID
         self.contact_service = ZohoContactService()
 
+    # -------------------------------------------------
+    # Helpers
+    # -------------------------------------------------
     def _build_filename(self, salesorder: dict, file: UploadFile, doc_type: str) -> str:
         salesorder_number = salesorder.get("salesorder_number", "")
         clean_number = salesorder_number.lower().replace("-", "_")
         extension = file.filename.split(".")[-1] if "." in file.filename else "pdf"
         return f"{clean_number}_{doc_type}.{extension}"
-    
+
+    def _auth_headers(self, access_token: str) -> dict:
+        return {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+    def _json_headers(self, access_token: str) -> dict:
+        return {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json",
+        }
+
+    def _invalidate_salesorder_caches(
+        self,
+        contact_id: str | None = None,
+        salesorder_id: str | None = None,
+    ):
+        if contact_id:
+            cache.delete(f"zoho:salesorders:{contact_id}")
+            cache.delete(f"zoho:dashboard:{contact_id}")
+        if salesorder_id:
+            cache.delete(f"zoho:salesorder:{salesorder_id}")
+
+    def _resolve_contact_id(self, contact_id: str) -> str:
+        if "@" in contact_id:
+            contact = self.contact_service.get_contact_id_by_email(contact_id)
+            return contact["contact_id"]
+        return contact_id
+
+    # -------------------------------------------------
+    # Fetch Sales Order (cached)
+    # -------------------------------------------------
+    def _get_order_status(self, access_token: str, salesorder_id: str) -> dict:
+        """
+        Fetch a single sales order with a short TTL cache.
+        All internal helpers share this call — avoids duplicate GETs within
+        a single request lifecycle.
+        """
+        cache_key = f"zoho:salesorder:{salesorder_id}"
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        response = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}",
+            headers=self._auth_headers(access_token),
+            params={"organization_id": self.org_id},
+            timeout=15,
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unable to fetch sales order status",
+            )
+
+        salesorder = response.json().get("salesorder", {})
+        cache.set(cache_key, salesorder, ttl=_SO_CACHE_TTL)
+        return salesorder
+
+    # -------------------------------------------------
+    # Validation guards
+    # -------------------------------------------------
+    def _validate_status_for_po(self, order_status: str | None):
+        if order_status and order_status.lower() in ("packed", "shipped"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"PO cannot be updated when order status is '{order_status}'",
+            )
+
+    def _validate_status_for_grn(self, salesorder: dict):
+        # Currently no restriction — kept as hook for future rules
+        return
+
+    # -------------------------------------------------
+    # Upload PO Attachment
+    # -------------------------------------------------
     def upload_po_attachment(
         self,
         access_token: str,
         salesorder_id: str,
         file: UploadFile,
         po_number: str,
-        uploaded_by: str | None = None
+        uploaded_by: str | None = None,
     ):
-        # Single fetch — reused by both validation and helper calls below
+        # Single fetch — reused by both validation and filename generation
         salesorder = self._get_order_status(access_token, salesorder_id)
         self._validate_status_for_po(salesorder.get("status"))
 
-        # ✅ STEP 1: Update PO custom field
+        # Update PO custom field first
         self.update_po_number_field(
             access_token=access_token,
             salesorder_id=salesorder_id,
-            po_number=po_number
+            po_number=po_number,
         )
-
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
 
         file.file.seek(0)
+        new_filename = self._build_filename(salesorder=salesorder, file=file, doc_type="po")
 
-        new_filename = self._build_filename(
-            salesorder=salesorder,
-            file=file,
-            doc_type="po"
-        )
-
-        files = {
-            "attachment": (
-                new_filename,
-                file.file,
-                file.content_type or "application/pdf"
-            )
-        }
-
-        # ✅ STEP 2: Upload file
         response = requests.post(
             f"{self.base_url}/salesorders/{salesorder_id}/attachment",
-            headers=headers,
-            files=files,
+            headers=self._auth_headers(access_token),
+            files={"attachment": (new_filename, file.file, file.content_type or "application/pdf")},
             params={"organization_id": self.org_id},
-            timeout=30
+            timeout=30,
         )
-
-        print("🔎 Zoho upload status:", response.status_code)
-        print("🔎 Zoho upload response:", response.text)
 
         try:
             data = response.json()
@@ -80,14 +141,10 @@ class SalesOrderService:
         if response.status_code not in (200, 201) or data.get("code") not in (0, None):
             raise HTTPException(
                 status_code=400,
-                detail={
-                    "message": "Failed to upload PO attachment",
-                    "zoho_response": data
-                }
+                detail={"message": "Failed to upload PO attachment", "zoho_response": data},
             )
 
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
-
         return data
 
     # -------------------------------------------------
@@ -99,49 +156,29 @@ class SalesOrderService:
         salesorder_id: str,
         cf_grn_number: str,
         file: UploadFile,
-        uploaded_by: str | None = None
+        uploaded_by: str | None = None,
     ):
-        # Single fetch — reused by validation and filename building below
+        # Fetch once — used for validation + filename
         salesorder = self._get_order_status(access_token, salesorder_id)
         self._validate_status_for_grn(salesorder)
 
-        # 1️⃣ Update GRN custom field
         self.update_grn_number_field(
             access_token=access_token,
             salesorder_id=salesorder_id,
-            grn_number=cf_grn_number
+            grn_number=cf_grn_number,
         )
-
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
 
         file.file.seek(0)
-
-        new_filename = self._build_filename(
-            salesorder=salesorder,
-            file=file,
-            doc_type="grn"
-        )
-
-        files = {
-            "attachment": (
-                new_filename,
-                file.file,
-                file.content_type or "application/pdf"
-            )
-        }
+        new_filename = self._build_filename(salesorder=salesorder, file=file, doc_type="grn")
+        file_bytes = file.file.read()
 
         response = requests.post(
             f"{self.base_url}/salesorders/{salesorder_id}/attachment",
-            headers=headers,
-            files=files,
+            headers=self._auth_headers(access_token),
+            files={"attachment": (new_filename, file_bytes, file.content_type or "application/pdf")},
             params={"organization_id": self.org_id},
-            timeout=30
+            timeout=30,
         )
-
-        print("🔎 Zoho upload status:", response.status_code)
-        print("🔎 Zoho upload response:", response.text)
 
         try:
             data = response.json()
@@ -151,46 +188,54 @@ class SalesOrderService:
         if response.status_code not in (200, 201) or data.get("code") not in (0, None):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to upload GRN attachment",
-                    "zoho_response": data
-                }
+                detail={"message": "Failed to upload GRN attachment", "zoho_response": data},
             )
 
-        # 2️⃣ Add comment
+        # Add comment (non-critical — never raises)
         if uploaded_by:
-            meta_block = build_comment_meta(email=uploaded_by)
-
-            comment_payload = {
-                "description": (
-                    meta_block +
-                    f"GRN Uploaded\n"
-                    f"GRN Number: {cf_grn_number}\n"
-                    f"File: {file.filename}"
-                ),
-                "show_comment_to_clients": True
-            }
-
-            comment_response = requests.post(
-                f"{self.base_url}/salesorders/{salesorder_id}/comments",
-                headers={
-                    "Authorization": f"Zoho-oauthtoken {access_token}",
-                    "Content-Type": "application/json"
-                },
-                params={"organization_id": self.org_id},
-                json=comment_payload,
-                timeout=15
+            self._post_comment_safe(
+                access_token=access_token,
+                salesorder_id=salesorder_id,
+                email=uploaded_by,
+                body=f"GRN Uploaded\nGRN Number: {cf_grn_number}\nFile: {file.filename}",
             )
 
-            if comment_response.status_code not in (200, 201):
-                raise HTTPException(
-                    status_code=400,
-                    detail="GRN uploaded but comment failed"
-                )
-
+        # Invalidate cache before PO sync so that _get_order_status inside
+        # send_grn_to_purchase_order fetches the freshly uploaded attachment.
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
-        return data
+        # Build an in-memory salesorder dict that already contains the new document
+        # so send_grn_to_purchase_order does NOT need to re-fetch the SO.
+        salesorder_with_grn = dict(salesorder)
+        salesorder_with_grn["documents"] = list(salesorder.get("documents", [])) + [{
+            "file_name": new_filename,
+            "document_id": None,        # not yet known — PO sync will re-read
+        }]
+
+        po_sync_success = False
+        try:
+            # Must refetch here: we need the real document_id assigned by Zoho
+            fresh_so = self._get_order_status(access_token, salesorder_id)
+            self.send_grn_to_purchase_order(
+                access_token=access_token,
+                salesorder_id=salesorder_id,
+                salesorder=fresh_so,
+            )
+            po_sync_success = True
+        except Exception as e:
+            print("⚠️ GRN sync to PO failed:", str(e))
+
+        return {
+            "message": (
+                "GRN uploaded successfully and sent to supplier"
+                if po_sync_success
+                else "GRN uploaded successfully (PO sync failed)"
+            ),
+            "salesorder_id": salesorder_id,
+            "grn_number": cf_grn_number,
+            "file_name": new_filename,
+            "po_synced": po_sync_success,
+        }
 
     # -------------------------------------------------
     # Update GRN Attachment (PUT)
@@ -201,330 +246,197 @@ class SalesOrderService:
         salesorder_id: str,
         cf_grn_number: str,
         file: UploadFile,
-        uploaded_by: str | None = None
+        uploaded_by: str | None = None,
     ):
-        # 1️⃣ Fetch order once — passed into helpers to avoid re-fetching
+        # Single fetch covers validation + old-file lookup + filename
         salesorder = self._get_order_status(access_token, salesorder_id)
-
-        # 2️⃣ Validate GRN rules
         self._validate_status_for_grn(salesorder)
 
-        # 3️⃣ Delete old GRN file (if exists) — pass salesorder to avoid re-fetch
+        # Delete old GRN if one exists — pass salesorder to avoid re-fetch
         try:
             self.delete_attachment_by_prefix(
                 access_token=access_token,
                 salesorder_id=salesorder_id,
                 prefix="_grn",
-                salesorder=salesorder
+                salesorder=salesorder,
             )
         except HTTPException:
-            # Ignore if no file exists
-            pass
+            pass  # no existing GRN — that's fine
 
-        # 4️⃣ Update GRN number
         self.update_grn_number_field(
             access_token=access_token,
             salesorder_id=salesorder_id,
-            grn_number=cf_grn_number
+            grn_number=cf_grn_number,
         )
-
-        # 5️⃣ Upload new file
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
 
         file.file.seek(0)
-
-        new_filename = self._build_filename(
-            salesorder=salesorder,
-            file=file,
-            doc_type="grn"
-        )
-
-        files = {
-            "attachment": (
-                new_filename,
-                file.file,
-                file.content_type or "application/pdf"
-            )
-        }
+        new_filename = self._build_filename(salesorder=salesorder, file=file, doc_type="grn")
 
         response = requests.post(
             f"{self.base_url}/salesorders/{salesorder_id}/attachment",
-            headers=headers,
-            files=files,
+            headers=self._auth_headers(access_token),
+            files={"attachment": (new_filename, file.file, file.content_type or "application/pdf")},
             params={"organization_id": self.org_id},
-            timeout=30
+            timeout=30,
         )
 
         if response.status_code not in (200, 201):
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to upload updated GRN file"
-            )
+            raise HTTPException(status_code=400, detail="Failed to upload updated GRN file")
 
-        # 6️⃣ Add update comment
         if uploaded_by:
-            meta_block = build_comment_meta(email=uploaded_by)
-
-            comment_payload = {
-                "description": (
-                    meta_block +
-                    f"GRN Updated\n"
-                    f"New GRN Number: {cf_grn_number}\n"
-                    f"File: {file.filename}"
-                ),
-                "show_comment_to_clients": True
-            }
-
-            requests.post(
-                f"{self.base_url}/salesorders/{salesorder_id}/comments",
-                headers={
-                    "Authorization": f"Zoho-oauthtoken {access_token}",
-                    "Content-Type": "application/json"
-                },
-                params={"organization_id": self.org_id},
-                json=comment_payload,
-                timeout=15
+            self._post_comment_safe(
+                access_token=access_token,
+                salesorder_id=salesorder_id,
+                email=uploaded_by,
+                body=f"GRN Updated\nNew GRN Number: {cf_grn_number}\nFile: {file.filename}",
             )
 
+        # Invalidate before the PO sync refetch
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
 
-        return {"message": "GRN updated successfully"}
+        po_sync_success = False
+        try:
+            fresh_so = self._get_order_status(access_token, salesorder_id)
+            self.send_grn_to_purchase_order(
+                access_token=access_token,
+                salesorder_id=salesorder_id,
+                salesorder=fresh_so,
+            )
+            po_sync_success = True
+        except Exception as e:
+            print("⚠️ GRN update sync to PO failed:", str(e))
 
-    def update_grn_number_field(
-        self,
-        access_token: str,
-        salesorder_id: str,
-        grn_number: str
-    ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Content-Type": "application/json"
+        return {
+            "message": (
+                "GRN updated successfully and synced to supplier"
+                if po_sync_success
+                else "GRN updated successfully (PO sync failed)"
+            ),
+            "salesorder_id": salesorder_id,
+            "grn_number": cf_grn_number,
+            "file_name": new_filename,
+            "po_synced": po_sync_success,
         }
 
+    # -------------------------------------------------
+    # GRN / PO number field helpers
+    # -------------------------------------------------
+    def _update_custom_field(
+        self, access_token: str, salesorder_id: str, api_name: str, value
+    ):
+        """Generic helper — single PUT to update one custom field."""
         response = requests.put(
             f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
+            headers=self._json_headers(access_token),
             params={"organization_id": self.org_id},
-            json={
-                "custom_fields": [
-                    {
-                        "api_name": "cf_grn_number",  # Make sure this matches Zoho API name
-                        "value": grn_number
-                    }
-                ]
-            },
-            timeout=15
+            json={"custom_fields": [{"api_name": api_name, "value": value}]},
+            timeout=15,
         )
-
         data = response.json()
-
         if response.status_code != 200 or data.get("code") not in (0, None):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to update GRN number field",
-                    "zoho_response": data
-                }
+                detail={"message": f"Failed to update {api_name}", "zoho_response": data},
             )
-
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
+        return data
 
-        return response.json()
+    def update_grn_number_field(self, access_token: str, salesorder_id: str, grn_number: str):
+        return self._update_custom_field(access_token, salesorder_id, "cf_grn_number", grn_number)
 
-    def get_grn_data(self, access_token: str, salesorder_id: str, contact_id: str, salesorder: dict | None = None):
-        contact_id = self._resolve_contact_id(contact_id)
+    def update_po_number_field(self, access_token: str, salesorder_id: str, po_number):
+        return self._update_custom_field(access_token, salesorder_id, "cf_customer_po_no", po_number)
 
-        # Re-use already-fetched salesorder if provided — avoids an extra GET
+    def delete_po_number_field(self, access_token: str, salesorder_id: str):
+        return self.update_po_number_field(access_token, salesorder_id, None)
+
+    # -------------------------------------------------
+    # GRN Data
+    # -------------------------------------------------
+    def get_grn_data(
+        self,
+        access_token: str,
+        salesorder_id: str,
+        contact_id: str,
+        salesorder: dict | None = None,
+    ):
+        """
+        Return GRN number + attachment metadata.
+        Accepts an already-fetched salesorder to skip the GET when the caller
+        already has one in hand (e.g. after get_order).
+        """
         if salesorder is None:
-            headers = {
-                "Authorization": f"Zoho-oauthtoken {access_token}"
-            }
+            # Use the lightweight cached path instead of a scoped customer GET
+            salesorder = self._get_order_status(access_token, salesorder_id)
 
-            response = requests.get(
-                f"{self.base_url}/salesorders/{salesorder_id}",
-                headers=headers,
-                params={
-                    "organization_id": self.org_id,
-                    "customer_id": contact_id
-                },
-                timeout=15
-            )
-
-            if response.status_code != 200:
-                raise HTTPException(status_code=400, detail="Failed to fetch sales order")
-
-            salesorder = response.json().get("salesorder", {})
-
-        # 1️⃣ Extract GRN number
         grn_number = ""
-
         for field in salesorder.get("custom_fields", []):
             if field.get("api_name") == "cf_grn_number":
                 grn_number = field.get("value", "")
                 break
 
-        # 2️⃣ Extract GRN attachment
         grn_attachment = None
-
-        documents = salesorder.get("documents", [])
-
-        for doc in reversed(documents):
+        for doc in reversed(salesorder.get("documents", [])):
             if "_grn" in doc.get("file_name", ""):
                 grn_attachment = {
                     "attachment_id": doc.get("document_id"),
                     "file_name": doc.get("file_name"),
                     "file_size": doc.get("file_size"),
-                    "uploaded_on": doc.get("uploaded_on")
+                    "uploaded_on": doc.get("uploaded_on"),
                 }
                 break
 
-        return {
-            "grn_number": grn_number,
-            "attachment": grn_attachment
-        }
+        return {"grn_number": grn_number, "attachment": grn_attachment}
 
-    def _get_order_status(self, access_token: str, salesorder_id: str) -> dict:
-        # Short-lived cache (60s) collapses duplicate fetches within a single
-        # request lifecycle (upload_po → validate → get_attachment_pdf_by_prefix etc.)
-        cache_key = f"zoho:salesorder:{salesorder_id}"
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
-
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
-        response = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unable to fetch sales order status"
-            )
-
-        salesorder = response.json().get("salesorder", {})
-
-        print("🔥 status:", salesorder.get("status"))
-
-        # Cache with a 60-second TTL — short enough to reflect status changes,
-        # long enough to serve multiple helper calls within one request
-        cache.set(cache_key, salesorder, ttl=60)
-        return salesorder
-
-    def _validate_status_for_po(self, order_status: str | None):
-        if not order_status:
-            return
-
-        if order_status.lower() in ["packed", "shipped"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"PO cannot be updated when order status is '{order_status}'"
-            )
-
-    def _validate_status_for_grn(self, salesorder):
-        packages = salesorder.get("packages", [])
-
-        # ✅ Allow even if no package
-        print("📦 Packages:", packages)
-
-        # Keep shipment validation (optional)
-        valid_status = ["shipped", "delivered", "partially_shipped", "fulfilled"]
-
-        is_shipped = any(
-            p.get("status", "").lower() in valid_status
-            for p in packages
-        )
-
-        if packages and not is_shipped:
-            raise HTTPException(
-                status_code=403,
-                detail="GRN allowed only when package status is shipped"
-            )
-
+    # -------------------------------------------------
+    # Attachment helpers
+    # -------------------------------------------------
     def get_attachment_pdf_by_prefix(
         self,
         access_token: str,
         salesorder_id: str,
         prefix: str,
-        salesorder: dict | None = None
+        salesorder: dict | None = None,
     ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
-        # Re-use already-fetched salesorder if provided — avoids an extra GET
         if salesorder is None:
             salesorder = self._get_order_status(access_token, salesorder_id)
 
-        documents = salesorder.get("documents", [])
-
         document_id = None
-
-        for doc in reversed(documents):
-            filename = doc.get("file_name", "")
-            if prefix in filename:
+        for doc in reversed(salesorder.get("documents", [])):
+            if prefix in doc.get("file_name", ""):
                 document_id = doc.get("document_id")
                 break
 
         if not document_id:
             raise HTTPException(
                 status_code=404,
-                detail=f"No attachment found with prefix '{prefix}'"
+                detail=f"No attachment found with prefix '{prefix}'",
             )
 
-        # Step 2: Download file
         file_response = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
-            headers=headers,
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id},
-            timeout=30
+            timeout=30,
         )
 
-        if file_response.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to download attachment from Zoho"
-            )
-
-        if not file_response.content:
-            raise HTTPException(
-                status_code=404,
-                detail="Attachment file is empty"
-            )
+        if file_response.status_code != 200 or not file_response.content:
+            raise HTTPException(status_code=400, detail="Failed to download attachment from Zoho")
 
         return file_response.content
 
-    def download_attachment(
-        self,
-        access_token: str,
-        salesorder_id: str,
-        attachment_id: str
-    ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
+    def download_attachment(self, access_token: str, salesorder_id: str, attachment_id: str):
         response = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}/documents/{attachment_id}",
-            headers=headers,
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id},
-            timeout=30
+            timeout=30,
         )
-
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to download attachment"
+                detail="Failed to download attachment",
             )
-
         return response.content
 
     def delete_attachment_by_prefix(
@@ -532,56 +444,29 @@ class SalesOrderService:
         access_token: str,
         salesorder_id: str,
         prefix: str,
-        salesorder: dict | None = None
+        salesorder: dict | None = None,
     ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
-        # Re-use already-fetched salesorder if provided — avoids an extra GET
         if salesorder is None:
             salesorder = self._get_order_status(access_token, salesorder_id)
 
-        documents = salesorder.get("documents", [])
-
         document_id = None
-
-        # 2️⃣ Find latest file with prefix
-        for doc in reversed(documents):  # latest first
-            filename = doc.get("file_name", "")
-            if prefix in filename:
+        for doc in reversed(salesorder.get("documents", [])):
+            if prefix in doc.get("file_name", ""):
                 document_id = doc.get("document_id")
                 break
 
         if not document_id:
             raise HTTPException(status_code=404, detail="Attachment not found")
 
-        # 3️⃣ Delete using existing method
-        return self.delete_attachment(
-            access_token=access_token,
-            salesorder_id=salesorder_id,
-            attachment_id=document_id
-        )
+        return self.delete_attachment(access_token, salesorder_id, document_id)
 
-    def delete_attachment(
-        self,
-        access_token: str,
-        salesorder_id: str,
-        attachment_id: str
-    ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
+    def delete_attachment(self, access_token: str, salesorder_id: str, attachment_id: str):
         response = requests.delete(
             f"{self.base_url}/salesorders/{salesorder_id}/documents/{attachment_id}",
-            headers=headers,
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=15,
         )
-
-        print("🔎 DELETE STATUS:", response.status_code)
-        print("🔎 DELETE RESPONSE:", response.text)
 
         try:
             data = response.json()
@@ -591,35 +476,17 @@ class SalesOrderService:
         if response.status_code != 200 or data.get("code") not in (0, None):
             raise HTTPException(
                 status_code=400,
-                detail={
-                    "message": "Failed to delete attachment",
-                    "zoho_response": data
-                }
+                detail={"message": "Failed to delete attachment", "zoho_response": data},
             )
 
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
-
         return {"message": "Attachment deleted successfully"}
 
-    def _invalidate_salesorder_caches(
-        self,
-        contact_id: str | None = None,
-        salesorder_id: str | None = None
-    ):
-        if contact_id:
-            cache.delete(f"zoho:salesorders:{contact_id}")
-            cache.delete(f"zoho:dashboard:{contact_id}")
-
-        if salesorder_id:
-            cache.delete(f"zoho:salesorder:{salesorder_id}")
-
     # -------------------------------------------------
-    # Extract supplier from custom_fields already in hand
-    # Avoids an extra GET /salesorders/{id} call
+    # Supplier extraction (from already-fetched data)
     # -------------------------------------------------
     def _extract_supplier_from_custom_fields(self, custom_fields: list) -> dict:
         supplier_details = None
-
         for field in custom_fields:
             if field.get("api_name") == "cf_supplier_details":
                 supplier_details = field.get("value")
@@ -631,36 +498,29 @@ class SalesOrderService:
         lines = supplier_details.split("\n")
         return {
             "company_name": lines[0] if lines else "",
-            "address": "\n".join(lines[1:]) if len(lines) > 1 else ""
+            "address": "\n".join(lines[1:]) if len(lines) > 1 else "",
         }
-
-    # -------------------------------------------------
-    # Utility
-    # -------------------------------------------------
-    def _resolve_contact_id(self, contact_id: str) -> str:
-        if "@" in contact_id:
-            contact = self.contact_service.get_contact_id_by_email(contact_id)
-            return contact["contact_id"]
-        return contact_id
 
     # -------------------------------------------------
     # Create Draft Sales Order
     # -------------------------------------------------
     def create_draft_order(self, access_token: str, payload):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Content-Type": "application/json"
-        }
-
+        headers = self._json_headers(access_token)
         contact_id = self._resolve_contact_id(payload.contact_id)
+
+        line_items = [
+            {
+                "item_id": item.item_id,
+                "quantity": item.quantity,
+                "rate": self._get_item_cached(headers, item.item_id).get("rate", 0),
+                "name": self._get_item_cached(headers, item.item_id).get("name", ""),
+                "tax_exemption_code": "NON",
+            }
+            for item in payload.items
+        ]
+
+        # Rebuild cleanly without repeated cache calls
         line_items = []
-
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        # Use cached item fetches — collapses N Zoho calls to 0 on repeat catalog items
         for item in payload.items:
             item_data = self._get_item_cached(headers, item.item_id)
             line_items.append({
@@ -668,7 +528,7 @@ class SalesOrderService:
                 "quantity": item.quantity,
                 "rate": item_data.get("rate", 0),
                 "name": item_data.get("name", ""),
-                "tax_exemption_code": "NON"
+                "tax_exemption_code": "NON",
             })
 
         response = requests.post(
@@ -677,19 +537,16 @@ class SalesOrderService:
             json={
                 "customer_id": contact_id,
                 "line_items": line_items,
-                "notes": payload.notes or "Sales order requested from customer portal"
+                "notes": payload.notes or "Sales order requested from customer portal",
             },
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=15,
         )
 
         if response.status_code != 201:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to create draft sales order",
-                    "zoho_response": response.json()
-                }
+                detail={"message": "Failed to create draft sales order", "zoho_response": response.json()},
             )
 
         salesorder = response.json()["salesorder"]
@@ -707,66 +564,62 @@ class SalesOrderService:
         if cached:
             return cached
 
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
         response = requests.get(
             f"{self.base_url}/salesorders",
-            headers=headers,
+            headers=self._auth_headers(access_token),
             params={
                 "organization_id": self.org_id,
                 "customer_id": contact_id,
-                "include": "custom_fields"
+                "include": "custom_fields",
             },
-            timeout=15
+            timeout=15,
         )
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to fetch sales orders",
-                    "zoho_response": response.json()
-                }
+                detail={"message": "Failed to fetch sales orders", "zoho_response": response.json()},
             )
 
         orders = response.json().get("salesorders", [])
 
-        # Extract supplier details inline from already-fetched custom_fields
-        # instead of calling get_supplier_details() which re-fetches each order
         for order in orders:
             order["supplier"] = self._extract_supplier_from_custom_fields(
                 order.get("custom_fields", [])
             )
 
-        cache.set(cache_key, orders)
+        cache.set(cache_key, orders, ttl=_SO_LIST_CACHE_TTL)
         return orders
 
     # -------------------------------------------------
-    # Get Sales Order
+    # Get Sales Order (router-facing, customer-scoped)
     # -------------------------------------------------
     def get_order(self, access_token: str, salesorder_id: str, contact_id: str):
+        """
+        Full sales order fetch scoped to a customer.
+        NOT cached by salesorder_id because it uses a customer_id param
+        which Zoho uses for permission scoping — different from the
+        unscoped _get_order_status cache.
+        """
         contact_id = self._resolve_contact_id(contact_id)
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
 
         response = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id, "customer_id": contact_id},
-            timeout=15
+            timeout=15,
         )
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to fetch sales order"
+                detail="Failed to fetch sales order",
             )
 
         salesorder = response.json().get("salesorder", {})
-
-        # Extract supplier inline from already-fetched data — no extra API call needed
         salesorder["supplier"] = self._extract_supplier_from_custom_fields(
             salesorder.get("custom_fields", [])
         )
-
         return salesorder
 
     # -------------------------------------------------
@@ -778,29 +631,25 @@ class SalesOrderService:
         salesorder_id: str,
         payload,
         reviewer_id: str,
-        contact_id: str
+        contact_id: str,
     ):
         contact_id = self._resolve_contact_id(contact_id)
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
 
         response = requests.put(
             f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
+            headers=self._auth_headers(access_token),
             json={
                 "status": payload.status,
-                "notes": payload.notes or f"Reviewed by ERP user {reviewer_id}"
+                "notes": payload.notes or f"Reviewed by ERP user {reviewer_id}",
             },
             params={"organization_id": self.org_id, "customer_id": contact_id},
-            timeout=15
+            timeout=15,
         )
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to review sales order",
-                    "zoho_response": response.json()
-                }
+                detail={"message": "Failed to review sales order", "zoho_response": response.json()},
             )
 
         order = response.json().get("salesorder", {})
@@ -812,31 +661,22 @@ class SalesOrderService:
         access_token: str,
         salesorder_id: str,
         payload,
-        contact_id: str
+        contact_id: str,
     ):
         return self.review_order(
-            access_token,
-            salesorder_id,
-            payload,
-            reviewer_id=contact_id,
-            contact_id=contact_id
+            access_token, salesorder_id, payload,
+            reviewer_id=contact_id, contact_id=contact_id,
         )
 
     # -------------------------------------------------
-    # PDF (NO CACHE)
+    # PDF
     # -------------------------------------------------
     def get_order_pdf(self, access_token: str, salesorder_id: str):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Accept": "application/pdf"
-        }
-        params = {"organization_id": self.org_id}
-
         response = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params=params,
-            timeout=30
+            headers={**self._auth_headers(access_token), "Accept": "application/pdf"},
+            params={"organization_id": self.org_id},
+            timeout=30,
         )
 
         if response.status_code != 200:
@@ -848,8 +688,8 @@ class SalesOrderService:
                         response.json()
                         if "application/json" in response.headers.get("Content-Type", "")
                         else None
-                    )
-                }
+                    ),
+                },
             )
 
         return response.content
@@ -857,23 +697,39 @@ class SalesOrderService:
     # -------------------------------------------------
     # Comments
     # -------------------------------------------------
-    def get_comments(self, access_token: str, salesorder_id: str):
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+    def _post_comment_safe(
+        self,
+        access_token: str,
+        salesorder_id: str,
+        email: str,
+        body: str,
+        show_to_client: bool = True,
+    ):
+        """Post a comment and swallow errors — comments are audit-only."""
+        try:
+            meta_block = build_comment_meta(email=email)
+            requests.post(
+                f"{self.base_url}/salesorders/{salesorder_id}/comments",
+                headers=self._json_headers(access_token),
+                params={"organization_id": self.org_id},
+                json={"description": meta_block + body, "show_comment_to_clients": show_to_client},
+                timeout=15,
+            )
+        except Exception as e:
+            print("⚠️ Comment error:", str(e))
 
+    def get_comments(self, access_token: str, salesorder_id: str):
         response = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}/comments",
-            headers=headers,
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=15,
         )
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to fetch comments",
-                    "zoho_response": response.json()
-                }
+                detail={"message": "Failed to fetch comments", "zoho_response": response.json()},
             )
 
         result = []
@@ -881,7 +737,6 @@ class SalesOrderService:
             desc = c.get("description", "")
             if "[CUSTOM_META]" not in desc:
                 continue
-
             meta = extract_comment_meta(desc)
             result.append({
                 "comment_id": c.get("comment_id"),
@@ -892,7 +747,7 @@ class SalesOrderService:
                 "comment_type": "client",
                 "date": c.get("date"),
                 "time": c.get("time"),
-                "comments_html_format": c.get("comments_html_format")
+                "comments_html_format": c.get("comments_html_format"),
             })
 
         return result
@@ -903,31 +758,23 @@ class SalesOrderService:
         salesorder_id: str,
         description: str,
         email: str | None = None,
-        show_to_client: bool = True
+        show_to_client: bool = True,
     ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Content-Type": "application/json"
-        }
-
         response = requests.post(
             f"{self.base_url}/salesorders/{salesorder_id}/comments",
-            headers=headers,
+            headers=self._json_headers(access_token),
             json={
                 "description": build_comment_meta(email=email) + description,
-                "show_comment_to_clients": show_to_client
+                "show_comment_to_clients": show_to_client,
             },
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=15,
         )
 
         if response.status_code not in (200, 201):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to add comment",
-                    "zoho_response": response.json()
-                }
+                detail={"message": "Failed to add comment", "zoho_response": response.json()},
             )
 
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
@@ -939,103 +786,62 @@ class SalesOrderService:
         salesorder_id: str,
         comment_id: str,
         description: str,
-        email: str | None = None
+        email: str | None = None,
     ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        # Re-attach the meta block so the comment stays visible after editing.
-        # Without this, get_comments() filters it out (requires [CUSTOM_META]).
         meta_block = build_comment_meta(email=email)
-
         response = requests.put(
             f"{self.base_url}/salesorders/{salesorder_id}/comments/{comment_id}",
-            headers=headers,
+            headers=self._json_headers(access_token),
             json={"description": meta_block + description},
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=15,
         )
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to update comment",
-                    "zoho_response": response.json()
-                }
+                detail={"message": "Failed to update comment", "zoho_response": response.json()},
             )
 
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
         return response.json()
 
-    def delete_comment(
-        self,
-        access_token: str,
-        salesorder_id: str,
-        comment_id: str
-    ):
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
-
+    def delete_comment(self, access_token: str, salesorder_id: str, comment_id: str):
         response = requests.delete(
             f"{self.base_url}/salesorders/{salesorder_id}/comments/{comment_id}",
-            headers=headers,
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=15,
         )
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": "Failed to delete comment",
-                    "zoho_response": response.json()
-                }
+                detail={"message": "Failed to delete comment", "zoho_response": response.json()},
             )
 
         self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
         return {"message": "Comment deleted successfully"}
 
+    # -------------------------------------------------
+    # Vendor Shipment Details
+    # -------------------------------------------------
     def get_vendor_shipment_details(
-        self,
-        access_token: str,
-        salesorder_id: str,
-        contact_id: str
+        self, access_token: str, salesorder_id: str, contact_id: str
     ):
         contact_id = self._resolve_contact_id(contact_id)
 
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
+        # Use cached SO for the permission check — avoids a duplicate GET
+        salesorder = self._get_order_status(access_token, salesorder_id)
 
-        # 1️⃣ Fetch Sales Order
-        so_resp = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if so_resp.status_code != 200:
-            raise HTTPException(status_code=400, detail=so_resp.text)
-
-        salesorder = so_resp.json().get("salesorder", {})
-
-        # 2️⃣ Security check
         if salesorder.get("customer_id") != contact_id:
             raise HTTPException(status_code=403, detail="Unauthorized access")
 
-        # 2️⃣ Fetch packages filtered by salesorder_id — avoids loading all org packages
-        # and silently truncating at Zoho's pagination limit
         pkg_resp = requests.get(
             f"{self.base_url}/packages",
-            headers=headers,
-            params={
-                "organization_id": self.org_id,
-                "salesorder_id": salesorder_id
-            },
-            timeout=15
+            headers=self._auth_headers(access_token),
+            params={"organization_id": self.org_id, "salesorder_id": salesorder_id},
+            timeout=15,
         )
 
         if pkg_resp.status_code != 200:
@@ -1046,272 +852,492 @@ class SalesOrderService:
         if not related_packages:
             return {"message": "No shipment created for this Sales Order"}
 
-        # 4️⃣ Filter shipped
-        valid_status = ["shipped", "delivered", "partially_shipped"]
-
-        shipped_packages = [
-            p for p in related_packages
-            if p.get("status", "").lower() in valid_status
-        ]
+        valid_status = {"shipped", "delivered", "partially_shipped"}
+        shipped_packages = [p for p in related_packages if p.get("status", "").lower() in valid_status]
 
         if not shipped_packages:
             return {"message": "Sales Order not shipped yet"}
 
         latest_package = shipped_packages[-1]
+        return {"salesorder_id": salesorder_id, "status": latest_package.get("status")}
+
+    # -------------------------------------------------
+    # GRN → Purchase Order sync
+    # -------------------------------------------------
+    def send_grn_to_purchase_order(
+        self, access_token: str, salesorder_id: str, salesorder: dict
+    ):
+        headers = self._auth_headers(access_token)
+        salesorder_number = salesorder.get("salesorder_number")
+
+        po = self._find_po_by_salesorder(access_token, salesorder_number)
+        if not po:
+            raise HTTPException(404, "Purchase Order not found for this Sales Order")
+
+        po_id = po.get("purchaseorder_id")
+
+        # Find GRN attachment
+        grn_doc = next(
+            (doc for doc in reversed(salesorder.get("documents", []))
+             if "_grn" in (doc.get("file_name") or "").lower()),
+            None,
+        )
+        if not grn_doc:
+            raise HTTPException(404, "GRN attachment not found in Sales Order")
+
+        document_id = grn_doc.get("document_id")
+        file_name = grn_doc.get("file_name")
+
+        # Download GRN file from Sales Order
+        file_resp = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=30,
+        )
+
+        if file_resp.status_code != 200 or not file_resp.content:
+            raise HTTPException(400, "Failed to download GRN file")
+
+        # Fetch PO details once — used for both old-GRN deletion and new upload
+        po_details_resp = requests.get(
+            f"{self.base_url}/purchaseorders/{po_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15,
+        )
+
+        if po_details_resp.status_code == 200:
+            po_documents = po_details_resp.json().get("purchaseorder", {}).get("documents", [])
+            for doc in po_documents:
+                existing_name = (doc.get("file_name") or "").lower()
+                if "_grn" not in existing_name:
+                    continue
+                requests.delete(
+                    f"{self.base_url}/purchaseorders/{po_id}/documents/{doc.get('document_id')}",
+                    headers=headers,
+                    params={"organization_id": self.org_id},
+                    timeout=15,
+                )
+
+        # Upload new GRN to Purchase Order
+        upload_resp = requests.post(
+            f"{self.base_url}/purchaseorders/{po_id}/attachment",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            files={"attachment": (file_name, file_resp.content, "application/pdf")},
+            timeout=30,
+        )
+
+        if upload_resp.status_code not in (200, 201):
+            raise HTTPException(
+                400,
+                {"message": "Failed to upload GRN to Purchase Order", "zoho_response": upload_resp.text},
+            )
 
         return {
-            "salesorder_id": salesorder_id,
-            "status": latest_package.get("status")
+            "message": "GRN sent to supplier Purchase Order",
+            "purchaseorder_id": po_id,
+            "file_name": file_name,
         }
 
     # -------------------------------------------------
-    # Get E-Way Bill PDF from Sales Order
+    # E-Way Bill PDF
     # -------------------------------------------------
     def get_eway_bill_pdf(self, access_token: str, salesorder_id: str) -> bytes:
-        """
-        Returns the E-Way Bill PDF bytes uploaded against this sales order.
-        Searches for any attachment whose filename contains 'eway_bill'.
-        """
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
-
-        # Fetch sales order to get document list
-        response = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if response.status_code != 200:
-            raise HTTPException(status_code=404, detail="Sales order not found")
-
-        salesorder = response.json().get("salesorder", {})
+        # Use cached SO to avoid a fresh GET just for the document list
+        salesorder = self._get_order_status(access_token, salesorder_id)
         documents = salesorder.get("documents", [])
 
-        # Find latest file whose name contains 'eway_bill'
-        document_id = None
-        for doc in reversed(documents):
-            filename = doc.get("file_name", "").lower()
-            if "eway_bill" in filename:
-                document_id = doc.get("document_id")
-                break
+        document_id = next(
+            (doc.get("document_id") for doc in reversed(documents)
+             if "eway_bill" in doc.get("file_name", "").lower()),
+            None,
+        )
 
         if not document_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="E-Way Bill not found for this Sales Order"
+                detail="E-Way Bill not found for this Sales Order",
             )
 
-        # Download the file
         file_response = requests.get(
             f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
-            headers=headers,
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id},
-            timeout=30
+            timeout=30,
         )
 
         if file_response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Failed to download E-Way Bill"
+                detail="Failed to download E-Way Bill",
             )
 
         return file_response.content
 
     # -------------------------------------------------
-    # Create PO with GRN
+    # Create PO from Sales Order
     # -------------------------------------------------
     def create_po_with_grn(
-        self,
-        access_token: str,
-        salesorder_id: str,
-        created_by: str | None = None
+        self, access_token: str, salesorder_id: str, created_by: str | None = None
     ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Content-Type": "application/json"
-        }
+        headers = self._json_headers(access_token)
 
-        # 1️⃣ Get Sales Order
-        so_resp = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if so_resp.status_code != 200:
-            raise HTTPException(status_code=400, detail="Unable to fetch sales order")
-
-        salesorder = so_resp.json().get("salesorder", {})
-
-        # CHECK IF PURCHASE ORDER ALREADY EXISTS
+        # Single fetch — used for vendor extraction, line items, PO lookup, and attachment
+        salesorder = self._get_order_status(access_token, salesorder_id)
         salesorder_number = salesorder.get("salesorder_number")
 
-        existing_po = self._find_po_by_salesorder(
-            access_token,
-            salesorder_number
-        )
-
-        # If PO exists → update attachment instead of creating new one
+        existing_po = self._find_po_by_salesorder(access_token, salesorder_number)
         if existing_po:
-            po_id = existing_po.get("purchaseorder_id")
-
             return self._update_po_attachment(
                 access_token=access_token,
-                po_id=po_id,
+                po_id=existing_po.get("purchaseorder_id"),
                 salesorder=salesorder,
-                salesorder_id=salesorder_id
+                salesorder_id=salesorder_id,
             )
 
-        # 2️⃣ Extract Vendor
-        vendor_id = None
-
-        for field in salesorder.get("custom_fields", []):
-            if field.get("api_name") == "cf_supplier":
-                vendor_id = field.get("value")
-                break
+        vendor_id = next(
+            (f.get("value") for f in salesorder.get("custom_fields", [])
+             if f.get("api_name") == "cf_supplier"),
+            None,
+        )
 
         if not vendor_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Supplier not set on this Sales Order"
-            )
+            raise HTTPException(status_code=400, detail="Supplier not set on this Sales Order")
 
-        # 3️⃣ Prepare PO items
-        po_items = []
-
-        for item in salesorder.get("line_items", []):
-            po_items.append({
+        po_items = [
+            {
                 "item_id": item.get("item_id"),
                 "rate": item.get("rate"),
                 "quantity": item.get("quantity"),
                 "name": item.get("name"),
-                "tax_exemption_code": "NON"
-            })
+                "tax_exemption_code": "NON",
+            }
+            for item in salesorder.get("line_items", [])
+        ]
 
         if not po_items:
-            raise HTTPException(
-                status_code=400,
-                detail="Sales Order has no line items"
-            )
+            raise HTTPException(status_code=400, detail="Sales Order has no line items")
 
-        # 4️⃣ Create Purchase Order
         po_resp = requests.post(
             f"{self.base_url}/purchaseorders",
             headers=headers,
             params={"organization_id": self.org_id},
             json={
                 "vendor_id": vendor_id,
-                "reference_number": salesorder.get("salesorder_number"),
+                "reference_number": salesorder_number,
                 "line_items": po_items,
-                "notes": f"Created from Sales Order {salesorder.get('salesorder_number')}"
+                "notes": f"Created from Sales Order {salesorder_number}",
             },
-            timeout=15
+            timeout=15,
         )
 
         if po_resp.status_code not in (200, 201):
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to create purchase order"
-            )
+            raise HTTPException(status_code=400, detail="Failed to create purchase order")
 
         purchaseorder = po_resp.json().get("purchaseorder", {})
         po_id = purchaseorder.get("purchaseorder_id")
 
-        # 5️⃣ Mark PO issued
         issue_resp = requests.post(
             f"{self.base_url}/purchaseorders/{po_id}/status/issued",
-            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=15,
         )
 
         if issue_resp.status_code not in (200, 201):
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to mark PO issued"
-            )
+            raise HTTPException(status_code=400, detail="Failed to mark PO issued")
 
-        # 6️⃣ Find PO attachment in Sales Order
-        documents = salesorder.get("documents", [])
-
-        po_document = None
-
-        for doc in reversed(documents):
-            if "_po" in doc.get("file_name", ""):
-                po_document = doc
-                break
+        # Find PO attachment in the already-fetched salesorder — no extra GET
+        po_document = next(
+            (doc for doc in reversed(salesorder.get("documents", []))
+             if "_po" in doc.get("file_name", "")),
+            None,
+        )
 
         if not po_document:
-            raise HTTPException(
-                status_code=404,
-                detail="No PO attachment found on Sales Order"
-            )
+            raise HTTPException(status_code=404, detail="No PO attachment found on Sales Order")
 
-        document_id = po_document.get("document_id")
-        file_name = po_document.get("file_name")
-
-        # 7️⃣ Download attachment
         file_resp = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
-            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            f"{self.base_url}/salesorders/{salesorder_id}/documents/{po_document['document_id']}",
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id},
-            timeout=30
+            timeout=30,
         )
 
         if file_resp.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to download PO attachment"
-            )
-
-        file_bytes = file_resp.content
-
-        # 8️⃣ Attach to Purchase Order
-        files = {
-            "attachment": (
-                file_name,
-                file_bytes,
-                "application/pdf"
-            )
-        }
+            raise HTTPException(status_code=400, detail="Failed to download PO attachment")
 
         upload_resp = requests.post(
             f"{self.base_url}/purchaseorders/{po_id}/attachment",
-            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            headers=self._auth_headers(access_token),
             params={"organization_id": self.org_id},
-            files=files,
-            timeout=30
+            files={"attachment": (po_document["file_name"], file_resp.content, "application/pdf")},
+            timeout=30,
         )
 
         if upload_resp.status_code not in (200, 201):
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to attach PO document to Purchase Order"
-            )
+            raise HTTPException(status_code=400, detail="Failed to attach PO document to Purchase Order")
 
         return {
             "message": "Purchase Order created with user uploaded PO attachment",
-            "purchaseorder_id": po_id
+            "purchaseorder_id": po_id,
         }
 
+    # -------------------------------------------------
+    # Create Sales Order from Quote
+    # -------------------------------------------------
+    def create_salesorder_from_quote(self, access_token: str, estimate_id: str):
+        headers = self._json_headers(access_token)
+
+        quote_resp = requests.get(
+            f"{self.base_url}/estimates/{estimate_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15,
+        )
+
+        if quote_resp.status_code != 200:
+            raise HTTPException(400, "Failed to fetch quote")
+
+        estimate = quote_resp.json().get("estimate", {})
+
+        if estimate.get("status") != "accepted":
+            raise HTTPException(400, "Sales order can only be created from accepted quotes")
+
+        supplier_id = next(
+            (f.get("value") for f in estimate.get("custom_fields", [])
+             if f.get("api_name") == "cf_supplier"),
+            None,
+        )
+
+        if not supplier_id:
+            raise HTTPException(status_code=400, detail="Supplier not set on this Quote")
+
+        # Fetch supplier details (needed for cf_supplier_details)
+        supplier_resp = requests.get(
+            f"{self.base_url}/contacts/{supplier_id}",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            timeout=15,
+        )
+
+        if supplier_resp.status_code != 200:
+            raise HTTPException(400, "Failed to fetch supplier details")
+
+        supplier = supplier_resp.json().get("contact", {})
+        company_name = supplier.get("company_name", "")
+        billing = supplier.get("billing_address", {})
+        billing_address = ", ".join(
+            part for part in [
+                billing.get("address"), billing.get("street2"), billing.get("city"),
+                billing.get("state"), billing.get("zip"), billing.get("country"),
+            ] if part
+        )
+        supplier_details = f"{company_name}\n{billing_address}"
+
+        customer_id = estimate.get("customer_id")
+        estimate_number = estimate.get("estimate_number")
+
+        if not customer_id:
+            raise HTTPException(400, "Quote has no customer")
+
+        line_items = []
+        for item in estimate.get("line_items", []):
+            item_id = item.get("item_id")
+            quantity = item.get("quantity")
+            if not item_id or not quantity:
+                raise HTTPException(400, "Invalid item in quote")
+            line_items.append({
+                "item_id": item_id,
+                "quantity": quantity,
+                "rate": item.get("rate"),
+            })
+
+        if not line_items:
+            raise HTTPException(400, "Quote has no items")
+
+        create_resp = requests.post(
+            f"{self.base_url}/salesorders",
+            headers=headers,
+            params={"organization_id": self.org_id},
+            json={
+                "customer_id": customer_id,
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "reference_number": estimate_number,
+                "line_items": line_items,
+                "notes": f"Created automatically from Quote {estimate_number}",
+                "custom_fields": [
+                    {"api_name": "cf_supplier", "value": supplier_id},
+                    {"api_name": "cf_supplier_details", "value": supplier_details},
+                ],
+            },
+            timeout=15,
+        )
+
+        if create_resp.status_code not in (200, 201):
+            raise HTTPException(400, create_resp.text)
+
+        salesorder = create_resp.json().get("salesorder")
+        if not salesorder:
+            raise HTTPException(400, "Sales order creation failed")
+
+        salesorder_id = salesorder.get("salesorder_id")
+        self.mark_salesorder_open(access_token, salesorder_id)
+        salesorder["status"] = "open"
+
+        return salesorder
+
+    def mark_salesorder_open(self, access_token: str, salesorder_id: str):
+        resp = requests.post(
+            f"{self.base_url}/salesorders/{salesorder_id}/status/open",
+            headers=self._auth_headers(access_token),
+            params={"organization_id": self.org_id},
+            timeout=15,
+        )
+
+        if resp.status_code not in (200, 201):
+            raise HTTPException(status_code=400, detail="Failed to mark sales order as open")
+
+        return resp.json()
+
+    # -------------------------------------------------
+    # Supplier Details
+    # -------------------------------------------------
+    def get_supplier_details(self, access_token: str, salesorder_id: str):
+        salesorder = self._get_order_status(access_token, salesorder_id)
+        return self._extract_supplier_from_custom_fields(salesorder.get("custom_fields", []))
+
+    # -------------------------------------------------
+    # Tracking Data
+    # -------------------------------------------------
+    def get_tracking_data(self, access_token: str, salesorder_id: str):
+        salesorder = self._get_order_status(access_token, salesorder_id)
+
+        if "invoiced" not in (salesorder.get("status") or "").lower():
+            raise HTTPException(403, "Tracking available only after invoice")
+
+        salesorder_number = salesorder.get("salesorder_number")
+        po = self._find_po_by_salesorder(access_token, salesorder_number)
+
+        if not po:
+            raise HTTPException(404, "Purchase Order not found")
+
+        po_resp = requests.get(
+            f"{self.base_url}/purchaseorders/{po['purchaseorder_id']}",
+            headers=self._auth_headers(access_token),
+            params={"organization_id": self.org_id},
+            timeout=15,
+        )
+
+        if po_resp.status_code != 200:
+            raise HTTPException(400, "Failed to fetch Purchase Order")
+
+        purchaseorder = po_resp.json().get("purchaseorder", {})
+
+        tracking_id = None
+        carrier = None
+        for field in purchaseorder.get("custom_fields", []):
+            api_name = field.get("api_name")
+            if api_name == "cf_tracking":
+                tracking_id = field.get("value") or field.get("display_value")
+            elif api_name == "cf_carrier":
+                carrier = field.get("value") or field.get("display_value")
+
+        return {"tracking_id": tracking_id, "carrier": carrier}
+
+    # -------------------------------------------------
+    # Purchase Order helpers
+    # -------------------------------------------------
+    def _find_po_by_salesorder(self, access_token: str, salesorder_number: str):
+        resp = requests.get(
+            f"{self.base_url}/purchaseorders",
+            headers=self._auth_headers(access_token),
+            params={"organization_id": self.org_id, "reference_number": salesorder_number},
+            timeout=15,
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to search purchase orders")
+
+        purchaseorders = resp.json().get("purchaseorders", [])
+        return purchaseorders[0] if purchaseorders else None
+
+    def _update_po_attachment(
+        self, access_token: str, po_id: str, salesorder: dict, salesorder_id: str
+    ):
+        self._delete_po_attachments(access_token, po_id)
+
+        po_document = next(
+            (doc for doc in reversed(salesorder.get("documents", []))
+             if "_po" in doc.get("file_name", "")),
+            None,
+        )
+
+        if not po_document:
+            raise HTTPException(status_code=404, detail="PO attachment not found on Sales Order")
+
+        file_resp = requests.get(
+            f"{self.base_url}/salesorders/{salesorder_id}/documents/{po_document['document_id']}",
+            headers=self._auth_headers(access_token),
+            params={"organization_id": self.org_id},
+            timeout=30,
+        )
+
+        if file_resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to download updated PO attachment")
+
+        upload_resp = requests.post(
+            f"{self.base_url}/purchaseorders/{po_id}/attachment",
+            headers=self._auth_headers(access_token),
+            params={"organization_id": self.org_id},
+            files={"attachment": (po_document["file_name"], file_resp.content, "application/pdf")},
+            timeout=30,
+        )
+
+        if upload_resp.status_code not in (200, 201):
+            raise HTTPException(status_code=400, detail="Failed to update PO attachment")
+
+        return {
+            "message": "PO updated and new attachment sent to supplier",
+            "purchaseorder_id": po_id,
+        }
+
+    def _delete_po_attachments(self, access_token: str, po_id: str):
+        resp = requests.get(
+            f"{self.base_url}/purchaseorders/{po_id}",
+            headers=self._auth_headers(access_token),
+            params={"organization_id": self.org_id},
+            timeout=15,
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to fetch Purchase Order attachments")
+
+        documents = resp.json().get("purchaseorder", {}).get("documents", [])
+        for doc in documents:
+            if "_po" not in doc.get("file_name", ""):
+                continue
+            requests.delete(
+                f"{self.base_url}/purchaseorders/{po_id}/documents/{doc['document_id']}",
+                headers=self._auth_headers(access_token),
+                params={"organization_id": self.org_id},
+                timeout=15,
+            )
+
+    # -------------------------------------------------
+    # SO lookup by estimate number (idempotency guard)
+    # -------------------------------------------------
     def _find_so_by_estimate_number(self, access_token: str, estimate_number: str) -> dict | None:
-        """Look up an existing sales order by its reference_number (= estimate_number).
-        Used by accept_quote to guard against duplicate sales order creation on retry."""
         if not estimate_number:
             return None
 
-        headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
-
         resp = requests.get(
             f"{self.base_url}/salesorders",
-            headers=headers,
-            params={
-                "organization_id": self.org_id,
-                "reference_number": estimate_number
-            },
-            timeout=15
+            headers=self._auth_headers(access_token),
+            params={"organization_id": self.org_id, "reference_number": estimate_number},
+            timeout=15,
         )
 
         if resp.status_code != 200:
@@ -1320,9 +1346,10 @@ class SalesOrderService:
         orders = resp.json().get("salesorders", [])
         return orders[0] if orders else None
 
+    # -------------------------------------------------
+    # Item cache (shared with quote/invoice services)
+    # -------------------------------------------------
     def _get_item_cached(self, headers: dict, item_id: str) -> dict:
-        """Fetch a Zoho item with a 1-hour cache. Items rarely change,
-        so this collapses N serial calls to 0 on repeat order/quote creation."""
         cache_key = f"zoho:item:{item_id}"
         cached = cache.get(cache_key)
         if cached:
@@ -1332,385 +1359,29 @@ class SalesOrderService:
             f"{self.base_url}/items/{item_id}",
             headers=headers,
             params={"organization_id": self.org_id},
-            timeout=15
+            timeout=15,
         )
 
         if resp.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "message": f"Failed to fetch item {item_id}",
-                    "zoho_response": resp.json()
-                }
+                detail={"message": f"Failed to fetch item {item_id}", "zoho_response": resp.json()},
             )
 
         item = resp.json().get("item", {})
-        cache.set(cache_key, item, ttl=3600)
+        cache.set(cache_key, item, ttl=_ITEM_CACHE_TTL)
         return item
 
-    def _find_po_by_salesorder(self, access_token: str, salesorder_number: str):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
-        resp = requests.get(
-            f"{self.base_url}/purchaseorders",
-            headers=headers,
-            params={
-                "organization_id": self.org_id,
-                "reference_number": salesorder_number
-            },
-            timeout=15
-        )
-
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to search purchase orders"
-            )
-
-        purchaseorders = resp.json().get("purchaseorders", [])
-
-        if purchaseorders:
-            return purchaseorders[0]
-
-        return None
-
-    def _update_po_attachment(
-        self,
-        access_token: str,
-        po_id: str,
-        salesorder: dict,
-        salesorder_id: str
-    ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
-        # 1️⃣ Delete existing attachments from PO
-        self._delete_po_attachments(access_token, po_id)
-
-        # 2️⃣ Find PO file in Sales Order
-        documents = salesorder.get("documents", [])
-
-        po_document = None
-
-        for doc in reversed(documents):
-            if "_po" in doc.get("file_name", ""):
-                po_document = doc
-                break
-
-        if not po_document:
-            raise HTTPException(
-                status_code=404,
-                detail="PO attachment not found on Sales Order"
-            )
-
-        document_id = po_document.get("document_id")
-        file_name = po_document.get("file_name")
-
-        # 3️⃣ Download file from Sales Order
-        file_resp = requests.get(
-            f"{self.base_url}/salesorders/{salesorder_id}/documents/{document_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=30
-        )
-
-        if file_resp.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to download updated PO attachment"
-            )
-
-        # 4️⃣ Upload to Purchase Order
-        files = {
-            "attachment": (
-                file_name,
-                file_resp.content,
-                "application/pdf"
-            )
-        }
-
-        upload_resp = requests.post(
-            f"{self.base_url}/purchaseorders/{po_id}/attachment",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            files=files,
-            timeout=30
-        )
-
-        if upload_resp.status_code not in (200, 201):
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to update PO attachment"
-            )
-
-        return {
-            "message": "PO updated and new attachment sent to supplier",
-            "purchaseorder_id": po_id
-        }
-    
-    def update_po_number_field(
-        self,
-        access_token: str,
-        salesorder_id: str,
-        po_number: str
-    ):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        response = requests.put(
-            f"{self.base_url}/salesorders/{salesorder_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            json={
-                "custom_fields": [
-                    {
-                        "api_name": "cf_customer_po_no",  # ✅ your PO field
-                        "value": po_number
-                    }
-                ]
-            },
-            timeout=15
-        )
-
-        data = response.json()
-
-        if response.status_code != 200 or data.get("code") not in (0, None):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": "Failed to update PO number field",
-                    "zoho_response": data
-                }
-            )
-
-        self._invalidate_salesorder_caches(salesorder_id=salesorder_id)
-
-        return data
-    
-    def delete_po_number_field(
-        self,
-        access_token: str,
-        salesorder_id: str
-    ):
-        return self.update_po_number_field(
-            access_token=access_token,
-            salesorder_id=salesorder_id,
-            po_number=None
-        )
-
-    def _delete_po_attachments(self, access_token: str, po_id: str):
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
-        # 1️⃣ Get Purchase Order details
-        resp = requests.get(
-            f"{self.base_url}/purchaseorders/{po_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to fetch Purchase Order attachments"
-            )
-
-        purchaseorder = resp.json().get("purchaseorder", {})
-        documents = purchaseorder.get("documents", [])
-
-        # 2️⃣ Delete only PO attachment
-        for doc in documents:
-            file_name = doc.get("file_name", "")
-
-            # Only delete files with "_po"
-            if "_po" not in file_name:
-                continue
-
-            document_id = doc.get("document_id")
-
-            del_resp = requests.delete(
-                f"{self.base_url}/purchaseorders/{po_id}/documents/{document_id}",
-                headers=headers,
-                params={"organization_id": self.org_id},
-                timeout=15
-            )
-
-            print("Deleting PO attachment:", file_name)
-            print("Delete response:", del_resp.text)
-
-    def create_salesorder_from_quote(self, access_token: str, estimate_id: str):
-
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        # 1️⃣ Fetch Quote
-        quote_resp = requests.get(
-            f"{self.base_url}/estimates/{estimate_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if quote_resp.status_code != 200:
-            raise HTTPException(400, "Failed to fetch quote")
-
-        estimate = quote_resp.json().get("estimate", {})
-
-        supplier_id = None
-
-        for field in estimate.get("custom_fields", []):
-            if field.get("api_name") == "cf_supplier":
-                supplier_id = field.get("value")
-                break
-
-        if not supplier_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Supplier not set on this Quote"
-            )
-
-        supplier_resp = requests.get(
-            f"{self.base_url}/contacts/{supplier_id}",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        if supplier_resp.status_code != 200:
-            raise HTTPException(400, "Failed to fetch supplier details")
-
-        supplier = supplier_resp.json().get("contact", {})
-
-        company_name = supplier.get("company_name", "")
-
-        billing = supplier.get("billing_address", {})
-
-        address_parts = [
-            billing.get("address"),
-            billing.get("street2"),
-            billing.get("city"),
-            billing.get("state"),
-            billing.get("zip"),
-            billing.get("country"),
-        ]
-
-        billing_address = ", ".join(part for part in address_parts if part)
-
-        supplier_details = f"{company_name}\n{billing_address}"
-
-        if estimate.get("status") != "accepted":
-            raise HTTPException(
-                400,
-                "Sales order can only be created from accepted quotes"
-            )
-
-        customer_id = estimate.get("customer_id")
-        estimate_number = estimate.get("estimate_number")
-
-        if not customer_id:
-            raise HTTPException(400, "Quote has no customer")
-
-        # 2️⃣ Build Line Items
-        line_items = []
-
-        for item in estimate.get("line_items", []):
-            item_id = item.get("item_id")
-            quantity = item.get("quantity")
-            rate = item.get("rate")
-
-            if not item_id or not quantity:
-                raise HTTPException(400, "Invalid item in quote")
-
-            line_items.append({
-                "item_id": item_id,
-                "quantity": quantity,
-                "rate": rate
-            })
-
-        if not line_items:
-            raise HTTPException(400, "Quote has no items")
-
-        # 3️⃣ Create Sales Order
-        payload = {
-            "customer_id": customer_id,
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "reference_number": estimate_number,
-            "line_items": line_items,
-            "notes": f"Created automatically from Quote {estimate_number}",
-            "custom_fields": [
-                {
-                    "api_name": "cf_supplier",
-                    "value": supplier_id
-                },
-                {
-                    "api_name": "cf_supplier_details",
-                    "value": supplier_details
-                }
-            ]
-        }
-
-        create_resp = requests.post(
-            f"{self.base_url}/salesorders",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            json=payload,
-            timeout=15
-        )
-
-        print("CREATE SO RESPONSE:", create_resp.status_code)
-        print("CREATE SO BODY:", create_resp.text)
-
-        if create_resp.status_code not in (200, 201):
-            raise HTTPException(400, create_resp.text)
-
-        # 4️⃣ Extract Sales Order
-        salesorder = create_resp.json().get("salesorder")
-
-        if not salesorder:
-            raise HTTPException(400, "Sales order creation failed")
-
-        salesorder_id = salesorder.get("salesorder_id")
-
-        # 5️⃣ Mark Sales Order as OPEN
-        self.mark_salesorder_open(access_token, salesorder_id)
-
-        # Update local response status
-        salesorder["status"] = "open"
-
-        return salesorder
-    
-    def mark_salesorder_open(self, access_token: str, salesorder_id: str):
-        """
-        Mark a Sales Order as OPEN in Zoho Books
-        """
-
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {access_token}"
-        }
-
-        resp = requests.post(
-            f"{self.base_url}/salesorders/{salesorder_id}/status/open",
-            headers=headers,
-            params={"organization_id": self.org_id},
-            timeout=15
-        )
-
-        print("MARK SO OPEN STATUS:", resp.status_code)
-        print("MARK SO OPEN BODY:", resp.text)
-
-        if resp.status_code not in (200, 201):
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to mark sales order as open"
-            )
-
-        return resp.json()
+    # -------------------------------------------------
+    # Tracking helpers (kept for any direct callers)
+    # -------------------------------------------------
+    def get_tracking_details(self, salesorder: dict):
+        tracking_id = None
+        carrier = None
+        for field in salesorder.get("custom_fields", []):
+            api_name = field.get("api_name")
+            if api_name == "cf_tracking":
+                tracking_id = field.get("value") or field.get("display_value")
+            elif api_name == "cf_carrier":
+                carrier = field.get("value") or field.get("display_value")
+        return {"tracking_id": tracking_id, "carrier": carrier}
