@@ -397,7 +397,10 @@ def seed_modules(session):
 {"name": "Organization Role Permissions", "description": "Configure permissions for organization roles", "path": "org_role_permissions", "group_name": "Organization"},
 # ✅ WORKFLOW MANAGEMENT MODULE
 {"name": "Workflows", "description": "Manage workflow definitions, states, transitions, and permissions", "path": "workflows", "group_name": "Administration"},
-
+{"name": "Vendor Documents",
+ "description": "View vendor uploaded documents",
+ "path": "vendor_documents",
+ "group_name": "Organization"},
     ]
 
     module_ids = {}
@@ -481,7 +484,7 @@ def seed_privileges(session, role_ids, module_ids):
         # ✅ ORGANIZATION MANAGEMENT MODULE
         "Organizations",
         # ✅ WORKFLOW MANAGEMENT MODULE
-        "Workflows"
+        "Workflows","Vendor Documents"
     ]
 
     # -------------------------------------------------------
