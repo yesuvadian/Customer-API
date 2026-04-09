@@ -638,6 +638,13 @@ def seed_privileges(session, role_ids, module_ids):
             "can_view": True, "can_approve": True, "can_assign": True
         },
 
+        # DOC-VIEWER — view only for Vendor Documents
+        {
+            "role": "doc-viewer", "module": "Vendor Documents",
+            "can_view": True, "can_add": False, "can_edit": False, 
+            "can_delete": False, "can_search": True
+        },
+
         # DEPARTMENT HEAD — approve on Recommendations + Approvals
         {"role": "Department Head", "module": "Recommendations",
          "can_view": True, "can_approve": True},
@@ -1555,6 +1562,8 @@ def seed_role_templates(session):
         *workflows_module,
     })
 
+    vendor_documents_module = [mid for mid in [modules_by_name.get("Vendor Documents")] if mid]
+
     templates_data = [
         # ── 1. Admin (Super Admin) — full access to all modules ──────────────
         {
@@ -1643,6 +1652,16 @@ def seed_role_templates(session):
                 _readwrite(dashboard_module) +
                 _readwrite(procurement_modules)
             ),
+        },
+
+        # ── 9. Doc Viewer — verifies uploaded documents ───────────────────────
+        {
+            "name": "doc-viewer",
+            "description": "Verifies vendor uploaded documents. Access to Vendor Documents module only.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": _readonly(vendor_documents_module),
         },
     ]
 
@@ -2212,6 +2231,14 @@ def seed_sample_organization(session):
             "lastname": "Admin",
             "phone": "9999999014"
         },
+        {
+            "email": "docviewer@sampleorg.com",
+            "password": "DocViewer123!",
+            "role_name": "doc-viewer",
+            "firstname": "Document",
+            "lastname": "Viewer",
+            "phone": "9999999015"
+        },
     ]
 
     created_other = 0
@@ -2420,6 +2447,15 @@ def seed_kptcl_organization(session):
             "phone": "+91-9900000006",
             "role_name": "Purchaser",
             "employee_id": "KPTCL-PUR-001",
+        },
+        {
+            "email": "docviewer@kptcl.com",
+            "password": "admin123",
+            "firstname": "KPTCL Doc",
+            "lastname": "Viewer",
+            "phone": "+91-9900000007",
+            "role_name": "doc-viewer",
+            "employee_id": "KPTCL-DOC-001",
         },
     ]
 
