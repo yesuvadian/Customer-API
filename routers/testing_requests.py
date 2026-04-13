@@ -1,7 +1,7 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -242,7 +242,7 @@ def get_testing_request_stats(
     return service.get_stats(organization_id=organization_id)
 
 
-@router.post("/", response_model=TestingRequestResponse)
+@router.post("/", response_model=TestingRequestResponse, status_code=status.HTTP_201_CREATED)
 def create_testing_request(
     data: TestingRequestCreate,
     db: Session = Depends(get_db),
@@ -334,6 +334,35 @@ def assign_tester(
 ):
     service = TestingRequestService(db)
     return _enrich(service.assign_tester(request_id, tester_id=data.tester_id, assigned_by=current_user.id))
+
+
+@router.put("/{request_id}/approve", response_model=TestingRequestResponse)
+def approve_testing_results(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Approve test results after testing is complete."""
+    from services.testing_request_workflow_service import TestingRequestWorkflowService
+
+    service = TestingRequestService(db)
+    request = service.get_request(request_id)
+
+    workflow_service = TestingRequestWorkflowService(db)
+    success, message = workflow_service.approve_results(
+        testing_request=request,
+        user=current_user,
+        comment=None
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+
+    db.refresh(request)
+    return _enrich(request)
 
 
 # NOTE: Tester workflow endpoints (accept, start, submit_results)

@@ -180,12 +180,19 @@ class TestSessionService(UTCDateTimeMixin):
         )
 
     def complete_session(self, session_id: UUID) -> TestSession:
-        """Mark a session as completed."""
-        return self.update_session(
+        """Mark a session as completed and check for auto-transition."""
+        session = self.update_session(
             session_id=session_id,
             status="completed",
             completed_at=self._utc_now(),
         )
+
+        # Auto-transition to test_submitted if all sessions are complete
+        from services.auto_status_transition_service import AutoStatusTransitionService
+        auto_transition = AutoStatusTransitionService(self.db)
+        auto_transition.check_and_transition_if_all_sessions_complete(session.testing_request_id)
+
+        return session
 
     # ═══════════════════════════════════════════════════════════
     # TEST SESSION READING CRUD
@@ -366,6 +373,8 @@ class TestSessionService(UTCDateTimeMixin):
 
     def get_session_statistics(self, session_id: UUID) -> dict:
         """Get statistics for a session."""
+        from models import SessionComment
+
         session = self.get_session(session_id)
 
         reading_count = self.db.query(func.count(TestSessionReading.id)).filter(
@@ -382,6 +391,10 @@ class TestSessionService(UTCDateTimeMixin):
             TestSessionReading.result_status == "fail"
         ).scalar()
 
+        comment_count = self.db.query(func.count(SessionComment.id)).filter(
+            SessionComment.session_id == session_id
+        ).scalar()
+
         return {
             "session_id": session_id,
             "session_number": session.session_number,
@@ -389,6 +402,7 @@ class TestSessionService(UTCDateTimeMixin):
             "reading_count": reading_count,
             "pass_count": pass_count,
             "fail_count": fail_count,
+            "comment_count": comment_count or 0,
             "duration_minutes": (
                 int((session.completed_at - session.started_at).total_seconds() / 60)
                 if session.started_at and session.completed_at else None

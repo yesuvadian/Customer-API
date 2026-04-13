@@ -80,6 +80,7 @@ from routers import (
     org_test_templates,
     test_request_schedules,
     test_sessions,  # NEW: Multi-session testing
+    session_comments,  # NEW: Session comments for approvers
 )
 
 # Organization Multi-Tenancy
@@ -110,6 +111,28 @@ scheduler.add_job(
     hour=0,
     minute=0,
     id="daily_test_scheduler",
+)
+
+# Auto-transition elapsed multi-session tests (runs every hour)
+def _check_elapsed_multi_session_tests():
+    """Check for multi-session tests with elapsed end dates and auto-submit them."""
+    db = SessionLocal()
+    try:
+        from services.auto_status_transition_service import AutoStatusTransitionService
+        svc = AutoStatusTransitionService(db)
+        count = svc.check_all_pending_multi_session_tests()
+        if count > 0:
+            logger.info(f"Auto-submitted {count} tests due to elapsed deadlines")
+    except Exception as e:
+        logger.error(f"Error in elapsed test check: {e}", exc_info=True)
+    finally:
+        db.close()
+
+scheduler.add_job(
+    _check_elapsed_multi_session_tests,
+    trigger="cron",
+    minute=0,  # Run at the start of every hour
+    id="hourly_elapsed_test_check",
 )
 
 # ── App Init ─────────────────────────────────────────────────────────────────
@@ -267,6 +290,7 @@ app.include_router(customer_care_router)
 app.include_router(testing_requests.router)
 app.include_router(testing.router)
 app.include_router(test_sessions.router)  # NEW: Multi-session testing
+app.include_router(session_comments.router)  # NEW: Session comments for approvers
 app.include_router(recommendations.router)
 app.include_router(approvals.router)
 app.include_router(testing_request_approvals.router)

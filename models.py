@@ -1693,6 +1693,7 @@ class TestSession(Base):
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
     readings = relationship("TestSessionReading", back_populates="test_session", cascade="all, delete-orphan")
+    comments = relationship("SessionComment", back_populates="session", cascade="all, delete-orphan")
 
 
 # ------------------------------
@@ -1756,6 +1757,28 @@ class TestSessionReadingImage(Base):
     # Relationships
     reading = relationship("TestSessionReading", back_populates="images")
     creator = relationship("User", foreign_keys=[created_by])
+
+
+# ------------------------------
+# Session Comment Model
+# ------------------------------
+class SessionComment(Base):
+    """Comments on test sessions (typically by approvers)"""
+    __tablename__ = "session_comments"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("public.test_sessions.id", ondelete="CASCADE"), nullable=False)
+
+    comment = Column(Text, nullable=False)
+    author_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    session = relationship("TestSession", back_populates="comments")
+    author = relationship("User", foreign_keys=[author_id])
 
 
 # ------------------------------

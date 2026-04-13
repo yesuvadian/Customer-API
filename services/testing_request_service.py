@@ -48,10 +48,14 @@ class TestingRequestService:
             priority=data.get("priority", "normal"),
             requested_date=data.get("requested_date"),
             due_date=data.get("due_date"),
+            scheduled_start_date=data.get("scheduled_start_date"),
             notes=data.get("notes"),
             status=TestingRequestStatus.draft,
             originator_id=originator_id,
             created_by=originator_id,
+            is_multi_session=data.get("is_multi_session", False),
+            total_sessions_planned=data.get("total_sessions_planned"),
+            session_interval_days=data.get("session_interval_days"),
         )
         self.db.add(request)
         self.db.commit()

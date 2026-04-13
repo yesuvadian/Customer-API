@@ -1335,6 +1335,28 @@ class TestSessionReadingResponse(BaseModel):
 
 
 # ==========================================
+# Session Comment Schemas
+# ==========================================
+
+class SessionCommentCreate(BaseModel):
+    comment: str
+
+class SessionCommentResponse(BaseModel):
+    id: str
+    session_id: str
+    comment: str
+    author_id: str
+    author_name: str
+    author_role: Optional[str] = None
+    created_at: Optional[str] = None
+    modified_at: Optional[str] = None
+    is_edited: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
 # Recommendation Schemas
 # ==========================================
 
