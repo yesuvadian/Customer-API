@@ -53,7 +53,8 @@ def list_category_masters(
     skip: int = 0,
     limit: int = 100,
     search: Optional[str] = None,
-    is_active: Optional[bool] = None,   # ✅ ADD THIS
+    is_active: Optional[bool] = None,
+    description: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     return CategoryMasterService.get_master_categories(
@@ -61,7 +62,8 @@ def list_category_masters(
         skip=skip,
         limit=limit,
         search=search,
-        is_active=is_active              # ✅ PASS IT
+        is_active=is_active,
+        description=description,
     )
 
 # ============================================================

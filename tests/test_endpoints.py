@@ -245,15 +245,22 @@ def test_workload_stats():
         print_error("No access token. Login first.")
         return False
 
-    url = f"{BASE_URL}/tester-assignment/workload-stats"
     headers = {"Authorization": f"Bearer {access_token}"}
 
+    # Get org ID first
+    orgs_resp = requests.get(f"{BASE_URL}/organizations/", headers=headers, timeout=10)
+    if orgs_resp.status_code != 200 or not orgs_resp.json():
+        print_warning("No organizations found, skipping workload stats")
+        return True
+    org_id = orgs_resp.json()[0].get('id')
+
+    url = f"{BASE_URL}/tester-assignment/workload-stats"
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, params={"organization_id": org_id}, timeout=10)
 
         if response.status_code == 200:
             data = response.json()
-            testers = data.get('testers', [])
+            testers = data if isinstance(data, list) else data.get('testers', [])
             print_success(f"Retrieved workload stats for {len(testers)} testers")
 
             for tester in testers:

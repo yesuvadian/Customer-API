@@ -20,32 +20,41 @@ class CategoryDetailsService:
         limit: int = 100,
         search: str | None = None,
         master_id: int | None = None,
-        is_active: bool | None = None    # ✅ ADD
+        is_active: bool | None = None,
+        master_description: str | None = None,
     ):
         """
         Fetch Category Details
         - is_active = None → ALL
         - is_active = True → only active
         - is_active = False → only inactive
+        - master_description → filter by parent CategoryMaster.description
         """
 
         query = db.query(CategoryDetails)
 
-        # 🔗 Filter by master
+        # Filter by master description (e.g. "Testing Equipment")
+        if master_description is not None:
+            query = query.join(
+                CategoryMaster,
+                CategoryDetails.category_master_id == CategoryMaster.id
+            ).filter(CategoryMaster.description == master_description)
+
+        # Filter by master id
         if master_id is not None:
             query = query.filter(CategoryDetails.category_master_id == master_id)
 
-        # 🔍 Search filter
+        # Search filter
         if search:
             query = query.filter(CategoryDetails.name.ilike(f"%{search}%"))
 
-        # ✅ Active / Inactive filter (ONLY if provided)
+        # Active / Inactive filter
         if is_active is not None:
             query = query.filter(CategoryDetails.is_active == is_active)
 
         return (
             query
-            .order_by(desc(CategoryDetails.id))
+            .order_by(CategoryDetails.name)
             .offset(skip)
             .limit(limit)
             .all()
