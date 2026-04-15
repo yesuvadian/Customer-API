@@ -1,6 +1,7 @@
 """
 Equipment Asset Register Router
 CRUD for equipment units with UEIC auto-generation, linked to OrgDepartment hierarchy.
+Enforces org-scoping and module-level RBAC via OrgRolePermission.
 """
 from typing import List, Optional
 from uuid import UUID
@@ -10,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from auth_utils import get_current_user
-from models import Equipment
+from models import Equipment, Module, User
+from middleware.org_auth import check_org_permission
 from schemas import (
     EquipmentCreate,
     EquipmentUpdate,
@@ -26,6 +28,59 @@ router = APIRouter(
     tags=["equipment"],
     dependencies=[Depends(get_current_user)]
 )
+
+
+# ── Permission helpers ──────────────────────────────────────────────────────
+def _get_equipment_module_id(db: Session) -> int:
+    """Resolve the Equipment module row; raises 500 if not seeded."""
+    mod = db.query(Module).filter_by(path="equipment", is_active=True).first()
+    if not mod:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Equipment module not configured. Run seed first.",
+        )
+    return mod.id
+
+
+def _require_permission(db: Session, user: User, action: str) -> None:
+    """
+    Check that *user* has *action* (can_view / can_add / can_edit / can_delete)
+    on the Equipment module.  Org admins are automatically allowed by
+    check_org_permission → the OrgRole.is_org_admin bypass in org_auth.
+    """
+    from models import OrgUserRole, OrgRole
+
+    # Org admins bypass all module checks
+    is_org_admin = (
+        db.query(OrgUserRole)
+        .join(OrgRole)
+        .filter(
+            OrgUserRole.user_id == user.id,
+            OrgRole.is_org_admin == True,
+            OrgUserRole.is_active == True,
+            OrgRole.is_active == True,
+        )
+        .first()
+    )
+    if is_org_admin:
+        return
+
+    module_id = _get_equipment_module_id(db)
+    if not check_org_permission(user.id, module_id, action, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission '{action}' required on Equipment module",
+        )
+
+
+def _enforce_org_scope(user: User) -> UUID:
+    """Return the user's organization_id or raise 403."""
+    if not user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User must belong to an organization to access equipment",
+        )
+    return user.organization_id
 
 
 def _to_response(eq: Equipment) -> dict:
@@ -65,12 +120,22 @@ def _to_response(eq: Equipment) -> dict:
 def create_equipment(
     data: EquipmentCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Register a new equipment unit. UEIC is auto-generated."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_add")
+
+    # Org-scope: force equipment into the user's own organization
+    if data.organization_id and data.organization_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot create equipment in another organization",
+        )
+
     equipment = EquipmentService.create_equipment(
         db=db,
-        organization_id=data.organization_id,
+        organization_id=org_id,
         department_id=data.department_id,
         equipment_type_id=data.equipment_type_id,
         voltage_class=data.voltage_class,
@@ -93,7 +158,6 @@ def create_equipment(
 # ============================================================
 @router.get("/", response_model=List[EquipmentResponse])
 def list_equipment(
-    organization_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
     equipment_type_id: Optional[int] = None,
     status: Optional[str] = None,
@@ -103,12 +167,15 @@ def list_equipment(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """List equipment with optional filters. Use department_id to get equipment at a substation."""
+    """List equipment with optional filters. Automatically scoped to user's organization."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
     items = EquipmentService.list_equipment(
         db=db,
-        organization_id=organization_id,
+        organization_id=org_id,
         department_id=department_id,
         equipment_type_id=equipment_type_id,
         status=status,
@@ -128,11 +195,19 @@ def list_equipment(
 def get_equipment(
     equipment_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
     equipment = EquipmentService.get_equipment(db, equipment_id)
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
+
+    # Org-scope: ensure the equipment belongs to the user's org
+    if equipment.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
     return _to_response(equipment)
 
 
@@ -143,11 +218,18 @@ def get_equipment(
 def get_equipment_by_ueic(
     ueic: str,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
     equipment = EquipmentService.get_equipment_by_ueic(db, ueic)
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
+
+    if equipment.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
     return _to_response(equipment)
 
 
@@ -159,8 +241,16 @@ def update_equipment(
     equipment_id: UUID,
     data: EquipmentUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_edit")
+
+    # Verify ownership before updating
+    existing = EquipmentService.get_equipment(db, equipment_id)
+    if not existing or existing.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
     equipment = EquipmentService.update_equipment(
         db=db,
         equipment_id=equipment_id,
@@ -180,9 +270,16 @@ def retire_equipment(
     equipment_id: UUID,
     data: EquipmentRetireRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Retire equipment (soft-delete). UEIC and historical data remain."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_edit")
+
+    existing = EquipmentService.get_equipment(db, equipment_id)
+    if not existing or existing.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
     equipment = EquipmentService.retire_equipment(
         db=db,
         equipment_id=equipment_id,
@@ -202,9 +299,16 @@ def replace_equipment(
     equipment_id: UUID,
     data: EquipmentReplaceRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Retire old equipment and register a replacement. Returns both old and new."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_add")  # creating new equipment
+
+    existing = EquipmentService.get_equipment(db, equipment_id)
+    if not existing or existing.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
     old, new = EquipmentService.replace_equipment(
         db=db,
         old_equipment_id=equipment_id,
@@ -233,9 +337,16 @@ def replace_equipment(
 def get_applicable_tests(
     equipment_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Get test types applicable to this equipment's type — for test request form dropdown."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
+    existing = EquipmentService.get_equipment(db, equipment_id)
+    if not existing or existing.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
     tests = EquipmentService.get_applicable_tests(db, equipment_id)
     return [
         {
@@ -255,11 +366,17 @@ def get_applicable_tests(
 def get_equipment_location_hierarchy(
     equipment_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Get the full department hierarchy for an equipment's location — auto-fills zone, circle, division etc."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
     equipment = EquipmentService.get_equipment(db, equipment_id)
     if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
+    if equipment.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
 
     ancestry = EquipmentService._get_department_ancestry_names(db, equipment.department_id)
@@ -277,10 +394,12 @@ def get_equipment_location_hierarchy(
 # ============================================================
 @router.get("/stats/counts", response_model=EquipmentCountResponse)
 def get_equipment_counts(
-    organization_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get equipment counts by status — for dashboard widgets."""
-    return EquipmentService.get_equipment_count(db, organization_id, department_id)
+    """Get equipment counts by status — for dashboard widgets. Scoped to user's organization."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
+    return EquipmentService.get_equipment_count(db, org_id, department_id)

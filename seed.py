@@ -401,6 +401,8 @@ def seed_modules(session):
  "description": "View vendor uploaded documents",
  "path": "vendor_documents",
  "group_name": "Organization"},
+# ✅ EQUIPMENT ASSET REGISTER MODULE
+{"name": "Equipment", "description": "Equipment asset register with UEIC auto-generation", "path": "equipment", "group_name": "Testing"},
     ]
 
     module_ids = {}
@@ -484,7 +486,9 @@ def seed_privileges(session, role_ids, module_ids):
         # ✅ ORGANIZATION MANAGEMENT MODULE
         "Organizations",
         # ✅ WORKFLOW MANAGEMENT MODULE
-        "Workflows","Vendor Documents"
+        "Workflows","Vendor Documents",
+        # ✅ EQUIPMENT ASSET REGISTER
+        "Equipment"
     ]
 
     # -------------------------------------------------------
@@ -675,6 +679,17 @@ def seed_privileges(session, role_ids, module_ids):
 
         # TEST TEMPLATE MANAGEMENT — Admin full (via bulk), Originator view-only
         {"role": "Originator", "module": "Test Template Management", "can_view": True},
+
+        # ✅ EQUIPMENT ASSET REGISTER — role-based access
+        {
+            "role": "Originator", "module": "Equipment",
+            "can_view": True, "can_add": True, "can_edit": True,
+            "can_search": True
+        },
+        {"role": "Field Tester", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Lab Tester", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Test Assigner", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Department Head", "module": "Equipment", "can_view": True, "can_search": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -1626,6 +1641,9 @@ def seed_role_templates(session):
                  "can_export": True, "can_import": False} for m in mids]
 
     # Super Admin modules: everything the Excel column lists
+    vendor_documents_module = [mid for mid in [modules_by_name.get("Vendor Documents")] if mid]
+    equipment_module = [mid for mid in [modules_by_name.get("Equipment")] if mid]
+
     super_admin_modules = list({
         *dashboard_module,
         *procurement_modules,
@@ -1636,9 +1654,8 @@ def seed_role_templates(session):
         *testing_request_approvals_module,
         *org_modules,
         *workflows_module,
+        *equipment_module,
     })
-
-    vendor_documents_module = [mid for mid in [modules_by_name.get("Vendor Documents")] if mid]
 
     templates_data = [
         # ── 1. Admin (Super Admin) — full access to all modules ──────────────
@@ -1659,62 +1676,69 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": _full(org_modules),
         },
-        # ── 3. Originator — procurement + testing requests ────────────────────
+        # ── 3. Originator — procurement + testing requests + equipment ────────
         {
             "name": "Originator",
-            "description": "Creates testing requests and raises procurement. Access to dashboard, all procurement modules, and testing requests.",
+            "description": "Creates testing requests and raises procurement. Access to dashboard, all procurement modules, testing requests, and equipment register.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readwrite(dashboard_module) +
                 _readwrite(procurement_modules) +
-                _readwrite(testing_requests_module)
+                _readwrite(testing_requests_module) +
+                _readwrite(equipment_module)
             ),
         },
-        # ── 4. Test Assigner (Approver) — testing request approvals only ──────
+        # ── 4. Test Assigner (Approver) — testing request approvals + equipment view
         {
             "name": "Test Assigner",
-            "description": "Approves testing requests and assigns testers. Access to Testing Request Approvals module only.",
+            "description": "Approves testing requests and assigns testers. Access to Testing Request Approvals module and view equipment register.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": _approve(testing_request_approvals_module),
+            "permissions_template": (
+                _approve(testing_request_approvals_module) +
+                _readonly(equipment_module)
+            ),
         },
         # ── 5. Field Tester ───────────────────────────────────────────────────
         {
             "name": "Field Tester",
-            "description": "Performs on-site transformer testing and uploads results. View testing requests; full access to testing module.",
+            "description": "Performs on-site transformer testing and uploads results. View testing requests; full access to testing module; view equipment register.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readonly(testing_requests_module) +
-                _readwrite(testing_module)
+                _readwrite(testing_module) +
+                _readonly(equipment_module)
             ),
         },
         # ── 6. Lab Tester ─────────────────────────────────────────────────────
         {
             "name": "Lab Tester",
-            "description": "Performs laboratory testing and uploads results. View testing requests; full access to testing module.",
+            "description": "Performs laboratory testing and uploads results. View testing requests; full access to testing module; view equipment register.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readonly(testing_requests_module) +
-                _readwrite(testing_module)
+                _readwrite(testing_module) +
+                _readonly(equipment_module)
             ),
         },
-        # ── 7. Department Head — recommendations & approvals ─────────────────
+        # ── 7. Department Head — recommendations & approvals + equipment view
         {
             "name": "Department Head",
-            "description": "Reviews and approves recommendations from testers. Access to Recommendations and Approvals modules.",
+            "description": "Reviews and approves recommendations from testers. Access to Recommendations, Approvals modules, and view equipment register.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
             "permissions_template": (
                 _approve(recommendations_module) +
-                _approve(approvals_module)
+                _approve(approvals_module) +
+                _readonly(equipment_module)
             ),
         },
         # ── 8. Purchaser — dashboard + procurement ────────────────────────────
