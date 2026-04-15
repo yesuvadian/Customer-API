@@ -39,6 +39,15 @@ def _enrich(req):
     req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
     req.test_type_name = req.test_type.name if req.test_type else None
     req.department_name = req.department.name if req.department else None
+
+    # Equipment asset register fields
+    if req.equipment:
+        req.equipment_ueic = req.equipment.ueic
+        req.equipment_name = req.equipment.ueic  # Alias for Flutter UI
+    else:
+        req.equipment_ueic = None
+        req.equipment_name = None
+
     if req.originator:
         req.originator_name = f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip() or req.originator.email
     else:
