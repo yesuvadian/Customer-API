@@ -77,6 +77,20 @@ class RecommendationType(PyEnum):
     retest = "retest"
 
 
+class EquipmentStatus(PyEnum):
+    active = "active"
+    retired = "retired"
+    scrapped = "scrapped"
+    under_repair = "under_repair"
+
+
+class RequestCategory(PyEnum):
+    test = "test"
+    maintenance = "maintenance"
+    inspection = "inspection"
+    repair_lifecycle = "repair_lifecycle"
+
+
 class Plan(Base):
     __tablename__ = "plans"
     __table_args__ = {"schema": "public"}
@@ -231,6 +245,63 @@ class OrgDepartment(Base):
     parent_department = relationship("OrgDepartment", remote_side=[id], foreign_keys=[parent_department_id])
     sub_departments = relationship("OrgDepartment", back_populates="parent_department", foreign_keys=[parent_department_id], remote_side=[parent_department_id])
     user_roles = relationship("OrgUserRole", back_populates="department", cascade="all, delete-orphan")
+    equipment = relationship("Equipment", back_populates="department", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Equipment Asset Register Model
+# ------------------------------
+class Equipment(Base):
+    __tablename__ = "equipment"
+    __table_args__ = (
+        UniqueConstraint("ueic", name="uq_equipment_ueic"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ueic = Column(String(50), unique=True, nullable=False)  # Auto-generated: BZ-PNYA-220-01-CB-01
+
+    # Location — linked to department hierarchy (substation level)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="CASCADE"), nullable=False)
+
+    # Classification
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=False)
+
+    # UEIC components
+    voltage_class = Column(String(10), nullable=True)   # "400", "220", "110", "66"
+    bay_number = Column(String(10), nullable=True)       # "01", "02"
+    serial_in_bay = Column(String(10), nullable=True)    # "01"
+
+    # Nameplate data — dynamic JSONB (template-driven, same pattern as OrgTestTemplate)
+    nameplate_data = Column(JSONB, nullable=True)
+
+    # Lifecycle
+    status = Column(Enum(EquipmentStatus), default=EquipmentStatus.active, nullable=False)
+    replaces_equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=True)
+    commissioned_date = Column(DateTime(timezone=True), nullable=True)
+    retired_date = Column(DateTime(timezone=True), nullable=True)
+    retirement_reason = Column(Text, nullable=True)
+
+    # Manufacturer / identity (quick-access fields from nameplate_data)
+    manufacturer = Column(String(255), nullable=True)
+    model_number = Column(String(255), nullable=True)
+    factory_serial_number = Column(String(100), nullable=True)
+    year_of_manufacture = Column(Integer, nullable=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    department = relationship("OrgDepartment", back_populates="equipment", foreign_keys=[department_id])
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    replaces_equipment = relationship("Equipment", remote_side=[id], foreign_keys=[replaces_equipment_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
 
 
 # ------------------------------
@@ -1438,6 +1509,12 @@ class TestingRequest(Base):
     equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=True)
     test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id"), nullable=True)
 
+    # Equipment Asset Register link (auto-fills equipment_type_id, nameplate fields, location)
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=True)
+
+    # Request category: test | maintenance | inspection | repair_lifecycle
+    request_category = Column(Enum(RequestCategory), default=RequestCategory.test, nullable=False)
+
     # Organization & Department (new multi-tenancy approach)
     organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id"), nullable=True)
@@ -1488,6 +1565,7 @@ class TestingRequest(Base):
     modifier = relationship("User", foreign_keys=[modified_by])
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
     test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
     organization = relationship("Organization", foreign_keys=[organization_id])
     department = relationship("OrgDepartment", foreign_keys=[department_id])
     test_results = relationship("TestResult", back_populates="testing_request", cascade="all, delete-orphan")
@@ -1605,6 +1683,10 @@ class TestResult(Base):
     overall_result = Column(String(20), nullable=True)
     template_key = Column(String(100), nullable=True)
     replacement_products = Column(JSONB, nullable=True)  # [{item_id, item_name, category, quantity}, ...]
+
+    # Auto-evaluation result (JSONB) — computed from template acceptance criteria
+    # {overall: "NORMAL"|"ALERT"|"CRITICAL", evaluated_at, fields: [{key, label, value, unit, status, thresholds}]}
+    evaluation_result = Column(JSONB, nullable=True)
 
     tested_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     tested_at = Column(DateTime(timezone=True), nullable=True)

@@ -86,6 +86,9 @@ from routers import (
 # Organization Multi-Tenancy
 from routers import organizations, org_departments, org_users, org_roles
 
+# Equipment Asset Register
+from routers import equipment
+
 # Workflow Engine
 from routers import workflows
 
@@ -300,6 +303,9 @@ app.include_router(tester_assignment.router)
 app.include_router(org_test_templates.router)
 app.include_router(org_test_templates.browser_router)
 app.include_router(test_request_schedules.router)
+
+# Equipment Asset Register
+app.include_router(equipment.router)
 
 # Organization Multi-Tenancy
 app.include_router(organizations.router)

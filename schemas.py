@@ -964,6 +964,12 @@ class TestingRequestCreate(BaseModel):
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
 
+    # Equipment Asset Register link (auto-fills equipment_type_id, nameplate fields, location)
+    equipment_id: Optional[UUID] = None
+
+    # Request category: test | maintenance | inspection | repair_lifecycle
+    request_category: Optional[str] = "test"
+
     # New department-based location
     organization_id: Optional[UUID] = None
     department_id: Optional[UUID] = None
@@ -998,6 +1004,12 @@ class TestingRequestUpdate(BaseModel):
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
     assigned_tester_id: Optional[UUID] = None
+
+    # Equipment Asset Register link
+    equipment_id: Optional[UUID] = None
+
+    # Request category
+    request_category: Optional[str] = None
 
     # New department-based location
     organization_id: Optional[UUID] = None
@@ -1039,6 +1051,13 @@ class TestingRequestResponse(BaseModel):
     equipment_type_name: Optional[str] = None
     equipment_name: Optional[str] = None  # Alias for Flutter UI
     test_type_name: Optional[str] = None
+
+    # Equipment Asset Register
+    equipment_id: Optional[UUID] = None
+    equipment_ueic: Optional[str] = None  # Computed from equipment relationship
+
+    # Request category
+    request_category: Optional[str] = "test"
 
     # New department-based location
     organization_id: Optional[UUID] = None
@@ -2162,3 +2181,84 @@ class ApprovalResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==========================================
+# Equipment Asset Register Schemas
+# ==========================================
+
+class EquipmentCreate(BaseModel):
+    organization_id: UUID
+    department_id: UUID
+    equipment_type_id: int
+    voltage_class: Optional[str] = None
+    bay_number: Optional[str] = None
+    nameplate_data: Optional[dict] = None
+    commissioned_date: Optional[datetime] = None
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    factory_serial_number: Optional[str] = None
+    year_of_manufacture: Optional[int] = None
+
+
+class EquipmentUpdate(BaseModel):
+    nameplate_data: Optional[dict] = None
+    voltage_class: Optional[str] = None
+    bay_number: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    factory_serial_number: Optional[str] = None
+    year_of_manufacture: Optional[int] = None
+    commissioned_date: Optional[datetime] = None
+
+
+class EquipmentResponse(BaseModel):
+    id: UUID
+    ueic: str
+    organization_id: UUID
+    department_id: UUID
+    equipment_type_id: int
+    equipment_type_name: Optional[str] = None
+    department_name: Optional[str] = None
+    voltage_class: Optional[str] = None
+    bay_number: Optional[str] = None
+    serial_in_bay: Optional[str] = None
+    nameplate_data: Optional[dict] = None
+    status: str
+    replaces_equipment_id: Optional[UUID] = None
+    commissioned_date: Optional[datetime] = None
+    retired_date: Optional[datetime] = None
+    retirement_reason: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    factory_serial_number: Optional[str] = None
+    year_of_manufacture: Optional[int] = None
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EquipmentRetireRequest(BaseModel):
+    reason: str
+
+
+class EquipmentReplaceRequest(BaseModel):
+    reason: str
+    nameplate_data: Optional[dict] = None
+    commissioned_date: Optional[datetime] = None
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    factory_serial_number: Optional[str] = None
+    year_of_manufacture: Optional[int] = None
+
+
+class EquipmentCountResponse(BaseModel):
+    active: int = 0
+    retired: int = 0
+    scrapped: int = 0
+    under_repair: int = 0
+    total: int = 0

@@ -1369,6 +1369,82 @@ def seed_sample_testing_request(session):
     print("[OK] Sample testing request seeded.")
 
 
+# ----------------- Migrate Equipment Asset Register -----------------
+
+def migrate_equipment_register(session):
+    """Create equipment table and add equipment_id, request_category, evaluation_result columns."""
+    from sqlalchemy import text
+    try:
+        # Create equipment table
+        session.execute(text("""
+            CREATE TABLE IF NOT EXISTS public.equipment (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                ueic VARCHAR(50) NOT NULL UNIQUE,
+                organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+                department_id UUID NOT NULL REFERENCES public.org_departments(id) ON DELETE CASCADE,
+                equipment_type_id INTEGER NOT NULL REFERENCES public."CategoryMaster"(id),
+                voltage_class VARCHAR(10),
+                bay_number VARCHAR(10),
+                serial_in_bay VARCHAR(10),
+                nameplate_data JSONB,
+                status VARCHAR(20) NOT NULL DEFAULT 'active',
+                replaces_equipment_id UUID REFERENCES public.equipment(id),
+                commissioned_date TIMESTAMPTZ,
+                retired_date TIMESTAMPTZ,
+                retirement_reason TEXT,
+                manufacturer VARCHAR(255),
+                model_number VARCHAR(255),
+                factory_serial_number VARCHAR(100),
+                year_of_manufacture INTEGER,
+                created_by UUID REFERENCES public.users(id),
+                modified_by UUID REFERENCES public.users(id),
+                cts TIMESTAMPTZ DEFAULT now(),
+                mts TIMESTAMPTZ DEFAULT now()
+            );
+        """))
+
+        # Create indexes on equipment table
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_org ON public.equipment(organization_id);
+        """))
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_dept ON public.equipment(department_id);
+        """))
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_type ON public.equipment(equipment_type_id);
+        """))
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_status ON public.equipment(status);
+        """))
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_ueic ON public.equipment(ueic);
+        """))
+
+        # Add equipment_id to testing_requests
+        session.execute(text("""
+            ALTER TABLE public.testing_requests
+            ADD COLUMN IF NOT EXISTS equipment_id UUID REFERENCES public.equipment(id);
+        """))
+
+        # Add request_category to testing_requests
+        session.execute(text("""
+            ALTER TABLE public.testing_requests
+            ADD COLUMN IF NOT EXISTS request_category VARCHAR(20) DEFAULT 'test';
+        """))
+
+        # Add evaluation_result to test_results
+        session.execute(text("""
+            ALTER TABLE public.test_results
+            ADD COLUMN IF NOT EXISTS evaluation_result JSONB;
+        """))
+
+        session.commit()
+        print("[OK] Equipment register table + columns migrated successfully.")
+    except Exception as e:
+        session.rollback()
+        print(f"[WARN] Equipment migration skipped or failed: {e}")
+
+
 # ----------------- Migrate Schema -----------------
 
 def migrate_testing_request_columns(session):
@@ -2851,6 +2927,7 @@ def run_seed():
 
         # Core System
         migrate_testing_request_columns(session)
+        migrate_equipment_register(session)
         role_ids = seed_roles(session)
         new_user_ids = seed_users(session)  # 👈 capture new users
         module_ids = seed_modules(session)
