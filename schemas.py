@@ -1,7 +1,7 @@
 import uuid
 from enum import Enum as PyEnum
 from pydantic import BaseModel, EmailStr, Field, constr
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel
@@ -968,7 +968,7 @@ class TestingRequestCreate(BaseModel):
     equipment_id: Optional[UUID] = None
 
     # Request category: test | maintenance | inspection | repair_lifecycle
-    request_category: Optional[str] = "test"
+    request_category: Optional[Literal["test", "maintenance", "inspection", "repair_lifecycle"]] = "test"
 
     # New department-based location
     organization_id: Optional[UUID] = None
@@ -1009,7 +1009,7 @@ class TestingRequestUpdate(BaseModel):
     equipment_id: Optional[UUID] = None
 
     # Request category
-    request_category: Optional[str] = None
+    request_category: Optional[Literal["test", "maintenance", "inspection", "repair_lifecycle"]] = None
 
     # New department-based location
     organization_id: Optional[UUID] = None

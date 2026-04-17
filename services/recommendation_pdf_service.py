@@ -35,6 +35,7 @@ class RecommendationPDFService:
             joinedload(TestingRequest.originator),
             joinedload(TestingRequest.assigned_tester),
             joinedload(TestingRequest.organization),
+            joinedload(TestingRequest.equipment),
         ).filter(TestingRequest.id == recommendation.testing_request_id).first()
 
         # Get approver
@@ -101,6 +102,9 @@ class RecommendationPDFService:
         ]
         if testing_request.description:
             request_data.append(['Description:', testing_request.description])
+
+        if testing_request.equipment and testing_request.equipment.ueic:
+            request_data.append(['UEIC:', testing_request.equipment.ueic])
 
         request_data.extend([
             ['Equipment Type:', testing_request.equipment_type.name if testing_request.equipment_type else '-'],

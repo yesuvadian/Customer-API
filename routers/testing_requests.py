@@ -258,8 +258,23 @@ def create_testing_request(
     current_user: User = Depends(get_current_user),
 ):
     service = TestingRequestService(db)
-    req = service.create_request(data.dict(), originator_id=current_user.id)
+    payload = data.dict()
+    # Auto-set organization_id from current user if not provided
+    if not payload.get("organization_id") and current_user.organization_id:
+        payload["organization_id"] = str(current_user.organization_id)
+    req = service.create_request(payload, originator_id=current_user.id)
     return _enrich(req)
+
+
+@router.get("/request-categories")
+def list_request_categories():
+    """Return all valid request categories with labels for Flutter dropdowns."""
+    return [
+        {"value": "test",             "label": "Testing",          "icon": "science",        "description": "Routine or scheduled equipment testing"},
+        {"value": "maintenance",      "label": "Maintenance",      "icon": "build",          "description": "Preventive or corrective maintenance"},
+        {"value": "inspection",       "label": "Inspection",       "icon": "search",         "description": "Visual or functional inspection"},
+        {"value": "repair_lifecycle", "label": "Repair / Lifecycle","icon": "engineering",   "description": "Repair work or lifecycle assessment"},
+    ]
 
 
 @router.get("/", response_model=List[TestingRequestResponse])
@@ -267,15 +282,12 @@ def list_testing_requests(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     status: Optional[str] = None,
+    category: Optional[str] = None,
     originator_id: Optional[UUID] = None,
     tester_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    print(f"[DEBUG] list_testing_requests called by user {current_user.email}")
-    print(f"[DEBUG] Query params: originator_id={originator_id}, tester_id={tester_id}, status={status}")
-    print(f"[DEBUG] User organization_id: {current_user.organization_id}")
-
     # Filter by organization if user belongs to one
     organization_id = current_user.organization_id
 
@@ -284,11 +296,11 @@ def list_testing_requests(
         skip=skip,
         limit=limit,
         status_filter=status,
+        category_filter=category,
         originator_id=originator_id,
         tester_id=tester_id,
         organization_id=organization_id,
     )
-    print(f"[DEBUG] Returning {len(requests)} testing requests (filters: org={organization_id}, originator={originator_id}, tester={tester_id})")
     return [_enrich(r) for r in requests]
 
 

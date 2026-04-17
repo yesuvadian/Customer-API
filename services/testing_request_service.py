@@ -75,6 +75,7 @@ class TestingRequestService:
         skip: int = 0,
         limit: int = 100,
         status_filter: Optional[str] = None,
+        category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
         organization_id: Optional[UUID] = None,
@@ -82,6 +83,8 @@ class TestingRequestService:
         query = self.db.query(TestingRequest)
         if status_filter:
             query = query.filter(TestingRequest.status == status_filter)
+        if category_filter:
+            query = query.filter(TestingRequest.request_category == category_filter)
         if originator_id:
             query = query.filter(TestingRequest.originator_id == originator_id)
         if tester_id:
@@ -198,6 +201,14 @@ class TestingRequestService:
         approved = query.filter(TestingRequest.status == TestingRequestStatus.approved).count()
         rejected = query.filter(TestingRequest.status == TestingRequestStatus.rejected).count()
         completed = query.filter(TestingRequest.status == TestingRequestStatus.completed).count()
+        # Category breakdown
+        from models import RequestCategory
+        by_category = {}
+        for cat in RequestCategory:
+            by_category[cat.value] = query.filter(
+                TestingRequest.request_category == cat.value
+            ).count()
+
         return {
             "total": total,
             "draft": draft,
@@ -207,6 +218,7 @@ class TestingRequestService:
             "approved": approved,
             "rejected": rejected,
             "completed": completed,
+            "by_category": by_category,
         }
 
     # NOTE: Tester workflow transitions (accept, start, submit_results)

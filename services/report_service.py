@@ -21,6 +21,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
+from sqlalchemy.orm import joinedload
 from models import Recommendation, TestingRequest, TestResult, User
 
 
@@ -48,7 +49,12 @@ class ReportService:
                 detail="Recommendation not found",
             )
 
-        request = self.db.query(TestingRequest).filter(
+        request = self.db.query(TestingRequest).options(
+            joinedload(TestingRequest.equipment_type),
+            joinedload(TestingRequest.test_type),
+            joinedload(TestingRequest.department),
+            joinedload(TestingRequest.equipment),
+        ).filter(
             TestingRequest.id == rec.testing_request_id
         ).first()
 
@@ -194,20 +200,38 @@ class ReportService:
         if request.test_type:
             test_type_name = request.test_type.name
 
+        # UEIC from linked equipment
+        ueic = "-"
+        if request.equipment and request.equipment.ueic:
+            ueic = request.equipment.ueic
+
+        # Department
+        dept_name = "-"
+        if request.department:
+            dept_name = request.department.name
+
         data = [
             ["Request Number", request.request_number or "-",
              "Date of Testing", date_of_testing],
             ["Title", request.title or "-",
              "Priority", (request.priority or "normal").upper()],
+        ]
+
+        if ueic != "-":
+            data.append(["UEIC", ueic, "Department", dept_name])
+
+        data.extend([
             ["Equipment Type", equip_name,
              "Test Type", test_type_name],
-            ["Transformer Rating", request.transformer_rating or "-",
-             "Manufacturer", request.manufacturer or "-"],
-            ["Serial Number", request.serial_number or "-",
-             "Status", (request.status.value if request.status else "-").replace("_", " ").upper()],
+            ["Transformer Type", request.transformer_type or "-",
+             "Transformer Rating", request.transformer_rating or "-"],
+            ["Manufacturer", request.manufacturer or "-",
+             "Serial Number", request.serial_number or "-"],
+            ["Status", (request.status.value if request.status else "-").replace("_", " ").upper(),
+             "", ""],
             ["Originator", self._user_name(request.originator_id),
              "Tester", self._user_name(request.assigned_tester_id)],
-        ]
+        ])
 
         # Location info
         loc_parts = []

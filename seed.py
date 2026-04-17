@@ -11,7 +11,7 @@ from models import (
     # Organization models
     Organization, OrgDepartment, OrgRole, OrgUserRole,
     OrgRolePermission, RoleTemplate, OrgInvitation, TesterRoleModuleRequirement,
-    ZohoImportMapping
+    ZohoImportMapping, Equipment, EquipmentStatus
 )
 from security_utils import get_password_hash  # password hashing utils
 
@@ -3003,6 +3003,9 @@ def run_seed():
                 print("[INFO] You can retry with:")
                 print(f"       python seed.py --kptcl {kptcl_org.id}")
 
+        # Sample Equipment (after departments + equipment types exist)
+        seed_sample_equipment(session, kptcl_org)
+
         # Zoho Import Mapping (after KPTCL org + departments exist)
         seed_zoho_import_mapping(session, kptcl_org)
 
@@ -3016,6 +3019,118 @@ def run_seed():
             print("  3. KPTCL Org Admin: orgadmin@kptcl.com / admin123")
         print(f"  {4 if kptcl_org else 3}. View API docs: http://localhost:8000/docs")
         print("\n" + "=" * 80 + "\n")
+
+
+def seed_sample_equipment(session, org):
+    """
+    Seed sample equipment for an organization so testing requests can link to registered assets.
+    Creates equipment across several substations with different types and voltage classes.
+    """
+    if not org:
+        print("[SKIP] No org — skipping equipment seeding")
+        return
+
+    from services.equipment_service import EquipmentService
+
+    # Get an admin user for created_by
+    admin_user = session.query(User).filter(
+        User.organization_id == org.id,
+        User.email.ilike("%orgadmin%")
+    ).first()
+    if not admin_user:
+        admin_user = session.query(User).filter(
+            User.organization_id == org.id
+        ).first()
+    created_by = admin_user.id if admin_user else None
+
+    # Get leaf departments (substations — those with no children)
+    from sqlalchemy import exists, select
+    from sqlalchemy.orm import aliased
+    ChildDept = aliased(OrgDepartment)
+    substations = (
+        session.query(OrgDepartment)
+        .filter(
+            OrgDepartment.organization_id == org.id,
+            ~exists(
+                select(ChildDept.id)
+                .where(ChildDept.parent_department_id == OrgDepartment.id)
+            ),
+        )
+        .order_by(OrgDepartment.name)
+        .limit(10)
+        .all()
+    )
+    if not substations:
+        # Fallback: any departments
+        substations = (
+            session.query(OrgDepartment)
+            .filter(OrgDepartment.organization_id == org.id)
+            .limit(5)
+            .all()
+        )
+
+    if not substations:
+        print("[WARN] No departments found — skipping equipment seeding")
+        return
+
+    # Get equipment types
+    equip_types = (
+        session.query(CategoryMaster)
+        .filter(CategoryMaster.description == "Testing Equipment", CategoryMaster.is_active == True)
+        .all()
+    )
+    if not equip_types:
+        print("[WARN] No equipment types found — skipping equipment seeding")
+        return
+
+    # Map equipment type names to their IDs
+    type_map = {et.name: et.id for et in equip_types}
+
+    # Define sample equipment configurations
+    equipment_configs = [
+        # (equipment_type_name, voltage_class, bay_number, manufacturer, model, serial, year)
+        ("Power Transformer", "220", "01", "BHEL", "PT-220-A", "PT2024001", 2020),
+        ("Power Transformer", "110", "02", "ABB", "PT-110-B", "PT2024002", 2019),
+        ("Current Transformer", "220", "01", "Siemens", "CT-220-X", "CT2024001", 2021),
+        ("Current Transformer", "110", "01", "CGL", "CT-110-Y", "CT2024002", 2022),
+        ("CVT", "220", "01", "BHEL", "CVT-220-A", "CVT2024001", 2020),
+        ("Power Transformer", "66", "01", "Crompton Greaves", "PT-66-C", "PT2024003", 2018),
+        ("Relay", "220", "01", "L&T", "REL-220-A", "REL2024001", 2023),
+        ("Meter", "110", "01", "Secure Meters", "MTR-110-A", "MTR2024001", 2021),
+    ]
+
+    created = 0
+    for i, substation in enumerate(substations):
+        # Each substation gets 2-3 pieces of equipment
+        configs_for_station = equipment_configs[i % len(equipment_configs): i % len(equipment_configs) + 3]
+        if not configs_for_station:
+            configs_for_station = equipment_configs[:2]
+
+        for type_name, voltage, bay, mfr, model, serial, year in configs_for_station:
+            if type_name not in type_map:
+                continue
+
+            try:
+                equipment = EquipmentService.create_equipment(
+                    db=session,
+                    organization_id=org.id,
+                    department_id=substation.id,
+                    equipment_type_id=type_map[type_name],
+                    voltage_class=voltage,
+                    bay_number=bay,
+                    manufacturer=mfr,
+                    model_number=model,
+                    factory_serial_number=serial,
+                    year_of_manufacture=year,
+                    created_by=created_by,
+                )
+                created += 1
+            except Exception as e:
+                # Skip duplicates or other errors
+                session.rollback()
+                continue
+
+    print(f"[OK] Seeded {created} sample equipment items for {org.name}")
 
 
 def seed_zoho_import_mapping(session, kptcl_org):

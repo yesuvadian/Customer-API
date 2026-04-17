@@ -28,7 +28,13 @@ router = APIRouter(
 def _enrich(req):
     """Attach computed display names to ORM object for tester workflow."""
     req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
-    req.equipment_name = req.equipment_type.name if req.equipment_type else None  # Alias for Flutter
+    # Prefer UEIC from linked equipment, fall back to equipment_type name
+    if req.equipment:
+        req.equipment_ueic = req.equipment.ueic
+        req.equipment_name = req.equipment.ueic
+    else:
+        req.equipment_ueic = None
+        req.equipment_name = req.equipment_type.name if req.equipment_type else None
     req.test_type_name = req.test_type.name if req.test_type else None
     req.department_name = req.department.name if req.department else None
     if req.originator:

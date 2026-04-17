@@ -133,6 +133,9 @@ class ApprovalService:
                 "transformer_rating": request.transformer_rating,
                 "manufacturer": request.manufacturer,
                 "serial_number": request.serial_number,
+                "equipment_id": str(request.equipment_id) if request.equipment_id else None,
+                "equipment_ueic": request.equipment.ueic if request.equipment else None,
+                "department_name": request.department.name if request.department else None,
                 "originator_name": _user_name(request.originator_id),
                 "assigned_tester_name": _user_name(request.assigned_tester_id),
             }

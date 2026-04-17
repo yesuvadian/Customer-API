@@ -28,9 +28,17 @@ router = APIRouter(prefix="/testing-requests/approvals", tags=["Testing Request 
 def _enrich(req):
     """Attach computed display names to ORM object for approval workflow."""
     req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
-    req.equipment_name = req.equipment_type.name if req.equipment_type else None  # Alias for Flutter
     req.test_type_name = req.test_type.name if req.test_type else None
     req.department_name = req.department.name if req.department else None
+
+    # Equipment asset register — prefer UEIC, fall back to equipment type name
+    if req.equipment:
+        req.equipment_ueic = req.equipment.ueic
+        req.equipment_name = req.equipment.ueic
+    else:
+        req.equipment_ueic = None
+        req.equipment_name = req.equipment_type.name if req.equipment_type else None
+
     if req.originator:
         req.originator_name = f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip() or req.originator.email
         req.requester_email = req.originator.email  # For Flutter UI
@@ -48,6 +56,7 @@ def _enrich(req):
 def get_pending_approvals(
     organization_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
+    category: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -76,6 +85,10 @@ def get_pending_approvals(
     if department_id:
         # TODO: Add department hierarchy filtering
         query = query.filter(TestingRequest.department_id == department_id)
+
+    # Filter by request category
+    if category:
+        query = query.filter(TestingRequest.request_category == category)
 
     requests = query.order_by(TestingRequest.cts.desc()).all()
     print(f"[DEBUG] Found {len(requests)} pending approvals")
