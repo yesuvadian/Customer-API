@@ -18,16 +18,22 @@ class CategoryMasterService:
         skip: int = 0,
         limit: int = 100,
         search: str | None = None,
-        is_active: bool | None = None
+        is_active: bool | None = None,
+        description: str | None = None,
     ):
         """
         Fetch master categories
         - is_active = None → ALL categories
         - is_active = True → only active
         - is_active = False → only inactive
+        - description → filter by CategoryMaster.description (e.g. "Testing Equipment")
         """
 
         query = db.query(CategoryMaster)
+
+        # Filter by description (e.g. "Testing Equipment")
+        if description is not None:
+            query = query.filter(CategoryMaster.description == description)
 
         # 🔍 Search filter
         if search:

@@ -41,6 +41,20 @@ class BankStatusEnum(PyEnum):
     approved = "approved"
     rejected = "rejected"
 
+class ScheduleFrequency(PyEnum):
+    daily = "daily"
+    weekly = "weekly"
+    biweekly = "biweekly"
+    monthly = "monthly"
+    quarterly = "quarterly"
+    yearly = "yearly"
+
+
+class ScheduleLogStatus(PyEnum):
+    success = "success"
+    failed = "failed"
+
+
 class TestingRequestStatus(PyEnum):
     draft = "draft"
     submitted = "submitted"
@@ -1474,6 +1488,57 @@ class TestingRequest(Base):
 
 
 # ------------------------------
+# TestRequestSchedule Model
+# ------------------------------
+class TestRequestSchedule(Base):
+    __tablename__ = "test_request_schedules"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    test_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False, unique=True)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+
+    frequency = Column(Enum(ScheduleFrequency), nullable=False)
+    start_date = Column(DateTime(timezone=True), nullable=False)  # = first request's due_date
+    end_date = Column(DateTime(timezone=True), nullable=True)
+    next_run_date = Column(DateTime(timezone=True), nullable=False)  # first request due_date + frequency
+    last_run_date = Column(DateTime(timezone=True), nullable=True)
+    advance_days = Column(Integer, default=1, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    test_request = relationship("TestingRequest", foreign_keys=[test_request_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    logs = relationship("TestRequestScheduleLog", back_populates="schedule", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# TestRequestScheduleLog Model
+# ------------------------------
+class TestRequestScheduleLog(Base):
+    __tablename__ = "test_request_schedule_logs"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    schedule_id = Column(UUID(as_uuid=True), ForeignKey("public.test_request_schedules.id", ondelete="CASCADE"), nullable=False)
+    generated_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="SET NULL"), nullable=True)
+    run_date = Column(DateTime(timezone=True), nullable=False)
+    status = Column(Enum(ScheduleLogStatus), nullable=False)
+    error_message = Column(Text, nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    schedule = relationship("TestRequestSchedule", back_populates="logs")
+    generated_request = relationship("TestingRequest", foreign_keys=[generated_request_id])
+
+
+# ------------------------------
 # TesterLocation Mapping (links tester users to org hierarchy without altering users table)
 # ------------------------------
 class TesterLocation(Base):
@@ -1651,6 +1716,25 @@ class ProcurementRequest(Base):
     raiser = relationship("User", foreign_keys=[raised_by])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
+
+
+# ------------------------------
+# OrgTestTemplate Model
+# ------------------------------
+class OrgTestTemplate(Base):
+    __tablename__ = "org_test_templates"
+    __table_args__ = (
+        UniqueConstraint("org_id", "template_key", name="uq_org_template_key"),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=True)   # NULL = global default
+    template_key = Column(String(100), nullable=False)
+    test_type_id = Column(Integer, nullable=True)            # soft ref to CategoryDetails.id
+    template_data = Column(JSONB, nullable=False)            # full template JSON
+    is_system = Column(Boolean, default=True)
+    version = Column(Integer, default=1)
 
 
 # ============================================================
@@ -1999,6 +2083,8 @@ class ZohoImportMapping(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
     organization = relationship("Organization", foreign_keys=[organization_id])
     department = relationship("OrgDepartment", foreign_keys=[department_id])
     org_role = relationship("OrgRole", foreign_keys=[org_role_id])

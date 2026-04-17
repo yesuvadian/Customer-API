@@ -24,6 +24,10 @@ def create_user(user: schemas.UserRegistor, db: Session = Depends(get_db)):
     return user_service_instance.create_user(db, user)
 
 
+@router.get("/me", response_model=schemas.User)
+def read_current_user(current_user: schemas.User = Depends(get_current_user)):
+    return current_user
+
 @router.get("/{user_id}", response_model=schemas.User)
 def read_user(user_id: str, db: Session = Depends(get_db)):
     """Fetch a user by ID."""
@@ -37,10 +41,6 @@ def read_user(user_id: str, db: Session = Depends(get_db)):
 def list_users(skip: int = 0, limit: int | None = None, search: str | None = None, db: Session = Depends(get_db)):
     """List users with optional search."""
     return user_service_instance.get_users(db, skip=skip, limit=limit, search=search)
-
-@router.get("/me", response_model=schemas.User)
-def read_current_user(current_user: schemas.User = Depends(get_current_user)):
-    return current_user
 
 @router.put("/{user_id}", response_model=schemas.User)
 def update_user_endpoint(user_id: str, updates: dict, db: Session = Depends(get_db)):

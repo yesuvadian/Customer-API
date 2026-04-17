@@ -1,0 +1,369 @@
+"""
+OrgTestTemplate service — provision, fetch and update per-org test templates.
+
+Global defaults (org_id=NULL) are seeded from test_templates.py.
+Org-specific rows clone global defaults and can be customised via the designer.
+"""
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+
+from models import CategoryDetails, OrgTestTemplate
+
+
+class OrgTestTemplateService:
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    # ─── Read ────────────────────────────────────────────────
+
+    def get_by_id(self, template_id: UUID) -> OrgTestTemplate:
+        tmpl = self.db.query(OrgTestTemplate).filter(OrgTestTemplate.id == template_id).first()
+        if not tmpl:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+        return tmpl
+
+    def list_templates(self, org_id: Optional[UUID] = None) -> List[OrgTestTemplate]:
+        """List global defaults (org_id=None) or org-specific rows."""
+        q = self.db.query(OrgTestTemplate)
+        if org_id is None:
+            q = q.filter(OrgTestTemplate.org_id == None)  # noqa: E711
+        else:
+            q = q.filter(OrgTestTemplate.org_id == org_id)
+        return q.order_by(OrgTestTemplate.template_key).all()
+
+    OVERALL_KEY = "overall_assessment"
+
+    def get_overall_assessment(self, org_id: Optional[UUID] = None) -> OrgTestTemplate:
+        """Return the overall assessment template (org-specific → global fallback)."""
+        if org_id:
+            tmpl = (
+                self.db.query(OrgTestTemplate)
+                .filter(
+                    OrgTestTemplate.org_id == org_id,
+                    OrgTestTemplate.template_key == self.OVERALL_KEY,
+                )
+                .first()
+            )
+            if tmpl:
+                return tmpl
+        tmpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(
+                OrgTestTemplate.org_id == None,  # noqa: E711
+                OrgTestTemplate.template_key == self.OVERALL_KEY,
+            )
+            .first()
+        )
+        if tmpl:
+            return tmpl
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Overall assessment template not found — run /provision/global first",
+        )
+
+    def get_for_test_type(self, test_type_id: int, org_id: Optional[UUID] = None) -> OrgTestTemplate:
+        """
+        Return the best-match template:
+          1. org-specific row (if org_id given)
+          2. global default
+          3. 404 if nothing found
+        """
+        if org_id:
+            tmpl = (
+                self.db.query(OrgTestTemplate)
+                .filter(
+                    OrgTestTemplate.org_id == org_id,
+                    OrgTestTemplate.test_type_id == test_type_id,
+                )
+                .first()
+            )
+            if tmpl:
+                return tmpl
+
+        # fallback → global default
+        tmpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(
+                OrgTestTemplate.org_id == None,  # noqa: E711
+                OrgTestTemplate.test_type_id == test_type_id,
+            )
+            .first()
+        )
+        if tmpl:
+            return tmpl
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No template found for test_type_id={test_type_id}",
+        )
+
+    def get_by_template_key(self, template_key: str) -> OrgTestTemplate:
+        """Lookup an org template by its template_key (any org or global)."""
+        tmpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.template_key == template_key)
+            .first()
+        )
+        if tmpl:
+            return tmpl
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No template found for key={template_key}",
+        )
+
+    # ─── Write ───────────────────────────────────────────────
+
+    def create_template(
+        self,
+        template_key: str,
+        template_data: dict,
+        test_type_id: Optional[int],
+        org_id: Optional[UUID],
+        created_by: Optional[UUID],
+    ) -> OrgTestTemplate:
+        existing = (
+            self.db.query(OrgTestTemplate)
+            .filter(
+                OrgTestTemplate.org_id == org_id,
+                OrgTestTemplate.template_key == template_key,
+            )
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Template with this key already exists for this org",
+            )
+        tmpl = OrgTestTemplate(
+            org_id=org_id,
+            template_key=template_key,
+            test_type_id=test_type_id,
+            template_data=template_data,
+            is_system=False,
+            version=1,
+            created_by=created_by,
+        )
+        self.db.add(tmpl)
+        self.db.commit()
+        self.db.refresh(tmpl)
+        return tmpl
+
+    def update_template(
+        self,
+        template_id: UUID,
+        template_data: dict,
+        modified_by: Optional[UUID],
+    ) -> OrgTestTemplate:
+        tmpl = self.get_by_id(template_id)
+        tmpl.template_data = template_data
+        tmpl.version = (tmpl.version or 1) + 1
+        tmpl.modified_by = modified_by
+        self.db.commit()
+        self.db.refresh(tmpl)
+        return tmpl
+
+    def reset_to_global(
+        self,
+        template_id: UUID,
+        modified_by: Optional[UUID],
+    ) -> OrgTestTemplate:
+        """Reset an org template back to the global default's template_data."""
+        tmpl = self.get_by_id(template_id)
+        if tmpl.org_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot reset a global default template",
+            )
+        global_tmpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(
+                OrgTestTemplate.org_id == None,  # noqa: E711
+                OrgTestTemplate.template_key == tmpl.template_key,
+            )
+            .first()
+        )
+        if not global_tmpl:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No global default found for this template key",
+            )
+        tmpl.template_data = global_tmpl.template_data
+        tmpl.version = global_tmpl.version
+        tmpl.modified_by = modified_by
+        self.db.commit()
+        self.db.refresh(tmpl)
+        return tmpl
+
+    def delete_template(self, template_id: UUID) -> None:
+        tmpl = self.get_by_id(template_id)
+        if tmpl.is_system and tmpl.org_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete a system global template",
+            )
+        self.db.delete(tmpl)
+        self.db.commit()
+
+    # ─── Provisioning ────────────────────────────────────────
+
+    def provision_overall_assessment(self) -> bool:
+        """Seed the global 'overall_assessment' template if it doesn't exist. Returns True if inserted."""
+        exists = (
+            self.db.query(OrgTestTemplate)
+            .filter(
+                OrgTestTemplate.org_id == None,  # noqa: E711
+                OrgTestTemplate.template_key == self.OVERALL_KEY,
+            )
+            .first()
+        )
+        if exists:
+            return False
+
+        default_data = {
+            "name": "Overall Assessment",
+            "sections": [
+                {
+                    "title": "Overall Assessment",
+                    "fields": [
+                        {
+                            "key": "overall_result",
+                            "label": "Result",
+                            "type": "dropdown",
+                            "required": True,
+                            "read_only": False,
+                            "options": ["Pass", "Fail", "Conditional Pass", "Refer for Retesting"],
+                        },
+                        {
+                            "key": "overall_remarks",
+                            "label": "Remarks",
+                            "type": "textarea",
+                            "required": False,
+                            "read_only": False,
+                        },
+                        {
+                            "key": "overall_recommendation",
+                            "label": "Recommendation",
+                            "type": "textarea",
+                            "required": False,
+                            "read_only": False,
+                        },
+                        {
+                            "key": "tested_by",
+                            "label": "Tested By",
+                            "type": "text",
+                            "required": False,
+                            "read_only": False,
+                        },
+                        {
+                            "key": "date_of_testing",
+                            "label": "Date of Testing",
+                            "type": "date",
+                            "required": False,
+                            "read_only": False,
+                        },
+                    ],
+                }
+            ],
+        }
+
+        self.db.add(OrgTestTemplate(
+            template_key=self.OVERALL_KEY,
+            org_id=None,
+            test_type_id=None,
+            template_data=default_data,
+            is_system=True,
+            version=1,
+        ))
+        self.db.commit()
+        return True
+
+    def provision_global_defaults(self) -> int:
+        """
+        Seed global default templates from test_templates.py.
+        Safe to call multiple times — skips already-existing keys.
+        Returns the count of newly inserted rows.
+        """
+        from test_templates import TEST_TEMPLATES, TEST_TYPE_TO_TEMPLATE
+
+        # Build reverse map: template_key → test_type_name
+        key_to_type_name: dict[str, str] = {v: k for k, v in TEST_TYPE_TO_TEMPLATE.items()}
+
+        inserted = 0
+        for template_key, template_data in TEST_TEMPLATES.items():
+            existing = (
+                self.db.query(OrgTestTemplate)
+                .filter(
+                    OrgTestTemplate.org_id == None,  # noqa: E711
+                    OrgTestTemplate.template_key == template_key,
+                )
+                .first()
+            )
+            if existing:
+                continue
+
+            # Resolve test_type_id from CategoryDetails
+            type_name = key_to_type_name.get(template_key)
+            test_type_id = None
+            if type_name:
+                detail = (
+                    self.db.query(CategoryDetails)
+                    .filter(CategoryDetails.name == type_name)
+                    .first()
+                )
+                test_type_id = detail.id if detail else None
+
+            tmpl = OrgTestTemplate(
+                org_id=None,
+                template_key=template_key,
+                test_type_id=test_type_id,
+                template_data=template_data,
+                is_system=True,
+                version=1,
+            )
+            self.db.add(tmpl)
+            inserted += 1
+
+        self.db.commit()
+        return inserted
+
+    def provision_for_org(self, org_id: UUID, created_by: Optional[UUID] = None) -> int:
+        """
+        Clone all global defaults for a specific org (skip if already exists).
+        Call this when a new org / customer user is registered.
+        Returns the count of newly inserted rows.
+        """
+        globals_ = (
+            self.db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.org_id == None)  # noqa: E711
+            .all()
+        )
+        inserted = 0
+        for g in globals_:
+            exists = (
+                self.db.query(OrgTestTemplate)
+                .filter(
+                    OrgTestTemplate.org_id == org_id,
+                    OrgTestTemplate.template_key == g.template_key,
+                )
+                .first()
+            )
+            if exists:
+                continue
+            clone = OrgTestTemplate(
+                org_id=org_id,
+                template_key=g.template_key,
+                test_type_id=g.test_type_id,
+                template_data=g.template_data,
+                is_system=False,
+                version=g.version,
+                created_by=created_by,
+            )
+            self.db.add(clone)
+            inserted += 1
+
+        self.db.commit()
+        return inserted

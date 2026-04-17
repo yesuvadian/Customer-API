@@ -19,7 +19,7 @@ import random
 from models import (
     TestingRequest,
     User,
-    UserRole,
+    OrgUserRole,
     OrgRole,
     OrgDepartment,
     TestingRequestStatus
@@ -113,19 +113,18 @@ class TesterAutoAssignmentService:
             User.firstname,
             User.lastname,
             User.email,
-            UserRole.department_id,
+            OrgUserRole.department_id,
             OrgDepartment.name.label('department_name'),
             OrgDepartment.hierarchy_path
         ).join(
-            UserRole, User.id == UserRole.user_id
+            OrgUserRole, User.id == OrgUserRole.user_id
         ).join(
-            OrgDepartment, UserRole.department_id == OrgDepartment.id
+            OrgDepartment, OrgUserRole.department_id == OrgDepartment.id
         ).filter(
             and_(
-                UserRole.role_id == tester_role.id,
-                UserRole.is_active == True,
-                User.active == True,
-                UserRole.organization_id == testing_request.organization_id
+                OrgUserRole.org_role_id == tester_role.id,
+                OrgUserRole.is_active == True,
+                User.isactive == True
             )
         )
 
@@ -323,9 +322,9 @@ class TesterAutoAssignmentService:
             ).label('in_progress_count'),
             func.count(TestingRequest.id).label('total_active')
         ).join(
-            UserRole, User.id == UserRole.user_id
+            OrgUserRole, User.id == OrgUserRole.user_id
         ).join(
-            OrgDepartment, UserRole.department_id == OrgDepartment.id
+            OrgDepartment, OrgUserRole.department_id == OrgDepartment.id
         ).outerjoin(
             TestingRequest,
             and_(
@@ -338,14 +337,14 @@ class TesterAutoAssignmentService:
             )
         ).filter(
             and_(
-                UserRole.role_id == tester_role.id,
-                UserRole.is_active == True,
-                User.active == True
+                OrgUserRole.org_role_id == tester_role.id,
+                OrgUserRole.is_active == True,
+                User.isactive == True
             )
         )
 
         if department_id:
-            query = query.filter(UserRole.department_id == department_id)
+            query = query.filter(OrgUserRole.department_id == department_id)
 
         query = query.group_by(
             User.id,
