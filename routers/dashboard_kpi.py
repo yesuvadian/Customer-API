@@ -272,7 +272,7 @@ def get_aee_dashboard(
     # KPIs
     pending_approvals = db.query(func.count(TestingRequest.id)).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status == 'pending_approval'
+        TestingRequest.status.in_(['submitted', 'pending_approval'])
     ).scalar() or 0
 
     assigned_tests = db.query(func.count(TestingRequest.id)).filter(
@@ -305,7 +305,7 @@ def get_aee_dashboard(
         db.query(TestingRequest)
         .filter(
             TestingRequest.organization_id == svc.org_id,
-            TestingRequest.status.in_(['pending_approval', 'in_progress', 'assigned'])
+            TestingRequest.status.in_(['submitted', 'pending_approval', 'in_progress', 'assigned'])
         )
         .order_by(TestingRequest.due_date.asc().nullslast())
         .limit(10)
@@ -548,7 +548,7 @@ def get_see_dashboard(
     # Pending Approvals
     pending_approvals = db.query(func.count(TestingRequest.id)).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status.in_(['pending_approval', 'pending_see_approval'])
+        TestingRequest.status.in_(['submitted', 'pending_approval'])
     ).scalar() or 0
 
     # Critical Issues (equipment under repair)
@@ -560,7 +560,7 @@ def get_see_dashboard(
     # Pending reviews list
     pending_reviews = db.query(TestingRequest).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status == 'pending_approval'
+        TestingRequest.status.in_(['submitted', 'pending_approval'])
     ).order_by(TestingRequest.cts.desc()).limit(10).all()
 
     reviews_list = []
@@ -616,7 +616,7 @@ def get_cee_dashboard(
     # Major Decisions (pending high-value approvals)
     major_decisions = db.query(func.count(TestingRequest.id)).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status == 'pending_approval'
+        TestingRequest.status.in_(['submitted', 'pending_approval'])
     ).scalar() or 0
 
     # Budget Utilization (placeholder - no budget tracking yet)
@@ -625,7 +625,7 @@ def get_cee_dashboard(
     # Pending strategic decisions
     strategic_decisions = db.query(TestingRequest).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status == 'pending_approval'
+        TestingRequest.status.in_(['submitted', 'pending_approval'])
     ).order_by(TestingRequest.cts.desc()).limit(10).all()
 
     decisions_list = []
