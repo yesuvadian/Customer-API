@@ -584,6 +584,7 @@ class UserResponse(BaseModel):
     usertype: Optional[str] = None
     organization_id: Optional[str] = None
     department_id: Optional[str] = None  # User's assigned department
+    default_module_path: Optional[str] = None  # Default module path to navigate on login
 
     cts: datetime
     mts: datetime
@@ -1190,6 +1191,7 @@ class TestResultResponse(BaseModel):
     test_data: Optional[dict] = None
     overall_result: Optional[str] = None
     replacement_products: Optional[list] = None
+    evaluation_result: Optional[dict] = None  # {overall, evaluated_at, fields}
     tested_by: Optional[UUID] = None
     tested_at: Optional[datetime] = None
     image_count: int = 0
@@ -1235,6 +1237,7 @@ class TestResultStructuredResponse(BaseModel):
     overall_result: Optional[str] = None
     remarks: Optional[str] = None
     replacement_products: Optional[list] = None
+    evaluation_result: Optional[dict] = None  # {overall, evaluated_at, fields:[{key,label,value,unit,status,thresholds}]}
     tested_by: Optional[UUID] = None
     tested_at: Optional[datetime] = None
     images: List[TestResultImageResponse] = []

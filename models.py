@@ -325,6 +325,7 @@ class OrgRole(Base):
     is_dept_admin = Column(Boolean, default=False)
     is_tester_assignable = Column(Boolean, default=False)  # Can this role be assigned as tester in testing requests
     is_active = Column(Boolean, default=True)
+    default_module_id = Column(Integer, ForeignKey("public.modules.id"), nullable=True)  # Default module to navigate on login
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -335,6 +336,7 @@ class OrgRole(Base):
     organization = relationship("Organization", back_populates="roles")
     user_roles = relationship("OrgUserRole", back_populates="org_role", cascade="all, delete-orphan")
     permissions = relationship("OrgRolePermission", back_populates="org_role", cascade="all, delete-orphan")
+    default_module = relationship("Module", foreign_keys=[default_module_id])
 
 
 # ------------------------------
@@ -410,6 +412,7 @@ class RoleTemplate(Base):
     is_org_admin = Column(Boolean, default=False)
     is_dept_admin = Column(Boolean, default=False)
     auto_provision = Column(Boolean, default=False)
+    default_module_id = Column(Integer, ForeignKey("public.modules.id"), nullable=True)  # Default landing module
 
     permissions_template = Column(JSONB, default=[])
 
@@ -2314,3 +2317,183 @@ class ZohoImportMapping(Base):
     organization = relationship("Organization", foreign_keys=[organization_id])
     department = relationship("OrgDepartment", foreign_keys=[department_id])
     org_role = relationship("OrgRole", foreign_keys=[org_role_id])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Notification & Alert Engine
+# ══════════════════════════════════════════════════════════════════════════════
+
+class NotificationTemplate(Base):
+    """
+    Defines what to send (subject + body) and who to send it to (recipient_roles)
+    for each event_type / channel combination.
+    NULL organization_id = global default template.
+    """
+    __tablename__ = "notification_templates"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,  # NULL = global default
+    )
+
+    # e.g. "eval_critical", "eval_alert", "due_reminder", "overdue_alert",
+    #       "recommendation_approved", "test_submitted"
+    event_type = Column(String(100), nullable=False, index=True)
+    channel = Column(String(20), nullable=False)  # "email" | "sms" | "inapp"
+
+    subject_template = Column(String(500), nullable=True)   # Jinja2 / str.format
+    body_template = Column(Text, nullable=False)             # Jinja2 / str.format
+
+    # Role names whose members should receive this notification
+    # e.g. ["Originator", "Department Head", "Tester"]
+    recipient_roles = Column(JSONB, nullable=False, server_default="[]")
+
+    is_active = Column(Boolean, default=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class NotificationLog(Base):
+    """
+    Audit log of every notification attempt.  status lifecycle:
+      pending → sent | failed | digested | skipped
+    Retry counter incremented on each attempt up to max_retries (default 3).
+    """
+    __tablename__ = "notification_log"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), nullable=True)
+
+    event_type = Column(String(100), nullable=False, index=True)
+    channel = Column(String(20), nullable=False)            # "email" | "sms" | "inapp"
+
+    recipient_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    recipient_email = Column(String(255), nullable=True)
+    recipient_phone = Column(String(50), nullable=True)
+
+    subject = Column(String(500), nullable=True)
+    body = Column(Text, nullable=True)
+
+    status = Column(String(20), default="pending", index=True)  # pending/sent/failed/digested/skipped
+    error_message = Column(Text, nullable=True)
+
+    retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=3)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Source object that triggered this notification
+    source_id = Column(UUID(as_uuid=True), nullable=True)   # TestResult.id, TestingRequest.id, etc.
+    source_type = Column(String(100), nullable=True)        # "test_result", "testing_request", etc.
+
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    recipient = relationship("User", foreign_keys=[recipient_id])
+
+
+class UserNotification(Base):
+    """
+    In-app (bell icon) notifications.  One row per user per event.
+    Soft-deleted via is_read flag; hard-delete never needed.
+    """
+    __tablename__ = "user_notifications"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    organization_id = Column(UUID(as_uuid=True), nullable=True)
+
+    event_type = Column(String(100), nullable=False)
+    title = Column(String(500), nullable=False)
+    body = Column(Text, nullable=False)
+    severity = Column(String(20), nullable=True)  # "critical" | "alert" | "info"
+
+    # Source navigation payload (flutter can deep-link)
+    source_id = Column(UUID(as_uuid=True), nullable=True)
+    source_type = Column(String(100), nullable=True)
+
+    is_read = Column(Boolean, default=False, index=True)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
+# ── Reporting Suite ────────────────────────────────────────────────────────
+
+class ReportDefinition(Base):
+    """
+    One row = one report.  The 14 SRS reports are seeded as system rows.
+    Custom ad-hoc reports saved by users are additional rows.
+    """
+    __tablename__ = "report_definitions"
+    __table_args__ = {"schema": "public"}
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True),
+                             ForeignKey("public.organizations.id", ondelete="CASCADE"),
+                             nullable=True, index=True)
+    name            = Column(String(255), nullable=False)
+    description     = Column(Text, nullable=True)
+    query_key       = Column(String(100), nullable=False)
+    # JSON schema of available filter parameters
+    parameters      = Column(JSONB, nullable=False, server_default="{}")
+    output_format   = Column(String(20), nullable=False, default="excel")   # excel | pdf | both
+    frequency       = Column(String(20), nullable=False, default="on_demand")  # daily | weekly | monthly | on_demand
+    recipient_roles = Column(JSONB, nullable=False, server_default="[]")
+    is_active       = Column(Boolean, default=True)
+    is_system       = Column(Boolean, default=False)   # True for the 14 built-in SRS reports
+    last_generated_at = Column(DateTime(timezone=True), nullable=True)
+    created_by      = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by     = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts             = Column(DateTime(timezone=True), server_default=func.now())
+    mts             = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    logs = relationship("ReportLog", back_populates="definition",
+                        cascade="all, delete-orphan")
+
+
+class ReportLog(Base):
+    """Tracks every execution of a ReportDefinition (scheduled or ad-hoc)."""
+    __tablename__ = "report_logs"
+    __table_args__ = {"schema": "public"}
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    definition_id   = Column(UUID(as_uuid=True),
+                             ForeignKey("public.report_definitions.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    organization_id = Column(UUID(as_uuid=True), nullable=True)
+    generated_by    = Column(UUID(as_uuid=True),
+                             ForeignKey("public.users.id", ondelete="SET NULL"),
+                             nullable=True)
+    parameters_used = Column(JSONB, nullable=False, server_default="{}")
+    output_format   = Column(String(20), nullable=False, default="excel")
+    file_path       = Column(String(500), nullable=True)
+    file_name       = Column(String(255), nullable=True)
+    file_size       = Column(Integer, nullable=True)
+    row_count       = Column(Integer, nullable=True)
+    status          = Column(String(20), default="pending", index=True)
+                           # pending | generating | completed | failed
+    error_message   = Column(Text, nullable=True)
+    started_at      = Column(DateTime(timezone=True), nullable=True)
+    completed_at    = Column(DateTime(timezone=True), nullable=True)
+    cts             = Column(DateTime(timezone=True), server_default=func.now())
+
+    definition          = relationship("ReportDefinition", back_populates="logs")
+    generated_by_user   = relationship("User", foreign_keys=[generated_by])
