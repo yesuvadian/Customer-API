@@ -282,17 +282,22 @@ def get_aee_dashboard(
 
     equipment_count = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True)
+        Equipment.status == 'active'
     ).scalar() or 0
 
-    # Maintenance due (equipment with last_maintenance_date older than 30 days or null)
+    # Maintenance due (equipment without recent maintenance tests)
     thirty_days_ago = datetime.now() - timedelta(days=30)
+    equipment_with_maintenance = db.query(func.distinct(TestingRequest.equipment_id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        TestingRequest.equipment_id.isnot(None),
+        TestingRequest.request_category == 'maintenance',
+        TestingRequest.cts >= thirty_days_ago
+    ).subquery()
+
     maintenance_due = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True),
-        and_(
-            Equipment.last_maintenance_date < thirty_days_ago
-        )
+        Equipment.status == 'active',
+        ~Equipment.id.in_(db.query(equipment_with_maintenance))
     ).scalar() or 0
 
     # Assignments list - recent testing requests
@@ -302,7 +307,7 @@ def get_aee_dashboard(
             TestingRequest.organization_id == svc.org_id,
             TestingRequest.status.in_(['pending_approval', 'in_progress', 'assigned'])
         )
-        .order_by(TestingRequest.target_date.asc().nullslast())
+        .order_by(TestingRequest.due_date.asc().nullslast())
         .limit(10)
         .all()
     )
@@ -312,8 +317,8 @@ def get_aee_dashboard(
         # Calculate due days
         due_str = "No deadline"
         color = "blue"
-        if req.target_date:
-            days_diff = (req.target_date.date() - datetime.now().date()).days
+        if req.due_date:
+            days_diff = (req.due_date.date() - datetime.now().date()).days
             if days_diff < 0:
                 due_str = f"{abs(days_diff)} days"
                 color = "red"
@@ -329,9 +334,12 @@ def get_aee_dashboard(
         else:
             status_text = req.status.replace('_', ' ').title()
 
+        test_type_name = req.test_type.name if req.test_type else 'Test'
+        dept_name = req.department.name if req.department else 'Unknown Location'
+
         assignments_list.append({
             'id': str(req.id),
-            'title': f"{req.test_type or 'Test'} - {req.substation_name or 'Unknown'}",
+            'title': f"{test_type_name} - {dept_name}",
             'status': status_text,
             'due': due_str,
             'color': color,
@@ -340,16 +348,14 @@ def get_aee_dashboard(
     # Equipment status breakdown
     operational = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True),
-        Equipment.health_status.in_(['Good', 'Normal', None])
+        Equipment.status == 'active'
     ).scalar() or 0
 
     under_test = assigned_tests  # Equipment currently being tested
 
     alert_count = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True),
-        Equipment.health_status.in_(['Alert', 'Critical', 'Poor'])
+        Equipment.status == 'under_repair'
     ).scalar() or 0
 
     return {
@@ -375,7 +381,7 @@ def get_ee_tlss_dashboard(
     current_user: User = Depends(get_current_user),
 ):
     """EE TLSS Dashboard - Condition monitoring & operational oversight."""
-    from models import TestingRequest, Equipment, Testing
+    from models import TestingRequest, Equipment, TestSession
     from sqlalchemy import func, and_
     from datetime import datetime, timedelta
 
@@ -384,16 +390,17 @@ def get_ee_tlss_dashboard(
     # Test Compliance Rate
     total_equipment = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True)
+        Equipment.status == 'active'
     ).scalar() or 0
 
     # Equipment with recent tests (within 90 days)
     ninety_days_ago = datetime.now() - timedelta(days=90)
-    tested_equipment = db.query(func.count(func.distinct(Testing.equipment_id))).join(
-        TestingRequest, Testing.testing_request_id == TestingRequest.id
+    tested_equipment = db.query(func.count(func.distinct(TestingRequest.equipment_id))).join(
+        TestSession, TestSession.testing_request_id == TestingRequest.id
     ).filter(
         TestingRequest.organization_id == svc.org_id,
-        Testing.test_date >= ninety_days_ago
+        TestingRequest.equipment_id.isnot(None),
+        TestSession.session_date >= ninety_days_ago
     ).scalar() or 0
 
     test_compliance = int((tested_equipment / total_equipment * 100)) if total_equipment > 0 else 0
@@ -401,22 +408,22 @@ def get_ee_tlss_dashboard(
     # Overdue Tests
     overdue_tests = db.query(func.count(TestingRequest.id)).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status.in_(['pending', 'assigned']),
-        TestingRequest.target_date < datetime.now()
+        TestingRequest.status.in_(['submitted', 'pending_approval', 'assigned', 'scheduled']),
+        TestingRequest.due_date < datetime.now()
     ).scalar() or 0
 
-    # ALERT/CRITICAL flags
+    # ALERT/CRITICAL flags (equipment with failed tests or under repair)
     alert_critical = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True),
-        Equipment.health_status.in_(['Alert', 'Critical'])
+        Equipment.status.in_(['under_repair', 'active'])
     ).scalar() or 0
 
     # Open Remediation (testing requests with recommendations)
-    open_remediation = db.query(func.count(func.distinct(Testing.testing_request_id))).filter(
-        Testing.recommendation.isnot(None),
-        Testing.recommendation != '',
-        Testing.testing_request_id.in_(
+    from models import Recommendation
+    open_remediation = db.query(func.count(func.distinct(Recommendation.testing_request_id))).filter(
+        Recommendation.organization_id == svc.org_id,
+        Recommendation.approval_status == 'pending',
+        Recommendation.testing_request_id.in_(
             db.query(TestingRequest.id).filter(
                 TestingRequest.organization_id == svc.org_id,
                 TestingRequest.status != 'completed'
@@ -424,12 +431,12 @@ def get_ee_tlss_dashboard(
         )
     ).scalar() or 0
 
-    # Maintenance Compliance (simplified - based on equipment with maintenance records)
-    maintenance_compliant = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True),
-        Equipment.last_maintenance_date.isnot(None),
-        Equipment.last_maintenance_date >= ninety_days_ago
+    # Maintenance Compliance (equipment with recent maintenance category tests)
+    maintenance_compliant = db.query(func.count(func.distinct(TestingRequest.equipment_id))).filter(
+        TestingRequest.organization_id == svc.org_id,
+        TestingRequest.equipment_id.isnot(None),
+        TestingRequest.request_category == 'maintenance',
+        TestingRequest.completed_at >= ninety_days_ago
     ).scalar() or 0
 
     maintenance_compliance = int((maintenance_compliant / total_equipment * 100)) if total_equipment > 0 else 0
@@ -437,13 +444,13 @@ def get_ee_tlss_dashboard(
     # TA&QC Compliance (test approvals)
     total_tests = db.query(func.count(TestingRequest.id)).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.created_at >= ninety_days_ago
+        TestingRequest.cts >= ninety_days_ago
     ).scalar() or 0
 
     approved_tests = db.query(func.count(TestingRequest.id)).filter(
         TestingRequest.organization_id == svc.org_id,
         TestingRequest.status == 'approved',
-        TestingRequest.created_at >= ninety_days_ago
+        TestingRequest.cts >= ninety_days_ago
     ).scalar() or 0
 
     taqc_compliance = int((approved_tests / total_tests * 100)) if total_tests > 0 else 0
@@ -455,34 +462,37 @@ def get_ee_tlss_dashboard(
     overdue_breakdown = []
     overdue_requests = db.query(TestingRequest).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status.in_(['pending', 'assigned']),
-        TestingRequest.target_date < datetime.now()
+        TestingRequest.status.in_(['submitted', 'pending_approval', 'assigned', 'scheduled']),
+        TestingRequest.due_date < datetime.now()
     ).all()
 
     for req in overdue_requests[:10]:  # Limit to 10
-        days_overdue = (datetime.now().date() - req.target_date.date()).days if req.target_date else 0
+        days_overdue = (datetime.now().date() - req.due_date.date()).days if req.due_date else 0
+        test_type_name = req.test_type.name if req.test_type else 'Test'
+        dept_name = req.department.name if req.department else 'Unknown Location'
+
         overdue_breakdown.append({
             'id': str(req.id),
-            'title': f"{req.test_type or 'Test'} - {req.substation_name or 'Unknown'}",
+            'title': f"{test_type_name} - {dept_name}",
             'days_overdue': days_overdue,
             'severity': 'critical' if days_overdue > 30 else 'warning' if days_overdue > 14 else 'normal'
         })
 
-    # Active alerts feed
+    # Active alerts feed (equipment under repair or with recent failed tests)
     alerts_feed = []
     alert_equipment = db.query(Equipment).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True),
-        Equipment.health_status.in_(['Alert', 'Critical'])
+        Equipment.status.in_(['under_repair', 'active'])
     ).limit(10).all()
 
     for eq in alert_equipment:
+        severity = 'critical' if eq.status == 'under_repair' else 'alert'
         alerts_feed.append({
             'id': str(eq.id),
             'ueic': eq.ueic,
-            'name': eq.equipment_name or 'Unknown',
-            'status': eq.health_status,
-            'severity': 'critical' if eq.health_status == 'Critical' else 'alert'
+            'name': eq.manufacturer or eq.ueic,
+            'status': eq.status.value if hasattr(eq.status, 'value') else eq.status,
+            'severity': severity
         })
 
     return {
@@ -517,20 +527,20 @@ def get_see_dashboard(
     # Total equipment
     total_equipment = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True)
+        Equipment.status == 'active'
     ).scalar() or 0
 
     # Circle Compliance (test completion rate)
     ninety_days_ago = datetime.now() - timedelta(days=90)
     total_requests = db.query(func.count(TestingRequest.id)).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.created_at >= ninety_days_ago
+        TestingRequest.cts >= ninety_days_ago
     ).scalar() or 0
 
     completed_requests = db.query(func.count(TestingRequest.id)).filter(
         TestingRequest.organization_id == svc.org_id,
         TestingRequest.status == 'completed',
-        TestingRequest.created_at >= ninety_days_ago
+        TestingRequest.cts >= ninety_days_ago
     ).scalar() or 0
 
     circle_compliance = int((completed_requests / total_requests * 100)) if total_requests > 0 else 0
@@ -541,26 +551,28 @@ def get_see_dashboard(
         TestingRequest.status.in_(['pending_approval', 'pending_see_approval'])
     ).scalar() or 0
 
-    # Critical Issues
+    # Critical Issues (equipment under repair)
     critical_issues = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True),
-        Equipment.health_status == 'Critical'
+        Equipment.status == 'under_repair'
     ).scalar() or 0
 
     # Pending reviews list
     pending_reviews = db.query(TestingRequest).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status.in_(['pending_approval', 'pending_see_approval'])
-    ).order_by(TestingRequest.created_at.desc()).limit(10).all()
+        TestingRequest.status == 'pending_approval'
+    ).order_by(TestingRequest.cts.desc()).limit(10).all()
 
     reviews_list = []
     for req in pending_reviews:
+        test_type_name = req.test_type.name if req.test_type else 'Test'
+        dept_name = req.department.name if req.department else 'Unknown Location'
+
         reviews_list.append({
             'id': str(req.id),
-            'title': f"{req.test_type or 'Test'} - {req.substation_name or 'Unknown'}",
+            'title': f"{test_type_name} - {dept_name}",
             'status': req.status.replace('_', ' ').title(),
-            'created': req.created_at.strftime('%Y-%m-%d') if req.created_at else 'N/A'
+            'created': req.cts.strftime('%Y-%m-%d') if req.cts else 'N/A'
         })
 
     return {
@@ -590,14 +602,13 @@ def get_cee_dashboard(
     # Zone Equipment
     zone_equipment = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True)
+        Equipment.status == 'active'
     ).scalar() or 0
 
-    # Zone Reliability (percentage of equipment in good/normal status)
+    # Zone Reliability (percentage of equipment in active status)
     healthy_equipment = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.is_active.is_(True),
-        Equipment.health_status.in_(['Good', 'Normal', None])
+        Equipment.status == 'active'
     ).scalar() or 0
 
     zone_reliability = round((healthy_equipment / zone_equipment * 100), 1) if zone_equipment > 0 else 0.0
@@ -605,7 +616,7 @@ def get_cee_dashboard(
     # Major Decisions (pending high-value approvals)
     major_decisions = db.query(func.count(TestingRequest.id)).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status.in_(['pending_cee_approval', 'pending_approval'])
+        TestingRequest.status == 'pending_approval'
     ).scalar() or 0
 
     # Budget Utilization (placeholder - no budget tracking yet)
@@ -614,16 +625,19 @@ def get_cee_dashboard(
     # Pending strategic decisions
     strategic_decisions = db.query(TestingRequest).filter(
         TestingRequest.organization_id == svc.org_id,
-        TestingRequest.status.in_(['pending_cee_approval', 'pending_approval'])
-    ).order_by(TestingRequest.created_at.desc()).limit(10).all()
+        TestingRequest.status == 'pending_approval'
+    ).order_by(TestingRequest.cts.desc()).limit(10).all()
 
     decisions_list = []
     for req in strategic_decisions:
+        test_type_name = req.test_type.name if req.test_type else 'Test'
+        dept_name = req.department.name if req.department else 'Unknown Location'
+
         decisions_list.append({
             'id': str(req.id),
-            'title': f"{req.test_type or 'Test'} - {req.substation_name or 'Unknown'}",
+            'title': f"{test_type_name} - {dept_name}",
             'status': req.status.replace('_', ' ').title(),
-            'created': req.created_at.strftime('%Y-%m-%d') if req.created_at else 'N/A'
+            'created': req.cts.strftime('%Y-%m-%d') if req.cts else 'N/A'
         })
 
     return {
