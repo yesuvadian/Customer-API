@@ -326,13 +326,13 @@ def get_aee_dashboard(
             elif days_diff == 0:
                 due_str = "Today"
                 color = "orange"
-                status_text = req.status.replace('_', ' ').title()
+                status_text = req.status.value.replace('_', ' ').title()
             else:
                 due_str = f"{days_diff} days"
-                color = "blue" if req.status == 'in_progress' else "orange"
-                status_text = req.status.replace('_', ' ').title()
+                color = "blue" if req.status.value == 'in_progress' else "orange"
+                status_text = req.status.value.replace('_', ' ').title()
         else:
-            status_text = req.status.replace('_', ' ').title()
+            status_text = req.status.value.replace('_', ' ').title()
 
         test_type_name = req.test_type.name if req.test_type else 'Test'
         dept_name = req.department.name if req.department else 'Unknown Location'
@@ -571,7 +571,7 @@ def get_see_dashboard(
         reviews_list.append({
             'id': str(req.id),
             'title': f"{test_type_name} - {dept_name}",
-            'status': req.status.replace('_', ' ').title(),
+            'status': req.status.value.replace('_', ' ').title(),
             'created': req.cts.strftime('%Y-%m-%d') if req.cts else 'N/A'
         })
 
@@ -636,7 +636,7 @@ def get_cee_dashboard(
         decisions_list.append({
             'id': str(req.id),
             'title': f"{test_type_name} - {dept_name}",
-            'status': req.status.replace('_', ' ').title(),
+            'status': req.status.value.replace('_', ' ').title(),
             'created': req.cts.strftime('%Y-%m-%d') if req.cts else 'N/A'
         })
 
