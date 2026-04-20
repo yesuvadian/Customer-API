@@ -230,9 +230,10 @@ class RecommendationPDFService:
                 ]))
                 story.append(header_table)
 
-                # ── Build field-label map and column-label map from template ──
-                _field_labels = {}   # field_key → friendly label
-                _col_labels   = {}   # field_key → {col_key: label}  (for table fields)
+                # ── Build field-label map and column-label/summary map from template ──
+                _field_labels    = {}   # field_key → friendly label
+                _col_labels      = {}   # field_key → {col_key: col_label}
+                _col_summaries   = {}   # field_key → {col_key: agg_fn}  (avg/sum/min/max)
                 try:
                     from models import OrgTestTemplate
                     _tmpl_row = (
@@ -254,6 +255,12 @@ class RecommendationPDFService:
                                     c.get("label", c) if isinstance(c, dict) else c
                                     for c in _f.get("columns", [])
                                 }
+                                raw_sums = _f.get("column_summaries", {})
+                                if isinstance(raw_sums, dict) and raw_sums:
+                                    _col_summaries[fk] = {
+                                        k: v for k, v in raw_sums.items()
+                                        if v and v != "none"
+                                    }
                 except Exception:
                     pass
 
@@ -318,7 +325,8 @@ class RecommendationPDFService:
                 )
                 for _tbl_label, _fkey, _rows in _table_items:
                     story.append(Paragraph(_tbl_label, _sub_heading_style))
-                    _col_map = _col_labels.get(_fkey, {})
+                    _col_map  = _col_labels.get(_fkey, {})
+                    _sum_cfg  = _col_summaries.get(_fkey, {})   # {col_key: agg_fn}
                     _col_keys = list(_rows[0].keys()) if _rows else []
                     _header = [
                         _col_map.get(ck, ck.replace('_', ' ').title())
@@ -328,22 +336,74 @@ class RecommendationPDFService:
                         [str(row.get(ck, '-')) if row.get(ck) is not None else '-' for ck in _col_keys]
                         for row in _rows
                     ]
-                    _n = max(len(_col_keys), 1)
+
+                    # ── Compute summary row from column_summaries config ──────
+                    _summary_row = None
+                    if _sum_cfg:
+                        _sum_cells = []
+                        _has_any   = False
+                        for ck in _col_keys:
+                            fn = _sum_cfg.get(ck)
+                            if fn:
+                                _vals = []
+                                for row in _rows:
+                                    try:
+                                        _vals.append(float(row.get(ck, '')))
+                                    except (TypeError, ValueError):
+                                        pass
+                                if _vals:
+                                    _has_any = True
+                                    if fn == 'avg':
+                                        _agg = sum(_vals) / len(_vals)
+                                    elif fn == 'sum':
+                                        _agg = sum(_vals)
+                                    elif fn == 'min':
+                                        _agg = min(_vals)
+                                    elif fn == 'max':
+                                        _agg = max(_vals)
+                                    else:
+                                        _agg = None
+                                    if _agg is not None:
+                                        _disp = str(int(_agg)) if _agg == int(_agg) else f'{_agg:.2f}'
+                                        _sum_cells.append(f'{fn.upper()}: {_disp}')
+                                    else:
+                                        _sum_cells.append('-')
+                                else:
+                                    _sum_cells.append('-')
+                            else:
+                                # First column: label; other non-aggregated columns: blank
+                                _sum_cells.append('Summary' if ck == _col_keys[0] else '')
+                        if _has_any:
+                            _summary_row = _sum_cells
+
+                    _n  = max(len(_col_keys), 1)
                     _cw = 6.0 * inch / _n
-                    _full_tbl = Table([_header] + _body, colWidths=[_cw] * _n)
-                    _full_tbl.setStyle(TableStyle([
-                        ('FONTNAME',      (0, 0), (-1,  0), 'Helvetica-Bold'),
-                        ('FONTNAME',      (0, 1), (-1, -1), 'Helvetica'),
-                        ('FONTSIZE',      (0, 0), (-1, -1), 8),
-                        ('BACKGROUND',    (0, 0), (-1,  0), colors.HexColor('#D8E4F0')),
-                        ('GRID',          (0, 0), (-1, -1), 0.5, colors.lightgrey),
-                        ('ALIGN',         (0, 0), (-1, -1), 'LEFT'),
-                        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
-                        ('TOPPADDING',    (0, 0), (-1, -1), 3),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-                        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
-                        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
-                    ]))
+                    _all_rows = [_header] + _body
+                    if _summary_row:
+                        _all_rows.append(_summary_row)
+
+                    _full_tbl = Table(_all_rows, colWidths=[_cw] * _n)
+                    _data_end = len(_body)          # last data row index (0-based, after header)
+                    _style_cmds = [
+                        ('FONTNAME',      (0, 0),        (-1,  0),        'Helvetica-Bold'),
+                        ('FONTNAME',      (0, 1),        (-1, _data_end), 'Helvetica'),
+                        ('FONTSIZE',      (0, 0),        (-1, -1),        8),
+                        ('BACKGROUND',    (0, 0),        (-1,  0),        colors.HexColor('#D8E4F0')),
+                        ('GRID',          (0, 0),        (-1, -1),        0.5, colors.lightgrey),
+                        ('ALIGN',         (0, 0),        (-1, -1),        'LEFT'),
+                        ('VALIGN',        (0, 0),        (-1, -1),        'TOP'),
+                        ('TOPPADDING',    (0, 0),        (-1, -1),        3),
+                        ('BOTTOMPADDING', (0, 0),        (-1, -1),        3),
+                        ('LEFTPADDING',   (0, 0),        (-1, -1),        4),
+                        ('RIGHTPADDING',  (0, 0),        (-1, -1),        4),
+                    ]
+                    if _summary_row:
+                        _style_cmds += [
+                            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#EDE7F6')),
+                            ('FONTNAME',   (0, -1), (-1, -1), 'Helvetica-Bold'),
+                            ('TEXTCOLOR',  (0, -1), (-1, -1), colors.HexColor('#4A148C')),
+                        ]
+                    _full_tbl.setStyle(TableStyle(_style_cmds))
                     story.append(_full_tbl)
 
                 # Add space between tests
