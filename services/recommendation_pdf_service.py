@@ -230,61 +230,121 @@ class RecommendationPDFService:
                 ]))
                 story.append(header_table)
 
-                # Test data details
-                # Build field-label map from OrgTestTemplate (DB-first, then static fallback)
-                _field_labels = {}
+                # ── Build field-label map and column-label map from template ──
+                _field_labels = {}   # field_key → friendly label
+                _col_labels   = {}   # field_key → {col_key: label}  (for table fields)
                 try:
                     from models import OrgTestTemplate
-                    tmpl = (
+                    _tmpl_row = (
                         self.db.query(OrgTestTemplate)
                         .filter(OrgTestTemplate.template_key == result.template_key)
                         .first()
                     )
-                    _tmpl_data = tmpl.template_data if tmpl and tmpl.template_data else {}
+                    _tmpl_data = _tmpl_row.template_data if _tmpl_row and _tmpl_row.template_data else {}
                     if not _tmpl_data:
                         from test_templates import get_template_by_key
                         _tmpl_data = get_template_by_key(result.template_key) or {}
                     for _sec in _tmpl_data.get("sections", []):
                         for _f in _sec.get("fields", []):
-                            _field_labels[_f["key"]] = _f.get("label", _f["key"])
+                            fk = _f.get("key")
+                            _field_labels[fk] = _f.get("label", fk)
+                            if _f.get("type") == "table":
+                                _col_labels[fk] = {
+                                    c.get("key", c) if isinstance(c, dict) else c:
+                                    c.get("label", c) if isinstance(c, dict) else c
+                                    for c in _f.get("columns", [])
+                                }
                 except Exception:
                     pass
 
                 # Keys already represented elsewhere in the PDF — skip them
                 _skip_keys = {'overall_result', 'overall_remarks'}
 
-                test_data_rows = []
+                # Separate scalar fields from table fields
+                _scalar_items = []   # list of (label, display_str)
+                _table_items  = []   # list of (label, field_key, list_of_row_dicts)
+
                 if result.test_data:
                     for key, value in result.test_data.items():
                         if key in _skip_keys:
                             continue
-                        if isinstance(value, list):
-                            # Table field — render as JSON string summary
-                            formatted_value = f"[{len(value)} row(s)]"
+                        friendly = _field_labels.get(key, key.replace('_', ' ').title())
+                        if isinstance(value, list) and value and isinstance(value[0], dict):
+                            _table_items.append((friendly, key, value))
                         else:
-                            formatted_value = str(value) if value is not None else '-'
-                        # Use template-defined label when available
-                        friendly_label = _field_labels.get(key, key.replace('_', ' ').title())
-                        test_data_rows.append([f"{friendly_label}:", formatted_value])
+                            _scalar_items.append((friendly, str(value) if value is not None else '-'))
 
-                # Add remarks if present
                 if result.remarks:
-                    test_data_rows.append(['Remarks:', result.remarks])
+                    _scalar_items.append(('Remarks', result.remarks))
 
-                if test_data_rows:
-                    test_data_table = Table(test_data_rows, colWidths=[2*inch, 4*inch])
-                    test_data_table.setStyle(TableStyle([
-                        ('FONTNAME', (0, 0), (0, -1), 'Helvetica'),
-                        ('FONTSIZE', (0, 0), (-1, -1), 9),
-                        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#666666')),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-                        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F9F9F9')),
-                        ('TOPPADDING', (0, 0), (-1, -1), 4),
+                # ── Two-column grid for scalar fields ──────────────────────────
+                # Layout: | Label | Value | Label | Value |  (1.2 + 1.8 + 1.2 + 1.8 = 6 in)
+                if _scalar_items:
+                    _two_col_rows = []
+                    for i in range(0, len(_scalar_items), 2):
+                        lbl_l, val_l = _scalar_items[i]
+                        if i + 1 < len(_scalar_items):
+                            lbl_r, val_r = _scalar_items[i + 1]
+                        else:
+                            lbl_r, val_r = '', ''
+                        _two_col_rows.append([f"{lbl_l}:", val_l, f"{lbl_r}:", val_r])
+
+                    _scalar_tbl = Table(_two_col_rows, colWidths=[1.2*inch, 1.8*inch, 1.2*inch, 1.8*inch])
+                    _scalar_tbl.setStyle(TableStyle([
+                        ('FONTNAME',      (0, 0), (-1, -1), 'Helvetica'),
+                        ('FONTNAME',      (0, 0), (0, -1), 'Helvetica-Bold'),   # left labels
+                        ('FONTNAME',      (2, 0), (2, -1), 'Helvetica-Bold'),   # right labels
+                        ('FONTSIZE',      (0, 0), (-1, -1), 8),
+                        ('TEXTCOLOR',     (0, 0), (0, -1), colors.HexColor('#555555')),
+                        ('TEXTCOLOR',     (2, 0), (2, -1), colors.HexColor('#555555')),
+                        ('BACKGROUND',    (0, 0), (0, -1), colors.HexColor('#F0F0F0')),
+                        ('BACKGROUND',    (2, 0), (2, -1), colors.HexColor('#F0F0F0')),
+                        ('ALIGN',         (0, 0), (-1, -1), 'LEFT'),
+                        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+                        ('GRID',          (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                        ('TOPPADDING',    (0, 0), (-1, -1), 4),
                         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                        ('LEFTPADDING',   (0, 0), (-1, -1), 5),
+                        ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
                     ]))
-                    story.append(test_data_table)
+                    story.append(_scalar_tbl)
+
+                # ── Full-width table for each table-type field ─────────────────
+                _sub_heading_style = ParagraphStyle(
+                    'SubHeading', parent=normal_style,
+                    fontSize=9, fontName='Helvetica-Bold',
+                    textColor=colors.HexColor('#003366'),
+                    spaceBefore=6, spaceAfter=3,
+                )
+                for _tbl_label, _fkey, _rows in _table_items:
+                    story.append(Paragraph(_tbl_label, _sub_heading_style))
+                    _col_map = _col_labels.get(_fkey, {})
+                    _col_keys = list(_rows[0].keys()) if _rows else []
+                    _header = [
+                        _col_map.get(ck, ck.replace('_', ' ').title())
+                        for ck in _col_keys
+                    ]
+                    _body = [
+                        [str(row.get(ck, '-')) if row.get(ck) is not None else '-' for ck in _col_keys]
+                        for row in _rows
+                    ]
+                    _n = max(len(_col_keys), 1)
+                    _cw = 6.0 * inch / _n
+                    _full_tbl = Table([_header] + _body, colWidths=[_cw] * _n)
+                    _full_tbl.setStyle(TableStyle([
+                        ('FONTNAME',      (0, 0), (-1,  0), 'Helvetica-Bold'),
+                        ('FONTNAME',      (0, 1), (-1, -1), 'Helvetica'),
+                        ('FONTSIZE',      (0, 0), (-1, -1), 8),
+                        ('BACKGROUND',    (0, 0), (-1,  0), colors.HexColor('#D8E4F0')),
+                        ('GRID',          (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                        ('ALIGN',         (0, 0), (-1, -1), 'LEFT'),
+                        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+                        ('TOPPADDING',    (0, 0), (-1, -1), 3),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+                        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+                    ]))
+                    story.append(_full_tbl)
 
                 # Add space between tests
                 if idx < len(test_results):
