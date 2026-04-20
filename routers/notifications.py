@@ -32,9 +32,10 @@ class UserNotificationOut(BaseModel):
     event_type: str
     title: str
     body: str
-    severity: Optional[str] = None
+    severity: Optional[str] = None       # "critical" | "alert" | "info"
     source_id: Optional[UUID] = None
     source_type: Optional[str] = None
+    ueic: Optional[str] = None           # Equipment UEIC for quick display
     is_read: bool
     read_at: Optional[object] = None
     cts: object
@@ -54,17 +55,46 @@ def list_notifications(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     unread_only: bool = Query(False),
+    severity: Optional[str] = Query(None),   # "critical" | "alert" | "info"
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return the current user's in-app notifications, newest first."""
+    """Return the current user's in-app notifications, newest first.
+    Filter by severity (critical/alert/info) or unread_only."""
     q = (
         db.query(UserNotification)
         .filter(UserNotification.user_id == current_user.id)
     )
     if unread_only:
         q = q.filter(UserNotification.is_read.is_(False))
+    if severity:
+        q = q.filter(UserNotification.severity == severity.lower())
     return q.order_by(UserNotification.cts.desc()).offset(skip).limit(limit).all()
+
+
+@router.get("/counts", response_model=dict)
+def severity_counts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return unread count broken down by severity for the Alerts badge."""
+    from sqlalchemy import func as sqlfunc
+    rows = (
+        db.query(UserNotification.severity, sqlfunc.count(UserNotification.id))
+        .filter(
+            UserNotification.user_id == current_user.id,
+            UserNotification.is_read.is_(False),
+        )
+        .group_by(UserNotification.severity)
+        .all()
+    )
+    counts = {"critical": 0, "alert": 0, "info": 0, "total": 0}
+    for sev, cnt in rows:
+        key = (sev or "info").lower()
+        if key in counts:
+            counts[key] += cnt
+        counts["total"] += cnt
+    return counts
 
 
 @router.get("/unread-count", response_model=UnreadCountOut)

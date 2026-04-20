@@ -1,13 +1,13 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User
+from models import Recommendation, TestingRequest, TestingRequestStatus, User
 from schemas import (
     TestingRequestResponse,
     TestResultResponse,
@@ -133,6 +133,85 @@ def get_test_results(
         )
         response.append(resp)
     return response
+
+
+# ─── Test Result Approver Endpoints ──────────────────────────
+
+@router.get("/pending-approval", response_model=List[TestingRequestResponse])
+def get_pending_result_approvals(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all testing requests in under_approval status for result approver review."""
+    requests = (
+        db.query(TestingRequest)
+        .filter(
+            TestingRequest.status == TestingRequestStatus.under_approval,
+            TestingRequest.organization_id == current_user.organization_id,
+        )
+        .order_by(TestingRequest.mts.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return [_enrich(req) for req in requests]
+
+
+@router.put("/{request_id}/approve_results", response_model=TestingRequestResponse)
+def approve_test_results(
+    request_id: UUID,
+    body: dict = Body(default={}),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Approve submitted test results — delegates to the approval/recommendation workflow."""
+    from services.approval_service import ApprovalService
+    rec = (
+        db.query(Recommendation)
+        .filter(Recommendation.testing_request_id == request_id)
+        .order_by(Recommendation.cts.desc())
+        .first()
+    )
+    if not rec:
+        raise HTTPException(status_code=404, detail="No recommendation found for this request")
+    ApprovalService(db).approve_recommendation(
+        recommendation_id=rec.id,
+        approver_id=current_user.id,
+        notes=body.get("comment"),
+    )
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    return _enrich(req)
+
+
+@router.put("/{request_id}/reject_results", response_model=TestingRequestResponse)
+def reject_test_results(
+    request_id: UUID,
+    body: dict = Body(default={}),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reject submitted test results — delegates to the approval/recommendation workflow."""
+    from services.approval_service import ApprovalService
+    rec = (
+        db.query(Recommendation)
+        .filter(Recommendation.testing_request_id == request_id)
+        .order_by(Recommendation.cts.desc())
+        .first()
+    )
+    if not rec:
+        raise HTTPException(status_code=404, detail="No recommendation found for this request")
+    comment = body.get("comment", "")
+    if not comment:
+        raise HTTPException(status_code=400, detail="Rejection comment is required")
+    ApprovalService(db).reject_recommendation(
+        recommendation_id=rec.id,
+        approver_id=current_user.id,
+        notes=comment,
+    )
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    return _enrich(req)
 
 
 @router.put("/{request_id}/submit_results", response_model=TestingRequestResponse)

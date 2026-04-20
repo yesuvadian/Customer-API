@@ -1411,9 +1411,11 @@ class RecommendationResponse(BaseModel):
     replacement_products: Optional[list] = None
     approval_status: Optional[str] = None
     approved_by: Optional[UUID] = None
+    approved_by_name: Optional[str] = None   # resolved display name
     approved_at: Optional[datetime] = None
     approval_notes: Optional[str] = None
     submitted_by: Optional[UUID] = None
+    submitted_by_name: Optional[str] = None  # resolved display name
     submitted_at: Optional[datetime] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
