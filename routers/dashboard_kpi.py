@@ -312,6 +312,7 @@ def get_aee_dashboard(
         .all()
     )
 
+    from models import TestSession
     assignments_list = []
     for req in assignments:
         # Calculate due days
@@ -337,12 +338,28 @@ def get_aee_dashboard(
         test_type_name = req.test_type.name if req.test_type else 'Test'
         dept_name = req.department.name if req.department else 'Unknown Location'
 
+        # Session trace — how many times the tester has saved results
+        sess_row = (
+            db.query(
+                func.count(TestSession.id).label('cnt'),
+                func.max(TestSession.session_date).label('last_date'),
+            )
+            .filter(TestSession.testing_request_id == req.id)
+            .first()
+        )
+        session_count = sess_row.cnt or 0
+        last_session_date = (
+            sess_row.last_date.strftime('%d %b %Y') if sess_row.last_date else None
+        )
+
         assignments_list.append({
             'id': str(req.id),
             'title': f"{test_type_name} - {dept_name}",
             'status': status_text,
             'due': due_str,
             'color': color,
+            'session_count': session_count,
+            'last_session_date': last_session_date,
         })
 
     # Equipment status breakdown

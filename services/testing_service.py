@@ -432,6 +432,35 @@ class TestingService:
             print(f"[WARN] Evaluation failed for {template_key}: {_eval_err}")
             traceback.print_exc()
 
+        # ── Auto-create TestSession for multi-session tracing ─────────────────
+        # Each save call = one session entry, giving a full audit trail of
+        # when the tester worked on this request and how many times.
+        # The TestResult row is still upserted (latest data), but TestSession
+        # accumulates one row per save — powering dashboard session counts,
+        # EE-TLSS compliance KPI, and the request-detail timeline.
+        try:
+            from models import TestSession
+            from sqlalchemy import func as _sfunc
+            _prev_count = (
+                self.db.query(_sfunc.count(TestSession.id))
+                .filter(TestSession.testing_request_id == request_id)
+                .scalar()
+            ) or 0
+            _session = TestSession(
+                testing_request_id=request_id,
+                organization_id=request.organization_id,
+                session_number=_prev_count + 1,
+                session_name=f"Session {_prev_count + 1}",
+                session_date=UTCDateTimeMixin._utc_now(),
+                status="completed",
+                template_key=template_key,
+                conducted_by=tester_id,
+                created_by=tester_id,
+            )
+            self.db.add(_session)
+        except Exception as _sess_err:
+            print(f"[WARN] TestSession auto-create failed: {_sess_err}")
+
         self.db.commit()
         self.db.refresh(result)
         return result
