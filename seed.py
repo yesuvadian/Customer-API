@@ -741,12 +741,12 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "EE TLSS", "module": "Quotes", "can_view": True},
         {"role": "EE TLSS", "module": "Sales Orders", "can_view": True},
 
-        # SEE W&M — Circle supervisor
+        # SEE W&M — Circle supervisor (equivalent to Test Assigner in SRS)
         {"role": "SEE W&M", "module": "Dashboard", "can_view": True},
         {"role": "SEE W&M", "module": "EE TLSS Dashboard", "can_view": True},
         {"role": "SEE W&M", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
         {"role": "SEE W&M", "module": "Testing", "can_view": True},
-        {"role": "SEE W&M", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "SEE W&M", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
         {"role": "SEE W&M", "module": "Equipment", "can_view": True, "can_search": True},
         {"role": "SEE W&M", "module": "Notifications", "can_view": True},
         {"role": "SEE W&M", "module": "Reports", "can_view": True, "can_export": True},
