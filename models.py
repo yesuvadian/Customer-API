@@ -847,6 +847,7 @@ class Module(Base):
     path = Column(String(255))
     group_name = Column(String(50))
     is_active = Column(Boolean, default=True)
+    is_menu = Column(Boolean, default=True, nullable=False, server_default="true")
 
     created_by = Column(ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     modified_by = Column(ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
@@ -2427,6 +2428,7 @@ class UserNotification(Base):
     # Source navigation payload (flutter can deep-link)
     source_id = Column(UUID(as_uuid=True), nullable=True)
     source_type = Column(String(100), nullable=True)
+    ueic = Column(String(100), nullable=True)  # Equipment UEIC for quick display
 
     is_read = Column(Boolean, default=False, index=True)
     read_at = Column(DateTime(timezone=True), nullable=True)
