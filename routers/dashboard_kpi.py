@@ -619,9 +619,6 @@ def get_cee_dashboard(
         TestingRequest.status.in_(['submitted', 'pending_approval'])
     ).scalar() or 0
 
-    # Budget Utilization (placeholder - no budget tracking yet)
-    budget_utilization = 67  # Mock value
-
     # Pending strategic decisions
     strategic_decisions = db.query(TestingRequest).filter(
         TestingRequest.organization_id == svc.org_id,
@@ -644,7 +641,6 @@ def get_cee_dashboard(
         'kpis': {
             'zone_reliability': zone_reliability,
             'major_decisions': major_decisions,
-            'budget_utilization': budget_utilization,
             'zone_equipment': zone_equipment,
         },
         'strategic_decisions': decisions_list,
