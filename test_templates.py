@@ -4,7 +4,12 @@ Test Result Templates — Template-driven dynamic forms for each test type.
 Each template defines sections and fields that the Flutter UI renders dynamically.
 Test results are stored as JSONB in a single test_results table.
 
-Field types: text, number, dropdown, boolean, textarea, table
+Field types: text, number, dropdown, boolean, textarea, table, date, checkbox
+  - checkbox : single tick-box (checklist item), value stored as true/false string
+               Use for checklists (maintenance, inspection). Different from 'boolean'
+               (toggle switch) — checkbox renders as a compact tick with label.
+  - boolean  : toggle/switch for yes-no answers with prominence
+  - checkbox_group : NOT YET SUPPORTED (use multiple checkbox fields instead)
 
 Multi-session support:
 - supports_multi_session: Boolean indicating if this test type can have multiple sessions
@@ -1776,10 +1781,451 @@ TEST_TEMPLATES = {
             },
         ]
     },
+
+    # ════════════════════════════════════════════════════════════
+    # CATEGORY-LEVEL TEMPLATES  (SEACMS-AI SRS v1.3)
+    # Mapped by request_category, not test_type_id.
+    # Field types used:
+    #   checkbox  – Yes/No checklist items (SRS 4.1.1)
+    #   dropdown  – Pass/Fail, enumerations, severity
+    #   number    – Measurements with unit and range
+    #   textarea  – Free-text observations
+    #   text      – Short string entries
+    #   date      – Calendar date picker
+    # ════════════════════════════════════════════════════════════
+
+    # ── Preventive Maintenance (SRS §4.1.1 + §4.2.2) ────────────
+    "transformer_maintenance": {
+        "key": "transformer_maintenance",
+        "name": "Transformer Preventive Maintenance",
+        "equipment_type": "Power Transformer",
+        "description": "Routine / preventive maintenance checklist and major maintenance record for power transformers. Per SRS §4.1.1 and §4.2.2.",
+        "supports_multi_session": True,
+        "typical_session_interval_days": 180,
+        "typical_total_sessions": 2,
+        "sections": [
+            # ── SRS §5.2.1: Universal metadata mandatory on every maintenance record ──
+            {
+                "title": "Test / Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",      "label": "Date of Maintenance",                  "type": "date",   "required": True},
+                    {"key": "maintenance_time",      "label": "Time",                                  "type": "text",   "required": True,  "placeholder": "HH:MM"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature",                   "type": "number", "required": True,  "unit": "deg C"},
+                    {"key": "humidity_pct",          "label": "Relative Humidity",                     "type": "number", "required": True,  "unit": "%"},
+                    {"key": "maintenance_officer",   "label": "Name and Designation of Officer",       "type": "text",   "required": True},
+                    {"key": "witness_officer",       "label": "Name of Witnessing Officer",             "type": "text",   "required": False},
+                    {"key": "instrument_make",       "label": "Instrument Make",                       "type": "text",   "required": False},
+                    {"key": "instrument_model",      "label": "Instrument Model / Serial No.",          "type": "text",   "required": False},
+                    {"key": "instrument_calib_date", "label": "Instrument Calibration Validity Date",  "type": "date",   "required": False},
+                ],
+            },
+            # ── SRS §4.1.1: Routine Preventive Maintenance Checklist (Yes/No) ──
+            {
+                "title": "Routine Maintenance Checklist (SRS §4.1.1)",
+                "fields": [
+                    {"key": "permit_to_work_obtained",    "label": "Permit to Work obtained",                              "type": "checkbox", "required": True},
+                    {"key": "lockout_tagout_applied",      "label": "Lockout / Tagout applied",                             "type": "checkbox", "required": True},
+                    {"key": "earth_connections_applied",   "label": "Earth connections applied before commencing work",     "type": "checkbox", "required": True},
+                    {"key": "general_cleaning_done",       "label": "General cleaning and housekeeping completed",          "type": "checkbox", "required": True},
+                    {"key": "lubrication_done",            "label": "Lubrication of mechanical moving parts done",          "type": "checkbox", "required": True},
+                    {"key": "open_close_trip_check",       "label": "Operational check – open / close / trip operations",   "type": "dropdown", "required": True,  "options": ["Pass", "Fail", "N/A"]},
+                    {"key": "alignment_check",             "label": "Alignment checks (isolators, CB mechanism)",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "N/A"]},
+                    {"key": "indicators_lamps_ok",         "label": "Local / remote indicators and status lamps healthy",   "type": "checkbox", "required": True},
+                    {"key": "annunciation_panel_ok",       "label": "Annunciation panel – all alarms healthy",              "type": "checkbox", "required": True},
+                    {"key": "pressure_gauges_ok",          "label": "Pressure gauges reading normal",                       "type": "checkbox", "required": True},
+                    {"key": "oil_level_indicators_ok",     "label": "Oil level indicators reading normal",                  "type": "checkbox", "required": True},
+                    {"key": "temp_indicators_ok",          "label": "Temperature indicators functional and reading normal",  "type": "checkbox", "required": True},
+                    {"key": "no_oil_leaks",                "label": "Physical inspection – no oil leaks observed",          "type": "checkbox", "required": True},
+                    {"key": "no_cracks_corrosion",         "label": "Physical inspection – no cracks or corrosion",         "type": "checkbox", "required": True},
+                    {"key": "no_bird_nesting",             "label": "Physical inspection – no bird nesting",                "type": "checkbox", "required": True},
+                    {"key": "earthing_connections_ok",     "label": "Earthing connections intact and tight",                "type": "checkbox", "required": True},
+                    {"key": "routine_check_observations",  "label": "Observations during routine checks (free text)",       "type": "textarea", "required": False},
+                ],
+            },
+            # ── SRS §4.2.2: Oil Sampling and Analysis (Power Transformer Major Maintenance) ──
+            {
+                "title": "Oil Sampling & Analysis (SRS §4.2.2)",
+                "fields": [
+                    {"key": "oil_sample_collected",      "label": "Oil sample collected",               "type": "checkbox", "required": True},
+                    {"key": "bdv_before_kv",             "label": "BDV Before Filtration",              "type": "number",   "required": True,  "unit": "kV"},
+                    {"key": "bdv_after_kv",              "label": "BDV After Filtration",               "type": "number",   "required": False, "unit": "kV"},
+                    {"key": "acidity_mg_koh_g",          "label": "Acidity (Neutralisation Value)",     "type": "number",   "required": True,  "unit": "mg KOH/g"},
+                    {"key": "moisture_ppm",              "label": "Moisture Content",                   "type": "number",   "required": True,  "unit": "ppm"},
+                    {"key": "tan_delta_90c",             "label": "Tan Delta at 90 deg C",              "type": "number",   "required": False},
+                    {"key": "interfacial_tension_mn_m",  "label": "Interfacial Tension",                "type": "number",   "required": False, "unit": "mN/m"},
+                    {"key": "flash_point_c",             "label": "Flash Point",                        "type": "number",   "required": False, "unit": "deg C"},
+                    {"key": "oil_filtration_done",       "label": "Oil filtration / reconditioned done","type": "checkbox", "required": False},
+                    {"key": "oil_filtration_volume_l",   "label": "Volume Filtered",                    "type": "number",   "required": False, "unit": "litres"},
+                    {"key": "oil_replacement_done",      "label": "Full oil replacement done",          "type": "checkbox", "required": False},
+                    {"key": "oil_replaced_volume_l",     "label": "Volume of Oil Replaced",             "type": "number",   "required": False, "unit": "litres"},
+                    {"key": "oil_grade",                 "label": "Oil Grade",                          "type": "text",     "required": False},
+                    {"key": "oil_supplier",              "label": "Oil Supplier",                       "type": "text",     "required": False},
+                    {"key": "dga_performed",             "label": "DGA (Dissolved Gas Analysis) performed", "type": "checkbox", "required": False},
+                    {"key": "dga_result_before",         "label": "DGA Result Before Maintenance",      "type": "textarea", "required": False},
+                    {"key": "dga_result_after",          "label": "DGA Result After Maintenance",       "type": "textarea", "required": False},
+                ],
+            },
+            # ── SRS §4.2.2: OLTC Overhaul ──
+            {
+                "title": "OLTC / Tap Changer (SRS §4.2.2)",
+                "fields": [
+                    {"key": "oltc_overhaul_done",        "label": "OLTC overhaul performed",                    "type": "checkbox", "required": False},
+                    {"key": "oltc_count_at_overhaul",    "label": "Cumulative OLTC operations at overhaul",     "type": "number",   "required": False},
+                    {"key": "oltc_overhaul_scope",       "label": "Scope of OLTC overhaul",                     "type": "textarea", "required": False},
+                    {"key": "oltc_parts_replaced",       "label": "Parts replaced during OLTC overhaul",        "type": "textarea", "required": False},
+                    {"key": "oltc_test_result_before",   "label": "OLTC test result before overhaul",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"]},
+                    {"key": "oltc_test_result_after",    "label": "OLTC test result after overhaul",            "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"]},
+                    {"key": "active_part_drying_done",   "label": "Active part drying performed",               "type": "checkbox", "required": False},
+                    {"key": "drying_method",             "label": "Drying Method",                              "type": "dropdown", "required": False, "options": ["Vapour Phase Drying", "Hot Air Circulation", "Oven Drying", "Other"]},
+                    {"key": "drying_duration_hrs",       "label": "Drying Duration",                            "type": "number",   "required": False, "unit": "hours"},
+                    {"key": "moisture_before_drying_ppm","label": "Moisture Content Before Drying",             "type": "number",   "required": False, "unit": "ppm"},
+                    {"key": "moisture_after_drying_ppm", "label": "Moisture Content After Drying",              "type": "number",   "required": False, "unit": "ppm"},
+                ],
+            },
+            # ── SRS §4.2.2: Gasket / Bushing Replacement ──
+            {
+                "title": "Gasket & Bushing Replacement (SRS §4.2.2)",
+                "fields": [
+                    {"key": "gasket_replacement_done",   "label": "Gasket replacement performed",                      "type": "checkbox", "required": False},
+                    {"key": "gasket_location",           "label": "Gasket Location (where replaced)",                  "type": "text",     "required": False},
+                    {"key": "gaskets_replaced_count",    "label": "Number of Gaskets Replaced",                        "type": "number",   "required": False},
+                    {"key": "oil_leakage_before",        "label": "Oil leakage observation before replacement",        "type": "textarea", "required": False},
+                    {"key": "oil_leakage_after",         "label": "Oil leakage observation after replacement",         "type": "textarea", "required": False},
+                    {"key": "bushing_replacement_done",  "label": "Bushing replacement performed",                     "type": "checkbox", "required": False},
+                    {"key": "old_bushing_details",       "label": "Old Bushing Details (make, rating, condition)",      "type": "textarea", "required": False},
+                    {"key": "new_bushing_details",       "label": "New Bushing Details (make, rating, serial)",        "type": "textarea", "required": False},
+                    {"key": "bushing_replacement_reason","label": "Reason for Bushing Replacement",                    "type": "textarea", "required": False},
+                    {"key": "bushing_test_results",      "label": "Bushing Test Results after Replacement",            "type": "textarea", "required": False},
+                ],
+            },
+            # ── SRS §4.1.2: Electrical Tests (IR, PI) ──
+            {
+                "title": "Electrical Tests",
+                "fields": [
+                    {"key": "ir_hv_to_earth_mohm",       "label": "IR — HV to Earth",                "type": "number",   "required": True,  "unit": "MOhm"},
+                    {"key": "ir_lv_to_earth_mohm",       "label": "IR — LV to Earth",                "type": "number",   "required": True,  "unit": "MOhm"},
+                    {"key": "ir_hv_to_lv_mohm",          "label": "IR — HV to LV",                   "type": "number",   "required": False, "unit": "MOhm"},
+                    {"key": "pi_ratio",                  "label": "Polarisation Index (PI)",          "type": "number",   "required": False},
+                    {"key": "winding_resistance_hv_ohm", "label": "Winding Resistance — HV Phase",   "type": "number",   "required": False, "unit": "Ohm"},
+                    {"key": "winding_resistance_lv_ohm", "label": "Winding Resistance — LV Phase",   "type": "number",   "required": False, "unit": "Ohm"},
+                    {"key": "ir_test_result",            "label": "IR Test Overall Result",           "type": "dropdown", "required": False, "options": ["Normal", "Alert", "Critical / Abnormal"]},
+                ],
+            },
+            # ── SRS §4.1.1: Post-Maintenance Verification ──
+            {
+                "title": "Post-Maintenance Verification & Sign-off",
+                "fields": [
+                    {"key": "earthing_restored",         "label": "Earthing connections restored",              "type": "checkbox", "required": True},
+                    {"key": "covers_secured",            "label": "All covers, manholes and gaskets secured",   "type": "checkbox", "required": True},
+                    {"key": "protection_restored",       "label": "Protection relays restored to service",      "type": "checkbox", "required": True},
+                    {"key": "ptw_closed",                "label": "Permit to Work closed",                      "type": "checkbox", "required": True},
+                    {"key": "next_maintenance_due",      "label": "Next Maintenance Due Date",                  "type": "date",     "required": False},
+                    {"key": "ad_hoc_maintenance_desc",   "label": "Any other ad-hoc maintenance (description)", "type": "textarea", "required": False},
+                    {"key": "post_maintenance_status",   "label": "Post-Maintenance Overall Status",            "type": "dropdown", "required": True, "options": ["All Healthy", "Punch Points Pending", "Deficiency — Action Required"]},
+                    {"key": "punch_points",              "label": "Open Punch Points (with target closure date)","type": "textarea", "required": False},
+                    {"key": "responsible_officer",       "label": "Responsible Officer Sign-off",               "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Annual Substation / Equipment Inspection (SRS §6.1) ──────
+    "transformer_inspection": {
+        "key": "transformer_inspection",
+        "name": "Transformer Annual Inspection",
+        "equipment_type": "Power Transformer",
+        "description": "Annual substation inspection observations and compliance record per SRS §6.1 (TA&QC Module). Captures observation category, severity, compliance and closure status.",
+        "supports_multi_session": True,
+        "typical_session_interval_days": 365,
+        "typical_total_sessions": 1,
+        "sections": [
+            # ── SRS §5.2.1: Universal metadata ──
+            {
+                "title": "Inspection Metadata",
+                "fields": [
+                    {"key": "inspection_date",           "label": "Date of Inspection",                        "type": "date",   "required": True},
+                    {"key": "inspection_time",           "label": "Time",                                       "type": "text",   "required": True,  "placeholder": "HH:MM"},
+                    {"key": "ambient_temp_c",            "label": "Ambient Temperature",                        "type": "number", "required": True,  "unit": "deg C"},
+                    {"key": "humidity_pct",              "label": "Relative Humidity",                          "type": "number", "required": True,  "unit": "%"},
+                    {"key": "inspecting_officer",        "label": "Name and Designation of Inspecting Officer", "type": "text",   "required": True},
+                    {"key": "witnessing_officer",        "label": "Name of Witnessing Officer",                 "type": "text",   "required": False},
+                    {"key": "inspection_type",           "label": "Inspection Type",                            "type": "dropdown", "required": True, "options": ["Annual", "Periodic", "Routine", "Pre-Energisation", "Post-Fault / Emergency", "TA&QC Audit"]},
+                    {"key": "equipment_in_service",      "label": "Equipment in service during inspection",     "type": "checkbox", "required": True},
+                    {"key": "load_pct",                  "label": "Load at Time of Inspection",                 "type": "number", "required": False, "unit": "%"},
+                    {"key": "weather_condition",         "label": "Weather Condition",                          "type": "dropdown", "required": False, "options": ["Clear", "Cloudy", "Raining", "Foggy", "Humid"]},
+                ],
+            },
+            # ── SRS §6.1: Observation Category and Severity ──
+            {
+                "title": "Inspection Observation (SRS §6.1)",
+                "fields": [
+                    {"key": "observation_category",      "label": "Observation Category",              "type": "dropdown", "required": True, "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "observation_description",   "label": "Detailed Observation Description",  "type": "textarea", "required": True},
+                    {"key": "severity",                  "label": "Severity",                          "type": "dropdown", "required": True, "options": ["Major", "Minor", "Advisory"]},
+                    {"key": "target_compliance_date",    "label": "Target Compliance Date",            "type": "date",     "required": True},
+                    {"key": "photograph_note",           "label": "Photograph Reference / Note",       "type": "textarea", "required": False},
+                ],
+            },
+            # ── SRS §6.1: Visual Inspection Checklist (all Yes/No) ──
+            {
+                "title": "Visual Inspection Checklist",
+                "fields": [
+                    # Tank and external condition
+                    {"key": "no_oil_leakage",            "label": "No oil leakage from tank / gaskets / fittings",      "type": "checkbox", "required": True},
+                    {"key": "no_bushing_damage",          "label": "Bushings — no cracks, chips or flashover marks",     "type": "checkbox", "required": True},
+                    {"key": "tank_paint_ok",              "label": "Tank paint in good condition (no severe corrosion)", "type": "checkbox", "required": True},
+                    {"key": "conservator_level_ok",       "label": "Conservator oil level in normal range",              "type": "checkbox", "required": True},
+                    {"key": "silica_gel_ok",              "label": "Silica gel breather — blue / active",                "type": "checkbox", "required": True},
+                    {"key": "pressure_relief_intact",     "label": "Pressure relief device intact and not operated",     "type": "checkbox", "required": True},
+                    {"key": "nameplate_legible",          "label": "Nameplate legible and intact",                       "type": "checkbox", "required": True},
+                    {"key": "marshalling_box_ok",         "label": "Marshalling box — clean, dry, no pests / moisture",  "type": "checkbox", "required": True},
+                    {"key": "no_bird_nesting",            "label": "No bird nesting on equipment or structure",          "type": "checkbox", "required": True},
+                    # Earthing
+                    {"key": "earthing_straps_ok",         "label": "Earthing straps intact and connected",               "type": "checkbox", "required": True},
+                    {"key": "neutral_earthing_ok",        "label": "Neutral earthing arrangement intact",                "type": "checkbox", "required": True},
+                    # Cooling
+                    {"key": "radiators_clean",            "label": "Radiators clean — no blockage or sludge",            "type": "checkbox", "required": True},
+                    {"key": "cooling_fans_running",       "label": "Cooling fans running without vibration / noise",     "type": "checkbox", "required": True},
+                    {"key": "oil_temp_indicator_ok",      "label": "Oil temperature indicator functional — no alarm",    "type": "checkbox", "required": True},
+                    {"key": "winding_temp_indicator_ok",  "label": "Winding temperature indicator — no alarm",           "type": "checkbox", "required": True},
+                    {"key": "oil_temp_reading_c",         "label": "Oil Temperature reading",                            "type": "number",   "required": False, "unit": "deg C"},
+                    {"key": "winding_temp_reading_c",     "label": "Winding Temperature reading",                        "type": "number",   "required": False, "unit": "deg C"},
+                    # OLTC
+                    {"key": "tap_changer_type",           "label": "Tap Changer Type",                                   "type": "dropdown", "required": False, "options": ["OLTC (Motor-operated)", "DETC (Off-Load)", "N/A"]},
+                    {"key": "tap_position",               "label": "Current Tap Position",                                "type": "text",     "required": False},
+                    {"key": "tap_changer_ok",             "label": "Tap changer operation smooth (no hunting)",           "type": "checkbox", "required": False},
+                    {"key": "oltc_counter_reading",       "label": "OLTC Operation Counter Reading",                     "type": "text",     "required": False},
+                    # Protection
+                    {"key": "buchholz_relay_ok",          "label": "Buchholz relay — no gas / oil accumulation",         "type": "checkbox", "required": True},
+                    {"key": "sudden_pressure_relay_ok",   "label": "Sudden pressure relay intact and healthy",           "type": "checkbox", "required": True},
+                    {"key": "differential_relay_ok",      "label": "Differential relay healthy (no alarm)",              "type": "checkbox", "required": False},
+                    {"key": "active_alarms_present",      "label": "Active alarms on panel / SCADA (note if Yes)",       "type": "checkbox", "required": True},
+                    {"key": "alarm_details",              "label": "Alarm Details (if any active alarms)",                "type": "textarea", "required": False},
+                ],
+            },
+            # ── SRS §6.1: Compliance Record (filled by substation staff) ──
+            {
+                "title": "Compliance & Closure (SRS §6.1)",
+                "fields": [
+                    {"key": "action_taken_description",  "label": "Action Taken Description",                "type": "textarea", "required": False},
+                    {"key": "date_of_compliance",        "label": "Date of Compliance",                      "type": "date",     "required": False},
+                    {"key": "compliance_status",         "label": "Observation Status",                      "type": "dropdown", "required": True, "options": ["Open", "Closed", "Reopened", "Accepted with Remarks"]},
+                    {"key": "reopen_remarks",            "label": "Remarks on Reopen (if status = Reopened)","type": "textarea", "required": False},
+                    {"key": "outcome",                   "label": "Inspection Outcome",                      "type": "dropdown", "required": True, "options": ["Accepted", "Accepted with Remarks", "Rejected"]},
+                    {"key": "responsible_officer",       "label": "Responsible Officer",                     "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Power Transformer Repair Lifecycle — 10 Stages (SRS §7) ──
+    "transformer_repair_lifecycle": {
+        "key": "transformer_repair_lifecycle",
+        "name": "Transformer Repair Lifecycle (10-Stage Tracking)",
+        "equipment_type": "Power Transformer",
+        "description": "Ten-stage repair lifecycle tracking per SRS §7.1. Each stage records date, document reference, responsible officer, and any contractual delay. Post-commissioning surveillance data also captured.",
+        "supports_multi_session": True,
+        "typical_session_interval_days": 14,
+        "typical_total_sessions": 10,
+        "sections": [
+            # ── SRS §7.1 Stage 1 ──
+            {
+                "title": "Stage 1 — Failure Report (SRS §7.1)",
+                "fields": [
+                    {"key": "s1_failure_date",           "label": "Date of Failure / Outage",         "type": "date",     "required": True},
+                    {"key": "s1_failure_mode",           "label": "Mode of Failure",                  "type": "dropdown", "required": True, "options": ["Internal Fault — Winding", "Internal Fault — Core", "Bushing Failure", "Oil Contamination / Degradation", "Tap Changer Failure", "External Fault (Lightning / Short Circuit)", "Overloading / Thermal", "Ageing", "Other"]},
+                    {"key": "s1_failure_brief",          "label": "Brief Report on Failure",          "type": "textarea", "required": True},
+                    {"key": "s1_doc_reference",          "label": "Failure Report Document Reference","type": "text",     "required": False},
+                    {"key": "s1_responsible_officer",    "label": "Responsible Officer",              "type": "text",     "required": True},
+                    {"key": "s1_contractual_date",       "label": "Contracted Completion Date",       "type": "date",     "required": False},
+                    {"key": "s1_actual_date",            "label": "Actual Completion Date",           "type": "date",     "required": False},
+                    {"key": "s1_delay_reason",           "label": "Delay Reason (if delayed)",        "type": "dropdown", "required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                    {"key": "s1_remarks",                "label": "Remarks",                          "type": "textarea", "required": False},
+                ],
+            },
+            # ── SRS §7.1 Stage 2 ──
+            {
+                "title": "Stage 2 — Transformer Repair Committee (SRS §7.1)",
+                "fields": [
+                    {"key": "s2_committee_date",         "label": "Date of Committee Presentation",   "type": "date",     "required": True},
+                    {"key": "s2_minutes_reference",      "label": "Minutes of Meeting Reference",     "type": "text",     "required": False},
+                    {"key": "s2_committee_decision",     "label": "Committee Decision",               "type": "dropdown", "required": True, "options": ["Repair Approved", "Replacement Recommended", "Further Investigation Required", "Pending"]},
+                    {"key": "s2_responsible_officer",    "label": "Responsible Officer",              "type": "text",     "required": True},
+                    {"key": "s2_contractual_date",       "label": "Contracted Completion Date",       "type": "date",     "required": False},
+                    {"key": "s2_actual_date",            "label": "Actual Completion Date",           "type": "date",     "required": False},
+                    {"key": "s2_delay_reason",           "label": "Delay Reason (if delayed)",        "type": "dropdown", "required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                    {"key": "s2_remarks",                "label": "Remarks",                          "type": "textarea", "required": False},
+                ],
+            },
+            # ── SRS §7.1 Stage 3 ──
+            {
+                "title": "Stage 3 — Allotment to Repairer (SRS §7.1)",
+                "fields": [
+                    {"key": "s3_allotment_date",         "label": "Date of Allotment",                "type": "date",     "required": True},
+                    {"key": "s3_repairer_name",          "label": "Name of Repairer / Workshop",      "type": "text",     "required": True},
+                    {"key": "s3_communication_ref",      "label": "Communication Reference (CEE RT&R&D / CEE Transmission Zone)", "type": "text", "required": False},
+                    {"key": "s3_work_order_no",          "label": "Work Order / PO Number",           "type": "text",     "required": False},
+                    {"key": "s3_responsible_officer",    "label": "Responsible Officer",              "type": "text",     "required": True},
+                    {"key": "s3_contractual_date",       "label": "Contracted Completion Date",       "type": "date",     "required": False},
+                    {"key": "s3_actual_date",            "label": "Actual Completion Date",           "type": "date",     "required": False},
+                    {"key": "s3_delay_reason",           "label": "Delay Reason (if delayed)",        "type": "dropdown", "required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                    {"key": "s3_remarks",                "label": "Remarks",                          "type": "textarea", "required": False},
+                ],
+            },
+            # ── SRS §7.1 Stage 4 ──
+            {
+                "title": "Stage 4 — Lifting by Repairer (SRS §7.1)",
+                "fields": [
+                    {"key": "s4_lifting_date",           "label": "Date of Lifting / Dispatch from Substation", "type": "date", "required": True},
+                    {"key": "s4_vehicle_details",        "label": "Vehicle Details (type, registration)", "type": "text",   "required": True},
+                    {"key": "s4_driver_name",            "label": "Driver Name",                         "type": "text",   "required": True},
+                    {"key": "s4_dispatch_doc_ref",       "label": "Dispatch Document Reference",         "type": "text",   "required": False},
+                    {"key": "s4_insurance_doc_ref",      "label": "Transit Insurance Document Reference","type": "text",   "required": False},
+                    {"key": "s4_responsible_officer",    "label": "Responsible Officer",                 "type": "text",   "required": True},
+                    {"key": "s4_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
+                    {"key": "s4_actual_date",            "label": "Actual Completion Date",              "type": "date",   "required": False},
+                    {"key": "s4_delay_reason",           "label": "Delay Reason (if delayed)",           "type": "dropdown","required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                    {"key": "s4_remarks",                "label": "Remarks",                             "type": "textarea","required": False},
+                ],
+            },
+            # ── SRS §7.1 Stage 5 ──
+            {
+                "title": "Stage 5 — Joint Inspection at Vendor Works (SRS §7.1)",
+                "fields": [
+                    {"key": "s5_inspection_date",        "label": "Date of Joint Inspection",            "type": "date",   "required": True},
+                    {"key": "s5_inspection_report_ref",  "label": "Inspection Report Reference",         "type": "text",   "required": False},
+                    {"key": "s5_inspection_outcome",     "label": "Inspection Outcome",                  "type": "dropdown","required": True, "options": ["Satisfactory", "Satisfactory with Observations", "Unsatisfactory — Rework Required"]},
+                    {"key": "s5_defects_found",          "label": "Defects / Observations found at Vendor Works", "type": "textarea", "required": False},
+                    {"key": "s5_responsible_officer",    "label": "Responsible Officer (KPTCL)",         "type": "text",   "required": True},
+                    {"key": "s5_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
+                    {"key": "s5_actual_date",            "label": "Actual Completion Date",              "type": "date",   "required": False},
+                    {"key": "s5_delay_reason",           "label": "Delay Reason (if delayed)",           "type": "dropdown","required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                    {"key": "s5_remarks",                "label": "Remarks",                             "type": "textarea","required": False},
+                ],
+            },
+            # ── SRS §7.1 Stage 6 ──
+            {
+                "title": "Stage 6 — Estimate & Revised Work Award (SRS §7.1)",
+                "fields": [
+                    {"key": "s6_estimate_date",          "label": "Date of Estimate Preparation",        "type": "date",   "required": True},
+                    {"key": "s6_estimate_amount",        "label": "Estimated Repair Amount",             "type": "number", "required": False, "unit": "INR"},
+                    {"key": "s6_estimate_doc_ref",       "label": "Estimate Document Reference",         "type": "text",   "required": False},
+                    {"key": "s6_work_award_date",        "label": "Date of Revised Work Award",          "type": "date",   "required": False},
+                    {"key": "s6_award_letter_ref",       "label": "Award Letter Reference",              "type": "text",   "required": False},
+                    {"key": "s6_responsible_officer",    "label": "Responsible Officer",                 "type": "text",   "required": True},
+                    {"key": "s6_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
+                    {"key": "s6_actual_date",            "label": "Actual Completion Date",              "type": "date",   "required": False},
+                    {"key": "s6_delay_reason",           "label": "Delay Reason (if delayed)",           "type": "dropdown","required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                    {"key": "s6_remarks",                "label": "Remarks",                             "type": "textarea","required": False},
+                ],
+            },
+            # ── SRS §7.1 Stage 7 ──
+            {
+                "title": "Stage 7 — Stage Inspections During Repair (SRS §7.1)",
+                "fields": [
+                    {"key": "s7_stage_insp_1_date",      "label": "Stage Inspection 1 — Date",           "type": "date",   "required": False},
+                    {"key": "s7_stage_insp_1_result",    "label": "Stage Inspection 1 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"]},
+                    {"key": "s7_stage_insp_2_date",      "label": "Stage Inspection 2 — Date",           "type": "date",   "required": False},
+                    {"key": "s7_stage_insp_2_result",    "label": "Stage Inspection 2 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"]},
+                    {"key": "s7_stage_insp_3_date",      "label": "Stage Inspection 3 — Date",           "type": "date",   "required": False},
+                    {"key": "s7_stage_insp_3_result",    "label": "Stage Inspection 3 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"]},
+                    {"key": "s7_stage_observations",     "label": "Observations across Stage Inspections","type": "textarea","required": False},
+                    {"key": "s7_responsible_officer",    "label": "Responsible Officer (Stage Inspections)","type": "text", "required": False},
+                    {"key": "s7_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
+                    {"key": "s7_actual_date",            "label": "Actual Completion Date",              "type": "date",   "required": False},
+                    {"key": "s7_delay_reason",           "label": "Delay Reason (if delayed)",           "type": "dropdown","required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                ],
+            },
+            # ── SRS §7.1 Stage 8 ──
+            {
+                "title": "Stage 8 — Final Inspection at Vendor Works (SRS §7.1)",
+                "fields": [
+                    {"key": "s8_final_insp_date",        "label": "Date of Final Inspection",            "type": "date",   "required": True},
+                    {"key": "s8_final_insp_report_ref",  "label": "Final Inspection Report Reference",   "type": "text",   "required": False},
+                    {"key": "s8_final_insp_outcome",     "label": "Final Inspection Outcome",            "type": "dropdown","required": True, "options": ["Accepted — Cleared for Dispatch", "Accepted with Punch Points", "Rejected — Rework Required"]},
+                    {"key": "s8_punch_points",           "label": "Punch Points (if any)",               "type": "textarea","required": False},
+                    {"key": "s8_test_results_summary",   "label": "Test Results Summary at Final Inspection", "type": "textarea","required": False},
+                    {"key": "s8_responsible_officer",    "label": "Responsible Officer",                 "type": "text",   "required": True},
+                    {"key": "s8_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
+                    {"key": "s8_actual_date",            "label": "Actual Completion Date",              "type": "date",   "required": False},
+                    {"key": "s8_delay_reason",           "label": "Delay Reason (if delayed)",           "type": "dropdown","required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                ],
+            },
+            # ── SRS §7.1 Stage 9 ──
+            {
+                "title": "Stage 9 — Dispatch of Transformer (SRS §7.1)",
+                "fields": [
+                    {"key": "s9_dispatch_date",          "label": "Date of Dispatch from Vendor Works",  "type": "date",   "required": True},
+                    {"key": "s9_transport_details",      "label": "Transport Details (vehicle type, registration, driver)", "type": "textarea","required": True},
+                    {"key": "s9_insurance_doc_ref",      "label": "Insurance Document Reference",        "type": "text",   "required": False},
+                    {"key": "s9_eta_substation",         "label": "Estimated Arrival at Substation",     "type": "date",   "required": False},
+                    {"key": "s9_actual_arrival_date",    "label": "Actual Arrival at Substation",        "type": "date",   "required": False},
+                    {"key": "s9_transit_damage",         "label": "Any transit damage observed",         "type": "checkbox","required": True},
+                    {"key": "s9_transit_damage_details", "label": "Transit Damage Details (if any)",     "type": "textarea","required": False},
+                    {"key": "s9_responsible_officer",    "label": "Responsible Officer",                 "type": "text",   "required": True},
+                    {"key": "s9_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
+                    {"key": "s9_delay_reason",           "label": "Delay Reason (if delayed)",           "type": "dropdown","required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                ],
+            },
+            # ── SRS §7.1 Stage 10 ──
+            {
+                "title": "Stage 10 — Erection, Testing & Commissioning (SRS §7.1)",
+                "fields": [
+                    {"key": "s10_erection_date",         "label": "Date of Erection / Re-installation",  "type": "date",   "required": True},
+                    {"key": "s10_commissioning_date",    "label": "Date of Commissioning",               "type": "date",   "required": True},
+                    {"key": "s10_commissioning_report_ref","label":"Commissioning Report Reference",      "type": "text",   "required": False},
+                    # Post-repair test results (SRS §7.3)
+                    {"key": "s10_ir_hv_mohm",            "label": "IR — HV to Earth (Post-Repair)",      "type": "number", "required": True,  "unit": "MOhm"},
+                    {"key": "s10_ir_lv_mohm",            "label": "IR — LV to Earth (Post-Repair)",      "type": "number", "required": True,  "unit": "MOhm"},
+                    {"key": "s10_bdv_kv",                "label": "Oil BDV (Post-Repair)",               "type": "number", "required": True,  "unit": "kV"},
+                    {"key": "s10_turns_ratio_ok",        "label": "Turns ratio within specification",    "type": "dropdown","required": True, "options": ["Pass", "Fail"]},
+                    {"key": "s10_winding_resistance_ok", "label": "Winding resistance within specification","type":"dropdown","required": True, "options": ["Pass", "Fail"]},
+                    {"key": "s10_no_load_test_ok",       "label": "No-load test result",                 "type": "dropdown","required": True, "options": ["Pass", "Fail"]},
+                    {"key": "s10_test_results_summary",  "label": "Complete Test Results Summary",       "type": "textarea","required": True},
+                    {"key": "s10_commissioning_status",  "label": "Commissioning Status",                "type": "dropdown","required": True, "options": ["Commissioned — In Service", "Commissioned with Surveillance", "Commissioning Failed — Rework Required"]},
+                    {"key": "s10_responsible_officer",   "label": "Responsible Officer",                 "type": "text",   "required": True},
+                    {"key": "s10_contractual_date",      "label": "Contracted Completion Date",          "type": "date",   "required": False},
+                    {"key": "s10_actual_date",           "label": "Actual Completion Date",              "type": "date",   "required": False},
+                    {"key": "s10_delay_reason",          "label": "Delay Reason (if delayed)",           "type": "dropdown","required": False, "options": ["Vendor-attributable", "KPTCL-attributable", "No Delay"]},
+                    # SRS §7.2 Delay Accountability
+                    {"key": "total_vendor_delay_days",   "label": "Total Vendor-Attributable Delay",     "type": "number", "required": False, "unit": "days"},
+                    {"key": "total_kptcl_delay_days",    "label": "Total KPTCL-Attributable Delay",      "type": "number", "required": False, "unit": "days"},
+                ],
+            },
+            # ── SRS §7.3: Post-Commissioning Surveillance ──
+            {
+                "title": "Post-Commissioning Surveillance (SRS §7.3)",
+                "fields": [
+                    {"key": "surveillance_period_months","label": "Surveillance Period",                 "type": "number", "required": True,  "unit": "months", "default": "24"},
+                    {"key": "surveillance_start_date",   "label": "Surveillance Start Date",             "type": "date",   "required": True},
+                    {"key": "surveillance_end_date",     "label": "Surveillance End Date",               "type": "date",   "required": False},
+                    {"key": "dga_result_1m",             "label": "DGA at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"]},
+                    {"key": "bdv_result_1m",             "label": "BDV at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"]},
+                    {"key": "ir_result_6m",              "label": "IR Test at 6 Months",                "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"]},
+                    {"key": "loading_history_summary",   "label": "Loading History Summary (surveillance period)", "type": "textarea","required": False},
+                    {"key": "incidents_during_surveillance","label":"Any incidents during surveillance period","type":"checkbox","required": True},
+                    {"key": "incident_details",          "label": "Incident Details (if any)",           "type": "textarea","required": False},
+                    {"key": "overall_quality_rating",    "label": "Overall Quality Rating of Repair",    "type": "dropdown","required": True, "options": ["Excellent", "Good", "Satisfactory", "Poor", "Unsatisfactory"]},
+                    {"key": "post_repair_evaluation",    "label": "Post-Repair Evaluation Summary",      "type": "textarea","required": True},
+                    {"key": "warranty_expiry_date",      "label": "Repair Warranty Expiry Date",         "type": "date",   "required": False},
+                ],
+            },
+        ],
+    },
 }
 
 
-# ─── Test Type Name → Template Key Lookup ──────────────────────
+# ── Request-category → template key mapping ──────────────────────────────────
+# Used when a TestingRequest is created with a specific request_category but no
+# explicit test_type_id. Flutter resolves the form template via this map.
+REQUEST_CATEGORY_TO_TEMPLATE = {
+    "maintenance":      "transformer_maintenance",
+    "inspection":       "transformer_inspection",
+    "repair_lifecycle": "transformer_repair_lifecycle",
+    # 'test' category uses test_type_id / TEST_TYPE_TO_TEMPLATE instead
+}
+
+
 TEST_TYPE_TO_TEMPLATE = {
     # Existing mappings
     "Relay Testing Report": "relay_testing_report",
@@ -1828,6 +2274,32 @@ TEST_TYPE_TO_TEMPLATE = {
     "Tan Delta NCT Test": "tandelta_nct",
     # CVT
     "CVT Test Report": "cvt_test",
+
+    # ── Category-based type mappings (Option 1: reuse templates) ──
+    # Maintenance types → transformer_maintenance
+    "Routine Preventive Maintenance": "transformer_maintenance",
+    "Power Transformer Major Maintenance": "transformer_maintenance",
+    "Circuit Breaker Major Maintenance": "transformer_maintenance",
+
+    # Inspection types → transformer_inspection
+    "Electrical Safety": "transformer_inspection",
+    "Civil": "transformer_inspection",
+    "Fire Safety": "transformer_inspection",
+    "Documentation": "transformer_inspection",
+    "Environmental": "transformer_inspection",
+    "General Maintenance": "transformer_inspection",
+
+    # Repair lifecycle stages → transformer_repair_lifecycle
+    "S1: Failure Report": "transformer_repair_lifecycle",
+    "S2: Repair Committee": "transformer_repair_lifecycle",
+    "S3: Allotment to Repairer": "transformer_repair_lifecycle",
+    "S4: Lifting by Repairer": "transformer_repair_lifecycle",
+    "S5: Joint Inspection at Vendor": "transformer_repair_lifecycle",
+    "S6: Estimate & Revised Work Award": "transformer_repair_lifecycle",
+    "S7: Stage Inspections": "transformer_repair_lifecycle",
+    "S8: Final Inspection": "transformer_repair_lifecycle",
+    "S9: Dispatch": "transformer_repair_lifecycle",
+    "S10: Erection, Testing & Commissioning": "transformer_repair_lifecycle",
 }
 
 

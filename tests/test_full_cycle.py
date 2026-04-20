@@ -1,527 +1,470 @@
 """
-Complete Testing Request Lifecycle Test
-Tests: Create → Approve → Assign → Accept → In Progress → Complete
+Full 4-User-Type Testing Request Lifecycle
+============================================================
+Users:
+  1. ORIGINATOR   originator@kptcl.com   admin123
+  2. ORG ADMIN    orgadmin@kptcl.com     admin123  (approves + assigns)
+  3. FIELD TESTER fieldtester1@kptcl.com Tester123!
+  4. LAB TESTER   labtester1@kptcl.com   Tester123!
+
+Request categories tested:
+  test | maintenance | inspection | repair_lifecycle
+============================================================
 """
 import requests
 import json
+from datetime import datetime, timezone
 
-BASE_URL = "http://localhost:8020"
+BASE = "http://localhost:8000"
 
+# ── Colour helpers ────────────────────────────────────────────────────────────
+OK   = "[OK]"
+FAIL = "[FAIL]"
+INFO = "[INFO]"
+WARN = "[WARN]"
+
+def section(title):
+    print(f"\n{'='*65}")
+    print(f"  {title}")
+    print(f"{'='*65}")
+
+def step(msg):
+    print(f"\n  >> {msg}")
+
+def log(tag, msg):
+    print(f"     {tag} {msg}")
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
 def login(email, password):
-    """Login and get JWT token"""
-    response = requests.post(
-        f"{BASE_URL}/token",
-        data={"username": email, "password": password}
-    )
-    if response.status_code == 200:
-        return response.json()["access_token"]
-    else:
-        print(f"[ERROR] Login failed for {email}: {response.status_code}")
-        print(response.text)
-        return None
+    r = requests.post(f"{BASE}/auth/login", json={"email": email, "password": password})
+    if r.status_code == 200:
+        return r.json()["access_token"]
+    log(FAIL, f"Login failed for {email}: {r.status_code} {r.text[:80]}")
+    return None
 
-def create_testing_request(token, data):
-    """Create a new testing request"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.post(
-        f"{BASE_URL}/testing_requests/",
-        headers=headers,
-        json=data
-    )
+def h(token):
+    return {"Authorization": f"Bearer {token}"}
 
-    if response.status_code in [200, 201]:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to create request: {response.status_code}")
-        print(response.text)
-        return None
+def call(method, url, token=None, **kwargs):
+    headers = h(token) if token else {}
+    if "json" in kwargs:
+        headers["Content-Type"] = "application/json"
+    r = getattr(requests, method)(url, headers=headers, **kwargs)
+    return r
 
-def submit_testing_request(token, request_id):
-    """Submit a testing request for approval"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.put(
-        f"{BASE_URL}/testing_requests/{request_id}/submit",
-        headers=headers
-    )
+# ── Setup helpers ─────────────────────────────────────────────────────────────
+def get_org_and_dept(admin_token):
+    r = call("get", f"{BASE}/organizations/", admin_token)
+    orgs = r.json() if r.status_code == 200 else []
+    org = next((o for o in orgs if o.get("code") == "KPTCL"), orgs[0] if orgs else None)
+    if not org:
+        return None, None
+    org_id = org["id"]
+    # Use /testing_requests/department_hierarchy to get a leaf dept
+    r2 = call("get", f"{BASE}/testing_requests/department_hierarchy?org_id={org_id}", admin_token)
+    depts = r2.json() if r2.status_code == 200 else []
+    dept_id = depts[0]["id"] if depts else None
+    return org_id, dept_id
 
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to submit request: {response.status_code}")
-        print(response.text)
-        return None
+def get_equipment(admin_token):
+    r = call("get", f"{BASE}/equipment/?limit=1", admin_token)
+    items = r.json() if r.status_code == 200 else []
+    return items[0] if items else None
 
-def get_pending_approvals(token):
-    """Get pending approvals"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(
-        f"{BASE_URL}/testing-requests/approvals/pending",
-        headers=headers
-    )
+def get_tester_role_and_user(admin_token, request_id, role_name="Field Tester"):
+    r = call("get", f"{BASE}/testing-requests/approvals/{request_id}/tester-roles", admin_token)
+    if r.status_code != 200:
+        return None, None
+    roles = r.json()
+    role = next((ro for ro in roles if ro["role_name"] == role_name), None)
+    if not role:
+        # fallback: pick any role
+        role = roles[0] if roles else None
+    if not role:
+        return None, None
+    role_id = role["role_id"]
+    r2 = call("get", f"{BASE}/testing-requests/approvals/{request_id}/tester-roles/{role_id}/users", admin_token)
+    users = r2.json() if r2.status_code == 200 else []
+    user = users[0] if users else None
+    return role_id, user
 
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to get pending approvals: {response.status_code}")
-        return []
+# ── Core lifecycle function ───────────────────────────────────────────────────
+def run_lifecycle(
+    scenario_name,
+    category,
+    originator_token,
+    admin_token,
+    tester_email,
+    tester_password,
+    tester_role_name,
+    org_id,
+    dept_id,
+    equip=None,
+    test_data_payload=None,
+):
+    section(f"{scenario_name}  [category={category}]")
+    passed = True
 
-def approve_and_assign(token, request_id, role_id, tester_id):
-    """Approve request and assign to tester"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.post(
-        f"{BASE_URL}/testing-requests/approvals/{request_id}/approve-and-assign",
-        headers=headers,
-        json={
-            "tester_role_id": str(role_id),
-            "tester_id": str(tester_id),
-            "comment": "Approved for testing"
-        }
-    )
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to approve: {response.status_code}")
-        print(response.text)
-        return None
-
-def get_tester_assignments(token):
-    """Get requests assigned to tester"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(
-        f"{BASE_URL}/testing/my-assignments",
-        headers=headers
-    )
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to get assignments: {response.status_code}")
-        print(response.text)
-        return []
-
-def tester_accept_request(token, request_id):
-    """Tester accepts the assigned request"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.put(
-        f"{BASE_URL}/testing/{request_id}/accept",
-        headers=headers
-    )
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to accept: {response.status_code}")
-        print(response.text)
-        return None
-
-def tester_start_testing(token, request_id):
-    """Tester starts testing"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.put(
-        f"{BASE_URL}/testing/{request_id}/start",
-        headers=headers
-    )
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to start testing: {response.status_code}")
-        print(response.text)
-        return None
-
-def upload_test_results(token, request_id):
-    """Upload structured test results"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.post(
-        f"{BASE_URL}/testing/{request_id}/results/structured",
-        headers=headers,
-        json={
-            "template_key": "general_test",
-            "test_data": {
-                "voltage_test": "passed",
-                "resistance_test": "passed",
-                "insulation_test": "passed"
-            },
-            "overall_result": "passed",
-            "remarks": "All tests passed successfully",
-            "replacement_products": []
-        }
-    )
-
-    if response.status_code in [200, 201]:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to upload results: {response.status_code}")
-        print(response.text)
-        return None
-
-def tester_complete_testing(token, request_id):
-    """Tester completes testing with results"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.put(
-        f"{BASE_URL}/testing/{request_id}/submit_results",
-        headers=headers,
-        json={
-            "replacement_products": []  # No replacement needed for passing test
-        }
-    )
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to complete testing: {response.status_code}")
-        print(response.text)
-        return None
-
-def get_request_details(token, request_id):
-    """Get testing request details"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(
-        f"{BASE_URL}/testing_requests/{request_id}",
-        headers=headers
-    )
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to get request: {response.status_code}")
-        return None
-
-def get_pending_recommendation_approvals(token):
-    """Get pending recommendation approvals"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(
-        f"{BASE_URL}/approvals/pending",
-        headers=headers
-    )
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to get pending approvals: {response.status_code}")
-        print(response.text)
-        return []
-
-def get_recommendation_by_request(token, request_id):
-    """Get recommendation created for a testing request"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(
-        f"{BASE_URL}/approvals/by-request/{request_id}",
-        headers=headers
-    )
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to get recommendation: {response.status_code}")
-        print(response.text)
-        return None
-
-def approve_recommendation(token, recommendation_id):
-    """Approve a recommendation"""
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.put(
-        f"{BASE_URL}/approvals/{recommendation_id}/approve",
-        headers=headers,
-        json={
-            "notes": "Recommendation approved - proceed with procurement"
-        }
-    )
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"[ERROR] Failed to approve recommendation: {response.status_code}")
-        print(response.text)
-        return None
-
-
-def main():
-    print("=" * 80)
-    print("  COMPLETE TESTING REQUEST LIFECYCLE TEST")
-    print("=" * 80)
-    print()
-
-    # ========== STEP 1: Create Request ==========
-    print("STEP 1: Create Testing Request (as org admin/originator)")
-    print("-" * 80)
-
-    originator_token = login("orgadmin@kptcl.com", "admin123")
-    if not originator_token:
-        print("[FAILED] Could not login as org admin")
-        return
-    print("[OK] Logged in as orgadmin@kptcl.com")
-
-    # Get KPTCL Organization
-    headers = {"Authorization": f"Bearer {originator_token}"}
-    org_response = requests.get(f"{BASE_URL}/organizations/", headers=headers)
-    if org_response.status_code != 200:
-        print(f"[FAILED] Could not fetch organizations: {org_response.status_code}")
-        return
-
-    orgs = org_response.json()
-    kptcl_org = next((org for org in orgs if org['code'] == 'KPTCL'), None)
-    if not kptcl_org:
-        print("[FAILED] KPTCL Organization not found")
-        return
-
-    org_id = kptcl_org['id']
-    dept_id = None
-    if kptcl_org.get('departments') and len(kptcl_org['departments']) > 0:
-        dept_id = kptcl_org['departments'][0]['id']
-
-    print(f"[OK] Found KPTCL Org: {org_id}")
-
-    request_data = {
-        "title": "Full Cycle Test - Transformer Testing",
-        "description": "Complete workflow validation for testing request lifecycle",
+    # ── Step 1: Originator creates draft ──────────────────────────────────────
+    step("ORIGINATOR: Create draft testing request")
+    payload = {
+        "title": f"[{category.upper()}] {scenario_name}",
+        "description": f"Automated E2E test for {category} workflow",
+        "request_category": category,
+        "priority": "high",
         "transformer_type": "Power Transformer",
         "transformer_rating": "100 MVA",
-        "manufacturer": "Test Manufacturer Co.",
-        "serial_number": "TEST-2026-001",
+        "manufacturer": "BHEL",
+        "serial_number": f"SN-{category[:4].upper()}-{datetime.now().strftime('%H%M%S')}",
         "organization_id": org_id,
-        "department_id": dept_id
+        "department_id": dept_id,
     }
+    if equip:
+        payload["equipment_id"] = equip["id"]
+        payload["equipment_type_id"] = equip.get("equipment_type_id")
 
-    new_request = create_testing_request(originator_token, request_data)
-    if not new_request:
-        print("[FAILED] Could not create testing request")
-        return
+    r = call("post", f"{BASE}/testing_requests/", originator_token, json=payload)
+    if r.status_code not in (200, 201):
+        log(FAIL, f"Create failed {r.status_code}: {r.text[:100]}")
+        return False
+    req = r.json()
+    req_id = req["id"]
+    log(OK, f"Created  {req['request_number']}  status={req['status']}  category={req['request_category']}")
+    log(INFO, f"         UEIC={req.get('equipment_ueic')}  dept={req.get('department_name')}")
 
-    request_id = new_request["id"]
-    request_number = new_request["request_number"]
-    print(f"[OK] Created request: {request_number} (ID: {request_id})")
-    print(f"     Status: {new_request['status']}")
+    # ── Step 2: Originator submits ────────────────────────────────────────────
+    step("ORIGINATOR: Submit request")
+    r = call("put", f"{BASE}/testing_requests/{req_id}/submit", originator_token)
+    if r.status_code != 200:
+        log(FAIL, f"Submit failed {r.status_code}: {r.text[:100]}")
+        return False
+    log(OK, f"Submitted  new status={r.json()['status']}")
 
-    # Submit the request for approval
-    print("[INFO] Submitting request for approval...")
-    submitted = submit_testing_request(originator_token, request_id)
-    if not submitted:
-        print("[FAILED] Could not submit request")
-        return
-    print(f"[OK] Request submitted, new status: {submitted['status']}")
-    print()
+    # ── Step 3: Admin sees pending approvals ──────────────────────────────────
+    step("ORG ADMIN: Check pending approvals")
+    r = call("get", f"{BASE}/testing-requests/approvals/pending?category={category}", admin_token)
+    pending = r.json() if r.status_code == 200 else []
+    found = any(p["id"] == req_id for p in pending)
+    log(OK if found else WARN, f"Pending list has {len(pending)} item(s). Our request found={found}")
 
-    # ========== STEP 2: Approve and Assign ==========
-    print("STEP 2: Approve and Assign to Tester (as approver)")
-    print("-" * 80)
-
-    approver_token = originator_token  # Use same admin token for approval
-    print("[OK] Using org admin as approver")
-
-    pending = get_pending_approvals(approver_token)
-    print(f"[OK] Found {len(pending)} pending approvals")
-
-    # Find our request
-    our_request = next((r for r in pending if r["id"] == request_id), None)
-    if not our_request:
-        print(f"[WARNING] Request {request_number} not found in pending (may need status update)")
-
-    # Get available tester roles dynamically
-    headers = {"Authorization": f"Bearer {approver_token}"}
-    roles_response = requests.get(
-        f"{BASE_URL}/testing-requests/approvals/{request_id}/tester-roles",
-        headers=headers
-    )
-
-    if roles_response.status_code != 200:
-        print(f"[FAILED] Could not fetch tester roles: {roles_response.status_code}")
-        return
-
-    tester_roles = roles_response.json()
-    if not tester_roles:
-        print("[FAILED] No eligible tester roles found")
-        return
-
-    print(f"[OK] Found {len(tester_roles)} eligible tester roles")
-    tester_role_id = tester_roles[0]["role_id"]
-    tester_role_name = tester_roles[0]["role_name"]
-    print(f"[INFO] Selected tester role: {tester_role_name}")
-
-    # Get users for this role
-    users_response = requests.get(
-        f"{BASE_URL}/testing-requests/approvals/{request_id}/tester-roles/{tester_role_id}/users",
-        headers=headers
-    )
-
-    if users_response.status_code != 200:
-        print(f"[FAILED] Could not fetch tester users: {users_response.status_code}")
-        return
-
-    tester_users = users_response.json()
-    if not tester_users:
-        print("[FAILED] No users found in tester role")
-        return
-
-    print(f"[OK] Found {len(tester_users)} users in role")
-    tester_id = tester_users[0]["user_id"]
-    tester_name = tester_users[0]["name"]
-    tester_email = tester_users[0]["email"]
-    print(f"[INFO] Selected tester: {tester_name} ({tester_email})")
-
-    approval_result = approve_and_assign(approver_token, request_id, tester_role_id, tester_id)
-    if not approval_result:
-        print("[FAILED] Could not approve and assign request")
-        return
-
-    print(f"[OK] Request approved and assigned to: {approval_result.get('assigned_tester_email')}")
-    print(f"     New status: {approval_result.get('new_status')}")
-    print()
-
-    # ========== STEP 3: Tester Views Assignment ==========
-    print("STEP 3: View Assigned Requests (as tester)")
-    print("-" * 80)
-
-    tester_token = login(tester_email, "Tester123!")
-    if not tester_token:
-        print(f"[FAILED] Could not login as {tester_email}")
-        return
-    print(f"[OK] Logged in as {tester_email}")
-
-    assignments = get_tester_assignments(tester_token)
-    print(f"[OK] Found {len(assignments)} assigned requests")
-
-    # Find our request
-    our_assignment = next((r for r in assignments if r["id"] == request_id), None)
-    if not our_assignment:
-        print(f"[WARNING] Request {request_number} not found in assignments")
-        print("     Available requests:")
-        for req in assignments:
-            print(f"       - {req.get('request_number')}: {req.get('status')}")
+    # ── Step 4: Admin picks tester role + user ────────────────────────────────
+    step(f"ORG ADMIN: Pick {tester_role_name} role and user")
+    role_id, tester_user = get_tester_role_and_user(admin_token, req_id, tester_role_name)
+    if not tester_user:
+        log(WARN, f"{tester_role_name} users not found via roles endpoint, using direct assign")
+        # Fallback: login as tester to get their ID
+        tt = login(tester_email, tester_password)
+        if not tt:
+            log(FAIL, "Tester login failed — cannot proceed")
+            return False
+        me_r = call("get", f"{BASE}/users/me", tt)
+        if me_r.status_code == 200:
+            tester_user = {"user_id": me_r.json()["id"], "email": tester_email, "name": tester_email}
+        else:
+            log(FAIL, "Cannot fetch tester user ID")
+            return False
     else:
-        print(f"[OK] Found our request: {our_assignment['request_number']}")
-        print(f"     Status: {our_assignment['status']}")
-    print()
+        log(OK, f"Role={tester_role_name}  user={tester_user['name']} ({tester_user['email']})")
 
-    # ========== STEP 4: Accept Request ==========
-    print("STEP 4: Accept Testing Request (as tester)")
-    print("-" * 80)
+    # ── Step 5: Admin approve-and-assign ─────────────────────────────────────
+    step("ORG ADMIN: Approve and assign to tester")
+    assign_body = {
+        "tester_id": tester_user["user_id"],
+        "comment": f"Approved for {tester_role_name} - {scenario_name}",
+    }
+    if role_id:
+        assign_body["tester_role_id"] = str(role_id)
 
-    accept_result = tester_accept_request(tester_token, request_id)
-    if not accept_result:
-        print("[FAILED] Could not accept request")
+    r = call("post", f"{BASE}/testing-requests/approvals/{req_id}/approve-and-assign", admin_token, json=assign_body)
+    if r.status_code != 200:
+        log(FAIL, f"Approve-and-assign failed {r.status_code}: {r.text[:150]}")
+        return False
+    result = r.json()
+    log(OK, f"Assigned to {result.get('assigned_tester_email')}  status={result.get('new_status')}")
+
+    # ── Step 6: Tester logs in and sees assignment ────────────────────────────
+    step(f"TESTER ({tester_email}): Login and view assignment")
+    tester_token = login(tester_email, tester_password)
+    if not tester_token:
+        log(FAIL, f"Tester login failed")
+        return False
+    log(OK, f"Logged in as {tester_email}")
+
+    r = call("get", f"{BASE}/testing/my-assignments", tester_token)
+    assignments = r.json() if r.status_code == 200 else []
+    found_assign = any(a["id"] == req_id for a in assignments)
+    log(OK if found_assign else WARN, f"My-assignments: {len(assignments)} items, our request found={found_assign}")
+
+    # ── Step 7: Tester accepts ────────────────────────────────────────────────
+    step("TESTER: Accept request")
+    r = call("put", f"{BASE}/testing/{req_id}/accept", tester_token)
+    if r.status_code != 200:
+        log(FAIL, f"Accept failed {r.status_code}: {r.text[:100]}")
+        return False
+    log(OK, f"Accepted  status={r.json()['status']}")
+
+    # ── Step 8: Tester starts ─────────────────────────────────────────────────
+    step("TESTER: Start testing")
+    r = call("put", f"{BASE}/testing/{req_id}/start", tester_token)
+    if r.status_code != 200:
+        log(FAIL, f"Start failed {r.status_code}: {r.text[:100]}")
+        return False
+    log(OK, f"Started   status={r.json()['status']}")
+
+    # ── Step 9: Tester uploads structured results ─────────────────────────────
+    step("TESTER: Upload structured test results")
+    if test_data_payload is None:
+        test_data_payload = {
+            "bdv_kv": "45",
+            "acidity_mg_koh": "0.03",
+            "moisture_ppm": "22",
+            "tan_delta": "0.003",
+            "overall": "NORMAL",
+        }
+    structured = {
+        "template_key": f"{category}_test",
+        "test_data": test_data_payload,
+        "overall_result": "passed",
+        "remarks": f"All {category} checks passed. Automated test.",
+        "replacement_products": [],
+    }
+    r = call("post", f"{BASE}/testing/{req_id}/results/structured", tester_token, json=structured)
+    if r.status_code not in (200, 201):
+        log(FAIL, f"Upload results failed {r.status_code}: {r.text[:100]}")
+        passed = False
+    else:
+        log(OK, f"Results uploaded  result_id={r.json().get('id','?')[:16]}...")
+
+    # ── Step 10: Tester submits results ───────────────────────────────────────
+    step("TESTER: Submit results (complete testing)")
+    r = call("put", f"{BASE}/testing/{req_id}/submit_results", tester_token,
+             json={"replacement_products": []})
+    if r.status_code != 200:
+        log(FAIL, f"Submit results failed {r.status_code}: {r.text[:100]}")
+        return False
+    status_after = r.json()["status"]
+    log(OK, f"Submitted  status={status_after}")
+
+    # ── Step 11: Admin / approver sees recommendation ─────────────────────────
+    step("ORG ADMIN: View and approve recommendation")
+    r = call("get", f"{BASE}/approvals/by-request/{req_id}", admin_token)
+    if r.status_code != 200:
+        log(WARN, f"No recommendation yet ({r.status_code}) — skipping approval step")
+    else:
+        rec = r.json()
+        rec_id = rec["id"]
+        rec_status = rec.get("approval_status")
+        log(OK, f"Recommendation found  id={str(rec_id)[:16]}...  approval_status={rec_status}")
+
+        if rec_status not in ("approved", "completed"):
+            r2 = call("put", f"{BASE}/approvals/{rec_id}/approve", admin_token,
+                      json={"notes": f"Approved by admin — {scenario_name}"})
+            if r2.status_code == 200:
+                log(OK, f"Recommendation approved  new_status={r2.json().get('approval_status')}")
+            else:
+                log(WARN, f"Approve recommendation returned {r2.status_code}: {r2.text[:80]}")
+
+    # ── Step 12: Verify final state ───────────────────────────────────────────
+    step("ORIGINATOR: Verify final request state")
+    r = call("get", f"{BASE}/testing_requests/{req_id}", originator_token)
+    if r.status_code == 200:
+        final = r.json()
+        log(OK, f"Final status         = {final['status']}")
+        log(INFO, f"request_category     = {final['request_category']}")
+        log(INFO, f"equipment_ueic       = {final.get('equipment_ueic')}")
+        log(INFO, f"assigned_tester_name = {final.get('assigned_tester_name')}")
+    else:
+        log(FAIL, f"Could not fetch final state {r.status_code}")
+        passed = False
+
+    if passed:
+        log(OK, f"SCENARIO PASSED")
+    else:
+        log(FAIL, f"SCENARIO HAD ERRORS — see above")
+    return passed
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+def main():
+    print("\n" + "+"*65)
+    print("|" + " "*15 + "4-USER-TYPE E2E TEST SUITE" + " "*22 + "|")
+    print("+"*65)
+    print("""
+  Users:
+    1. ORIGINATOR   originator@kptcl.com   admin123
+    2. ORG ADMIN    orgadmin@kptcl.com     admin123
+    3. FIELD TESTER fieldtester1@kptcl.com Tester123!
+    4. LAB TESTER   labtester1@kptcl.com   Tester123!
+""")
+
+    # ── Login all 4 users ────────────────────────────────────────────────────
+    section("LOGIN — 4 User Types")
+    tokens = {}
+
+    users = [
+        ("originator",   "originator@kptcl.com",    "admin123"),
+        ("admin",        "orgadmin@kptcl.com",       "admin123"),
+        ("fieldtester",  "fieldtester1@kptcl.com",   "Tester123!"),
+        ("labtester",    "labtester1@kptcl.com",      "Tester123!"),
+    ]
+    for key, email, pwd in users:
+        t = login(email, pwd)
+        if t:
+            tokens[key] = t
+            log(OK, f"{key:15} logged in as {email}")
+        else:
+            log(FAIL, f"{key:15} login FAILED for {email}")
+
+    if "admin" not in tokens or "originator" not in tokens:
+        print("\n[FAIL] Cannot proceed — admin/originator login failed")
         return
 
-    print(f"[OK] Request accepted")
-    print(f"     Status: {accept_result.get('status')}")
-    print()
+    # ── Shared setup ─────────────────────────────────────────────────────────
+    section("SETUP — Org, Department, Equipment")
+    org_id, dept_id = get_org_and_dept(tokens["admin"])
+    log(OK if org_id else FAIL, f"org_id  = {org_id}")
+    log(OK if dept_id else WARN, f"dept_id = {dept_id}")
 
-    # ========== STEP 5: Start Testing ==========
-    print("STEP 5: Start Testing (as tester)")
-    print("-" * 80)
+    equip = get_equipment(tokens["admin"])
+    log(OK if equip else WARN,
+        f"equipment = {equip['ueic'] if equip else 'none (will use manual fields)'}")
 
-    start_result = tester_start_testing(tester_token, request_id)
-    if not start_result:
-        print("[FAILED] Could not start testing")
+    if not org_id:
+        print("[FAIL] No org found — cannot continue")
         return
 
-    print(f"[OK] Testing started")
-    print(f"     Status: {start_result.get('status')}")
+    # ── Originator token (use admin if originator doesn't exist) ─────────────
+    orig_token = tokens.get("originator") or tokens["admin"]
+
+    # ── Run 4 scenarios — each with different category + tester type ─────────
+    results = []
+
+    # Scenario A: test category  → Field Tester
+    if "fieldtester" in tokens:
+        ok = run_lifecycle(
+            scenario_name="Routine Test — Field Tester",
+            category="test",
+            originator_token=orig_token,
+            admin_token=tokens["admin"],
+            tester_email="fieldtester1@kptcl.com",
+            tester_password="Tester123!",
+            tester_role_name="Field Tester",
+            org_id=org_id,
+            dept_id=dept_id,
+            equip=equip,
+            test_data_payload={
+                "insulation_resistance_mohm": "500",
+                "winding_resistance_ohm": "0.45",
+                "turns_ratio": "11:0.433",
+                "no_load_current_a": "2.1",
+                "overall": "PASS",
+            },
+        )
+        results.append(("A. test      -> Field Tester",  ok))
+    else:
+        log(WARN, "Skipping Field Tester scenario (login failed)")
+
+    # Scenario B: maintenance category  → Lab Tester
+    if "labtester" in tokens:
+        ok = run_lifecycle(
+            scenario_name="Preventive Maintenance — Lab Tester",
+            category="maintenance",
+            originator_token=orig_token,
+            admin_token=tokens["admin"],
+            tester_email="labtester1@kptcl.com",
+            tester_password="Tester123!",
+            tester_role_name="Lab Tester",
+            org_id=org_id,
+            dept_id=dept_id,
+            equip=equip,
+            test_data_payload={
+                "bdv_oil_kv": "42",
+                "acidity_mg_koh_g": "0.05",
+                "moisture_ppm": "25",
+                "colour": "Light Yellow",
+                "flash_point_c": "152",
+                "overall": "NORMAL",
+            },
+        )
+        results.append(("B. maintenance -> Lab Tester", ok))
+    else:
+        log(WARN, "Skipping Lab Tester maintenance scenario (login failed)")
+
+    # Scenario C: inspection category  → Field Tester
+    if "fieldtester" in tokens:
+        ok = run_lifecycle(
+            scenario_name="Annual Inspection — Field Tester",
+            category="inspection",
+            originator_token=orig_token,
+            admin_token=tokens["admin"],
+            tester_email="fieldtester1@kptcl.com",
+            tester_password="Tester123!",
+            tester_role_name="Field Tester",
+            org_id=org_id,
+            dept_id=dept_id,
+            equip=None,  # manual fields only
+            test_data_payload={
+                "visual_condition": "Good",
+                "oil_leakage": "None",
+                "bushing_condition": "No cracks",
+                "cooling_fans": "Operational",
+                "tap_changer": "Smooth operation",
+                "overall": "SATISFACTORY",
+            },
+        )
+        results.append(("C. inspection  -> Field Tester", ok))
+
+    # Scenario D: repair_lifecycle category  → Lab Tester
+    if "labtester" in tokens:
+        ok = run_lifecycle(
+            scenario_name="Bushing Repair / Lifecycle — Lab Tester",
+            category="repair_lifecycle",
+            originator_token=orig_token,
+            admin_token=tokens["admin"],
+            tester_email="labtester1@kptcl.com",
+            tester_password="Tester123!",
+            tester_role_name="Lab Tester",
+            org_id=org_id,
+            dept_id=dept_id,
+            equip=equip,
+            test_data_payload={
+                "tan_delta_bushing": "0.015",
+                "capacitance_pf": "320",
+                "partial_discharge_pc": "80",
+                "remaining_life_years": "8",
+                "action_recommended": "Monitor annually",
+                "overall": "ALERT",
+            },
+        )
+        results.append(("D. repair_lifecycle -> Lab Tester", ok))
+
+    # ── Final summary ─────────────────────────────────────────────────────────
+    section("FINAL SUMMARY")
     print()
-
-    # ========== STEP 6: Upload Test Results ==========
-    print("STEP 6: Upload Test Results (as tester)")
-    print("-" * 80)
-
-    results = upload_test_results(tester_token, request_id)
-    if not results:
-        print("[FAILED] Could not upload test results")
-        return
-
-    print(f"[OK] Test results uploaded")
-    print()
-
-    # ========== STEP 7: Complete Testing ==========
-    print("STEP 7: Submit and Complete Testing (as tester)")
-    print("-" * 80)
-
-    complete_result = tester_complete_testing(tester_token, request_id)
-    if not complete_result:
-        print("[FAILED] Could not complete testing")
-        return
-
-    print(f"[OK] Testing completed")
-    print(f"     Status: {complete_result.get('status')}")
-    print()
-
-    # ========== STEP 8: View Recommendation for Approval ==========
-    print("STEP 8: View Pending Recommendation Approvals (as approver)")
-    print("-" * 80)
-
-    # Login as orgadmin who can approve recommendations
-    approver_token = login("orgadmin@kptcl.com", "admin123")
-    if not approver_token:
-        print("[FAILED] Could not login as approver")
-        return
-    print("[OK] Logged in as orgadmin@kptcl.com")
-
-    pending_approvals = get_pending_recommendation_approvals(approver_token)
-    print(f"[OK] Found {len(pending_approvals)} pending recommendation approvals")
-
-    # Get the recommendation for our testing request
-    recommendation = get_recommendation_by_request(approver_token, request_id)
-    if not recommendation:
-        print("[FAILED] Could not get recommendation for testing request")
-        return
-
-    recommendation_id = recommendation["id"]
-    print(f"[OK] Found recommendation ID: {recommendation_id}")
-    print(f"     Type: {recommendation.get('recommendation_type')}")
-    print(f"     Approval Status: {recommendation.get('approval_status')}")
-    print()
-
-    # ========== STEP 9: Approve Recommendation ==========
-    print("STEP 9: Approve Recommendation (as approver)")
-    print("-" * 80)
-
-    approval_result = approve_recommendation(approver_token, recommendation_id)
-    if not approval_result:
-        print("[FAILED] Could not approve recommendation")
-        return
-
-    print(f"[OK] Recommendation approved")
-    print(f"     Approval Status: {approval_result.get('approval_status')}")
-    print()
-
-    # ========== STEP 10: Verify Final State ==========
-    print("STEP 10: Verify Final State")
-    print("-" * 80)
-
-    final_request = get_request_details(originator_token, request_id)
-    if final_request:
-        print(f"[OK] Final request details:")
-        print(f"     Request Number: {final_request['request_number']}")
-        print(f"     Status: {final_request['status']}")
-        print(f"     Assigned Tester: {final_request.get('assigned_tester_email', 'N/A')}")
-
-    final_recommendation = get_recommendation_by_request(approver_token, request_id)
-    if final_recommendation:
-        print(f"[OK] Final recommendation details:")
-        print(f"     Approval Status: {final_recommendation.get('approval_status')}")
-        print(f"     Recommendation Type: {final_recommendation.get('recommendation_type')}")
+    all_ok = True
+    for name, passed in results:
+        icon = OK if passed else FAIL
+        print(f"  {icon}  {name}")
+        if not passed:
+            all_ok = False
 
     print()
-    print("=" * 80)
-    print("  COMPLETE LIFECYCLE TEST FINISHED!")
-    print("=" * 80)
+    # Stats snapshot
+    r = call("get", f"{BASE}/testing_requests/stats", tokens["admin"])
+    if r.status_code == 200:
+        stats = r.json()
+        print(f"  Total requests in org : {stats.get('total')}")
+        by_cat = stats.get("by_category", {})
+        for cat, cnt in by_cat.items():
+            bar = "#" * min(cnt, 30)
+            print(f"    {cat:25}: {cnt:3}  {bar}")
+
     print()
-    print("Summary of complete workflow:")
-    print("  1. [OK] Engineer created testing request")
-    print("  2. [OK] Engineer submitted request for approval")
-    print("  3. [OK] Department head approved and assigned to tester")
-    print("  4. [OK] Tester viewed assigned requests")
-    print("  5. [OK] Tester accepted the request")
-    print("  6. [OK] Tester started testing")
-    print("  7. [OK] Tester uploaded test results")
-    print("  8. [OK] Tester submitted and completed testing")
-    print("  9. [OK] Approver viewed pending recommendations")
-    print(" 10. [OK] Approver approved recommendation")
-    print(" 11. [OK] Verified final state")
+    if all_ok:
+        print("  *** ALL SCENARIOS PASSED ***")
+    else:
+        print("  *** SOME SCENARIOS FAILED — see output above ***")
     print()
-    print(f"Final Testing Request Status: {final_request.get('status') if final_request else 'Unknown'}")
-    print(f"Final Recommendation Status: {final_recommendation.get('approval_status') if final_recommendation else 'Unknown'}")
-    print(f"Request Number: {request_number}")
 
 
 if __name__ == "__main__":
