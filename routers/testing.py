@@ -123,6 +123,7 @@ def get_test_results(
             test_data=r.test_data,
             overall_result=r.overall_result,
             replacement_products=r.replacement_products,
+            evaluation_result=r.evaluation_result,
             tested_by=r.tested_by,
             tested_at=r.tested_at,
             image_count=len(imgs),
@@ -151,6 +152,49 @@ def submit_test_results(
 
 
 # ─── Template & Structured Results ──────────────────────────
+
+@router.get("/templates/by-category/{request_category}")
+def get_test_template_by_request_category(
+    request_category: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return the best-match template for a given request_category
+    (maintenance | inspection | repair_lifecycle).
+    Falls back to global default when no org-specific row exists.
+    """
+    from test_templates import REQUEST_CATEGORY_TO_TEMPLATE
+    from models import OrgTestTemplate
+    import copy
+    template_key = REQUEST_CATEGORY_TO_TEMPLATE.get(request_category)
+    if not template_key:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=404,
+            detail=f"No template mapped for request_category='{request_category}'",
+        )
+    tmpl = (
+        db.query(OrgTestTemplate)
+        .filter(OrgTestTemplate.template_key == template_key)
+        .first()
+    )
+    if not tmpl:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Template '{template_key}' not seeded — run /org-test-templates/provision/global")
+    svc = __import__('services.org_test_template_service', fromlist=['OrgTestTemplateService']).OrgTestTemplateService(db)
+    data = copy.deepcopy(tmpl.template_data or {})
+    if "key" not in data:
+        data["key"] = tmpl.template_key
+    try:
+        overall = svc.get_overall_assessment(org_id=tmpl.org_id)
+        overall_sections = (overall.template_data or {}).get("sections", [])
+        data.setdefault("sections", [])
+        data["sections"].extend(copy.deepcopy(overall_sections))
+    except Exception:
+        pass
+    return data
+
 
 @router.get("/templates/by-key/{template_key}")
 def get_test_template_by_key(
@@ -273,6 +317,7 @@ def _build_structured_response(result) -> TestResultStructuredResponse:
         overall_result=result.overall_result,
         remarks=result.remarks,
         replacement_products=result.replacement_products,
+        evaluation_result=result.evaluation_result,
         tested_by=result.tested_by,
         tested_at=result.tested_at,
         images=images,

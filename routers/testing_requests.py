@@ -118,7 +118,8 @@ def get_department_hierarchy(
 def list_equipment_types(db: Session = Depends(get_db)):
     """
     Returns equipment types (CategoryMaster where description='Testing Equipment')
-    with their test types (CategoryDetails).
+    with their types grouped by request category (test, maintenance, inspection, repair_lifecycle).
+    Per SRS: All categories need type dropdowns with multiple options.
     """
     masters = (
         db.query(CategoryMaster)
@@ -128,16 +129,40 @@ def list_equipment_types(db: Session = Depends(get_db)):
     )
     result = []
     for m in masters:
-        tests = (
+        # Get all types for this equipment
+        all_types = (
             db.query(CategoryDetails)
             .filter(CategoryDetails.category_master_id == m.id, CategoryDetails.is_active == True)
             .order_by(CategoryDetails.name)
             .all()
         )
+
+        # Group types by category based on description field
+        # TODO: Once category_type column added, use that instead of parsing description
+        types_by_category = {
+            "test": [],
+            "maintenance": [],
+            "inspection": [],
+            "repair_lifecycle": []
+        }
+
+        for t in all_types:
+            desc_lower = (t.description or "").lower()
+            if "maintenance" in desc_lower:
+                types_by_category["maintenance"].append({"id": t.id, "name": t.name})
+            elif "inspection" in desc_lower:
+                types_by_category["inspection"].append({"id": t.id, "name": t.name})
+            elif "repair" in desc_lower or "lifecycle" in desc_lower:
+                types_by_category["repair_lifecycle"].append({"id": t.id, "name": t.name})
+            else:
+                # Default to test category
+                types_by_category["test"].append({"id": t.id, "name": t.name})
+
         result.append({
             "id": m.id,
             "name": m.name,
-            "tests": [{"id": t.id, "name": t.name} for t in tests],
+            "tests": types_by_category["test"],  # Legacy field for backward compatibility
+            "types_by_category": types_by_category,  # New field with all categories
         })
     return result
 
