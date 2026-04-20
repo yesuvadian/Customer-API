@@ -161,15 +161,12 @@ def get_available_tester_roles(
             OrgRolePermission.org_role_id == role.id
         ).all()
 
-        # Find modules where role has FULL permissions (all 6 flags TRUE)
+        # Find modules where role has FULL permissions (view, add, edit required for testers)
         full_permission_modules = set()
         for perm in permissions:
             if (perm.can_view and
                 perm.can_add and
-                perm.can_edit and
-                perm.can_delete and
-                perm.can_approve and
-                perm.can_assign):
+                perm.can_edit):
                 full_permission_modules.add(perm.module_id)
 
         # Check for EXACT match
