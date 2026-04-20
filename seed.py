@@ -729,11 +729,11 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "AEE Maintenance", "module": "Reports", "can_view": True, "can_export": True},
 
         # EE TLSS — Primary reviewer (most critical role)
+        # NOTE: Does NOT have Testing Request Approvals access (not applicable for this role)
         {"role": "EE TLSS", "module": "Dashboard", "can_view": True},
         {"role": "EE TLSS", "module": "EE TLSS Dashboard", "can_view": True},
         {"role": "EE TLSS", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True},
         {"role": "EE TLSS", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "EE TLSS", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
         {"role": "EE TLSS", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "EE TLSS", "module": "Notifications", "can_view": True},
         {"role": "EE TLSS", "module": "Reports", "can_view": True, "can_export": True},
