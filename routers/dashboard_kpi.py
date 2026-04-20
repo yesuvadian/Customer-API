@@ -415,7 +415,7 @@ def get_ee_tlss_dashboard(
     # ALERT/CRITICAL flags (equipment with failed tests or under repair)
     alert_critical = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.status.in_(['under_repair', 'active'])
+        Equipment.status == 'under_repair'
     ).scalar() or 0
 
     # Open Remediation (testing requests with recommendations)
