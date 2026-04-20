@@ -85,7 +85,6 @@ class TestingRequestPDFService:
         story.append(Paragraph("Request Information", heading_style))
 
         request_data = [
-            ['Request ID:', str(testing_request.id)],
             ['Title:', testing_request.title or '-'],
             ['Priority:', (testing_request.priority or '-').upper() if isinstance(testing_request.priority, str) else (testing_request.priority.value.upper() if testing_request.priority else '-')],
         ]
