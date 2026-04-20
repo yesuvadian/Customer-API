@@ -8,6 +8,29 @@ from models import TestingRequest, TestingRequestStatus, TestResult, TestResultI
 from utils.common_service import UTCDateTimeMixin
 
 
+def _deduplicated_overall_sections(main_sections: list, overall_sections: list) -> list:
+    """
+    Return only those sections/fields from overall_sections that don't already
+    exist (by field key) in main_sections.  This prevents a double overall_result
+    dropdown when the main template already contains that field.
+    """
+    existing_keys = {
+        f.get("key")
+        for sec in main_sections
+        for f in sec.get("fields", [])
+        if f.get("key")
+    }
+    deduped = []
+    for sec in overall_sections:
+        filtered_fields = [
+            f for f in sec.get("fields", [])
+            if f.get("key") not in existing_keys
+        ]
+        if filtered_fields:
+            deduped.append({**sec, "fields": filtered_fields})
+    return deduped
+
+
 class TestingService:
 
     def __init__(self, db: Session):
@@ -273,13 +296,17 @@ class TestingService:
                             for c in cols
                         ]
 
-        # Append overall assessment sections (template-driven)
+        # Append overall assessment sections (template-driven), skipping fields
+        # whose key already exists in the main template to avoid duplicates
+        # (e.g. overall_result appears in both static templates and overall_assessment).
         try:
             overall = svc.get_overall_assessment(org_id=org_id)
             overall_sections = (overall.template_data or {}).get("sections", [])
             if overall_sections:
                 template_data.setdefault("sections", [])
-                template_data["sections"].extend(copy.deepcopy(overall_sections))
+                template_data["sections"].extend(
+                    _deduplicated_overall_sections(template_data["sections"], copy.deepcopy(overall_sections))
+                )
         except FHE:
             pass  # No overall assessment template yet — skip silently
 

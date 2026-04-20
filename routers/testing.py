@@ -262,16 +262,21 @@ def get_test_template_by_request_category(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"Template '{template_key}' not seeded — run /org-test-templates/provision/global")
     svc = __import__('services.org_test_template_service', fromlist=['OrgTestTemplateService']).OrgTestTemplateService(db)
+    from services.testing_service import _deduplicated_overall_sections
     data = copy.deepcopy(tmpl.template_data or {})
     if "key" not in data:
         data["key"] = tmpl.template_key
     try:
         # Use current user's org_id so org-specific overall assessment edits
         # are picked up even when the main template is a global (org_id=None) one.
+        # Deduplicate field keys so fields already in the main template are not
+        # repeated from the overall_assessment template (e.g. overall_result).
         overall = svc.get_overall_assessment(org_id=current_user.organization_id)
         overall_sections = (overall.template_data or {}).get("sections", [])
         data.setdefault("sections", [])
-        data["sections"].extend(copy.deepcopy(overall_sections))
+        data["sections"].extend(
+            _deduplicated_overall_sections(data["sections"], copy.deepcopy(overall_sections))
+        )
     except Exception:
         pass
     return data
@@ -287,6 +292,7 @@ def get_test_template_by_key(
     from services.org_test_template_service import OrgTestTemplateService
     import copy
     svc = OrgTestTemplateService(db)
+    from services.testing_service import _deduplicated_overall_sections
     tmpl = svc.get_by_template_key(template_key)
     data = copy.deepcopy(tmpl.template_data or {})
     if "key" not in data:
@@ -294,11 +300,14 @@ def get_test_template_by_key(
     # Append Overall Assessment sections (template-driven).
     # Use current user's org_id so org-specific overall assessment edits
     # are picked up even when the main template is global (org_id=None).
+    # Deduplicate field keys to prevent a double overall_result dropdown.
     try:
         overall = svc.get_overall_assessment(org_id=current_user.organization_id)
         overall_sections = (overall.template_data or {}).get("sections", [])
         data.setdefault("sections", [])
-        data["sections"].extend(copy.deepcopy(overall_sections))
+        data["sections"].extend(
+            _deduplicated_overall_sections(data["sections"], copy.deepcopy(overall_sections))
+        )
     except Exception:
         pass
     return data
