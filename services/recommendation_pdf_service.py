@@ -233,13 +233,41 @@ class RecommendationPDFService:
                 story.append(header_table)
 
                 # Test data details
+                # Build field-label map from OrgTestTemplate (DB-first, then static fallback)
+                _field_labels = {}
+                try:
+                    from models import OrgTestTemplate
+                    tmpl = (
+                        self.db.query(OrgTestTemplate)
+                        .filter(OrgTestTemplate.template_key == result.template_key)
+                        .first()
+                    )
+                    _tmpl_data = tmpl.template_data if tmpl and tmpl.template_data else {}
+                    if not _tmpl_data:
+                        from test_templates import get_template_by_key
+                        _tmpl_data = get_template_by_key(result.template_key) or {}
+                    for _sec in _tmpl_data.get("sections", []):
+                        for _f in _sec.get("fields", []):
+                            _field_labels[_f["key"]] = _f.get("label", _f["key"])
+                except Exception:
+                    pass
+
+                # Keys already represented elsewhere in the PDF — skip them
+                _skip_keys = {'overall_result', 'overall_remarks'}
+
                 test_data_rows = []
                 if result.test_data:
                     for key, value in result.test_data.items():
-                        # Format key (remove underscores, capitalize)
-                        formatted_key = key.replace('_', ' ').title() + ':'
-                        formatted_value = str(value) if value is not None else '-'
-                        test_data_rows.append([formatted_key, formatted_value])
+                        if key in _skip_keys:
+                            continue
+                        if isinstance(value, list):
+                            # Table field — render as JSON string summary
+                            formatted_value = f"[{len(value)} row(s)]"
+                        else:
+                            formatted_value = str(value) if value is not None else '-'
+                        # Use template-defined label when available
+                        friendly_label = _field_labels.get(key, key.replace('_', ' ').title())
+                        test_data_rows.append([f"{friendly_label}:", formatted_value])
 
                 # Add remarks if present
                 if result.remarks:

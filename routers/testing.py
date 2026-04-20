@@ -266,7 +266,9 @@ def get_test_template_by_request_category(
     if "key" not in data:
         data["key"] = tmpl.template_key
     try:
-        overall = svc.get_overall_assessment(org_id=tmpl.org_id)
+        # Use current user's org_id so org-specific overall assessment edits
+        # are picked up even when the main template is a global (org_id=None) one.
+        overall = svc.get_overall_assessment(org_id=current_user.organization_id)
         overall_sections = (overall.template_data or {}).get("sections", [])
         data.setdefault("sections", [])
         data["sections"].extend(copy.deepcopy(overall_sections))
@@ -289,9 +291,11 @@ def get_test_template_by_key(
     data = copy.deepcopy(tmpl.template_data or {})
     if "key" not in data:
         data["key"] = tmpl.template_key
-    # Append Overall Assessment sections (template-driven)
+    # Append Overall Assessment sections (template-driven).
+    # Use current user's org_id so org-specific overall assessment edits
+    # are picked up even when the main template is global (org_id=None).
     try:
-        overall = svc.get_overall_assessment(org_id=tmpl.org_id)
+        overall = svc.get_overall_assessment(org_id=current_user.organization_id)
         overall_sections = (overall.template_data or {}).get("sections", [])
         data.setdefault("sections", [])
         data["sections"].extend(copy.deepcopy(overall_sections))
@@ -308,7 +312,7 @@ def get_test_template(
 ):
     """Returns the dynamic form template for a test type."""
     service = TestingService(db)
-    return service.get_template(test_type_id)
+    return service.get_template(test_type_id, org_id=current_user.organization_id)
 
 
 @router.post("/{request_id}/results/structured", response_model=TestResultStructuredResponse)
