@@ -765,9 +765,9 @@ def seed_privileges(session, role_ids, module_ids):
 
         # SEE RT — Senior Research & Testing
         {"role": "SEE RT", "module": "Dashboard", "can_view": True},
-        {"role": "SEE RT", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "SEE RT", "module": "Testing", "can_view": True},
-        {"role": "SEE RT", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "SEE RT", "module": "Testing Requests", "can_view": True},
+        {"role": "SEE RT", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True, "can_export": True},
+        {"role": "SEE RT", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
         {"role": "SEE RT", "module": "Test Template Management", "can_view": True, "can_edit": True},
         {"role": "SEE RT", "module": "Equipment", "can_view": True, "can_search": True},
         {"role": "SEE RT", "module": "Reports", "can_view": True, "can_export": True},
@@ -2119,7 +2119,10 @@ def seed_role_templates(session):
             "permissions_template": (
                 _readonly(dashboard_module) +
                 _approve(approvals_module) +
+                # Testing Requests: view only — SEE RT is a tester, not an originator
+                _readonly(testing_requests_module) +
                 _readwrite(testing_module) +
+                _approve(testing_request_approvals_module) +
                 _readonly(vendor_documents_module) +
                 _readonly(equipment_module)
             ),
@@ -2933,6 +2936,53 @@ def seed_kptcl_organization(session):
                 "phone": "+91-9900000014",
                 "role_name": "SEE RT",
                 "employee_id": "KPTCL-SEE-RT-001",
+                "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
+                "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
+            },
+            # ── Zone-based SEE RT testers ──────────────────────────────────────
+            {
+                "email": "see.rt.bangalore@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE RT",
+                "lastname": "Bangalore",
+                "phone": "+91-9900000020",
+                "role_name": "SEE RT",
+                "employee_id": "KPTCL-SEE-RT-BLR-001",
+                "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
+                "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
+            },
+            {
+                "email": "see.rt.hubli@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE RT",
+                "lastname": "Hubli",
+                "phone": "+91-9900000021",
+                "role_name": "SEE RT",
+                "employee_id": "KPTCL-SEE-RT-HBL-001",
+                "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
+                "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
+            },
+            {
+                "email": "see.rt.mysore@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE RT",
+                "lastname": "Mysore",
+                "phone": "+91-9900000022",
+                "role_name": "SEE RT",
+                "employee_id": "KPTCL-SEE-RT-MYS-001",
+                "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
+                "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
+            },
+            {
+                "email": "see.rt.gulbarga@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE RT",
+                "lastname": "Gulbarga",
+                "phone": "+91-9900000023",
+                "role_name": "SEE RT",
+                "employee_id": "KPTCL-SEE-RT-GLB-001",
+                "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
+                "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
             },
             {
                 "email": "cee.zone@kptcl.com",
@@ -3200,6 +3250,53 @@ def seed_kptcl_organization(session):
             "phone": "+91-9900000014",
             "role_name": "SEE RT",
             "employee_id": "KPTCL-SEE-RT-001",
+            "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
+            "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
+        },
+        # ── Zone-based SEE RT testers ──────────────────────────────────────
+        {
+            "email": "see.rt.bangalore@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE RT",
+            "lastname": "Bangalore",
+            "phone": "+91-9900000020",
+            "role_name": "SEE RT",
+            "employee_id": "KPTCL-SEE-RT-BLR-001",
+            "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
+            "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
+        },
+        {
+            "email": "see.rt.hubli@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE RT",
+            "lastname": "Hubli",
+            "phone": "+91-9900000021",
+            "role_name": "SEE RT",
+            "employee_id": "KPTCL-SEE-RT-HBL-001",
+            "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
+            "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
+        },
+        {
+            "email": "see.rt.mysore@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE RT",
+            "lastname": "Mysore",
+            "phone": "+91-9900000022",
+            "role_name": "SEE RT",
+            "employee_id": "KPTCL-SEE-RT-MYS-001",
+            "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
+            "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
+        },
+        {
+            "email": "see.rt.gulbarga@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE RT",
+            "lastname": "Gulbarga",
+            "phone": "+91-9900000023",
+            "role_name": "SEE RT",
+            "employee_id": "KPTCL-SEE-RT-GLB-001",
+            "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
+            "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
         },
         {
             "email": "cee.zone@kptcl.com",

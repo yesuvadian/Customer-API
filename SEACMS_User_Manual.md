@@ -14,17 +14,19 @@ Version 1.3 · April 2026
 5. [Test Request Categories](#5-test-request-categories)
 6. [End-to-End Workflow](#6-end-to-end-workflow)
 7. [Template System](#7-template-system)
-8. [Scheduling — Recurring Requests](#8-scheduling--recurring-requests)
-9. [Multi-Session Testing](#9-multi-session-testing)
-10. [Scenario: CVT Dielectric Test (Single Session)](#10-scenario-cvt-dielectric-test-single-session)
-11. [Scenario: Power Transformer Maintenance (Scheduled + Recurring)](#11-scenario-power-transformer-maintenance-scheduled--recurring)
-12. [Scenario: Substation Inspection (Multi-Day, Multi-Session)](#12-scenario-substation-inspection-multi-day-multi-session)
-13. [Scenario: Circuit Breaker Repair Lifecycle (Multi-Session, 10 Stages)](#13-scenario-circuit-breaker-repair-lifecycle-multi-session-10-stages)
-14. [Dashboards & KPI Cards](#14-dashboards--kpi-cards)
-15. [Notifications](#15-notifications)
-16. [Reports (14 Built-In)](#16-reports-14-built-in)
-17. [Org Admin Tasks](#17-org-admin-tasks)
-18. [Quick Reference](#18-quick-reference)
+8. [Template Rule Evaluation Engine](#8-template-rule-evaluation-engine)
+9. [Template Evaluation Scenarios](#9-template-evaluation-scenarios)
+10. [Scheduling — Recurring Requests](#10-scheduling--recurring-requests)
+11. [Multi-Session Testing](#11-multi-session-testing)
+12. [Scenario: CVT Dielectric Test (Single Session)](#12-scenario-cvt-dielectric-test-single-session)
+13. [Scenario: Power Transformer Maintenance (Scheduled + Recurring)](#13-scenario-power-transformer-maintenance-scheduled--recurring)
+14. [Scenario: Substation Inspection (Multi-Day, Multi-Session)](#14-scenario-substation-inspection-multi-day-multi-session)
+15. [Scenario: Circuit Breaker Repair Lifecycle (Multi-Session, 10 Stages)](#15-scenario-circuit-breaker-repair-lifecycle-multi-session-10-stages)
+16. [Dashboards & KPI Cards](#16-dashboards--kpi-cards)
+17. [Notifications](#17-notifications)
+18. [Reports (14 Built-In)](#18-reports-14-built-in)
+19. [Org Admin Tasks](#19-org-admin-tasks)
+20. [Quick Reference](#20-quick-reference)
 
 ---
 
@@ -311,11 +313,445 @@ When a tester opens a request and clicks **Start Test**, the system auto-loads t
 
 ---
 
-## 8. Scheduling — Recurring Requests
+## 8. Template Rule Evaluation Engine
+
+When a tester submits a completed test form, SEACMS-AI automatically evaluates every field that has evaluation rules defined. The result appears as a coloured badge on the request and drives the auto-generated recommendation.
+
+### 8.1 Status Hierarchy
+
+```
+NORMAL  (green)   — values within acceptable range
+  ↓
+ALERT   (amber)   — degraded but not immediately dangerous
+  ↓
+CRITICAL (red)    — action required; remedial recommendation auto-generated
+```
+
+The **overall status** of the entire test result is the highest severity found across all evaluated fields. One CRITICAL field turns the whole result CRITICAL.
+
+### 8.2 Four Evaluation Rule Types
+
+#### Type 1 — NUMBER field
+
+Applies threshold bands to a single numeric measurement.
+
+```json
+"evaluation": {
+  "enabled": true,
+  "normal_min": 1000,
+  "normal_max": null,
+  "alert_min": 100,
+  "alert_max": null,
+  "critical_below": 50,
+  "critical_above": null,
+  "trend_watch": true,
+  "revised_interval_days": 90,
+  "remedial_action_text": "Immediate drying-out treatment required",
+  "suggested_products": ["Insulation drying equipment"]
+}
+```
+
+**Decision logic (priority order):**
+
+| Check | Condition | Status |
+|-------|-----------|--------|
+| 1st | value < `critical_below` OR value > `critical_above` | **CRITICAL** |
+| 2nd | value < `alert_min` OR value > `alert_max` | **ALERT** |
+| 3rd | value < `normal_min` OR value > `normal_max` | **ALERT** |
+| 4th | all within normal | **NORMAL** |
+
+**Extra ALERT behaviour:**
+- If `trend_watch: true` — field is flagged for historical trending on the dashboard
+- If `revised_interval_days` set — system shortens the next scheduled test interval to this value (e.g., 90 days instead of the standard 365)
+
+---
+
+#### Type 2 — TABLE field
+
+A table collects multiple rows of measurements. Two independent sub-rules run on each table field.
+
+**Sub-rule A — Aggregate rule** (whole-table aggregate vs. one threshold):
+
+```json
+"table_evaluation": {
+  "enabled": true,
+  "aggregate_type": "average",
+  "aggregate_column": "tan_delta",
+  "aggregate_threshold": 0.5,
+  "threshold_condition": "gte",
+  "remedial_action_text": "Tan delta exceeds 0.5% — schedule capacitor replacement",
+  "suggested_products": ["Capacitor stack replacement kit"]
+}
+```
+
+Aggregate functions available:
+
+| `aggregate_type` | Computes |
+|-----------------|---------|
+| `sum` | Total of all values in the column |
+| `average` | Mean of all values in the column |
+| `count` | Number of non-null rows in the column |
+| `max` | Highest value in the column |
+| `min` | Lowest value in the column |
+
+Threshold conditions:
+
+| `threshold_condition` | Triggers CRITICAL when |
+|----------------------|----------------------|
+| `gte` | aggregate ≥ threshold |
+| `gt` | aggregate > threshold |
+| `lte` | aggregate ≤ threshold |
+| `lt` | aggregate < threshold |
+
+**Sub-rule B — Per-column row evaluation** (each cell vs. numeric bands):
+
+```json
+"column_evaluations": {
+  "pickup_current": {
+    "normal_min": 4.8,
+    "normal_max": 5.2,
+    "alert_min": 4.5,
+    "critical_below": 4.0
+  },
+  "error_percent": {
+    "critical_above": 5.0,
+    "alert_max": 3.0
+  }
+}
+```
+
+Every row × column combination is checked. If any single cell breaches CRITICAL, the table field status becomes CRITICAL (even if the aggregate is NORMAL).
+
+**Overall table field status = worst status across both sub-rules.**
+
+---
+
+#### Type 3 — DROPDOWN / RADIO field
+
+Maps each selectable option directly to a severity level.
+
+```json
+"dropdown_evaluation": {
+  "enabled": true,
+  "value_severities": {
+    "Good":   "NORMAL",
+    "Fair":   "ALERT",
+    "Poor":   "CRITICAL",
+    "Failed": "CRITICAL"
+  },
+  "remedial_action_text": "Equipment condition critical — initiate repair lifecycle"
+}
+```
+
+The tester picks a value from the dropdown; the system immediately resolves the severity from the mapping. Any value not listed defaults to NORMAL.
+
+---
+
+#### Type 4 — DATE field
+
+Evaluates whether a date (e.g., next calibration due, oil sample date) is approaching or overdue.
+
+```json
+"date_evaluation": {
+  "enabled": true,
+  "warning_days_before": 30,
+  "alert_days_before": 15,
+  "critical_when_overdue": true,
+  "remedial_action_text": "Calibration certificate expired — test results invalid"
+}
+```
+
+| Days Until Date | Status |
+|----------------|--------|
+| > `warning_days_before` | NORMAL |
+| ≤ `warning_days_before` | ALERT |
+| ≤ `alert_days_before` | ALERT |
+| Past (negative) + `critical_when_overdue: true` | CRITICAL |
+
+---
+
+### 8.3 Evaluation Output Structure
+
+After submission the system returns (and stores in `evaluation_result` JSONB column):
+
+```json
+{
+  "overall": "CRITICAL",
+  "evaluated_at": "2026-04-20T10:32:00Z",
+  "fields": [
+    {
+      "key": "ir_hv_to_earth_mohm",
+      "label": "IR — HV to Earth",
+      "type": "number",
+      "value": 42.0,
+      "unit": "MOhm",
+      "status": "CRITICAL",
+      "thresholds": {
+        "normal_min": 1000,
+        "critical_below": 50
+      },
+      "trend_watch": true,
+      "remedial_action_text": "Immediate drying-out required",
+      "suggested_products": ["Insulation drying equipment"],
+      "revised_interval_days": 90
+    },
+    {
+      "key": "tan_delta_readings",
+      "label": "Tan Delta Table",
+      "type": "table",
+      "status": "ALERT",
+      "aggregate_result": {
+        "aggregate_type": "average",
+        "column": "tan_delta",
+        "value": 0.38,
+        "threshold": 0.5,
+        "condition": "gte",
+        "threshold_met": false
+      },
+      "column_results": [
+        {"column": "tan_delta", "row": 2, "value": 0.48, "status": "ALERT"}
+      ]
+    }
+  ]
+}
+```
+
+### 8.4 What Happens After Evaluation
+
+| Outcome | System Action |
+|---------|--------------|
+| Any CRITICAL field | Auto-generates recommendation text from `remedial_action_text` |
+| Any ALERT field | Flags field in UI with amber highlight; shows remedial text on hover |
+| Suggested products | Added to the procurement suggestion list on the request |
+| `revised_interval_days` set (ALERT) | Next scheduled test date shortened to the minimum revised interval |
+| `trend_watch: true` | Field value stored in trending history; appears in dashboard trend chart |
+| CRITICAL overall | Dashboard KPI "Critical Alerts" counter incremented; notification sent to EE TLSS and SEE W&M |
+
+### 8.5 How Evaluation Appears in the UI
+
+After the tester submits the test:
+
+1. **Result badge** on request card — green `NORMAL` / amber `ALERT` / red `CRITICAL`
+2. **Field-level highlight** inside the filled form — each evaluated field shows its status colour
+3. **Evaluation Summary panel** — collapsible, shows all evaluated fields with their values, thresholds, and status
+4. **Auto-recommendation** — pre-filled in the recommendation box, tester can edit before final submission
+5. **Suggested products** — shown as a clickable list; clicking "Raise Procurement" starts a new procurement request pre-filled with those items
+
+---
+
+## 9. Template Evaluation Scenarios
+
+### Scenario A — CT Ratio Test: Table Per-Column Rule (CRITICAL)
+
+**Template:** `ct_ratio_test`
+**Table field:** `ratio_readings`
+**Columns:** primary_current, secondary_current, measured_ratio, error_percent, row_result
+
+**Evaluation rule on `error_percent` column:**
+```json
+"column_evaluations": {
+  "error_percent": {
+    "critical_above": 5.0,
+    "alert_max": 3.0,
+    "normal_max": 1.0
+  }
+}
+```
+
+**Tester enters these readings:**
+
+| Row | Primary (A) | Secondary (A) | Measured Ratio | Error (%) | Row Result |
+|-----|------------|---------------|----------------|-----------|------------|
+| 1 | 200 | 1.00 | 200.0 | 0.0 | Pass |
+| 2 | 100 | 0.50 | 200.0 | 0.5 | Pass |
+| 3 | 50 | 0.26 | 192.3 | **6.2** | Fail |
+
+**Evaluation result:**
+
+- Row 1: error_percent = 0.0 → NORMAL
+- Row 2: error_percent = 0.5 → NORMAL
+- Row 3: error_percent = 6.2 → **CRITICAL** (> `critical_above: 5.0`)
+- Table field overall → **CRITICAL**
+- Overall test result → **CRITICAL**
+
+**UI outcome:**
+- Row 3 highlighted red in the table
+- Auto-recommendation: _"[CT Ratio Error] Ratio error exceeds 5% — CT winding may be damaged. Schedule replacement."_
+- EE TLSS receives CRITICAL alert notification
+
+---
+
+### Scenario B — CVT Tan Delta Test: Aggregate Average Rule (ALERT)
+
+**Template:** `cvt_test_report`
+**Table field:** `tan_delta_readings`
+**Aggregate rule:**
+```json
+"table_evaluation": {
+  "enabled": true,
+  "aggregate_type": "average",
+  "aggregate_column": "tan_delta_percent",
+  "aggregate_threshold": 0.5,
+  "threshold_condition": "gte",
+  "remedial_action_text": "Average tan delta ≥ 0.5% — plan capacitor stack replacement within 6 months"
+}
+```
+
+**Tester enters:**
+
+| Measurement Point | C1 (pF) | Tan Delta (%) |
+|-------------------|---------|---------------|
+| HV to Ground | 12500 | 0.35 |
+| Stack 1 | 6200 | 0.42 |
+| Stack 2 | 6250 | 0.48 |
+| Neutral | 6180 | 0.38 |
+
+**Evaluation:**
+- Average tan_delta = (0.35 + 0.42 + 0.48 + 0.38) / 4 = **0.4075**
+- 0.4075 < 0.5 → threshold NOT met → aggregate status = **NORMAL**
+
+*(No aggregate CRITICAL. But if Stack 2 had been 0.52:)*
+- Average = (0.35 + 0.42 + 0.52 + 0.38) / 4 = **0.4675** — still NORMAL
+- Average = (0.55 + 0.62 + 0.68 + 0.59) / 4 = **0.61** → **CRITICAL** (≥ 0.5)
+
+**UI outcome (NORMAL case):** Green badge. No auto-recommendation. Tester still enters manual overall result.
+
+**UI outcome (CRITICAL case):** Red badge. Auto-recommendation: _"Average tan delta ≥ 0.5% — plan capacitor stack replacement."_ Suggested product added to procurement list.
+
+---
+
+### Scenario C — Transformer Differential Test: Dropdown Rule (CRITICAL)
+
+**Template:** `differential_protection_test`
+**Field:** `stability_result` (dropdown)
+**Evaluation rule:**
+```json
+"dropdown_evaluation": {
+  "enabled": true,
+  "value_severities": {
+    "Stable (No Trip)": "NORMAL",
+    "Unstable (Tripped)": "CRITICAL"
+  },
+  "remedial_action_text": "Relay operated during through-fault — protection coordination review required"
+}
+```
+
+**Tester selects:** `Unstable (Tripped)`
+
+**Evaluation result:**
+- Value → `Unstable (Tripped)` → **CRITICAL**
+- Auto-recommendation: _"[Stability Test Result] Relay operated during through-fault — protection coordination review required"_
+
+**UI outcome:** Entire request flagged CRITICAL immediately on dropdown selection (live feedback). EE TLSS and SEE W&M notified.
+
+---
+
+### Scenario D — Protection Relay: Number Rule + Trend Watch (ALERT)
+
+**Template:** `protection_relay_functional_test`
+**Field:** `pickup_current` (number, unit: A)
+**Evaluation rule:**
+```json
+"evaluation": {
+  "enabled": true,
+  "normal_min": 4.8,
+  "normal_max": 5.2,
+  "alert_min": 4.5,
+  "alert_max": 5.5,
+  "critical_below": 4.0,
+  "critical_above": 6.0,
+  "trend_watch": true,
+  "revised_interval_days": 90,
+  "remedial_action_text": "Pickup current drifted — relay calibration required"
+}
+```
+
+**Tester measures:** `4.6 A`
+
+**Decision walk-through:**
+1. Is 4.6 < `critical_below` (4.0)? → No
+2. Is 4.6 > `critical_above` (6.0)? → No
+3. Is 4.6 < `alert_min` (4.5)? → No
+4. Is 4.6 < `normal_min` (4.8)? → **Yes** → **ALERT**
+
+**UI outcome:**
+- Field highlighted amber
+- Remedial text shown: _"Pickup current drifted — relay calibration required"_
+- Next test schedule compressed to 90 days (instead of normal annual interval)
+- Value stored in trend history — dashboard shows drift chart over time
+
+---
+
+### Scenario E — Instrument Calibration: Date Rule (CRITICAL)
+
+**Template:** Any (field added by org admin)
+**Field:** `megger_calibration_due` (date)
+**Evaluation rule:**
+```json
+"date_evaluation": {
+  "enabled": true,
+  "warning_days_before": 30,
+  "alert_days_before": 15,
+  "critical_when_overdue": true,
+  "remedial_action_text": "Test instrument calibration certificate expired — results not valid"
+}
+```
+
+**Test conducted on:** 2026-04-20
+**Calibration due date entered by tester:** `2026-04-10` (10 days ago)
+
+**Days until:** -10 (overdue)
+- `critical_when_overdue: true` → **CRITICAL**
+
+**UI outcome:**
+- Field highlighted red
+- Warning banner shown: _"Calibration certificate expired — test results may be invalid"_
+- Request cannot be approved until tester provides explanation or updated certificate
+
+---
+
+### Scenario F — Substation Inspection: Combined Evaluation (Multi-Field)
+
+**Template:** `substation_inspection`
+**Three evaluated fields:**
+
+| Field | Type | Rule | Entered Value | Status |
+|-------|------|------|---------------|--------|
+| `earthing_resistance` | number | critical_above: 1.0 Ω | 0.8 Ω | NORMAL |
+| `overall_condition` | dropdown | Poor → CRITICAL, Fair → ALERT | `Fair` | **ALERT** |
+| `last_maintenance_date` | date | critical_when_overdue, alert_before 30d | 2 months ago | **CRITICAL** |
+
+**Evaluation result:**
+- Field 1: NORMAL
+- Field 2: ALERT
+- Field 3: CRITICAL
+- **Overall: CRITICAL** (highest wins)
+
+**Auto-recommendation built from CRITICAL fields only:**
+> `[AUTO-EVAL CRITICAL] Substation Inspection — [Last Maintenance Date] Maintenance overdue — immediate scheduling required`
+
+**Suggested products from ALERT fields also appended** to procurement list.
+
+---
+
+### 9.1 Evaluation Scenario Summary Table
+
+| Scenario | Equipment | Rule Type | Trigger | Outcome |
+|----------|-----------|-----------|---------|---------|
+| A — CT Ratio Error | Current Transformer | Table per-column | error_percent row > 5% | CRITICAL, auto-recommendation |
+| B — CVT Tan Delta | CVT | Table aggregate average | avg tan delta ≥ 0.5% | CRITICAL, procurement suggestion |
+| C — Differential Stability | Power Transformer | Dropdown severity map | Unstable (Tripped) selected | CRITICAL, immediate notification |
+| D — Relay Pickup Drift | Protection Relay | Number threshold + trend | 4.6A < normal_min 4.8A | ALERT, 90-day revised interval, trend chart |
+| E — Calibration Expired | Any equipment | Date overdue | certificate date in past | CRITICAL, approval blocked |
+| F — Substation Inspection | Substation | Multi-field combined | one date overdue | CRITICAL (highest wins) |
+
+---
+
+## 10. Scheduling — Recurring Requests
 
 The **Schedule** feature lets a test request automatically repeat at a fixed frequency, creating a new child request before the due date arrives.
 
-### 8.1 How to Enable a Schedule
+### 10.1 How to Enable a Schedule
 
 **Who can do this:** AEE Maintenance, EE TLSS, EE RT (roles with `can_add` on Testing Requests)
 
@@ -333,7 +769,7 @@ The **Schedule** feature lets a test request automatically repeat at a fixed fre
 4. Click **Save Schedule**
 5. The schedule badge appears on the request card
 
-### 8.2 Frequency Options
+### 10.2 Frequency Options
 
 | Frequency | Interval | Typical Use |
 |-----------|----------|-------------|
@@ -344,7 +780,7 @@ The **Schedule** feature lets a test request automatically repeat at a fixed fre
 | `quarterly` | Every 90 days | Quarterly transformer maintenance |
 | `yearly` | Every 365 days | Annual type test / overhaul |
 
-### 8.3 Schedule Management
+### 10.3 Schedule Management
 
 | Action | How |
 |--------|-----|
@@ -355,7 +791,7 @@ The **Schedule** feature lets a test request automatically repeat at a fixed fre
 | Delete schedule | Schedule tab → **Delete Schedule** |
 | View history | Schedule tab → **Logs** (shows each run: success / failed, generated request ID) |
 
-### 8.4 What Happens Automatically
+### 10.4 What Happens Automatically
 
 When `next_run_date` arrives (system runs nightly at midnight IST):
 1. A new testing request is cloned from the template request
@@ -364,7 +800,7 @@ When `next_run_date` arrives (system runs nightly at midnight IST):
 4. Originator receives a **notification**: _"Recurring test request auto-created: [Request ID]"_
 5. Schedule log entry created (success / failed)
 
-### 8.5 Schedule Scenario — Monthly Transformer PMC
+### 10.5 Schedule Scenario — Monthly Transformer PMC
 
 **Context:** Substation XYZ has a 220/132 kV Power Transformer. AEE Maintenance wants routine monthly preventive maintenance checks.
 
@@ -380,11 +816,11 @@ When `next_run_date` arrives (system runs nightly at midnight IST):
 
 ---
 
-## 9. Multi-Session Testing
+## 11. Multi-Session Testing
 
 Multi-session testing allows a single test request to span **multiple days or sessions**, each with its own readings, environmental conditions, and pass/fail status.
 
-### 9.1 When to Use Multi-Session
+### 11.1 When to Use Multi-Session
 
 | Use Case | Sessions | Template |
 |----------|----------|----------|
@@ -393,7 +829,7 @@ Multi-session testing allows a single test request to span **multiple days or se
 | Multi-point substation inspection | Per inspection bay | `substation_inspection` |
 | Long-duration stability test | Periodic readings over days | Any template |
 
-### 9.2 Enabling Multi-Session on a Request
+### 11.2 Enabling Multi-Session on a Request
 
 **Who can do this:** EE TLSS, EE RT (when creating or editing a request before assignment)
 
@@ -406,14 +842,14 @@ Multi-session testing allows a single test request to span **multiple days or se
    - **Scheduled Start Date** (first session date)
 5. Submit
 
-### 9.3 Session States
+### 11.3 Session States
 
 ```
 scheduled → in_progress → completed
                         → skipped   (session not conducted, documented reason)
 ```
 
-### 9.4 Working with Sessions (Tester View)
+### 11.4 Working with Sessions (Tester View)
 
 After accepting a multi-session request:
 
@@ -432,7 +868,7 @@ After accepting a multi-session request:
 | Complete session | **Complete Session** — prompts for sign-off notes |
 | Skip session | **Skip** — requires reason |
 
-### 9.5 Session Reading Structure
+### 11.5 Session Reading Structure
 
 Each reading within a session captures:
 - **Reading Number** (auto-increment within session)
@@ -444,7 +880,7 @@ Each reading within a session captures:
 - **Remarks**
 - **Photos** (multiple images per reading)
 
-### 9.6 Multi-Session Progress View
+### 11.6 Multi-Session Progress View
 
 The request card shows a **Session Progress Bar:**
 
@@ -456,7 +892,7 @@ Tapping the bar opens the full session timeline with dates and statuses.
 
 ---
 
-## 10. Scenario: CVT Dielectric Test (Single Session)
+## 12. Scenario: CVT Dielectric Test (Single Session)
 
 **Equipment:** 220 kV CVT (UEIC: KPT-CVT-220-001)
 **Category:** Test · **Test Type:** CVT Test Report
@@ -481,7 +917,7 @@ Tapping the bar opens the full session timeline with dates and statuses.
 
 ---
 
-## 11. Scenario: Power Transformer Maintenance (Scheduled + Recurring)
+## 13. Scenario: Power Transformer Maintenance (Scheduled + Recurring)
 
 **Equipment:** 100 MVA 220/132 kV Power Transformer (UEIC: KPT-PT-220-003)
 **Category:** Maintenance · **Type:** Routine Preventive Maintenance
@@ -514,7 +950,7 @@ Navigate to the original request → **Schedule** tab → **Logs:**
 
 ---
 
-## 12. Scenario: Substation Inspection (Multi-Day, Multi-Session)
+## 14. Scenario: Substation Inspection (Multi-Day, Multi-Session)
 
 **Equipment:** 220 kV Substation – Entire yard
 **Category:** Inspection · **Type:** Electrical Safety, Civil, Fire Safety
@@ -548,7 +984,7 @@ Overall: 3/3 sessions · Status: test_submitted
 
 ---
 
-## 13. Scenario: Circuit Breaker Repair Lifecycle (Multi-Session, 10 Stages)
+## 15. Scenario: Circuit Breaker Repair Lifecycle (Multi-Session, 10 Stages)
 
 **Equipment:** 132 kV SF6 Circuit Breaker (UEIC: KPT-CB-132-007)
 **Category:** Repair Lifecycle
@@ -610,7 +1046,7 @@ S10 Erection, Test & Comm.   [✓]  2026-04-18   Field Tester + EE TLSS
 
 ---
 
-## 14. Dashboards & KPI Cards
+## 16. Dashboards & KPI Cards
 
 ### AEE Maintenance Dashboard
 
@@ -653,7 +1089,7 @@ S10 Erection, Test & Comm.   [✓]  2026-04-18   Field Tester + EE TLSS
 
 ---
 
-## 15. Notifications
+## 17. Notifications
 
 All users receive in-app and email notifications for events relevant to their role.
 
@@ -673,7 +1109,7 @@ All users receive in-app and email notifications for events relevant to their ro
 
 ---
 
-## 16. Reports (14 Built-In)
+## 18. Reports (14 Built-In)
 
 Navigate to **Reports** → select report → set filters → **Export PDF** or **Export Excel**.
 
@@ -696,7 +1132,7 @@ Navigate to **Reports** → select report → set filters → **Export PDF** or 
 
 ---
 
-## 17. Org Admin Tasks
+## 19. Org Admin Tasks
 
 Login: `kptcl.admin@kptcl.com` / `admin123`
 
@@ -725,7 +1161,7 @@ This re-seeds all 13 SRS built-in templates from the system defaults.
 
 ---
 
-## 18. Quick Reference
+## 20. Quick Reference
 
 ### Request Status Reference
 
