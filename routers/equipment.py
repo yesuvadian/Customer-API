@@ -353,6 +353,7 @@ def get_applicable_tests(
             "id": t.id,
             "name": t.name,
             "description": t.description,
+            "category_type": t.category_type,
             "is_active": t.is_active,
         }
         for t in tests

@@ -137,8 +137,7 @@ def list_equipment_types(db: Session = Depends(get_db)):
             .all()
         )
 
-        # Group types by category based on description field
-        # TODO: Once category_type column added, use that instead of parsing description
+        # Group types by category using category_type column
         types_by_category = {
             "test": [],
             "maintenance": [],
@@ -147,16 +146,20 @@ def list_equipment_types(db: Session = Depends(get_db)):
         }
 
         for t in all_types:
-            desc_lower = (t.description or "").lower()
-            if "maintenance" in desc_lower:
-                types_by_category["maintenance"].append({"id": t.id, "name": t.name})
-            elif "inspection" in desc_lower:
-                types_by_category["inspection"].append({"id": t.id, "name": t.name})
-            elif "repair" in desc_lower or "lifecycle" in desc_lower:
-                types_by_category["repair_lifecycle"].append({"id": t.id, "name": t.name})
+            category = t.category_type or "test"  # Default to test if not set
+            if category in types_by_category:
+                types_by_category[category].append({
+                    "id": t.id,
+                    "name": t.name,
+                    "category_type": t.category_type
+                })
             else:
-                # Default to test category
-                types_by_category["test"].append({"id": t.id, "name": t.name})
+                # Fallback to test for unknown categories
+                types_by_category["test"].append({
+                    "id": t.id,
+                    "name": t.name,
+                    "category_type": t.category_type
+                })
 
         result.append({
             "id": m.id,

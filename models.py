@@ -1196,6 +1196,7 @@ class CategoryDetails(Base):
 
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
+    category_type = Column(String(50), nullable=True)  # test, maintenance, inspection, repair_lifecycle
     is_active = Column(Boolean, default=True)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
