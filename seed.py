@@ -2243,9 +2243,10 @@ def seed_tester_role_module_requirements(session):
 
     # Dynamically resolve module IDs by name so they survive any reseed sequence
     # Only modules where testers need FULL permissions (not VIEW-only)
+    # Testers only need Testing module - NOT Testing Request Approvals (that's for approvers)
     _tester_req_module_names = [
-        "Testing",  # Module 46
-        "Testing Request Approvals",  # Module 49
+        "Testing",  # Module 46 - Core testing work module
+        # Removed "Testing Request Approvals" - testers don't approve/assign, only perform tests
         # Removed "Testing Requests" (VIEW-only, not FULL)
         # Removed "Tester Mapping" (no longer used)
     ]
@@ -2266,8 +2267,8 @@ def seed_tester_role_module_requirements(session):
         organization_id=None,  # Global default
         required_module_ids=required_ids,
         description=(
-            "Global default: Roles must have full permissions on "
-            "Testing Requests, Testing, Testing Request Approvals, and Tester Mapping modules"
+            "Global default: Roles must have full permissions (view, add, edit) on "
+            "Testing module to qualify as tester roles"
         ),
         is_active=True,
         cts=datetime.now(datetime.now().astimezone().tzinfo),
