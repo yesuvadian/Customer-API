@@ -1440,11 +1440,13 @@ def seed_test_type_categories(session, master_ids):
                 session.add(CategoryDetails(
                     name=test_name,
                     description=f"Test for {equipment_name}",
+                    category_type="test",
                     category_master_id=master_id,
                     is_active=True,
                 ))
             else:
                 existing_detail.is_active = True
+                existing_detail.category_type = "test"
 
     # ── Seed category-based types (new SRS-compliant structure) ──
     for equipment_name, categories in equipment_types_by_category.items():
@@ -1474,20 +1476,20 @@ def seed_test_type_categories(session, master_ids):
                 ).first()
 
                 if not existing_detail:
-                    # Create new CategoryDetail with category_type metadata
+                    # Create new CategoryDetail with category_type
                     detail = CategoryDetails(
                         name=type_name,
                         description=f"{category_type.replace('_', ' ').title()} for {equipment_name}",
+                        category_type=category_type,
                         category_master_id=master_id,
                         is_active=True,
                     )
                     session.add(detail)
-                    # Store category_type in description for now (until we add column)
-                    # TODO: Add category_type column to CategoryDetails table
                 else:
                     existing_detail.is_active = True
-                    # Update description to include category type
+                    # Update description and category_type
                     existing_detail.description = f"{category_type.replace('_', ' ').title()} for {equipment_name}"
+                    existing_detail.category_type = category_type
 
     session.commit()
     print("[OK] Equipment & Test Type categories seeded successfully.")
