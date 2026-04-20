@@ -201,6 +201,15 @@ class ApprovalService:
 
         self.db.commit()
         self.db.refresh(rec)
+
+        # ── Notification: recommendation approved → notify procurement ─────────
+        if request:
+            try:
+                from services.notification_service import NotificationService
+                NotificationService(self.db).notify_recommendation_approved(request, rec)
+            except Exception as _n:
+                print(f"[WARN] recommendation_approved notification failed: {_n}")
+
         return rec
 
     def get_approval_stats(self, approver_id: UUID = None) -> dict:

@@ -153,6 +153,16 @@ class TestingRequestService:
         request.modified_by = modified_by
         self.db.commit()
         self.db.refresh(request)
+
+        # Trigger notification
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).notify_request_submitted(request)
+        except Exception as e:
+            # Log but don't fail the request
+            import logging
+            logging.getLogger(__name__).error(f"Notification failed: {e}")
+
         return request
 
     def assign_tester(self, request_id: UUID, tester_id: UUID, assigned_by: UUID) -> TestingRequest:
@@ -172,6 +182,15 @@ class TestingRequestService:
         request.modified_by = assigned_by
         self.db.commit()
         self.db.refresh(request)
+
+        # Trigger notification
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).notify_tester_assigned(request)
+        except Exception as e:
+            # Log but don't fail the assignment
+            import logging
+            logging.getLogger(__name__).error(f"Notification failed: {e}")
         return request
 
     def get_stats(self, user_id: UUID = None, organization_id: UUID = None) -> dict:

@@ -284,42 +284,46 @@ class OrgTestTemplateService:
     def provision_global_defaults(self) -> int:
         """
         Seed global default templates from test_templates.py.
-        Safe to call multiple times — skips already-existing keys.
+        Creates one OrgTestTemplate row per test_type_id that maps to a template.
+        Safe to call multiple times — skips already-existing (test_type_id, template_key).
         Returns the count of newly inserted rows.
         """
         from test_templates import TEST_TEMPLATES, TEST_TYPE_TO_TEMPLATE
 
-        # Build reverse map: template_key → test_type_name
-        key_to_type_name: dict[str, str] = {v: k for k, v in TEST_TYPE_TO_TEMPLATE.items()}
-
         inserted = 0
-        for template_key, template_data in TEST_TEMPLATES.items():
+
+        # For each test_type_name → template_key mapping
+        for type_name, template_key in TEST_TYPE_TO_TEMPLATE.items():
+            # Get the template data
+            template_data = TEST_TEMPLATES.get(template_key)
+            if not template_data:
+                continue  # Skip if template doesn't exist
+
+            # Resolve test_type_id from CategoryDetails
+            detail = (
+                self.db.query(CategoryDetails)
+                .filter(CategoryDetails.name == type_name)
+                .first()
+            )
+            if not detail:
+                continue  # Skip if test type not found
+
+            # Check if already exists for this test_type_id
             existing = (
                 self.db.query(OrgTestTemplate)
                 .filter(
                     OrgTestTemplate.org_id == None,  # noqa: E711
-                    OrgTestTemplate.template_key == template_key,
+                    OrgTestTemplate.test_type_id == detail.id,
                 )
                 .first()
             )
             if existing:
                 continue
 
-            # Resolve test_type_id from CategoryDetails
-            type_name = key_to_type_name.get(template_key)
-            test_type_id = None
-            if type_name:
-                detail = (
-                    self.db.query(CategoryDetails)
-                    .filter(CategoryDetails.name == type_name)
-                    .first()
-                )
-                test_type_id = detail.id if detail else None
-
             tmpl = OrgTestTemplate(
                 org_id=None,
                 template_key=template_key,
-                test_type_id=test_type_id,
+                test_type_id=detail.id,
                 template_data=template_data,
                 is_system=True,
                 version=1,
