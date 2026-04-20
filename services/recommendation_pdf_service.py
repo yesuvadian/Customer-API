@@ -79,7 +79,6 @@ class RecommendationPDFService:
         # Document Info Table
         doc_info_data = [
             ['Report Generated:', datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
-            ['Recommendation ID:', str(recommendation.id)],
         ]
         doc_info_table = Table(doc_info_data, colWidths=[2*inch, 4*inch])
         doc_info_table.setStyle(TableStyle([
@@ -95,7 +94,6 @@ class RecommendationPDFService:
         # Request Information
         story.append(Paragraph("Request Information", heading_style))
         request_data = [
-            ['Request ID:', str(testing_request.id)],
             ['Request Number:', testing_request.request_number or '-'],
             ['Title:', testing_request.title or '-'],
             ['Priority:', (testing_request.priority or '-').upper() if isinstance(testing_request.priority, str) else (testing_request.priority.value.upper() if testing_request.priority else '-')],
