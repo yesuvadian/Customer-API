@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
-from models import TestingRequest, TestingRequestStatus, TestResult, TestResultImage, CategoryDetails, Recommendation, RecommendationType
+from models import TestingRequest, TestingRequestStatus, TestResult, TestResultImage, CategoryDetails, Recommendation, RecommendationType, TestSession
 from utils.common_service import UTCDateTimeMixin
 
 
@@ -143,8 +143,24 @@ class TestingService:
             )
             self.db.add(recommendation)
 
-        # Transition directly to under_approval (skips test_submitted)
-        request.status = TestingRequestStatus.under_approval
+        # Multi-session check: only transition to under_approval if all sessions complete
+        if request.is_multi_session:
+            # Count completed sessions for this request
+            completed_sessions = self.db.query(TestSession).filter(
+                TestSession.testing_request_id == request_id,
+                TestSession.status == "completed"
+            ).count()
+
+            # Only transition to approval if all sessions complete
+            if completed_sessions >= request.total_sessions_planned:
+                request.status = TestingRequestStatus.under_approval
+            else:
+                # Keep in_progress - more sessions to complete
+                request.status = TestingRequestStatus.in_progress
+        else:
+            # Single-session: proceed to approval immediately
+            request.status = TestingRequestStatus.under_approval
+
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
@@ -316,6 +332,7 @@ class TestingService:
         self, request_id: UUID, template_key: str, test_data: dict,
         overall_result: Optional[str], remarks: Optional[str], tester_id: UUID,
         replacement_products: Optional[list] = None,
+        test_session_id: Optional[UUID] = None,
     ) -> TestResult:
         """Create a structured test result with JSONB data."""
         from test_templates import get_template_by_key
@@ -344,12 +361,15 @@ class TestingService:
             except Exception:
                 test_name = template_key
 
-        # Upsert: update existing result if same request + template_key, else create
+        # Upsert: update existing result if same request + template_key + session, else create
+        # For multi-session: look up by session_id if provided
+        # For legacy single-session: look up by request_id + template_key + session_id=NULL
         existing = (
             self.db.query(TestResult)
             .filter(
                 TestResult.testing_request_id == request_id,
                 TestResult.template_key == template_key,
+                TestResult.test_session_id == test_session_id,  # Match session (NULL for legacy)
             )
             .first()
         )
@@ -360,6 +380,7 @@ class TestingService:
             existing.overall_result = overall_result
             existing.remarks = remarks
             existing.replacement_products = replacement_products
+            existing.test_session_id = test_session_id  # Update session link
             existing.tested_by = tester_id
             existing.tested_at = UTCDateTimeMixin._utc_now()
             existing.modified_by = tester_id
@@ -367,6 +388,7 @@ class TestingService:
         else:
             result = TestResult(
                 testing_request_id=request_id,
+                test_session_id=test_session_id,  # Link to session
                 organization_id=request.organization_id,  # Auto-populate from testing_request
                 test_name=test_name,
                 template_key=template_key,

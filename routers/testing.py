@@ -2,7 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -331,7 +331,7 @@ def create_structured_result(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Submit structured test results with JSONB data."""
+    """Submit structured test results with JSONB data. Supports multi-session via test_session_id."""
     service = TestingService(db)
     result = service.create_structured_result(
         request_id=request_id,
@@ -341,6 +341,7 @@ def create_structured_result(
         remarks=data.remarks,
         tester_id=current_user.id,
         replacement_products=data.replacement_products,
+        test_session_id=data.test_session_id,  # Pass session_id for multi-session support
     )
     # Build response with images list
     return _build_structured_response(result)
@@ -416,3 +417,435 @@ def _build_structured_response(result) -> TestResultStructuredResponse:
         cts=result.cts,
         mts=result.mts,
     )
+
+
+@router.get("/results/{result_id}/preview", response_class=HTMLResponse)
+def preview_test_result(
+    result_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Render test result as styled HTML (browser-friendly preview)."""
+    from models import TestResult
+    from services.org_test_template_service import OrgTestTemplateService
+
+    service = TestingService(db)
+    result = db.query(TestResult).filter(TestResult.id == result_id).first()
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Test result not found")
+
+    # Get template definition to render fields properly
+    template_service = OrgTestTemplateService(db)
+    template = None
+    if result.template_key:
+        template = template_service.get_by_template_key(result.template_key)
+
+    test_data = result.test_data or {}
+    overall_result = result.overall_result or "N/A"
+    tested_at = result.tested_at.strftime("%d/%m/%Y %H:%M:%S") if result.tested_at else "N/A"
+
+    # Determine result badge color
+    badge_color = "#4CAF50" if overall_result.lower() in ["pass", "ok"] else \
+                  "#f44336" if overall_result.lower() in ["fail", "failed"] else \
+                  "#ff9800" if overall_result.lower() in ["conditional", "warning"] else \
+                  "#9e9e9e"
+
+    # Build field HTML from test_data
+    def format_field_name(key: str) -> str:
+        """Convert snake_case to Title Case."""
+        return " ".join(word.capitalize() for word in key.split("_"))
+
+    def render_value(value) -> str:
+        """Render value safely as HTML."""
+        if isinstance(value, (list, dict)):
+            import json
+            return f"<pre>{json.dumps(value, indent=2)}</pre>"
+        return str(value) if value is not None else "-"
+
+    def render_test_data_structure(data: dict, depth: int = 0) -> str:
+        """
+        Intelligently render test data based on structure:
+        - List of dicts with consistent keys → Table
+        - Dict with simple key-value pairs → Two-column grid
+        - Section with nested data → Heading + recursive render
+        """
+        html = ""
+
+        for key, value in data.items():
+            section_name = format_field_name(key)
+
+            if isinstance(value, list) and value and isinstance(value[0], dict):
+                # LIST OF DICTS → RENDER AS TABLE
+                html += f'<h4 style="color:#2a5298; margin-top:20px; margin-bottom:10px;">{section_name}</h4>'
+                html += render_table_from_list(value)
+
+            elif isinstance(value, dict):
+                # Check if it's simple key-value or nested
+                has_nested = any(isinstance(v, (dict, list)) for v in value.values())
+
+                if has_nested:
+                    # NESTED DICT → SECTION HEADING + RECURSIVE
+                    html += f'<h4 style="color:#2a5298; margin-top:20px; margin-bottom:10px;">{section_name}</h4>'
+                    html += render_test_data_structure(value, depth + 1)
+                else:
+                    # SIMPLE KEY-VALUE DICT → TWO-COLUMN LAYOUT
+                    html += f'<h4 style="color:#2a5298; margin-top:20px; margin-bottom:10px;">{section_name}</h4>'
+                    html += render_two_column_layout(value)
+
+            else:
+                # SIMPLE VALUE → Add to two-column
+                html += render_two_column_layout({key: value})
+
+        return html
+
+    def render_table_from_list(data_list: list) -> str:
+        """Render list of dicts as HTML table"""
+        if not data_list:
+            return ""
+
+        # Extract headers from first dict
+        headers = list(data_list[0].keys())
+
+        html = '<table class="data-table"><thead><tr>'
+        for header in headers:
+            html += f'<th>{format_field_name(header)}</th>'
+        html += '</tr></thead><tbody>'
+
+        for row in data_list:
+            html += '<tr>'
+            for header in headers:
+                value = row.get(header, '-')
+                html += f'<td>{value}</td>'
+            html += '</tr>'
+
+        html += '</tbody></table>'
+        return html
+
+    def render_two_column_layout(data_dict: dict) -> str:
+        """Render simple key-value pairs in two-column grid"""
+        html = '<div class="fields">'
+        for key, value in data_dict.items():
+            label = format_field_name(key)
+            display_value = str(value) if value is not None else '-'
+            html += f'''
+            <div class="field">
+                <label>{label}</label>
+                <div class="value">{display_value}</div>
+            </div>
+            '''
+        html += '</div>'
+        return html
+
+    fields_html = ""
+
+    if template and template.template_data:
+        # Render using template structure for better formatting
+        sections = template.template_data.get("sections", [])
+        for section in sections:
+            section_title = section.get("title", "")
+            fields = section.get("fields", [])
+
+            if not fields:
+                continue
+
+            fields_html += f'<div class="section"><h3>{section_title}</h3><div class="fields">'
+
+            for field in fields:
+                field_key = field.get("key", "")
+                field_label = field.get("label", format_field_name(field_key))
+                field_value = test_data.get(field_key, "-")
+                field_type = field.get("type", "text")
+                unit = field.get("unit", "")
+
+                # Format value based on field type
+                if field_type == "toggle":
+                    display_value = "✓ Yes" if field_value else "✗ No"
+                elif field_type == "table":
+                    # Render table
+                    if isinstance(field_value, list) and field_value:
+                        cols = field.get("columns", [])
+                        display_value = "<table class='data-table'><thead><tr>"
+                        for col in cols:
+                            display_value += f"<th>{col.get('label', col.get('key', ''))}</th>"
+                        display_value += "</tr></thead><tbody>"
+                        for row in field_value:
+                            display_value += "<tr>"
+                            for col in cols:
+                                cell_val = row.get(col.get('key', ''), '-')
+                                display_value += f"<td>{cell_val}</td>"
+                            display_value += "</tr>"
+                        display_value += "</tbody></table>"
+                    else:
+                        display_value = "-"
+                else:
+                    display_value = render_value(field_value)
+                    if unit and display_value != "-":
+                        display_value += f" {unit}"
+
+                fields_html += f'''
+                <div class="field">
+                    <label>{field_label}</label>
+                    <div class="value">{display_value}</div>
+                </div>
+                '''
+
+            fields_html += '</div></div>'
+    else:
+        # No template - render raw test_data intelligently
+        fields_html += '<div class="section"><h3>Test Data</h3>'
+        fields_html += render_test_data_structure(test_data)
+        fields_html += '</div>'
+
+    # Add remarks if present
+    if result.remarks:
+        fields_html += f'''
+        <div class="section">
+            <h3>Remarks</h3>
+            <div class="remarks">{result.remarks}</div>
+        </div>
+        '''
+
+    # Add evaluation result if present
+    if result.evaluation_result:
+        eval_data = result.evaluation_result
+        overall_eval = eval_data.get("overall", "")
+        alerts = eval_data.get("alerts", [])
+
+        if overall_eval or alerts:
+            fields_html += '<div class="section"><h3>Evaluation Results</h3>'
+            if overall_eval:
+                eval_color = "#4CAF50" if overall_eval == "OK" else \
+                            "#f44336" if overall_eval == "CRITICAL" else \
+                            "#ff9800"
+                fields_html += f'<div class="eval-badge" style="background:{eval_color}">{overall_eval}</div>'
+
+            if alerts:
+                fields_html += '<ul class="alerts">'
+                for alert in alerts:
+                    alert_msg = alert.get("message", "")
+                    alert_level = alert.get("level", "info")
+                    icon = "⚠️" if alert_level in ["warning", "ALERT"] else "🚨" if alert_level == "CRITICAL" else "ℹ️"
+                    fields_html += f'<li>{icon} {alert_msg}</li>'
+                fields_html += '</ul>'
+
+            fields_html += '</div>'
+
+    html_page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Result - {result.test_name or result.template_key or 'Preview'}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }}
+        .container {{
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 30px;
+        }}
+        .header h1 {{
+            font-size: 24px;
+            margin-bottom: 15px;
+        }}
+        .meta {{
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+            font-size: 14px;
+            opacity: 0.95;
+        }}
+        .meta-item {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .meta-item strong {{
+            font-weight: 600;
+        }}
+        .result-badge {{
+            display: inline-block;
+            background: {badge_color};
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .content {{
+            padding: 30px;
+        }}
+        .section {{
+            margin-bottom: 30px;
+        }}
+        .section h3 {{
+            color: #333;
+            font-size: 18px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }}
+        .fields {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }}
+        .field {{
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 3px solid #667eea;
+        }}
+        .field label {{
+            display: block;
+            color: #555;
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .field .value {{
+            color: #222;
+            font-size: 15px;
+            word-wrap: break-word;
+        }}
+        .remarks {{
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 8px;
+            color: #856404;
+        }}
+        .eval-badge {{
+            display: inline-block;
+            padding: 10px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }}
+        .alerts {{
+            list-style: none;
+            padding: 0;
+        }}
+        .alerts li {{
+            background: #fff3cd;
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            border-left: 3px solid #ff9800;
+        }}
+        .data-table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }}
+        .data-table th,
+        .data-table td {{
+            padding: 10px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }}
+        .data-table th {{
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+        }}
+        .data-table tr:nth-child(even) {{
+            background: #f8f9fa;
+        }}
+        pre {{
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }}
+        .preview-badge {{
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }}
+        @media print {{
+            body {{ background: white; padding: 0; }}
+            .preview-badge {{ display: none; }}
+            .container {{ box-shadow: none; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{result.test_name or result.template_key or "Test Result"}</h1>
+            <div class="meta">
+                <div class="meta-item">
+                    <strong>Result:</strong>
+                    <span class="result-badge">{overall_result}</span>
+                </div>
+                <div class="meta-item">
+                    <strong>Tested At:</strong> {tested_at}
+                </div>
+                {f'<div class="meta-item"><strong>Template:</strong> {result.template_key}</div>' if result.template_key else ''}
+            </div>
+        </div>
+        <div class="content">
+            {fields_html}
+        </div>
+    </div>
+    <div class="preview-badge">TEST RESULT PREVIEW</div>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html_page)
+
+
+@router.get("/results/{result_id}/pdf")
+def generate_test_result_pdf(
+    result_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate professional PDF report from test result using ReportLab."""
+    from fastapi.responses import StreamingResponse
+    from services.test_result_pdf_service import TestResultPDFService
+
+    try:
+        pdf_service = TestResultPDFService(db)
+        pdf_buffer = pdf_service.generate_pdf(result_id)
+
+        # Return PDF as streaming response
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="test_result_{result_id}.pdf"'
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
