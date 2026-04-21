@@ -62,9 +62,13 @@ def jprint(label, d, keys=None):
         d = {k: d[k] for k in keys if k in d}
     info(f"{label}: {json.dumps(d, indent=2, default=str)}")
 
-# ─── STEP 1: Update template with calculated field ────────────────────────────
+# ─── STEP 1: Verify template has calculated pi_value + column_summaries ───────
+# The template is now seeded with these values in test_templates.py.
+# This step verifies the DB reflects the correct structure; if an older seed is
+# present it self-heals by applying the update via the Template Designer API
+# (same call the UI makes when the admin saves changes in Template Designer).
 def step1_update_template():
-    sec("STEP 1 — Update IR template: pi_value → calculated + column_summaries")
+    sec("STEP 1 — Verify IR template: pi_value=calculated + column_summaries")
 
     r = requests.get(f"{BASE_URL}/org-test-templates/{IR_TEMPLATE_ID}", headers=auth("requester"))
     if r.status_code != 200:
@@ -74,39 +78,47 @@ def step1_update_template():
     tmpl = r.json()
     td   = tmpl["template_data"]
 
-    # Find ir_readings table and modify pi_value column
-    updated = False
+    # Check current state
+    already_correct = False
+    needs_fix = False
     for sec_block in td.get("sections", []):
         for field in sec_block.get("fields", []):
             if field.get("key") == "ir_readings" and field.get("type") == "table":
                 for col in field.get("columns", []):
                     if col.get("key") == "pi_value":
-                        col["type"]    = "calculated"
-                        col["formula"] = "ratio(ir_value_10min, ir_value_1min)"
-                        info("  pi_value column → calculated  formula=ratio(ir_value_10min, ir_value_1min)")
-                        updated = True
+                        if col.get("type") == "calculated" and col.get("formula"):
+                            already_correct = True
+                            info(f"  pi_value already calculated  formula={col['formula']}")
+                        else:
+                            needs_fix = True
+                            info("  pi_value is plain number — applying fix via Template Designer API")
+                            col["type"]    = "calculated"
+                            col["formula"] = "ratio(ir_value_10min, ir_value_1min)"
+                # Ensure column_summaries are set
+                if not field.get("column_summaries"):
+                    needs_fix = True
+                    field["column_summaries"] = {
+                        "ir_value_1min":  "avg",
+                        "ir_value_10min": "avg",
+                        "pi_value":       "avg",
+                    }
+                    info("  column_summaries missing — adding avg for IR1/IR10/PI")
+                else:
+                    info(f"  column_summaries already set: {field['column_summaries']}")
 
-                # Add column_summaries
-                field["column_summaries"] = {
-                    "ir_value_1min":  "avg",
-                    "ir_value_10min": "avg",
-                    "pi_value":       "avg",
-                }
-                info("  column_summaries: avg for ir_value_1min, ir_value_10min, pi_value")
+    if already_correct and not needs_fix:
+        ok("Template already has correct structure (no update needed)")
+        return True
 
-    if not updated:
-        err("pi_value column not found — check template structure")
-        return False
-
-    # PATCH / PUT back
+    # Apply fix via same API endpoint the Template Designer UI uses
     r2 = requests.put(
         f"{BASE_URL}/org-test-templates/{IR_TEMPLATE_ID}",
-        headers=auth("result_approver"),   # admin can edit
+        headers=auth("result_approver"),
         json={"template_data": td},
     )
     if r2.status_code in (200, 201):
-        ok(f"Template updated  (HTTP {r2.status_code})")
-        # Verify
+        ok(f"Template updated via Template Designer API  (HTTP {r2.status_code})")
+        # Verify round-trip
         r3 = requests.get(f"{BASE_URL}/org-test-templates/{IR_TEMPLATE_ID}", headers=auth("requester"))
         for sb in r3.json()["template_data"]["sections"]:
             for f in sb.get("fields", []):
