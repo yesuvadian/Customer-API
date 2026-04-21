@@ -1667,6 +1667,9 @@ class TestResult(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
 
+    # Multi-session support: link result to specific test session
+    test_session_id = Column(UUID(as_uuid=True), ForeignKey("public.test_sessions.id", ondelete="SET NULL"), nullable=True)
+
     # Multi-tenancy
     organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
 
@@ -1703,6 +1706,7 @@ class TestResult(Base):
 
     # Relationships
     testing_request = relationship("TestingRequest", back_populates="test_results")
+    test_session = relationship("TestSession", foreign_keys=[test_session_id])
     organization = relationship("Organization", foreign_keys=[organization_id])
     images = relationship("TestResultImage", back_populates="test_result", cascade="all, delete-orphan")
     tester = relationship("User", foreign_keys=[tested_by])

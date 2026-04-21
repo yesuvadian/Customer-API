@@ -1214,6 +1214,7 @@ class TestResultStructuredCreate(BaseModel):
     remarks: Optional[str] = None
     replacement_products: Optional[list] = None
     organization_id: Optional[UUID] = None
+    test_session_id: Optional[UUID] = None  # Link result to specific session
 
 class TestResultImageResponse(BaseModel):
     id: UUID
@@ -1230,6 +1231,7 @@ class TestResultImageResponse(BaseModel):
 class TestResultStructuredResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    test_session_id: Optional[UUID] = None  # Session this result belongs to
     organization_id: Optional[UUID] = None
     test_name: str
     template_key: Optional[str] = None
