@@ -152,7 +152,9 @@ def get_available_tester_roles(
         OrgRole.is_active == True
     ).all()
 
-    # Filter roles: must have FULL permissions on EXACTLY the required modules
+    # Filter roles: must have FULL permissions on AT LEAST the required modules
+    # (having additional permissions is acceptable — a role is eligible if it covers
+    #  the required modules, even if it also covers other modules)
     eligible_roles = []
 
     for role in all_roles:
@@ -169,12 +171,12 @@ def get_available_tester_roles(
                 perm.can_edit):
                 full_permission_modules.add(perm.module_id)
 
-        # Check for EXACT match
-        if full_permission_modules == required_modules:
+        # Check that role has AT LEAST the required modules (subset check)
+        if required_modules.issubset(full_permission_modules):
             eligible_roles.append(role)
-            print(f"[DEBUG] Role '{role.name}' matches (modules: {full_permission_modules})")
+            print(f"[DEBUG] Role '{role.name}' eligible (has modules: {full_permission_modules})")
         else:
-            print(f"[DEBUG] Role '{role.name}' excluded (has modules: {full_permission_modules})")
+            print(f"[DEBUG] Role '{role.name}' excluded (missing required: {required_modules - full_permission_modules})")
 
     print(f"[DEBUG] {len(eligible_roles)} eligible tester roles found")
 

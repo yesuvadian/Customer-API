@@ -81,6 +81,7 @@ from routers import (
     test_request_schedules,
     test_sessions,  # NEW: Multi-session testing
     session_comments,  # NEW: Session comments for approvers
+    tester_locations,  # Tester-to-zone mapping
 )
 
 # Organization Multi-Tenancy
@@ -403,6 +404,7 @@ app.include_router(testing_requests.router)
 app.include_router(testing.router)
 app.include_router(test_sessions.router)  # NEW: Multi-session testing
 app.include_router(session_comments.router)  # NEW: Session comments for approvers
+app.include_router(tester_locations.router)  # Tester-to-zone mapping
 app.include_router(recommendations.router)
 app.include_router(approvals.router)
 app.include_router(testing_request_approvals.router)
