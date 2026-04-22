@@ -1,8 +1,85 @@
-# Ignore Python compiled files
+# Python
 *.pyc
 __pycache__/
-venv/
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
 
-# Ignore environment variable files
+# Virtual environments
+venv/
+venv311/
+env/
+ENV/
+
+# Environment variables
 .env
 .env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+api*.log
+server*.log
+uvicorn.log
+test*.log
+debug*.txt
+nul
+
+# Database backups
+*.sql
+backup_*.sql
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# Node modules (if using JS tools)
+node_modules/
+package-lock.json
+
+# Documentation drafts
+*.docx
+~$*.docx
+unpacked_manual/
+
+# Temp files
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# Scripts and utilities
+restart_and_test.sh
+run_full_test.bat
+add_*.py
+fix_*.py
+drop_*.py
+gen_*.js
+
+# Claude assistant
+.claude/
+
+# Documentation (work in progress)
+*_STATUS.md
+*_IMPLEMENTATION.md
+*_GUIDE.md
+*_REVIEW.md
+*_DESIGN.md
+*_PLAN.md
+*_SUMMARY.md
+*_TABLE.md
+*_CHECKLIST.md

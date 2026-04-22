@@ -1,7 +1,7 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -39,6 +39,15 @@ def _enrich(req):
     req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
     req.test_type_name = req.test_type.name if req.test_type else None
     req.department_name = req.department.name if req.department else None
+
+    # Equipment asset register fields
+    if req.equipment:
+        req.equipment_ueic = req.equipment.ueic
+        req.equipment_name = req.equipment.ueic  # Alias for Flutter UI
+    else:
+        req.equipment_ueic = None
+        req.equipment_name = None
+
     if req.originator:
         req.originator_name = f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip() or req.originator.email
     else:
@@ -109,7 +118,8 @@ def get_department_hierarchy(
 def list_equipment_types(db: Session = Depends(get_db)):
     """
     Returns equipment types (CategoryMaster where description='Testing Equipment')
-    with their test types (CategoryDetails).
+    with their types grouped by request category (test, maintenance, inspection, repair_lifecycle).
+    Per SRS: All categories need type dropdowns with multiple options.
     """
     masters = (
         db.query(CategoryMaster)
@@ -119,16 +129,43 @@ def list_equipment_types(db: Session = Depends(get_db)):
     )
     result = []
     for m in masters:
-        tests = (
+        # Get all types for this equipment
+        all_types = (
             db.query(CategoryDetails)
             .filter(CategoryDetails.category_master_id == m.id, CategoryDetails.is_active == True)
             .order_by(CategoryDetails.name)
             .all()
         )
+
+        # Group types by category using category_type column
+        types_by_category = {
+            "test": [],
+            "maintenance": [],
+            "inspection": [],
+            "repair_lifecycle": []
+        }
+
+        for t in all_types:
+            category = t.category_type or "test"  # Default to test if not set
+            if category in types_by_category:
+                types_by_category[category].append({
+                    "id": t.id,
+                    "name": t.name,
+                    "category_type": t.category_type
+                })
+            else:
+                # Fallback to test for unknown categories
+                types_by_category["test"].append({
+                    "id": t.id,
+                    "name": t.name,
+                    "category_type": t.category_type
+                })
+
         result.append({
             "id": m.id,
             "name": m.name,
-            "tests": [{"id": t.id, "name": t.name} for t in tests],
+            "tests": types_by_category["test"],  # Legacy field for backward compatibility
+            "types_by_category": types_by_category,  # New field with all categories
         })
     return result
 
@@ -242,15 +279,30 @@ def get_testing_request_stats(
     return service.get_stats(organization_id=organization_id)
 
 
-@router.post("/", response_model=TestingRequestResponse)
+@router.post("/", response_model=TestingRequestResponse, status_code=status.HTTP_201_CREATED)
 def create_testing_request(
     data: TestingRequestCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     service = TestingRequestService(db)
-    req = service.create_request(data.dict(), originator_id=current_user.id)
+    payload = data.dict()
+    # Auto-set organization_id from current user if not provided
+    if not payload.get("organization_id") and current_user.organization_id:
+        payload["organization_id"] = str(current_user.organization_id)
+    req = service.create_request(payload, originator_id=current_user.id)
     return _enrich(req)
+
+
+@router.get("/request-categories")
+def list_request_categories():
+    """Return all valid request categories with labels for Flutter dropdowns."""
+    return [
+        {"value": "test",             "label": "Testing",          "icon": "science",        "description": "Routine or scheduled equipment testing"},
+        {"value": "maintenance",      "label": "Maintenance",      "icon": "build",          "description": "Preventive or corrective maintenance"},
+        {"value": "inspection",       "label": "Inspection",       "icon": "search",         "description": "Visual or functional inspection"},
+        {"value": "repair_lifecycle", "label": "Repair / Lifecycle","icon": "engineering",   "description": "Repair work or lifecycle assessment"},
+    ]
 
 
 @router.get("/", response_model=List[TestingRequestResponse])
@@ -258,15 +310,12 @@ def list_testing_requests(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     status: Optional[str] = None,
+    category: Optional[str] = None,
     originator_id: Optional[UUID] = None,
     tester_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    print(f"[DEBUG] list_testing_requests called by user {current_user.email}")
-    print(f"[DEBUG] Query params: originator_id={originator_id}, tester_id={tester_id}, status={status}")
-    print(f"[DEBUG] User organization_id: {current_user.organization_id}")
-
     # Filter by organization if user belongs to one
     organization_id = current_user.organization_id
 
@@ -275,11 +324,11 @@ def list_testing_requests(
         skip=skip,
         limit=limit,
         status_filter=status,
+        category_filter=category,
         originator_id=originator_id,
         tester_id=tester_id,
         organization_id=organization_id,
     )
-    print(f"[DEBUG] Returning {len(requests)} testing requests (filters: org={organization_id}, originator={originator_id}, tester={tester_id})")
     return [_enrich(r) for r in requests]
 
 
@@ -334,6 +383,35 @@ def assign_tester(
 ):
     service = TestingRequestService(db)
     return _enrich(service.assign_tester(request_id, tester_id=data.tester_id, assigned_by=current_user.id))
+
+
+@router.put("/{request_id}/approve", response_model=TestingRequestResponse)
+def approve_testing_results(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Approve test results after testing is complete."""
+    from services.testing_request_workflow_service import TestingRequestWorkflowService
+
+    service = TestingRequestService(db)
+    request = service.get_request(request_id)
+
+    workflow_service = TestingRequestWorkflowService(db)
+    success, message = workflow_service.approve_results(
+        testing_request=request,
+        user=current_user,
+        comment=None
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+
+    db.refresh(request)
+    return _enrich(request)
 
 
 # NOTE: Tester workflow endpoints (accept, start, submit_results)

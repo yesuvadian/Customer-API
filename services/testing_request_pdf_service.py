@@ -28,6 +28,7 @@ class TestingRequestPDFService:
             joinedload(TestingRequest.originator),
             joinedload(TestingRequest.assigned_tester),
             joinedload(TestingRequest.organization),
+            joinedload(TestingRequest.equipment),
         ).filter(TestingRequest.id == request_id).first()
 
         if not testing_request:
@@ -84,13 +85,15 @@ class TestingRequestPDFService:
         story.append(Paragraph("Request Information", heading_style))
 
         request_data = [
-            ['Request ID:', str(testing_request.id)],
             ['Title:', testing_request.title or '-'],
             ['Priority:', (testing_request.priority or '-').upper() if isinstance(testing_request.priority, str) else (testing_request.priority.value.upper() if testing_request.priority else '-')],
         ]
 
         if testing_request.description:
             request_data.append(['Description:', testing_request.description])
+
+        if testing_request.equipment and testing_request.equipment.ueic:
+            request_data.append(['UEIC:', testing_request.equipment.ueic])
 
         request_data.extend([
             ['Equipment Type:', testing_request.equipment_type.name if testing_request.equipment_type else '-'],

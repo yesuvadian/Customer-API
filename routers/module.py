@@ -30,6 +30,7 @@ class ModuleUpdateRequest(BaseModel):
     path: Optional[str] = None
     group_name: Optional[str] = None
     is_active: Optional[bool] = None
+    is_menu: Optional[bool] = None   # controls sidebar visibility
 
     class Config:
         from_attributes = True     # Pydantic v2 equivalent of orm_mode
@@ -79,7 +80,8 @@ async def list_modules(
                 "description": m.description,
                 "path": m.path,
                 "group_name": m.group_name,
-                "is_active": m.is_active
+                "is_active": m.is_active,
+                "is_menu": getattr(m, "is_menu", True),
             }
             for m in modules
         ]

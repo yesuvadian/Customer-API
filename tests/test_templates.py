@@ -274,9 +274,19 @@ TEST_TEMPLATES = {
                             {"key": "measurement_point", "label": "Measurement", "type": "text"},
                             {"key": "ir_value_1min", "label": "IR 1min (MOhm)", "type": "number"},
                             {"key": "ir_value_10min", "label": "IR 10min (MOhm)", "type": "number"},
-                            {"key": "pi_value", "label": "PI", "type": "number"},
+                            {
+                                "key": "pi_value",
+                                "label": "PI (Polarisation Index)",
+                                "type": "calculated",
+                                "formula": "ratio(ir_value_10min, ir_value_1min)"
+                            },
                             {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
-                        ]
+                        ],
+                        "column_summaries": {
+                            "ir_value_1min": "avg",
+                            "ir_value_10min": "avg",
+                            "pi_value": "avg"
+                        }
                     }
                 ]
             },

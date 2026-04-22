@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 import uuid
 import pandas as pd
 from typing import Dict, Optional
-from database import VendorSessionLocal
+from sqlalchemy import text
+from database import VendorSessionLocal, Base, vendor_engine
 from models import (
     CategoryDetails, CategoryMaster, Country, Division, Plan, Product,
     ProductCategory, ProductSubCategory, Role, RoleModulePrivilege,
@@ -11,7 +12,9 @@ from models import (
     # Organization models
     Organization, OrgDepartment, OrgRole, OrgUserRole,
     OrgRolePermission, RoleTemplate, OrgInvitation, TesterRoleModuleRequirement,
-    ZohoImportMapping
+    ZohoImportMapping, Equipment, EquipmentStatus,
+    # Reporting Suite
+    ReportDefinition,
 )
 from security_utils import get_password_hash  # password hashing utils
 
@@ -148,6 +151,14 @@ def seed_roles(session):
         {"name": "Originator", "description": "Creates testing requests and raises procurement"},
         {"name": "Tester", "description": "Performs transformer testing and uploads results"},
         {"name": "Approver", "description": "Reviews and approves or rejects recommendations"},
+        # ✅ SRS-SPECIFIED DESIGNATION ROLES (SEACMS-AI v1.3 Section 2.3)
+        {"name": "AEE Maintenance", "description": "Assistant Executive Engineer - Field-level maintenance responsible officer"},
+        {"name": "EE TLSS", "description": "Executive Engineer - Transmission Line & Substation primary reviewer"},
+        {"name": "SEE W&M", "description": "Superintending Engineer - Works & Maintenance circle supervisor"},
+        {"name": "EE RT", "description": "Executive Engineer - Research & Testing"},
+        {"name": "SEE RT", "description": "Superintending Engineer - Research & Testing"},
+        {"name": "CEE Transmission Zone", "description": "Chief Engineer Executive - Transmission zone management"},
+        {"name": "CEE RT&R&D", "description": "Chief Engineer Executive - Research Testing & R&D"},
     ]
 
     role_ids = {}
@@ -372,35 +383,46 @@ def seed_modules(session):
 {"name": "zohocontacts", "description": "Manage Zoho Contacts", "path": "zohocontacts", "group_name": "CRM"},
 # ✅ PROCUREMENT / ZOHO PORTAL MODULES
 {"name": "Request Quote", "description": "Request quotes from suppliers", "path": "request_quote", "group_name": "Procurement"},
-{"name": "RQ with Vendor", "description": "Request quotes with vendor selection", "path": "rqWithVendor", "group_name": "Procurement"},
-{"name": "Request Product", "description": "Request new products", "path": "request_product", "group_name": "Procurement"},
+{"name": "RQ with Vendor", "description": "Request quotes with vendor selection", "path": "rqWithVendor", "group_name": "Procurement", "is_menu": False},
+{"name": "Request Product", "description": "Request new products", "path": "request_product", "group_name": "Procurement", "is_menu": False},
 {"name": "Quotes", "description": "View and manage quotes", "path": "quotes", "group_name": "Procurement"},
-{"name": "Sales Orders", "description": "View and manage sales orders", "path": "sales_orders", "group_name": "Procurement"},  
-{"name": "Invoices", "description": "View and manage invoices", "path": "invoices", "group_name": "Procurement"},
-{"name": "Retainer Invoices", "description": "Manage retainer invoices", "path": "retainer_invoices", "group_name": "Procurement"},
-{"name": "Payments Made", "description": "Track payments made", "path": "payments_made", "group_name": "Procurement"},
-{"name": "Statements", "description": "View account statements", "path": "statements", "group_name": "Procurement"},
-{"name": "Enquiry", "description": "Submit and manage enquiries", "path": "enquiry", "group_name": "Procurement"},
-{"name": "Contact Us", "description": "Customer support", "path": "contact_us", "group_name": "Procurement"},
+{"name": "Sales Orders", "description": "View and manage sales orders", "path": "sales_orders", "group_name": "Procurement", "is_menu": False},
+{"name": "Invoices", "description": "View and manage invoices", "path": "invoices", "group_name": "Procurement", "is_menu": False},
+{"name": "Retainer Invoices", "description": "Manage retainer invoices", "path": "retainer_invoices", "group_name": "Procurement", "is_menu": False},
+{"name": "Payments Made", "description": "Track payments made", "path": "payments_made", "group_name": "Procurement", "is_menu": False},
+{"name": "Statements", "description": "View account statements", "path": "statements", "group_name": "Procurement", "is_menu": False},
+{"name": "Enquiry", "description": "Submit and manage enquiries", "path": "enquiry", "group_name": "Procurement", "is_menu": False},
+{"name": "Contact Us", "description": "Customer support", "path": "contact_us", "group_name": "Procurement", "is_menu": False},
 # ✅ TESTING REQUEST SYSTEM MODULES
 {"name": "Testing Requests", "description": "Create and manage transformer testing requests", "path": "testing_requests", "group_name": "Testing"},
 {"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
 {"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 {"name": "Testing Request Approvals", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
-{"name": "Validation Requests", "description": "Create and manage validation requests", "path": "validation_requests", "group_name": "Testing"},
-{"name": "Tester Mapping", "description": "Map testers to locations (zone/circle/division)", "path": "tester_mapping", "group_name": "Testing"},
+# Removed: Validation Requests (not implemented)
+# Removed: Tester Mapping (no longer used)
 {"name": "Test Template Management", "description": "Design and customise per-org test form templates", "path": "test_templates", "group_name": "Testing"},
 # ✅ ORGANIZATION MANAGEMENT MODULES
 {"name": "Organizations", "description": "Manage organizations, departments, roles, and users", "path": "organizations", "group_name": "Organization"},
 {"name": "Organization User Roles", "description": "Assign organization-specific roles to users within your organization", "path": "org_user_roles", "group_name": "Organization"},
 {"name": "Organization Role Permissions", "description": "Configure permissions for organization roles", "path": "org_role_permissions", "group_name": "Organization"},
 # ✅ WORKFLOW MANAGEMENT MODULE
-{"name": "Workflows", "description": "Manage workflow definitions, states, transitions, and permissions", "path": "workflows", "group_name": "Administration"},
+{"name": "Workflows", "description": "Manage workflow definitions, states, transitions, and permissions", "path": "workflows", "group_name": "Administration", "is_menu": False},
 {"name": "Vendor Documents",
  "description": "View vendor uploaded documents",
  "path": "vendor_documents",
  "group_name": "Organization"},
+# ✅ EQUIPMENT ASSET REGISTER MODULE
+{"name": "Equipment", "description": "Equipment asset register with UEIC auto-generation", "path": "equipment", "group_name": "Testing"},
+# ✅ DASHBOARD KPI MODULES - Role-specific dashboards
+{"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
+{"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
+# ✅ REPORTING SUITE MODULE
+{"name": "Reports", "description": "Generic report engine — 14 SRS operational reports with Excel/PDF export", "path": "reports", "group_name": "Testing"},
     ]
 
     module_ids = {}
@@ -414,7 +436,8 @@ def seed_modules(session):
                 description=m["description"],
                 path=m["path"],
                 group_name=m["group_name"],
-                is_active=m.get("is_active", True)
+                is_active=m.get("is_active", True),
+                is_menu=m.get("is_menu", True),
             )
             session.add(module)
             session.flush()
@@ -424,9 +447,8 @@ def seed_modules(session):
             existing.description = m["description"]
             existing.path = m["path"]
             existing.group_name = m["group_name"]
-
-            # 🔥 MOST IMPORTANT FIX
             existing.is_active = m.get("is_active", True)
+            existing.is_menu = m.get("is_menu", True)
 
             module_ids[m["name"]] = existing.id
 
@@ -479,12 +501,20 @@ def seed_privileges(session, role_ids, module_ids):
         "Invoices", "Retainer Invoices", "Payments Made", "Statements",
         "Enquiry", "Contact Us", "RQ with Vendor",
         # ✅ TESTING REQUEST SYSTEM MODULES
-        "Testing Requests", "Testing", "Recommendations", "Approvals", "Validation Requests",
+        "Testing Requests", "Testing", "Recommendations", "Approvals",
+        # Removed: "Validation Requests" (not implemented)
         "Test Template Management",
         # ✅ ORGANIZATION MANAGEMENT MODULE
         "Organizations",
         # ✅ WORKFLOW MANAGEMENT MODULE
-        "Workflows","Vendor Documents"
+        "Workflows","Vendor Documents",
+        # ✅ EQUIPMENT ASSET REGISTER
+        "Equipment",
+        # ✅ DASHBOARD KPI & NOTIFICATIONS
+        "EE TLSS Dashboard",
+        "Notifications",
+        # ✅ REPORTING SUITE
+        "Reports",
     ]
 
     # -------------------------------------------------------
@@ -600,10 +630,7 @@ def seed_privileges(session, role_ids, module_ids):
             "can_view": True, "can_add": True, "can_edit": True,
             "can_delete": True, "can_search": True, "can_assign": True
         },
-        {
-            "role": "Originator", "module": "Validation Requests",
-            "can_view": True, "can_add": True, "can_edit": True, "can_search": True
-        },
+        # Removed: Validation Requests privilege (module not implemented)
         {"role": "Originator", "module": "Dashboard", "can_view": True},
         # Originator — Procurement modules (full add/edit)
         {"role": "Originator", "module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
@@ -637,6 +664,8 @@ def seed_privileges(session, role_ids, module_ids):
             "role": "Test Assigner", "module": "Testing Request Approvals",
             "can_view": True, "can_approve": True, "can_assign": True
         },
+        {"role": "Test Assigner", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Test Assigner", "module": "Dashboard", "can_view": True},
 
         # DOC-VIEWER — view only for Vendor Documents
         {
@@ -646,6 +675,8 @@ def seed_privileges(session, role_ids, module_ids):
         },
 
         # DEPARTMENT HEAD — approve on Recommendations + Approvals
+        {"role": "Department Head", "module": "Dashboard", "can_view": True},
+        {"role": "Department Head", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
         {"role": "Department Head", "module": "Recommendations",
          "can_view": True, "can_approve": True},
         {"role": "Department Head", "module": "Approvals",
@@ -675,6 +706,123 @@ def seed_privileges(session, role_ids, module_ids):
 
         # TEST TEMPLATE MANAGEMENT — Admin full (via bulk), Originator view-only
         {"role": "Originator", "module": "Test Template Management", "can_view": True},
+
+        # ✅ EQUIPMENT ASSET REGISTER — role-based access
+        {
+            "role": "Originator", "module": "Equipment",
+            "can_view": True, "can_add": True, "can_edit": True,
+            "can_search": True
+        },
+        {"role": "Field Tester", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Lab Tester", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Test Assigner", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Department Head", "module": "Equipment", "can_view": True, "can_search": True},
+
+        # ✅ SRS DESIGNATION ROLES — Permissions per role hierarchy
+        # AEE Maintenance — Field supervisor
+        {"role": "AEE Maintenance", "module": "Dashboard", "can_view": True},
+        {"role": "AEE Maintenance", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True, "can_assign": True},
+        {"role": "AEE Maintenance", "module": "Testing", "can_view": True, "can_add": True},
+        {"role": "AEE Maintenance", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "AEE Maintenance", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "AEE Maintenance", "module": "Notifications", "can_view": True},
+        {"role": "AEE Maintenance", "module": "Reports", "can_view": True, "can_export": True},
+
+        # EE TLSS — Primary reviewer (most critical role)
+        # NOTE: Does NOT have Testing Request Approvals access (not applicable for this role)
+        {"role": "EE TLSS", "module": "Dashboard", "can_view": True},
+        {"role": "EE TLSS", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "EE TLSS", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "EE TLSS", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "EE TLSS", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "EE TLSS", "module": "Notifications", "can_view": True},
+        {"role": "EE TLSS", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "EE TLSS", "module": "Request Quote", "can_view": True},
+        {"role": "EE TLSS", "module": "Quotes", "can_view": True},
+        {"role": "EE TLSS", "module": "Sales Orders", "can_view": True},
+
+        # SEE W&M — Circle supervisor (equivalent to Test Assigner in SRS)
+        {"role": "SEE W&M", "module": "Dashboard", "can_view": True},
+        {"role": "SEE W&M", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "SEE W&M", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "SEE W&M", "module": "Testing", "can_view": True},
+        {"role": "SEE W&M", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "SEE W&M", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "SEE W&M", "module": "Notifications", "can_view": True},
+        {"role": "SEE W&M", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "SEE W&M", "module": "Request Quote", "can_view": True, "can_add": True},
+        {"role": "SEE W&M", "module": "Quotes", "can_view": True, "can_approve": True},
+        {"role": "SEE W&M", "module": "Vendor Directory", "can_view": True},
+
+        # EE RT — Research & Testing engineer
+        {"role": "EE RT", "module": "Dashboard", "can_view": True},
+        {"role": "EE RT", "module": "Testing Requests", "can_view": True, "can_add": True, "can_approve": True, "can_assign": True},
+        {"role": "EE RT", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "EE RT", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "EE RT", "module": "Test Template Management", "can_view": True, "can_edit": True},
+        {"role": "EE RT", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "EE RT", "module": "Reports", "can_view": True, "can_export": True},
+
+        # SEE RT — Senior Research & Testing
+        {"role": "SEE RT", "module": "Dashboard", "can_view": True},
+        {"role": "SEE RT", "module": "Testing Requests", "can_view": True},
+        {"role": "SEE RT", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True, "can_export": True},
+        {"role": "SEE RT", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "SEE RT", "module": "Test Template Management", "can_view": True, "can_edit": True},
+        {"role": "SEE RT", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "SEE RT", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "SEE RT", "module": "Vendor Directory", "can_view": True},
+
+        # CEE Transmission Zone — Zone management
+        {"role": "CEE Transmission Zone", "module": "Dashboard", "can_view": True},
+        {"role": "CEE Transmission Zone", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "CEE Transmission Zone", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "CEE Transmission Zone", "module": "Testing", "can_view": True},
+        {"role": "CEE Transmission Zone", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "CEE Transmission Zone", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "CEE Transmission Zone", "module": "Notifications", "can_view": True},
+        {"role": "CEE Transmission Zone", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "CEE Transmission Zone", "module": "Request Quote", "can_view": True, "can_approve": True},
+        {"role": "CEE Transmission Zone", "module": "Quotes", "can_view": True, "can_approve": True},
+        {"role": "CEE Transmission Zone", "module": "Sales Orders", "can_view": True},
+        {"role": "CEE Transmission Zone", "module": "Vendor Directory", "can_view": True},
+
+        # CEE RT&R&D — Research & Development chief
+        {"role": "CEE RT&R&D", "module": "Dashboard", "can_view": True},
+        {"role": "CEE RT&R&D", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "CEE RT&R&D", "module": "Testing", "can_view": True},
+        {"role": "CEE RT&R&D", "module": "Testing Request Approvals", "can_view": True},
+        {"role": "CEE RT&R&D", "module": "Test Template Management", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True},
+        {"role": "CEE RT&R&D", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "CEE RT&R&D", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "CEE RT&R&D", "module": "Vendor Directory", "can_view": True},
+
+        # ✅ EE TLSS DASHBOARD — role-based access
+        # All operational roles can view the dashboard; it auto-renders the
+        # correct widget set based on the user's OrgRole inside dashboard_service.py.
+        {"role": "Originator",      "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Field Tester",    "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Lab Tester",      "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Test Assigner",   "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Department Head", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Purchaser",       "module": "EE TLSS Dashboard", "can_view": True},
+
+        # ✅ NOTIFICATIONS — all active roles can view their own notification centre
+        {"role": "Originator",      "module": "Notifications", "can_view": True},
+        {"role": "Field Tester",    "module": "Notifications", "can_view": True},
+        {"role": "Lab Tester",      "module": "Notifications", "can_view": True},
+        {"role": "Test Assigner",   "module": "Notifications", "can_view": True},
+        {"role": "Department Head", "module": "Notifications", "can_view": True},
+        {"role": "Purchaser",       "module": "Notifications", "can_view": True},
+        {"role": "Vendor",          "module": "Notifications", "can_view": True},
+
+        # ✅ REPORTING SUITE — view + export for all operational roles
+        {"role": "Originator",      "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Field Tester",    "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Lab Tester",      "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Test Assigner",   "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Department Head", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Purchaser",       "module": "Reports", "can_view": True, "can_export": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -1103,8 +1251,10 @@ def seed_test_type_categories(session, master_ids):
     Description='Testing Equipment' tags these masters for filtering.
     """
 
+    # Updated structure: equipment types now have types grouped by request category
+    # Per SRS: test, maintenance, inspection, repair_lifecycle all need type dropdowns
     equipment_tests = {
-        # ── From user's Equipment → Test mapping ──
+        # ── From user's Equipment → Test mapping (legacy, kept for backward compat) ──
         "Feeder protection relays": [
             "Relay Testing Report",
         ],
@@ -1177,6 +1327,90 @@ def seed_test_type_categories(session, master_ids):
         ],
     }
 
+    # ── NEW: Category-based types structure (SRS-compliant) ──
+    # Power Transformer with all 4 categories defined
+    equipment_types_by_category = {
+        "Power Transformer": {
+            "test": [
+                "Power Transformer Nameplate Details",
+                "Transformer Physical Inspection",
+                "Ratio Test HV-IV",
+                "Ratio Test HV-LV",
+                "Short Circuit Test HV-IV",
+                "Short Circuit Test HV-LV",
+                "Magnetic Balance Test HV",
+                "Magnetic Balance Test IV",
+                "Magnetic Balance Test LV",
+                "Open Circuit Test HV-IV (1Ph)",
+                "Open Circuit Test HV-IV (3Ph)",
+                "Open Circuit Test HV-LV (1Ph)",
+                "Open Circuit Test HV-LV (3Ph)",
+                "Open Circuit Test IV-LV (1Ph)",
+                "Open Circuit Test IV-LV (3Ph)",
+                "Capacitance & Tan Delta Test (Transformer)",
+                "Capacitance & Tan Delta Comparison",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+                "Power Transformer Major Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "Civil",
+                "Fire Safety",
+                "Documentation",
+                "Environmental",
+                "General Maintenance",
+            ],
+            "repair_lifecycle": [
+                "S1: Failure Report",
+                "S2: Repair Committee",
+                "S3: Allotment to Repairer",
+                "S4: Lifting by Repairer",
+                "S5: Joint Inspection at Vendor",
+                "S6: Estimate & Revised Work Award",
+                "S7: Stage Inspections",
+                "S8: Final Inspection",
+                "S9: Dispatch",
+                "S10: Erection, Testing & Commissioning",
+            ],
+        },
+        "Circuit Breaker": {
+            "test": [
+                "Contact Resistance Test",
+                "Insulation Resistance Test",
+                "SF6 Gas Pressure Test",
+                "SF6 Gas Purity Test",
+                "Travel and Timing Test",
+                "Minimum Trip Voltage Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+                "Circuit Breaker Major Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "Civil",
+                "Fire Safety",
+                "Documentation",
+                "Environmental",
+                "General Maintenance",
+            ],
+            "repair_lifecycle": [
+                "S1: Failure Report",
+                "S2: Repair Committee",
+                "S3: Allotment to Repairer",
+                "S4: Lifting by Repairer",
+                "S5: Joint Inspection at Vendor",
+                "S6: Estimate & Revised Work Award",
+                "S7: Stage Inspections",
+                "S8: Final Inspection",
+                "S9: Dispatch",
+                "S10: Erection, Testing & Commissioning",
+            ],
+        },
+    }
+
     for equipment_name, test_list in equipment_tests.items():
         # ---- upsert CategoryMaster (Equipment) ----
         existing_master = session.query(CategoryMaster).filter_by(name=equipment_name).first()
@@ -1206,14 +1440,60 @@ def seed_test_type_categories(session, master_ids):
                 session.add(CategoryDetails(
                     name=test_name,
                     description=f"Test for {equipment_name}",
+                    category_type="test",
                     category_master_id=master_id,
                     is_active=True,
                 ))
             else:
                 existing_detail.is_active = True
+                existing_detail.category_type = "test"
+
+    # ── Seed category-based types (new SRS-compliant structure) ──
+    for equipment_name, categories in equipment_types_by_category.items():
+        # Get or create equipment master
+        existing_master = session.query(CategoryMaster).filter_by(name=equipment_name).first()
+        if not existing_master:
+            master = CategoryMaster(
+                name=equipment_name,
+                description="Testing Equipment",
+                is_active=True,
+            )
+            session.add(master)
+            session.flush()
+            master_id = master.id
+        else:
+            master_id = existing_master.id
+
+        master_ids[equipment_name] = master_id
+
+        # Add types for each category (test, maintenance, inspection, repair_lifecycle)
+        for category_type, type_list in categories.items():
+            for type_name in type_list:
+                # Check if this type already exists
+                existing_detail = session.query(CategoryDetails).filter_by(
+                    name=type_name,
+                    category_master_id=master_id,
+                ).first()
+
+                if not existing_detail:
+                    # Create new CategoryDetail with category_type
+                    detail = CategoryDetails(
+                        name=type_name,
+                        description=f"{category_type.replace('_', ' ').title()} for {equipment_name}",
+                        category_type=category_type,
+                        category_master_id=master_id,
+                        is_active=True,
+                    )
+                    session.add(detail)
+                else:
+                    existing_detail.is_active = True
+                    # Update description and category_type
+                    existing_detail.description = f"{category_type.replace('_', ' ').title()} for {equipment_name}"
+                    existing_detail.category_type = category_type
 
     session.commit()
     print("[OK] Equipment & Test Type categories seeded successfully.")
+    print("[OK] Category-based types (maintenance, inspection, repair_lifecycle) seeded.")
 
     # ── Priority master ──
     priority_master_name = "Testing Priority"
@@ -1369,6 +1649,82 @@ def seed_sample_testing_request(session):
     print("[OK] Sample testing request seeded.")
 
 
+# ----------------- Migrate Equipment Asset Register -----------------
+
+def migrate_equipment_register(session):
+    """Create equipment table and add equipment_id, request_category, evaluation_result columns."""
+    from sqlalchemy import text
+    try:
+        # Create equipment table
+        session.execute(text("""
+            CREATE TABLE IF NOT EXISTS public.equipment (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                ueic VARCHAR(50) NOT NULL UNIQUE,
+                organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+                department_id UUID NOT NULL REFERENCES public.org_departments(id) ON DELETE CASCADE,
+                equipment_type_id INTEGER NOT NULL REFERENCES public."CategoryMaster"(id),
+                voltage_class VARCHAR(10),
+                bay_number VARCHAR(10),
+                serial_in_bay VARCHAR(10),
+                nameplate_data JSONB,
+                status VARCHAR(20) NOT NULL DEFAULT 'active',
+                replaces_equipment_id UUID REFERENCES public.equipment(id),
+                commissioned_date TIMESTAMPTZ,
+                retired_date TIMESTAMPTZ,
+                retirement_reason TEXT,
+                manufacturer VARCHAR(255),
+                model_number VARCHAR(255),
+                factory_serial_number VARCHAR(100),
+                year_of_manufacture INTEGER,
+                created_by UUID REFERENCES public.users(id),
+                modified_by UUID REFERENCES public.users(id),
+                cts TIMESTAMPTZ DEFAULT now(),
+                mts TIMESTAMPTZ DEFAULT now()
+            );
+        """))
+
+        # Create indexes on equipment table
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_org ON public.equipment(organization_id);
+        """))
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_dept ON public.equipment(department_id);
+        """))
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_type ON public.equipment(equipment_type_id);
+        """))
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_status ON public.equipment(status);
+        """))
+        session.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_equipment_ueic ON public.equipment(ueic);
+        """))
+
+        # Add equipment_id to testing_requests
+        session.execute(text("""
+            ALTER TABLE public.testing_requests
+            ADD COLUMN IF NOT EXISTS equipment_id UUID REFERENCES public.equipment(id);
+        """))
+
+        # Add request_category to testing_requests
+        session.execute(text("""
+            ALTER TABLE public.testing_requests
+            ADD COLUMN IF NOT EXISTS request_category VARCHAR(20) DEFAULT 'test';
+        """))
+
+        # Add evaluation_result to test_results
+        session.execute(text("""
+            ALTER TABLE public.test_results
+            ADD COLUMN IF NOT EXISTS evaluation_result JSONB;
+        """))
+
+        session.commit()
+        print("[OK] Equipment register table + columns migrated successfully.")
+    except Exception as e:
+        session.rollback()
+        print(f"[WARN] Equipment migration skipped or failed: {e}")
+
+
 # ----------------- Migrate Schema -----------------
 
 def migrate_testing_request_columns(session):
@@ -1502,6 +1858,13 @@ def seed_role_templates(session):
     # Dashboard (should be accessible to everyone)
     dashboard_module = [modules_by_name.get("Dashboard")] if modules_by_name.get("Dashboard") else []
 
+    # Role-specific dashboard module IDs
+    ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
+    aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
+    see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
+    cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
+    admin_dashboard_module_id = modules_by_name.get("Admin Dashboard")
+
     # ── Named module-set shortcuts ─────────────────────────────────────────
     # Procurement modules (without Dashboard — added individually where needed)
     procurement_module_names = [
@@ -1550,6 +1913,9 @@ def seed_role_templates(session):
                  "can_export": True, "can_import": False} for m in mids]
 
     # Super Admin modules: everything the Excel column lists
+    vendor_documents_module = [mid for mid in [modules_by_name.get("Vendor Documents")] if mid]
+    equipment_module = [mid for mid in [modules_by_name.get("Equipment")] if mid]
+
     super_admin_modules = list({
         *dashboard_module,
         *procurement_modules,
@@ -1560,9 +1926,8 @@ def seed_role_templates(session):
         *testing_request_approvals_module,
         *org_modules,
         *workflows_module,
+        *equipment_module,
     })
-
-    vendor_documents_module = [mid for mid in [modules_by_name.get("Vendor Documents")] if mid]
 
     templates_data = [
         # ── 1. Admin (Super Admin) — full access to all modules ──────────────
@@ -1572,6 +1937,7 @@ def seed_role_templates(session):
             "is_org_admin": True,
             "is_dept_admin": False,
             "auto_provision": True,
+            "default_module_id": admin_dashboard_module_id,
             "permissions_template": _full(all_module_ids),
         },
         # ── 2. Org Admin — manages org structure only ─────────────────────────
@@ -1583,62 +1949,69 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": _full(org_modules),
         },
-        # ── 3. Originator — procurement + testing requests ────────────────────
+        # ── 3. Originator — procurement + testing requests + equipment ────────
         {
             "name": "Originator",
-            "description": "Creates testing requests and raises procurement. Access to dashboard, all procurement modules, and testing requests.",
+            "description": "Creates testing requests and raises procurement. Access to dashboard, all procurement modules, testing requests, and equipment register.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readwrite(dashboard_module) +
                 _readwrite(procurement_modules) +
-                _readwrite(testing_requests_module)
+                _readwrite(testing_requests_module) +
+                _readwrite(equipment_module)
             ),
         },
-        # ── 4. Test Assigner (Approver) — testing request approvals only ──────
+        # ── 4. Test Assigner (Approver) — testing request approvals + equipment view
         {
             "name": "Test Assigner",
-            "description": "Approves testing requests and assigns testers. Access to Testing Request Approvals module only.",
+            "description": "Approves testing requests and assigns testers. Access to Testing Request Approvals module and view equipment register.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": _approve(testing_request_approvals_module),
+            "permissions_template": (
+                _approve(testing_request_approvals_module) +
+                _readonly(equipment_module)
+            ),
         },
         # ── 5. Field Tester ───────────────────────────────────────────────────
         {
             "name": "Field Tester",
-            "description": "Performs on-site transformer testing and uploads results. View testing requests; full access to testing module.",
+            "description": "Performs on-site transformer testing and uploads results. View testing requests; full access to testing module; view equipment register.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readonly(testing_requests_module) +
-                _readwrite(testing_module)
+                _readwrite(testing_module) +
+                _readonly(equipment_module)
             ),
         },
         # ── 6. Lab Tester ─────────────────────────────────────────────────────
         {
             "name": "Lab Tester",
-            "description": "Performs laboratory testing and uploads results. View testing requests; full access to testing module.",
+            "description": "Performs laboratory testing and uploads results. View testing requests; full access to testing module; view equipment register.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readonly(testing_requests_module) +
-                _readwrite(testing_module)
+                _readwrite(testing_module) +
+                _readonly(equipment_module)
             ),
         },
-        # ── 7. Department Head — recommendations & approvals ─────────────────
+        # ── 7. Department Head — recommendations & approvals + equipment view
         {
             "name": "Department Head",
-            "description": "Reviews and approves recommendations from testers. Access to Recommendations and Approvals modules.",
+            "description": "Reviews and approves recommendations from testers. Access to Recommendations, Approvals modules, and view equipment register.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
             "permissions_template": (
                 _approve(recommendations_module) +
-                _approve(approvals_module)
+                _approve(approvals_module) +
+                _readonly(equipment_module)
             ),
         },
         # ── 8. Purchaser — dashboard + procurement ────────────────────────────
@@ -1663,6 +2036,133 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": _readonly(vendor_documents_module),
         },
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        # SRS-SPECIFIED DESIGNATION ROLES (SEACMS-AI v1.3 Section 2.3)
+        # ═══════════════════════════════════════════════════════════════════════════
+
+        # ── 10. AEE Maintenance — Field supervisor ────────────────────────────
+        {
+            "name": "AEE Maintenance",
+            "description": "Assistant Executive Engineer - Field-level maintenance responsible officer",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": aee_dashboard_module_id,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _readonly(testing_requests_module) +
+                _approve(approvals_module) +
+                _readonly(recommendations_module)
+            ),
+        },
+
+        # ── 11. EE TLSS — Primary reviewer (CRITICAL ROLE) ────────────────────
+        {
+            "name": "EE TLSS",
+            "description": "Executive Engineer - Transmission Line & Substation primary reviewer",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": ee_tlss_dashboard_module_id,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _readwrite(testing_requests_module) +
+                _approve(testing_request_approvals_module) +
+                _readwrite(testing_module) +
+                _readonly(equipment_module) +
+                _readonly(procurement_modules)
+            ),
+        },
+
+        # ── 12. SEE W&M — Circle supervisor (CRITICAL ROLE) ───────────────────
+        {
+            "name": "SEE W&M",
+            "description": "Superintending Engineer - Works & Maintenance circle supervisor",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": see_dashboard_module_id,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _approve(approvals_module) +
+                _readonly(vendor_documents_module) +
+                _readonly(recommendations_module) +
+                _readonly(testing_requests_module)
+            ),
+        },
+
+        # ── 13. EE RT — R&D engineer ──────────────────────────────────────────
+        {
+            "name": "EE RT",
+            "description": "Executive Engineer - Research & Testing",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": ee_tlss_dashboard_module_id,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _readwrite(testing_requests_module) +
+                _readwrite(testing_module) +
+                _readonly(equipment_module)
+            ),
+        },
+
+        # ── 14. SEE RT — Senior R&D ───────────────────────────────────────────
+        {
+            "name": "SEE RT",
+            "description": "Superintending Engineer - Research & Testing",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": see_dashboard_module_id,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _approve(approvals_module) +
+                # Testing Requests: view only — SEE RT is a tester, not an originator
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module) +
+                _approve(testing_request_approvals_module) +
+                _readonly(vendor_documents_module) +
+                _readonly(equipment_module)
+            ),
+        },
+
+        # ── 15. CEE Transmission Zone — Zone management ───────────────────────
+        {
+            "name": "CEE Transmission Zone",
+            "description": "Chief Engineer Executive - Transmission zone management",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": True,
+            "default_module_id": cee_dashboard_module_id,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _approve(approvals_module) +
+                _readonly(recommendations_module) +
+                _readonly(testing_requests_module) +
+                _readonly(procurement_modules) +
+                _readonly(vendor_documents_module) +
+                _readonly(equipment_module)
+            ),
+        },
+
+        # ── 16. CEE RT&R&D — R&D chief ────────────────────────────────────────
+        {
+            "name": "CEE RT&R&D",
+            "description": "Chief Engineer Executive - Research Testing & R&D",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": True,
+            "default_module_id": cee_dashboard_module_id,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _full(testing_module) +
+                _readwrite(equipment_module) +
+                _readonly(testing_requests_module) +
+                _readonly(recommendations_module)
+            ),
+        },
     ]
 
     created_count = 0
@@ -1676,6 +2176,7 @@ def seed_role_templates(session):
             existing.is_org_admin = template_data["is_org_admin"]
             existing.is_dept_admin = template_data["is_dept_admin"]
             existing.auto_provision = template_data["auto_provision"]
+            existing.default_module_id = template_data.get("default_module_id")
             existing.permissions_template = template_data["permissions_template"]
             existing.mts = datetime.now(datetime.now().astimezone().tzinfo)
             updated_count += 1
@@ -1687,6 +2188,7 @@ def seed_role_templates(session):
                 is_org_admin=template_data["is_org_admin"],
                 is_dept_admin=template_data["is_dept_admin"],
                 auto_provision=template_data["auto_provision"],
+                default_module_id=template_data.get("default_module_id"),
                 permissions_template=template_data["permissions_template"],
                 cts=datetime.now(datetime.now().astimezone().tzinfo),
                 mts=datetime.now(datetime.now().astimezone().tzinfo)
@@ -1736,26 +2238,44 @@ def seed_tester_role_module_requirements(session):
     """
     Seed global default configuration for tester role module requirements.
     Defines which modules a role must have FULL permissions on to appear in tester assignment dropdown.
+    Always deletes and recreates so module IDs stay correct after a drop-reseed.
     """
-    # Check if global default already exists
-    existing_config = session.query(TesterRoleModuleRequirement).filter_by(
-        organization_id=None
-    ).first()
+    # Always delete and recreate so IDs are always correct (idempotent)
+    session.query(TesterRoleModuleRequirement).filter_by(organization_id=None).delete()
+    session.flush()
 
-    if existing_config:
-        print(f"[INFO] Global tester role module requirements already exist")
-        return existing_config.id
+    # Dynamically resolve module IDs by name so they survive any reseed sequence
+    # Only modules where testers need FULL permissions (not VIEW-only)
+    # Testers only need Testing module - NOT Testing Request Approvals (that's for approvers)
+    _tester_req_module_names = [
+        "Testing",  # Module 46 - Core testing work module
+        # Removed "Testing Request Approvals" - testers don't approve/assign, only perform tests
+        # Removed "Testing Requests" (VIEW-only, not FULL)
+        # Removed "Tester Mapping" (no longer used)
+    ]
+    required_ids = []
+    for mod_name in _tester_req_module_names:
+        mod = session.query(Module).filter_by(name=mod_name, is_active=True).first()
+        if mod:
+            required_ids.append(mod.id)
+        else:
+            print(f"[WARN] Module '{mod_name}' not found — excluded from tester requirements")
 
-    # Create global default configuration
-    # Modules: 45=Testing Requests, 46=Testing, 49=Testing Request Approvals, 51=Tester Mapping
+    if not required_ids:
+        print("[WARN] No tester-requirement modules found — skipping TesterRoleModuleRequirement seeding")
+        return None
+
     config = TesterRoleModuleRequirement(
         id=uuid.uuid4(),
         organization_id=None,  # Global default
-        required_module_ids=[45, 46, 49, 51],
-        description="Global default: Roles must have full permissions on Testing Requests, Testing, Testing Request Approvals, and Tester Mapping modules",
+        required_module_ids=required_ids,
+        description=(
+            "Global default: Roles must have full permissions (view, add, edit) on "
+            "Testing module to qualify as tester roles"
+        ),
         is_active=True,
         cts=datetime.now(datetime.now().astimezone().tzinfo),
-        mts=datetime.now(datetime.now().astimezone().tzinfo)
+        mts=datetime.now(datetime.now().astimezone().tzinfo),
     )
     session.add(config)
     session.commit()
@@ -1842,6 +2362,7 @@ def seed_sample_organization(session):
             role_type="default",
             is_org_admin=template.is_org_admin,
             is_dept_admin=template.is_dept_admin,
+            default_module_id=template.default_module_id,
             is_active=True,
             cts=datetime.now(datetime.now().astimezone().tzinfo),
             mts=datetime.now(datetime.now().astimezone().tzinfo)
@@ -2032,9 +2553,20 @@ def seed_sample_organization(session):
     # Create sample tester roles with EXACT module permissions (always run)
     print(f"[INFO] Creating sample tester roles for {org_code}")
 
-    # Required modules for testers: [45, 46, 49, 51]
-    # 45=Testing Requests, 46=Testing, 49=Testing Request Approvals, 51=Tester Mapping
-    TESTER_REQUIRED_MODULES = [45, 46, 49, 51]
+    # Dynamically resolve module IDs so they survive any drop-reseed sequence
+    _tester_module_names = [
+        "Testing Requests",
+        "Testing",
+        "Testing Request Approvals",
+        # Removed "Tester Mapping" - no longer used
+    ]
+    TESTER_REQUIRED_MODULES = []
+    for _mod_name in _tester_module_names:
+        _mod = session.query(Module).filter_by(name=_mod_name, is_active=True).first()
+        if _mod:
+            TESTER_REQUIRED_MODULES.append(_mod.id)
+        else:
+            print(f"[WARN] Module '{_mod_name}' not found — excluded from tester role permissions")
 
     tester_roles_config = [
         {
@@ -2305,6 +2837,221 @@ def seed_kptcl_organization(session):
     existing_org = session.query(Organization).filter_by(code=org_code).first()
     if existing_org:
         print(f"[INFO] KPTCL organization already exists: {org_code}")
+        org = existing_org
+
+        # Provision any missing roles from updated role templates
+        print(f"[INFO] Provisioning missing roles for existing KPTCL org...")
+        templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
+        existing_role_names = {r.name for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
+
+        provisioned_count = 0
+        for template in templates:
+            if template.name not in existing_role_names:
+                role = OrgRole(
+                    id=uuid.uuid4(),
+                    organization_id=org.id,
+                    name=template.name,
+                    description=template.description,
+                    role_type="default",
+                    is_org_admin=template.is_org_admin,
+                    is_dept_admin=template.is_dept_admin,
+                    is_active=True,
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                )
+                session.add(role)
+                session.flush()
+
+                # Create permissions from template
+                if template.permissions_template:
+                    for perm_data in template.permissions_template:
+                        permission = OrgRolePermission(
+                            id=uuid.uuid4(),
+                            org_role_id=role.id,
+                            module_id=perm_data.get("module_id"),
+                            can_view=perm_data.get("can_view", False),
+                            can_add=perm_data.get("can_add", False),
+                            can_edit=perm_data.get("can_edit", False),
+                            can_delete=perm_data.get("can_delete", False),
+                            can_approve=perm_data.get("can_approve", False),
+                            can_assign=perm_data.get("can_assign", False),
+                            can_export=perm_data.get("can_export", False),
+                            can_import=perm_data.get("can_import", False),
+                            cts=datetime.now(datetime.now().astimezone().tzinfo),
+                            mts=datetime.now(datetime.now().astimezone().tzinfo)
+                        )
+                        session.add(permission)
+                provisioned_count += 1
+                print(f"  [+] Provisioned role: {template.name}")
+
+        session.commit()
+        print(f"[OK] Provisioned {provisioned_count} new roles for KPTCL")
+
+        # Build a lookup of all roles (existing + newly provisioned)
+        provisioned_by_name = {r.name: r for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
+
+        # Create missing test users for new SRS roles
+        kptcl_users = [
+            {
+                "email": "aee.maintenance@kptcl.com",
+                "password": "admin123",
+                "firstname": "AEE",
+                "lastname": "Maintenance",
+                "phone": "+91-9900000010",
+                "role_name": "AEE Maintenance",
+                "employee_id": "KPTCL-AEE-M-001",
+            },
+            {
+                "email": "ee.tlss@kptcl.com",
+                "password": "admin123",
+                "firstname": "EE",
+                "lastname": "TLSS",
+                "phone": "+91-9900000011",
+                "role_name": "EE TLSS",
+                "employee_id": "KPTCL-EE-TLSS-001",
+            },
+            {
+                "email": "see.wm@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE",
+                "lastname": "W&M",
+                "phone": "+91-9900000012",
+                "role_name": "SEE W&M",
+                "employee_id": "KPTCL-SEE-WM-001",
+            },
+            {
+                "email": "ee.rt@kptcl.com",
+                "password": "admin123",
+                "firstname": "EE",
+                "lastname": "RT",
+                "phone": "+91-9900000013",
+                "role_name": "EE RT",
+                "employee_id": "KPTCL-EE-RT-001",
+            },
+            {
+                "email": "see.rt@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE",
+                "lastname": "RT",
+                "phone": "+91-9900000014",
+                "role_name": "SEE RT",
+                "employee_id": "KPTCL-SEE-RT-001",
+                "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
+                "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
+            },
+            # ── Zone-based SEE RT testers ──────────────────────────────────────
+            {
+                "email": "see.rt.bangalore@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE RT",
+                "lastname": "Bangalore",
+                "phone": "+91-9900000020",
+                "role_name": "SEE RT",
+                "employee_id": "KPTCL-SEE-RT-BLR-001",
+                "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
+                "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
+            },
+            {
+                "email": "see.rt.hubli@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE RT",
+                "lastname": "Hubli",
+                "phone": "+91-9900000021",
+                "role_name": "SEE RT",
+                "employee_id": "KPTCL-SEE-RT-HBL-001",
+                "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
+                "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
+            },
+            {
+                "email": "see.rt.mysore@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE RT",
+                "lastname": "Mysore",
+                "phone": "+91-9900000022",
+                "role_name": "SEE RT",
+                "employee_id": "KPTCL-SEE-RT-MYS-001",
+                "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
+                "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
+            },
+            {
+                "email": "see.rt.gulbarga@kptcl.com",
+                "password": "admin123",
+                "firstname": "SEE RT",
+                "lastname": "Gulbarga",
+                "phone": "+91-9900000023",
+                "role_name": "SEE RT",
+                "employee_id": "KPTCL-SEE-RT-GLB-001",
+                "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
+                "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
+            },
+            {
+                "email": "cee.zone@kptcl.com",
+                "password": "admin123",
+                "firstname": "CEE",
+                "lastname": "Transmission Zone",
+                "phone": "+91-9900000015",
+                "role_name": "CEE Transmission Zone",
+                "employee_id": "KPTCL-CEE-TZ-001",
+            },
+            {
+                "email": "cee.rtrd@kptcl.com",
+                "password": "admin123",
+                "firstname": "CEE",
+                "lastname": "RT&R&D",
+                "phone": "+91-9900000016",
+                "role_name": "CEE RT&R&D",
+                "employee_id": "KPTCL-CEE-RTRD-001",
+            },
+        ]
+
+        created_users = 0
+        for user_data in kptcl_users:
+            existing_user = session.query(User).filter_by(email=user_data["email"]).first()
+            if existing_user:
+                user = existing_user
+                if user.organization_id != org.id:
+                    user.organization_id = org.id
+            else:
+                user = User(
+                    id=uuid.uuid4(),
+                    email=user_data["email"],
+                    password_hash=get_password_hash(user_data["password"]),
+                    firstname=user_data["firstname"],
+                    lastname=user_data["lastname"],
+                    phone_number=user_data["phone"],
+                    employee_id=user_data.get("employee_id"),
+                    organization_id=org.id,
+                    isactive=True,
+                    email_confirmed=True,
+                    phone_confirmed=True,
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                )
+                session.add(user)
+                session.flush()
+                created_users += 1
+
+            role = provisioned_by_name.get(user_data["role_name"])
+            if not role:
+                print(f"[WARN] OrgRole '{user_data['role_name']}' not found for {user_data['email']}")
+                continue
+
+            existing_role = session.query(OrgUserRole).filter_by(
+                user_id=user.id, org_role_id=role.id, is_active=True
+            ).first()
+            if not existing_role:
+                session.add(OrgUserRole(
+                    id=uuid.uuid4(),
+                    user_id=user.id,
+                    org_role_id=role.id,
+                    department_id=None,
+                    is_active=True,
+                    assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                    assigned_by=None
+                ))
+
+        session.commit()
+        print(f"[OK] Created {created_users} new SRS designation users for KPTCL")
         return existing_org
 
     # Get a basic plan if available
@@ -2363,6 +3110,7 @@ def seed_kptcl_organization(session):
             role_type="default",
             is_org_admin=template.is_org_admin,
             is_dept_admin=template.is_dept_admin,
+            default_module_id=template.default_module_id,
             is_active=True,
             cts=datetime.now(datetime.now().astimezone().tzinfo),
             mts=datetime.now(datetime.now().astimezone().tzinfo)
@@ -2457,6 +3205,117 @@ def seed_kptcl_organization(session):
             "role_name": "doc-viewer",
             "employee_id": "KPTCL-DOC-001",
         },
+        # ✅ SRS DESIGNATION ROLES — Test users
+        {
+            "email": "aee.maintenance@kptcl.com",
+            "password": "admin123",
+            "firstname": "AEE",
+            "lastname": "Maintenance",
+            "phone": "+91-9900000010",
+            "role_name": "AEE Maintenance",
+            "employee_id": "KPTCL-AEE-M-001",
+        },
+        {
+            "email": "ee.tlss@kptcl.com",
+            "password": "admin123",
+            "firstname": "EE",
+            "lastname": "TLSS",
+            "phone": "+91-9900000011",
+            "role_name": "EE TLSS",
+            "employee_id": "KPTCL-EE-TLSS-001",
+        },
+        {
+            "email": "see.wm@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE",
+            "lastname": "W&M",
+            "phone": "+91-9900000012",
+            "role_name": "SEE W&M",
+            "employee_id": "KPTCL-SEE-WM-001",
+        },
+        {
+            "email": "ee.rt@kptcl.com",
+            "password": "admin123",
+            "firstname": "EE",
+            "lastname": "RT",
+            "phone": "+91-9900000013",
+            "role_name": "EE RT",
+            "employee_id": "KPTCL-EE-RT-001",
+        },
+        {
+            "email": "see.rt@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE",
+            "lastname": "RT",
+            "phone": "+91-9900000014",
+            "role_name": "SEE RT",
+            "employee_id": "KPTCL-SEE-RT-001",
+            "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
+            "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
+        },
+        # ── Zone-based SEE RT testers ──────────────────────────────────────
+        {
+            "email": "see.rt.bangalore@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE RT",
+            "lastname": "Bangalore",
+            "phone": "+91-9900000020",
+            "role_name": "SEE RT",
+            "employee_id": "KPTCL-SEE-RT-BLR-001",
+            "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
+            "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
+        },
+        {
+            "email": "see.rt.hubli@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE RT",
+            "lastname": "Hubli",
+            "phone": "+91-9900000021",
+            "role_name": "SEE RT",
+            "employee_id": "KPTCL-SEE-RT-HBL-001",
+            "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
+            "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
+        },
+        {
+            "email": "see.rt.mysore@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE RT",
+            "lastname": "Mysore",
+            "phone": "+91-9900000022",
+            "role_name": "SEE RT",
+            "employee_id": "KPTCL-SEE-RT-MYS-001",
+            "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
+            "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
+        },
+        {
+            "email": "see.rt.gulbarga@kptcl.com",
+            "password": "admin123",
+            "firstname": "SEE RT",
+            "lastname": "Gulbarga",
+            "phone": "+91-9900000023",
+            "role_name": "SEE RT",
+            "employee_id": "KPTCL-SEE-RT-GLB-001",
+            "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
+            "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
+        },
+        {
+            "email": "cee.zone@kptcl.com",
+            "password": "admin123",
+            "firstname": "CEE",
+            "lastname": "Transmission Zone",
+            "phone": "+91-9900000015",
+            "role_name": "CEE Transmission Zone",
+            "employee_id": "KPTCL-CEE-TZ-001",
+        },
+        {
+            "email": "cee.rtrd@kptcl.com",
+            "password": "admin123",
+            "firstname": "CEE",
+            "lastname": "RT&R&D",
+            "phone": "+91-9900000016",
+            "role_name": "CEE RT&R&D",
+            "employee_id": "KPTCL-CEE-RTRD-001",
+        },
     ]
 
     for user_data in kptcl_users:
@@ -2512,8 +3371,9 @@ def seed_kptcl_organization(session):
     # Create sample tester roles with EXACT module permissions
     print(f"[INFO] Creating sample tester roles for KPTCL")
 
-    # Required modules for testers: [45, 46, 49, 51]
-    TESTER_REQUIRED_MODULES = [45, 46, 49, 51]
+    # Required modules for testers: [45, 46, 49]
+    # Removed 51 (Tester Mapping) - no longer used
+    TESTER_REQUIRED_MODULES = [45, 46, 49]
 
     tester_roles_config = [
         {
@@ -2696,6 +3556,24 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     if not os.path.exists(excel_path):
         raise FileNotFoundError(f"Excel file not found: {excel_path}")
 
+    # Delete existing testing requests first (to avoid FK violation with equipment)
+    print(f"[INFO] Deleting existing testing requests for organization: {org.name}")
+    from models import TestingRequest
+    deleted_requests = session.query(TestingRequest).filter(
+        TestingRequest.organization_id == uuid.UUID(org_id)
+    ).delete()
+    session.commit()
+    print(f"[OK] Deleted {deleted_requests} testing requests")
+
+    # Delete existing equipment for this organization
+    print(f"[INFO] Deleting existing equipment for organization: {org.name}")
+    from models import Equipment
+    deleted_equipment = session.query(Equipment).filter(
+        Equipment.organization_id == uuid.UUID(org_id)
+    ).delete()
+    session.commit()
+    print(f"[OK] Deleted {deleted_equipment} equipment records")
+
     # Delete existing departments for this organization
     print(f"[INFO] Deleting existing departments for organization: {org.name}")
     existing_depts = session.query(OrgDepartment).filter(
@@ -2841,9 +3719,237 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     print(f"{'='*60}\n")
 
 
+# ----------------- Reporting Suite Seed -----------------
+
+def migrate_report_tables(session):
+    """
+    Create report_definitions and report_logs tables if they don't exist.
+    Safe to run multiple times — uses IF NOT EXISTS.
+    """
+    session.execute(text("""
+        CREATE TABLE IF NOT EXISTS public.report_definitions (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            organization_id  UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
+            name             VARCHAR(255) NOT NULL,
+            description      TEXT,
+            query_key        VARCHAR(100) NOT NULL,
+            parameters       JSONB NOT NULL DEFAULT '{}',
+            output_format    VARCHAR(20)  NOT NULL DEFAULT 'excel',
+            frequency        VARCHAR(20)  NOT NULL DEFAULT 'on_demand',
+            recipient_roles  JSONB NOT NULL DEFAULT '[]',
+            is_active        BOOLEAN DEFAULT TRUE,
+            is_system        BOOLEAN DEFAULT FALSE,
+            last_generated_at TIMESTAMPTZ,
+            created_by       UUID REFERENCES public.users(id),
+            modified_by      UUID REFERENCES public.users(id),
+            cts              TIMESTAMPTZ DEFAULT NOW(),
+            mts              TIMESTAMPTZ DEFAULT NOW()
+        )
+    """))
+    session.execute(text("""
+        CREATE TABLE IF NOT EXISTS public.report_logs (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            definition_id   UUID NOT NULL REFERENCES public.report_definitions(id) ON DELETE CASCADE,
+            organization_id UUID,
+            generated_by    UUID REFERENCES public.users(id) ON DELETE SET NULL,
+            parameters_used JSONB NOT NULL DEFAULT '{}',
+            output_format   VARCHAR(20) NOT NULL DEFAULT 'excel',
+            file_path       VARCHAR(500),
+            file_name       VARCHAR(255),
+            file_size       INTEGER,
+            row_count       INTEGER,
+            status          VARCHAR(20) DEFAULT 'pending',
+            error_message   TEXT,
+            started_at      TIMESTAMPTZ,
+            completed_at    TIMESTAMPTZ,
+            cts             TIMESTAMPTZ DEFAULT NOW()
+        )
+    """))
+    session.commit()
+    print("[OK] report_definitions and report_logs tables ready.")
+
+
+def seed_report_definitions(session):
+    """
+    Insert the 14 SRS report definitions as system rows.
+    Idempotent — skips rows that already exist (matched by query_key).
+    """
+    DEFINITIONS = [
+        {
+            "name": "Equipment Condition Summary",
+            "description": "All active equipment with latest test condition (CRITICAL/ALERT/NORMAL/NOT_TESTED)",
+            "query_key": "equipment_condition_summary",
+            "output_format": "excel",
+            "frequency": "on_demand",
+        },
+        {
+            "name": "Overdue Tests",
+            "description": "Testing requests past their due date",
+            "query_key": "overdue_tests_report",
+            "output_format": "excel",
+            "frequency": "daily",
+        },
+        {
+            "name": "Active Alerts",
+            "description": "Test results with CRITICAL or ALERT evaluation",
+            "query_key": "active_alerts_report",
+            "output_format": "excel",
+            "frequency": "daily",
+        },
+        {
+            "name": "Flagged Equipment",
+            "description": "Equipment with CRITICAL or ALERT status (deduplicated)",
+            "query_key": "flagged_equipment_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+        },
+        {
+            "name": "Repair Lifecycle Progress",
+            "description": "Repair lifecycle requests with session progress",
+            "query_key": "repair_progress_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+        },
+        {
+            "name": "Maintenance Overdue",
+            "description": "Preventive maintenance requests past due date",
+            "query_key": "maintenance_overdue_report",
+            "output_format": "excel",
+            "frequency": "daily",
+        },
+        {
+            "name": "Procurement Pipeline",
+            "description": "All procurement requests with status",
+            "query_key": "procurement_pipeline_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+        },
+        {
+            "name": "Open Remediation Records",
+            "description": "Pending recommendations awaiting approval",
+            "query_key": "open_remediation_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+        },
+        {
+            "name": "Testing Request Status",
+            "description": "All testing requests with current status and assignment",
+            "query_key": "testing_request_status_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+        },
+        {
+            "name": "Test Results Summary",
+            "description": "Test results with evaluation outcomes",
+            "query_key": "test_results_summary_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+        },
+        {
+            "name": "Recommendation Approvals",
+            "description": "Recommendations with approval status and notes",
+            "query_key": "recommendation_approval_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+        },
+        {
+            "name": "Compliance Status by Substation",
+            "description": "Equipment testing compliance rates grouped by substation",
+            "query_key": "compliance_status_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+        },
+        {
+            "name": "Tester Performance",
+            "description": "Tester completion rates and average turnaround times",
+            "query_key": "tester_performance_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+        },
+        {
+            "name": "Monthly KPI Summary",
+            "description": "Monthly aggregated KPIs: requests, completions, alerts, findings",
+            "query_key": "monthly_kpi_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+        },
+    ]
+
+    created = 0
+    for d in DEFINITIONS:
+        existing = session.query(ReportDefinition).filter_by(
+            query_key=d["query_key"]
+        ).first()
+        if existing:
+            continue
+        session.add(ReportDefinition(
+            name=d["name"],
+            description=d["description"],
+            query_key=d["query_key"],
+            parameters={},
+            output_format=d["output_format"],
+            frequency=d["frequency"],
+            recipient_roles=[],
+            is_active=True,
+            is_system=True,
+        ))
+        created += 1
+
+    session.commit()
+    print(f"[OK] Report definitions seeded: {created} created, "
+          f"{len(DEFINITIONS) - created} already existed.")
+
+
 # ----------------- Run Seed -----------------
 
+def seed_org_role_permissions_for_modules(session, module_ids):
+    """
+    Grant can_view on every module in module_ids to every active OrgRole
+    across all organisations.  Idempotent — skips rows that already exist.
+
+    The dashboard_service already gates which widgets each OrgRole sees, so
+    granting view at the module level is safe for all roles.
+    """
+    module_names_granted = []
+    org_roles = session.query(OrgRole).filter(OrgRole.is_active.is_(True)).all()
+
+    for module_name, module_id in module_ids.items():
+        for org_role in org_roles:
+            exists = session.query(OrgRolePermission).filter_by(
+                org_role_id=org_role.id,
+                module_id=module_id,
+            ).first()
+            if exists:
+                continue
+            session.add(OrgRolePermission(
+                org_role_id=org_role.id,
+                module_id=module_id,
+                can_view=True,
+                can_add=False,
+                can_edit=False,
+                can_delete=False,
+                can_approve=False,
+                can_assign=False,
+                can_export=False,
+                can_import=False,
+            ))
+        module_names_granted.append(module_name)
+
+    session.commit()
+    if module_names_granted:
+        print(f"[OK] org_role_permissions granted for: {', '.join(module_names_granted)}"
+              f" -> {len(org_roles)} org role(s)")
+    else:
+        print("[INFO] org_role_permissions: all entries already exist.")
+
+
 def run_seed():
+    # ── Create ALL SQLAlchemy tables (idempotent — safe on existing DB) ──────
+    print("[INIT] Creating database schema via Base.metadata.create_all …")
+    import models  # noqa: F401  — ensures all model classes register with Base
+    Base.metadata.create_all(bind=vendor_engine)
+    print("[OK]   Schema ready.")
+
     with get_db_session() as session:
         print("\n" + "=" * 80)
         print("  DATABASE SEEDING STARTED")
@@ -2851,10 +3957,14 @@ def run_seed():
 
         # Core System
         migrate_testing_request_columns(session)
+        migrate_equipment_register(session)
         role_ids = seed_roles(session)
         new_user_ids = seed_users(session)  # 👈 capture new users
         module_ids = seed_modules(session)
         seed_privileges(session, role_ids, module_ids)
+        # org_role_permissions seeded AFTER orgs are created (see end of org section)
+        migrate_report_tables(session)
+        seed_report_definitions(session)
         seed_user_roles(session, role_ids)
         assign_viewer_role_to_new_users(session, new_user_ids, role_ids)
         seed_plans(session)
@@ -2902,8 +4012,16 @@ def run_seed():
                 print("[INFO] You can retry with:")
                 print(f"       python seed.py --kptcl {kptcl_org.id}")
 
+        # Sample Equipment (after departments + equipment types exist)
+        seed_sample_equipment(session, kptcl_org)
+
         # Zoho Import Mapping (after KPTCL org + departments exist)
         seed_zoho_import_mapping(session, kptcl_org)
+
+        # Org role permissions — AFTER all orgs + org_roles are created
+        # DISABLED: This grants VIEW to ALL modules for ALL roles, breaking RBAC
+        # Proper permissions are already set via role templates during org role provisioning
+        # seed_org_role_permissions_for_modules(session, module_ids)
 
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")
@@ -2915,6 +4033,118 @@ def run_seed():
             print("  3. KPTCL Org Admin: orgadmin@kptcl.com / admin123")
         print(f"  {4 if kptcl_org else 3}. View API docs: http://localhost:8000/docs")
         print("\n" + "=" * 80 + "\n")
+
+
+def seed_sample_equipment(session, org):
+    """
+    Seed sample equipment for an organization so testing requests can link to registered assets.
+    Creates equipment across several substations with different types and voltage classes.
+    """
+    if not org:
+        print("[SKIP] No org — skipping equipment seeding")
+        return
+
+    from services.equipment_service import EquipmentService
+
+    # Get an admin user for created_by
+    admin_user = session.query(User).filter(
+        User.organization_id == org.id,
+        User.email.ilike("%orgadmin%")
+    ).first()
+    if not admin_user:
+        admin_user = session.query(User).filter(
+            User.organization_id == org.id
+        ).first()
+    created_by = admin_user.id if admin_user else None
+
+    # Get leaf departments (substations — those with no children)
+    from sqlalchemy import exists, select
+    from sqlalchemy.orm import aliased
+    ChildDept = aliased(OrgDepartment)
+    substations = (
+        session.query(OrgDepartment)
+        .filter(
+            OrgDepartment.organization_id == org.id,
+            ~exists(
+                select(ChildDept.id)
+                .where(ChildDept.parent_department_id == OrgDepartment.id)
+            ),
+        )
+        .order_by(OrgDepartment.name)
+        .limit(10)
+        .all()
+    )
+    if not substations:
+        # Fallback: any departments
+        substations = (
+            session.query(OrgDepartment)
+            .filter(OrgDepartment.organization_id == org.id)
+            .limit(5)
+            .all()
+        )
+
+    if not substations:
+        print("[WARN] No departments found — skipping equipment seeding")
+        return
+
+    # Get equipment types
+    equip_types = (
+        session.query(CategoryMaster)
+        .filter(CategoryMaster.description == "Testing Equipment", CategoryMaster.is_active == True)
+        .all()
+    )
+    if not equip_types:
+        print("[WARN] No equipment types found — skipping equipment seeding")
+        return
+
+    # Map equipment type names to their IDs
+    type_map = {et.name: et.id for et in equip_types}
+
+    # Define sample equipment configurations
+    equipment_configs = [
+        # (equipment_type_name, voltage_class, bay_number, manufacturer, model, serial, year)
+        ("Power Transformer", "220", "01", "BHEL", "PT-220-A", "PT2024001", 2020),
+        ("Power Transformer", "110", "02", "ABB", "PT-110-B", "PT2024002", 2019),
+        ("Current Transformer", "220", "01", "Siemens", "CT-220-X", "CT2024001", 2021),
+        ("Current Transformer", "110", "01", "CGL", "CT-110-Y", "CT2024002", 2022),
+        ("CVT", "220", "01", "BHEL", "CVT-220-A", "CVT2024001", 2020),
+        ("Power Transformer", "66", "01", "Crompton Greaves", "PT-66-C", "PT2024003", 2018),
+        ("Relay", "220", "01", "L&T", "REL-220-A", "REL2024001", 2023),
+        ("Meter", "110", "01", "Secure Meters", "MTR-110-A", "MTR2024001", 2021),
+    ]
+
+    created = 0
+    for i, substation in enumerate(substations):
+        # Each substation gets 2-3 pieces of equipment
+        configs_for_station = equipment_configs[i % len(equipment_configs): i % len(equipment_configs) + 3]
+        if not configs_for_station:
+            configs_for_station = equipment_configs[:2]
+
+        for type_name, voltage, bay, mfr, model, serial, year in configs_for_station:
+            if type_name not in type_map:
+                continue
+
+            try:
+                equipment = EquipmentService.create_equipment(
+                    db=session,
+                    organization_id=org.id,
+                    department_id=substation.id,
+                    equipment_type_id=type_map[type_name],
+                    voltage_class=voltage,
+                    bay_number=bay,
+                    manufacturer=mfr,
+                    model_number=model,
+                    factory_serial_number=serial,
+                    year_of_manufacture=year,
+                    created_by=created_by,
+                )
+                created += 1
+            except Exception as e:
+                # Skip duplicates or other errors
+                session.rollback()
+                continue
+
+    print(f"[OK] Seeded {created} sample equipment items for {org.name}")
 
 
 def seed_zoho_import_mapping(session, kptcl_org):

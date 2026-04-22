@@ -28,9 +28,17 @@ router = APIRouter(prefix="/testing-requests/approvals", tags=["Testing Request 
 def _enrich(req):
     """Attach computed display names to ORM object for approval workflow."""
     req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
-    req.equipment_name = req.equipment_type.name if req.equipment_type else None  # Alias for Flutter
     req.test_type_name = req.test_type.name if req.test_type else None
     req.department_name = req.department.name if req.department else None
+
+    # Equipment asset register — prefer UEIC, fall back to equipment type name
+    if req.equipment:
+        req.equipment_ueic = req.equipment.ueic
+        req.equipment_name = req.equipment.ueic
+    else:
+        req.equipment_ueic = None
+        req.equipment_name = req.equipment_type.name if req.equipment_type else None
+
     if req.originator:
         req.originator_name = f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip() or req.originator.email
         req.requester_email = req.originator.email  # For Flutter UI
@@ -48,6 +56,7 @@ def _enrich(req):
 def get_pending_approvals(
     organization_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
+    category: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -76,6 +85,10 @@ def get_pending_approvals(
     if department_id:
         # TODO: Add department hierarchy filtering
         query = query.filter(TestingRequest.department_id == department_id)
+
+    # Filter by request category
+    if category:
+        query = query.filter(TestingRequest.request_category == category)
 
     requests = query.order_by(TestingRequest.cts.desc()).all()
     print(f"[DEBUG] Found {len(requests)} pending approvals")
@@ -139,7 +152,9 @@ def get_available_tester_roles(
         OrgRole.is_active == True
     ).all()
 
-    # Filter roles: must have FULL permissions on EXACTLY the required modules
+    # Filter roles: must have FULL permissions on AT LEAST the required modules
+    # (having additional permissions is acceptable — a role is eligible if it covers
+    #  the required modules, even if it also covers other modules)
     eligible_roles = []
 
     for role in all_roles:
@@ -148,23 +163,20 @@ def get_available_tester_roles(
             OrgRolePermission.org_role_id == role.id
         ).all()
 
-        # Find modules where role has FULL permissions (all 6 flags TRUE)
+        # Find modules where role has FULL permissions (view, add, edit required for testers)
         full_permission_modules = set()
         for perm in permissions:
             if (perm.can_view and
                 perm.can_add and
-                perm.can_edit and
-                perm.can_delete and
-                perm.can_approve and
-                perm.can_assign):
+                perm.can_edit):
                 full_permission_modules.add(perm.module_id)
 
-        # Check for EXACT match
-        if full_permission_modules == required_modules:
+        # Check that role has AT LEAST the required modules (subset check)
+        if required_modules.issubset(full_permission_modules):
             eligible_roles.append(role)
-            print(f"[DEBUG] Role '{role.name}' matches (modules: {full_permission_modules})")
+            print(f"[DEBUG] Role '{role.name}' eligible (has modules: {full_permission_modules})")
         else:
-            print(f"[DEBUG] Role '{role.name}' excluded (has modules: {full_permission_modules})")
+            print(f"[DEBUG] Role '{role.name}' excluded (missing required: {required_modules - full_permission_modules})")
 
     print(f"[DEBUG] {len(eligible_roles)} eligible tester roles found")
 

@@ -86,6 +86,48 @@ def get_by_test_type(
     return svc.get_for_test_type(test_type_id=test_type_id, org_id=org_id)
 
 
+# ─── By request category ─────────────────────────────────────────────────────
+
+@router.get("/by-request-category/{request_category}", response_model=OrgTestTemplateResponse)
+def get_by_request_category(
+    request_category: str,
+    org_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return the best-match template for a given request_category
+    (maintenance | inspection | repair_lifecycle).
+    Prefers org-specific row; falls back to global default.
+    Uses REQUEST_CATEGORY_TO_TEMPLATE from test_templates.py.
+    """
+    from test_templates import REQUEST_CATEGORY_TO_TEMPLATE
+    template_key = REQUEST_CATEGORY_TO_TEMPLATE.get(request_category)
+    if not template_key:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No default template mapped for request_category='{request_category}'",
+        )
+    svc = OrgTestTemplateService(db)
+    # Try org-specific first, then global
+    if org_id:
+        tmpl = (
+            db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.org_id == org_id, OrgTestTemplate.template_key == template_key)
+            .first()
+        )
+        if tmpl:
+            return tmpl
+    tmpl = (
+        db.query(OrgTestTemplate)
+        .filter(OrgTestTemplate.org_id == None, OrgTestTemplate.template_key == template_key)  # noqa: E711
+        .first()
+    )
+    if not tmpl:
+        raise HTTPException(status_code=404, detail=f"Template '{template_key}' not found in DB — run /provision/global first")
+    return tmpl
+
+
 # ─── Single ──────────────────────────────────────────────────────────────────
 
 @router.get("/{template_id}", response_model=OrgTestTemplateResponse)
@@ -257,6 +299,30 @@ def preview_template(
         ro_class = ' ro-field' if read_only else ""
         ro_attr = 'readonly' if read_only else ""
 
+        # Checkbox gets its own full-row container (no outer label wrapper)
+        if ftype == "checkbox":
+            checked = "checked" if default.lower() in ("true", "1", "yes") else ""
+            disabled = "disabled" if read_only else ""
+            cb_on = default.lower() in ("true", "1", "yes")
+
+            bg = "rgba(63,169,245,0.12)" if cb_on else "rgba(255,255,255,0.04)"
+            border_col = "rgba(63,169,245,0.5)" if cb_on else "rgba(255,255,255,0.12)"
+
+            # ✅ FIX: move HTML outside f-string expressions
+            req_html = '<span style="color:#f55;margin-left:3px;">*</span>' if required else ''
+            ro_html = '<span style="color:#ffb347;font-size:10px;margin-left:6px;">&nbsp;🔒</span>' if read_only else ''
+
+            text_color = "#e0e6f0" if cb_on else "#aac0d5"
+
+            return (
+                f'<div class="field cb-field" style="grid-column:1/-1;'
+                f'background:{bg};border:1px solid {border_col};border-radius:10px;'
+                f'padding:10px 14px;display:flex;align-items:center;gap:10px;">'
+                f'<input type="checkbox" {checked} {disabled} style="width:18px;height:18px;accent-color:#3fa9f5;">'
+                f'<span style="color:{text_color};font-size:13px;">'
+                f'{label}{req_html}{ro_html}'
+                f'</span></div>'
+            )
         html = f'<div class="field{ro_class}"><label>{label}{req_badge}{ro_badge}</label>'
 
         if ftype == "textarea":
@@ -504,8 +570,8 @@ def pdf_template(
             req_mark = " *" if required else ""
             lbl_para = Paragraph(f"{label}{req_mark}", label_style)
 
-            if ftype == "boolean":
-                val_text = "✓ Yes" if default.lower() in ("true", "1", "yes") else "○ No"
+            if ftype in ("boolean", "checkbox"):
+                val_text = "☑ Yes / Done" if default.lower() in ("true", "1", "yes") else "☐ No / Pending"
             elif ftype == "dropdown":
                 val_text = f"[{' / '.join(opts[:4])}{'...' if len(opts) > 4 else ''}]" if opts else "[Dropdown]"
             elif ftype == "table":

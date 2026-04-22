@@ -21,6 +21,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
+from sqlalchemy.orm import joinedload
 from models import Recommendation, TestingRequest, TestResult, User
 
 
@@ -48,7 +49,12 @@ class ReportService:
                 detail="Recommendation not found",
             )
 
-        request = self.db.query(TestingRequest).filter(
+        request = self.db.query(TestingRequest).options(
+            joinedload(TestingRequest.equipment_type),
+            joinedload(TestingRequest.test_type),
+            joinedload(TestingRequest.department),
+            joinedload(TestingRequest.equipment),
+        ).filter(
             TestingRequest.id == rec.testing_request_id
         ).first()
 
@@ -194,20 +200,38 @@ class ReportService:
         if request.test_type:
             test_type_name = request.test_type.name
 
+        # UEIC from linked equipment
+        ueic = "-"
+        if request.equipment and request.equipment.ueic:
+            ueic = request.equipment.ueic
+
+        # Department
+        dept_name = "-"
+        if request.department:
+            dept_name = request.department.name
+
         data = [
             ["Request Number", request.request_number or "-",
              "Date of Testing", date_of_testing],
             ["Title", request.title or "-",
              "Priority", (request.priority or "normal").upper()],
+        ]
+
+        if ueic != "-":
+            data.append(["UEIC", ueic, "Department", dept_name])
+
+        data.extend([
             ["Equipment Type", equip_name,
              "Test Type", test_type_name],
-            ["Transformer Rating", request.transformer_rating or "-",
-             "Manufacturer", request.manufacturer or "-"],
-            ["Serial Number", request.serial_number or "-",
-             "Status", (request.status.value if request.status else "-").replace("_", " ").upper()],
+            ["Transformer Type", request.transformer_type or "-",
+             "Transformer Rating", request.transformer_rating or "-"],
+            ["Manufacturer", request.manufacturer or "-",
+             "Serial Number", request.serial_number or "-"],
+            ["Status", (request.status.value if request.status else "-").replace("_", " ").upper(),
+             "", ""],
             ["Originator", self._user_name(request.originator_id),
              "Tester", self._user_name(request.assigned_tester_id)],
-        ]
+        ])
 
         # Location info
         loc_parts = []
@@ -232,6 +256,29 @@ class ReportService:
     # ───────────────────────────────────────────────────
     # Individual Test Result Section
     # ───────────────────────────────────────────────────
+    def _get_template(self, template_key: str) -> dict:
+        """DB-first template lookup: OrgTestTemplate → static test_templates fallback."""
+        if not template_key:
+            return {}
+        try:
+            from models import OrgTestTemplate
+            tmpl = (
+                self.db.query(OrgTestTemplate)
+                .filter(OrgTestTemplate.template_key == template_key)
+                .first()
+            )
+            if tmpl and tmpl.template_data:
+                return tmpl.template_data
+        except Exception:
+            pass
+        # Fall back to static hardcoded templates
+        try:
+            from test_templates import get_template_by_key
+            t = get_template_by_key(template_key)
+            return t or {}
+        except Exception:
+            return {}
+
     def _build_result_section(self, styles, result: TestResult, index: int):
         elements = []
         test_name = result.test_name or result.template_key or f"Test {index + 1}"
@@ -252,8 +299,7 @@ class ReportService:
         template_display = result.template_key or "-"
         if result.template_key:
             try:
-                from test_templates import get_template_by_key
-                tmpl = get_template_by_key(result.template_key)
+                tmpl = self._get_template(result.template_key)
                 if tmpl:
                     template_display = tmpl.get("name", template_display)
             except Exception:
@@ -291,13 +337,13 @@ class ReportService:
         elements = []
 
         # Try to get template for field labels and table column metadata
+        # DB-first lookup covers fields added via Template Designer
         field_labels = {}
         field_meta = {}  # key -> full field dict (for table columns etc.)
         sections_order = []
         if template_key:
             try:
-                from test_templates import get_template_by_key
-                template = get_template_by_key(template_key)
+                template = self._get_template(template_key)
                 if template and "sections" in template:
                     for sec in template["sections"]:
                         sec_fields = []
@@ -397,14 +443,17 @@ class ReportService:
                             elements.append(Spacer(1, 2 * mm))
                         elements.extend(table_elements)
         else:
-            # Fallback: render all key-value pairs
+            # Fallback: render all key-value pairs (use field_labels for friendly names if available)
             rows = []
             list_tables = []
+            _skip_keys = {"overall_result", "overall_remarks"}
             items = list(test_data.items())
             for k, v in items:
-                label = k.replace("_", " ").title()
+                if k in _skip_keys:
+                    continue
+                label = field_labels.get(k, k.replace("_", " ").title())
                 if isinstance(v, list) and v and isinstance(v[0], dict):
-                    list_tables.append((label, v))
+                    list_tables.append((label, v, field_meta.get(k, {}).get("columns", [])))
                 else:
                     val = self._format_value(v)
                     rows.append((label, val))
@@ -420,9 +469,43 @@ class ReportService:
                     table_rows.append(row)
                 elements.append(self._detail_table_raw(table_rows))
 
-            for label, data_list in list_tables:
+            for label, data_list, columns in list_tables:
                 elements.append(Spacer(1, 2 * mm))
-                elements.extend(self._build_list_table(label, data_list, []))
+                elements.extend(self._build_list_table(label, data_list, columns))
+
+        # Show any test_data fields NOT covered by template sections
+        if sections_order:
+            covered_keys = {key for _, keys in sections_order for key in keys}
+            covered_keys |= {"overall_result", "overall_remarks"}
+            extra_rows = []
+            extra_tables = []
+            for k, v in test_data.items():
+                if k in covered_keys:
+                    continue
+                label = field_labels.get(k, k.replace("_", " ").title())
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    extra_tables.append((label, v, field_meta.get(k, {}).get("columns", [])))
+                else:
+                    extra_rows.append((label, self._format_value(v)))
+            if extra_rows or extra_tables:
+                elements.append(Paragraph(
+                    "<b>Additional Fields</b>",
+                    ParagraphStyle("SubSection", fontSize=9, textColor=colors.HexColor("#2c5f8a"),
+                                   spaceBefore=2 * mm, spaceAfter=1 * mm),
+                ))
+                if extra_rows:
+                    table_rows = []
+                    for i in range(0, len(extra_rows), 2):
+                        row = [extra_rows[i][0], extra_rows[i][1]]
+                        if i + 1 < len(extra_rows):
+                            row += [extra_rows[i + 1][0], extra_rows[i + 1][1]]
+                        else:
+                            row += ["", ""]
+                        table_rows.append(row)
+                    elements.append(self._detail_table_raw(table_rows))
+                for label, data_list, columns in extra_tables:
+                    elements.append(Spacer(1, 2 * mm))
+                    elements.extend(self._build_list_table(label, data_list, columns))
 
         return elements
 

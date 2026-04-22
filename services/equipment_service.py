@@ -1,0 +1,402 @@
+"""
+Equipment Asset Register Service
+Handles UEIC generation, CRUD, lifecycle management, and department-based querying.
+"""
+from uuid import UUID
+from typing import Optional, List
+from datetime import datetime, timezone
+
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import desc, func
+
+from models import Equipment, EquipmentStatus, OrgDepartment, CategoryMaster
+
+
+class EquipmentService:
+
+    # ── Equipment Type Code Mapping (from SRS Appendix A) ──
+    EQUIPMENT_TYPE_CODES = {
+        "Power Transformer": "PT",
+        "Circuit Breaker": "CB",
+        "Current Transformer": "CT",
+        "Potential Transformer": "VT",
+        "Voltage Transformer": "VT",
+        "CVT": "CV",
+        "Capacitor Voltage Transformer": "CV",
+        "Surge Arrestor": "SA",
+        "Isolator": "IS",
+        "Disconnector": "IS",
+        "Control & Relay Panel": "CR",
+        "Battery Set": "BS",
+        "Battery Charger": "BC",
+        "Wave Trap": "WT",
+        "Station Auxiliary Transformer": "AT",
+        "LTAC Panel": "LA",
+        "Fire Fighting System": "FF",
+        "PLCC Panel": "PL",
+        "Digital Communication Panel": "DC",
+        "Diesel Generator Set": "DG",
+        "Electronic Tri-vector Meter": "EM",
+        "ETV Meter": "EM",
+        "Protection Relay": "RL",
+    }
+
+    @classmethod
+    def _get_department_ancestor(cls, db: Session, department_id: UUID, target_level: int) -> Optional[OrgDepartment]:
+        """Walk up the department tree to find ancestor at a given depth (0=root)."""
+        dept = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
+        if not dept:
+            return None
+
+        # Build path to root
+        path = [dept]
+        current = dept
+        while current.parent_department_id:
+            current = db.query(OrgDepartment).filter(OrgDepartment.id == current.parent_department_id).first()
+            if not current:
+                break
+            path.append(current)
+
+        path.reverse()  # root first
+
+        if target_level < len(path):
+            return path[target_level]
+        return None
+
+    @classmethod
+    def _get_department_ancestry_names(cls, db: Session, department_id: UUID) -> dict:
+        """Walk up department tree and return hierarchy names for auto-fill."""
+        dept = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
+        if not dept:
+            return {}
+
+        path = [dept]
+        current = dept
+        while current.parent_department_id:
+            current = db.query(OrgDepartment).filter(OrgDepartment.id == current.parent_department_id).first()
+            if not current:
+                break
+            path.append(current)
+
+        path.reverse()  # root first
+
+        # Map levels to KPTCL hierarchy names
+        level_names = ["zone", "ce_circle", "se_division", "ee_subdivision", "aee_section", "ae_je"]
+        result = {}
+        for i, dept_node in enumerate(path):
+            if i < len(level_names):
+                result[level_names[i]] = dept_node.name
+        return result
+
+    @classmethod
+    def generate_ueic(
+        cls,
+        db: Session,
+        department_id: UUID,
+        equipment_type_name: str,
+        voltage_class: str,
+        bay_number: str,
+    ) -> str:
+        """
+        Generate UEIC: {zone_code}-{substation_code}-{voltage}-{bay}-{type_code}-{serial}
+        Example: BZ-PNYA-220-01-CB-01
+        """
+        # Get zone code (first ancestor = level 0)
+        zone_dept = cls._get_department_ancestor(db, department_id, target_level=0)
+        zone_code = (zone_dept.code or zone_dept.name[:2]).upper()[:2] if zone_dept else "XX"
+
+        # Get substation code (the department itself or closest leaf)
+        substation = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
+        substation_code = (substation.code or substation.name[:4]).upper()[:4] if substation else "XXXX"
+
+        # Equipment type code
+        type_code = cls.EQUIPMENT_TYPE_CODES.get(equipment_type_name, "XX")
+
+        # Voltage and bay
+        v_class = str(voltage_class).zfill(3) if voltage_class else "000"
+        bay = str(bay_number).zfill(2) if bay_number else "00"
+
+        # Find next serial for this bay + type at this substation
+        existing_count = db.query(func.count(Equipment.id)).filter(
+            Equipment.department_id == department_id,
+            Equipment.voltage_class == voltage_class,
+            Equipment.bay_number == bay_number,
+            Equipment.equipment_type_id == db.query(CategoryMaster.id).filter(
+                CategoryMaster.name == equipment_type_name
+            ).scalar_subquery()
+        ).scalar() or 0
+
+        serial = str(existing_count + 1).zfill(2)
+
+        return f"{zone_code}-{substation_code}-{v_class}-{bay}-{type_code}-{serial}"
+
+    @classmethod
+    def create_equipment(
+        cls,
+        db: Session,
+        organization_id: UUID,
+        department_id: UUID,
+        equipment_type_id: int,
+        voltage_class: Optional[str] = None,
+        bay_number: Optional[str] = None,
+        nameplate_data: Optional[dict] = None,
+        commissioned_date: Optional[datetime] = None,
+        manufacturer: Optional[str] = None,
+        model_number: Optional[str] = None,
+        factory_serial_number: Optional[str] = None,
+        year_of_manufacture: Optional[int] = None,
+        created_by: Optional[UUID] = None,
+    ) -> Equipment:
+        """Register a new equipment unit with auto-generated UEIC."""
+
+        # Get equipment type name for UEIC generation
+        eq_type = db.query(CategoryMaster).filter(CategoryMaster.id == equipment_type_id).first()
+        if not eq_type:
+            raise HTTPException(status_code=404, detail="Equipment type not found")
+
+        # Validate department exists
+        dept = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
+        if not dept:
+            raise HTTPException(status_code=404, detail="Department/substation not found")
+
+        # Generate UEIC
+        ueic = cls.generate_ueic(db, department_id, eq_type.name, voltage_class, bay_number)
+
+        # Find next serial if UEIC already exists (collision handling)
+        while db.query(Equipment).filter(Equipment.ueic == ueic).first():
+            # Increment serial
+            parts = ueic.rsplit("-", 1)
+            current_serial = int(parts[-1])
+            parts[-1] = str(current_serial + 1).zfill(2)
+            ueic = "-".join(parts)
+
+        equipment = Equipment(
+            ueic=ueic,
+            organization_id=organization_id,
+            department_id=department_id,
+            equipment_type_id=equipment_type_id,
+            voltage_class=voltage_class,
+            bay_number=bay_number,
+            serial_in_bay=ueic.rsplit("-", 1)[-1],
+            nameplate_data=nameplate_data,
+            status=EquipmentStatus.active,
+            commissioned_date=commissioned_date,
+            manufacturer=manufacturer,
+            model_number=model_number,
+            factory_serial_number=factory_serial_number,
+            year_of_manufacture=year_of_manufacture,
+            created_by=created_by,
+        )
+        db.add(equipment)
+        db.flush()
+        return equipment
+
+    @classmethod
+    def get_equipment(cls, db: Session, equipment_id: UUID) -> Optional[Equipment]:
+        """Get single equipment by ID with relationships."""
+        return (
+            db.query(Equipment)
+            .options(
+                joinedload(Equipment.equipment_type),
+                joinedload(Equipment.department),
+                joinedload(Equipment.organization),
+            )
+            .filter(Equipment.id == equipment_id)
+            .first()
+        )
+
+    @classmethod
+    def get_equipment_by_ueic(cls, db: Session, ueic: str) -> Optional[Equipment]:
+        """Get equipment by UEIC code."""
+        return db.query(Equipment).filter(Equipment.ueic == ueic).first()
+
+    @classmethod
+    def list_equipment(
+        cls,
+        db: Session,
+        organization_id: Optional[UUID] = None,
+        department_id: Optional[UUID] = None,
+        equipment_type_id: Optional[int] = None,
+        status: Optional[str] = None,
+        voltage_class: Optional[str] = None,
+        manufacturer: Optional[str] = None,
+        search: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[Equipment]:
+        """List equipment with filters."""
+        query = (
+            db.query(Equipment)
+            .options(
+                joinedload(Equipment.equipment_type),
+                joinedload(Equipment.department),
+            )
+        )
+
+        if organization_id:
+            query = query.filter(Equipment.organization_id == organization_id)
+        if department_id:
+            query = query.filter(Equipment.department_id == department_id)
+        if equipment_type_id:
+            query = query.filter(Equipment.equipment_type_id == equipment_type_id)
+        if status:
+            query = query.filter(Equipment.status == status)
+        if voltage_class:
+            query = query.filter(Equipment.voltage_class == voltage_class)
+        if manufacturer:
+            query = query.filter(Equipment.manufacturer.ilike(f"%{manufacturer}%"))
+        if search:
+            query = query.filter(
+                (Equipment.ueic.ilike(f"%{search}%")) |
+                (Equipment.manufacturer.ilike(f"%{search}%")) |
+                (Equipment.model_number.ilike(f"%{search}%")) |
+                (Equipment.factory_serial_number.ilike(f"%{search}%"))
+            )
+
+        return (
+            query
+            .order_by(Equipment.ueic)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    @classmethod
+    def update_equipment(
+        cls,
+        db: Session,
+        equipment_id: UUID,
+        modified_by: Optional[UUID] = None,
+        **kwargs,
+    ) -> Equipment:
+        """Update equipment fields (nameplate_data, manufacturer, etc.)."""
+        equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        if not equipment:
+            raise HTTPException(status_code=404, detail="Equipment not found")
+
+        allowed_fields = [
+            "nameplate_data", "voltage_class", "bay_number", "manufacturer",
+            "model_number", "factory_serial_number", "year_of_manufacture",
+            "commissioned_date", "retirement_reason",
+        ]
+
+        for key, value in kwargs.items():
+            if key in allowed_fields and value is not None:
+                setattr(equipment, key, value)
+
+        if modified_by:
+            equipment.modified_by = modified_by
+
+        db.flush()
+        return equipment
+
+    @classmethod
+    def retire_equipment(
+        cls,
+        db: Session,
+        equipment_id: UUID,
+        reason: str,
+        modified_by: Optional[UUID] = None,
+    ) -> Equipment:
+        """Retire an equipment unit (soft-delete). UEIC remains for historical records."""
+        equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        if not equipment:
+            raise HTTPException(status_code=404, detail="Equipment not found")
+        if equipment.status != EquipmentStatus.active:
+            raise HTTPException(status_code=400, detail=f"Equipment is already {equipment.status.value}")
+
+        equipment.status = EquipmentStatus.retired
+        equipment.retired_date = datetime.now(timezone.utc)
+        equipment.retirement_reason = reason
+        if modified_by:
+            equipment.modified_by = modified_by
+
+        db.flush()
+        return equipment
+
+    @classmethod
+    def replace_equipment(
+        cls,
+        db: Session,
+        old_equipment_id: UUID,
+        reason: str,
+        created_by: Optional[UUID] = None,
+        **new_equipment_kwargs,
+    ) -> tuple:
+        """Retire old equipment and register a new replacement. Returns (old, new)."""
+        old = cls.retire_equipment(db, old_equipment_id, reason, modified_by=created_by)
+
+        # Create replacement with same location and type
+        new_kwargs = {
+            "organization_id": old.organization_id,
+            "department_id": old.department_id,
+            "equipment_type_id": old.equipment_type_id,
+            "voltage_class": old.voltage_class,
+            "bay_number": old.bay_number,
+            "created_by": created_by,
+        }
+        new_kwargs.update(new_equipment_kwargs)
+
+        new_equipment = cls.create_equipment(db, **new_kwargs)
+        new_equipment.replaces_equipment_id = old.id
+        db.flush()
+
+        return old, new_equipment
+
+    @classmethod
+    def get_equipment_for_department(cls, db: Session, department_id: UUID) -> List[Equipment]:
+        """Get all active equipment at a specific substation/department — for test request form auto-populate."""
+        return (
+            db.query(Equipment)
+            .options(joinedload(Equipment.equipment_type))
+            .filter(
+                Equipment.department_id == department_id,
+                Equipment.status == EquipmentStatus.active,
+            )
+            .order_by(Equipment.ueic)
+            .all()
+        )
+
+    @classmethod
+    def get_applicable_tests(cls, db: Session, equipment_id: UUID) -> list:
+        """Get test types applicable to an equipment's type — for test request form."""
+        from models import CategoryDetails
+        equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        if not equipment:
+            raise HTTPException(status_code=404, detail="Equipment not found")
+
+        tests = (
+            db.query(CategoryDetails)
+            .filter(
+                CategoryDetails.category_master_id == equipment.equipment_type_id,
+                CategoryDetails.is_active == True,
+            )
+            .order_by(CategoryDetails.name)
+            .all()
+        )
+        return tests
+
+    @classmethod
+    def get_equipment_count(
+        cls,
+        db: Session,
+        organization_id: Optional[UUID] = None,
+        department_id: Optional[UUID] = None,
+    ) -> dict:
+        """Get equipment counts by status."""
+        query = db.query(
+            Equipment.status,
+            func.count(Equipment.id)
+        )
+        if organization_id:
+            query = query.filter(Equipment.organization_id == organization_id)
+        if department_id:
+            query = query.filter(Equipment.department_id == department_id)
+
+        results = query.group_by(Equipment.status).all()
+        counts = {s.value: 0 for s in EquipmentStatus}
+        for s, c in results:
+            counts[s.value] = c
+        counts["total"] = sum(counts.values())
+        return counts
