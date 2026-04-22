@@ -18,7 +18,32 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/login", response_model=LoginResponse)
 def login(request: LoginRequest, db: Session = Depends(get_db)):
-    return login_user(db=db, email=request.email, password=request.password)
+    print("[DEBUG-START] Login endpoint called!")
+    result = login_user(db=db, email=request.email, password=request.password)
+    print("[DEBUG-AFTER-LOGIN] Got result from login_user")
+
+    # TEMP FIX: Manually inject dashboard_type by querying DB directly
+    from sqlalchemy import text
+    user_id = result["user"]["id"]
+
+    # Query default_module_path directly from database
+    query = text("""
+        SELECT m.path
+        FROM public.org_user_roles our
+        JOIN public.org_roles oroles ON our.org_role_id = oroles.id
+        LEFT JOIN public.modules m ON oroles.default_module_id = m.id
+        WHERE our.user_id = :user_id AND our.is_active = true
+        LIMIT 1
+    """)
+
+    result_row = db.execute(query, {"user_id": user_id}).fetchone()
+    default_module_path = result_row[0] if (result_row and result_row[0]) else None
+
+    print(f"[DEBUG] user_id: {user_id}")
+    print(f"[DEBUG] default_module_path: {default_module_path}")
+
+    result["user"]["default_module_path"] = default_module_path
+    return result
 
 
 @router.get("/privileges")

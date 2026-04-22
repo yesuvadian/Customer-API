@@ -4,8 +4,31 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
-from models import TestingRequest, TestingRequestStatus, TestResult, TestResultImage, CategoryDetails, Recommendation, RecommendationType
+from models import TestingRequest, TestingRequestStatus, TestResult, TestResultImage, CategoryDetails, Recommendation, RecommendationType, TestSession
 from utils.common_service import UTCDateTimeMixin
+
+
+def _deduplicated_overall_sections(main_sections: list, overall_sections: list) -> list:
+    """
+    Return only those sections/fields from overall_sections that don't already
+    exist (by field key) in main_sections.  This prevents a double overall_result
+    dropdown when the main template already contains that field.
+    """
+    existing_keys = {
+        f.get("key")
+        for sec in main_sections
+        for f in sec.get("fields", [])
+        if f.get("key")
+    }
+    deduped = []
+    for sec in overall_sections:
+        filtered_fields = [
+            f for f in sec.get("fields", [])
+            if f.get("key") not in existing_keys
+        ]
+        if filtered_fields:
+            deduped.append({**sec, "fields": filtered_fields})
+    return deduped
 
 
 class TestingService:
@@ -88,8 +111,10 @@ class TestingService:
             )
 
         # --- Auto-create or update Recommendation from test results ---
-        rec_type = self._derive_recommendation_type(results)
-        summary = self._build_recommendation_summary(request, results, rec_type)
+        # Prefer evaluation_result if any result has CRITICAL/ALERT evaluation
+        rec_type, summary, suggested_prods = self._derive_recommendation_from_results(request, results)
+        # Merge caller-supplied replacement_products with auto-suggested ones
+        merged_products = replacement_products or suggested_prods or None
 
         # Check for existing recommendation (re-submission from test_submitted)
         existing_rec = (
@@ -100,7 +125,7 @@ class TestingService:
         if existing_rec:
             existing_rec.recommendation_type = rec_type
             existing_rec.summary = summary
-            existing_rec.replacement_products = replacement_products
+            existing_rec.replacement_products = merged_products
             existing_rec.approval_status = "pending"
             existing_rec.modified_by = tester_id
         else:
@@ -110,7 +135,7 @@ class TestingService:
                 recommendation_type=rec_type,
                 summary=summary,
                 detailed_notes=None,
-                replacement_products=replacement_products,
+                replacement_products=merged_products,
                 submitted_by=tester_id,
                 submitted_at=UTCDateTimeMixin._utc_now(),
                 approval_status="pending",
@@ -118,38 +143,103 @@ class TestingService:
             )
             self.db.add(recommendation)
 
-        # Transition directly to under_approval (skips test_submitted)
-        request.status = TestingRequestStatus.under_approval
+        # Multi-session check: only transition to under_approval if all sessions complete
+        if request.is_multi_session:
+            # Count completed sessions for this request
+            completed_sessions = self.db.query(TestSession).filter(
+                TestSession.testing_request_id == request_id,
+                TestSession.status == "completed"
+            ).count()
+
+            # Only transition to approval if all sessions complete
+            if completed_sessions >= request.total_sessions_planned:
+                request.status = TestingRequestStatus.under_approval
+            else:
+                # Keep in_progress - more sessions to complete
+                request.status = TestingRequestStatus.in_progress
+        else:
+            # Single-session: proceed to approval immediately
+            request.status = TestingRequestStatus.under_approval
+
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
+
+        # ── Notification: test submitted → notify approvers ───────────────────
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).notify_test_submitted(request)
+        except Exception as _n:
+            print(f"[WARN] test_submitted notification failed: {_n}")
+
         return request
 
     @staticmethod
-    def _derive_recommendation_type(results: list) -> RecommendationType:
-        """Derive recommendation type from overall_result of test results."""
+    def _derive_recommendation_from_results(
+        request, results: list
+    ) -> tuple:
+        """
+        Derive (recommendation_type, summary, suggested_products) from results.
+
+        Priority:
+          1. If any evaluation_result.overall == CRITICAL → fail + auto-summary
+          2. If any evaluation_result.overall == ALERT   → conditional + auto-summary
+          3. Fall back to overall_result strings (pass/fail/conditional)
+        """
+        from services.evaluation_service import EvaluationService
+
+        # ── Evaluation-based derivation ──────────────────────────────────────
+        critical_results = [r for r in results if (r.evaluation_result or {}).get("overall") == "CRITICAL"]
+        alert_results    = [r for r in results if (r.evaluation_result or {}).get("overall") == "ALERT"]
+        title = getattr(request, "title", "") or getattr(request, "request_number", "") or ""
+
+        if critical_results:
+            # Merge summaries from all CRITICAL results
+            summaries: list[str] = []
+            products: list = []
+            for r in critical_results:
+                ev = r.evaluation_result or {}
+                txt = EvaluationService.build_remedial_summary(ev, title)
+                if txt:
+                    summaries.append(txt)
+                products.extend(EvaluationService.collect_suggested_products(ev))
+            # Deduplicate products by item_name
+            seen, uniq = set(), []
+            for p in products:
+                k = p.get("item_name", str(p))
+                if k not in seen:
+                    seen.add(k)
+                    uniq.append(p)
+            full_summary = " | ".join(summaries) if summaries else f"[CRITICAL] {title}"
+            return RecommendationType.fail, full_summary, uniq or None
+
+        if alert_results:
+            summaries = []
+            for r in alert_results:
+                ev = r.evaluation_result or {}
+                txt = EvaluationService.build_remedial_summary(ev, title)
+                if txt:
+                    summaries.append(txt)
+            full_summary = " | ".join(summaries) if summaries else f"[ALERT] {title}"
+            return RecommendationType.conditional, full_summary, None
+
+        # ── Fallback: use tester-entered overall_result strings ──────────────
         overall_results = [
             (r.overall_result or "").lower().strip()
             for r in results if r.overall_result
         ]
         if not overall_results:
-            return RecommendationType.conditional
-
-        if all(r == "pass" for r in overall_results):
-            return RecommendationType.pass_test
+            rec_type = RecommendationType.conditional
+        elif all(r == "pass" for r in overall_results):
+            rec_type = RecommendationType.pass_test
         elif any(r == "fail" for r in overall_results):
-            return RecommendationType.fail
+            rec_type = RecommendationType.fail
         else:
-            return RecommendationType.conditional
+            rec_type = RecommendationType.conditional
 
-    @staticmethod
-    def _build_recommendation_summary(request, results: list, rec_type: RecommendationType) -> str:
-        """Build a human-readable recommendation summary."""
         test_names = [r.test_name or r.template_key or "Test" for r in results]
-        tests_str = ", ".join(test_names)
-        title = request.title or request.request_number
-        type_label = rec_type.value.upper()
-        return f"[{type_label}] {title} — {len(results)} test(s): {tests_str}"
+        summary = f"[{rec_type.value.upper()}] {title} — {len(results)} test(s): {', '.join(test_names)}"
+        return rec_type, summary, None
 
     def get_my_assignments(self, tester_id: UUID, skip: int = 0, limit: int = 100) -> List[TestingRequest]:
         return (
@@ -222,13 +312,17 @@ class TestingService:
                             for c in cols
                         ]
 
-        # Append overall assessment sections (template-driven)
+        # Append overall assessment sections (template-driven), skipping fields
+        # whose key already exists in the main template to avoid duplicates
+        # (e.g. overall_result appears in both static templates and overall_assessment).
         try:
             overall = svc.get_overall_assessment(org_id=org_id)
             overall_sections = (overall.template_data or {}).get("sections", [])
             if overall_sections:
                 template_data.setdefault("sections", [])
-                template_data["sections"].extend(copy.deepcopy(overall_sections))
+                template_data["sections"].extend(
+                    _deduplicated_overall_sections(template_data["sections"], copy.deepcopy(overall_sections))
+                )
         except FHE:
             pass  # No overall assessment template yet — skip silently
 
@@ -238,6 +332,7 @@ class TestingService:
         self, request_id: UUID, template_key: str, test_data: dict,
         overall_result: Optional[str], remarks: Optional[str], tester_id: UUID,
         replacement_products: Optional[list] = None,
+        test_session_id: Optional[UUID] = None,
     ) -> TestResult:
         """Create a structured test result with JSONB data."""
         from test_templates import get_template_by_key
@@ -266,12 +361,15 @@ class TestingService:
             except Exception:
                 test_name = template_key
 
-        # Upsert: update existing result if same request + template_key, else create
+        # Upsert: update existing result if same request + template_key + session, else create
+        # For multi-session: look up by session_id if provided
+        # For legacy single-session: look up by request_id + template_key + session_id=NULL
         existing = (
             self.db.query(TestResult)
             .filter(
                 TestResult.testing_request_id == request_id,
                 TestResult.template_key == template_key,
+                TestResult.test_session_id == test_session_id,  # Match session (NULL for legacy)
             )
             .first()
         )
@@ -282,6 +380,7 @@ class TestingService:
             existing.overall_result = overall_result
             existing.remarks = remarks
             existing.replacement_products = replacement_products
+            existing.test_session_id = test_session_id  # Update session link
             existing.tested_by = tester_id
             existing.tested_at = UTCDateTimeMixin._utc_now()
             existing.modified_by = tester_id
@@ -289,6 +388,7 @@ class TestingService:
         else:
             result = TestResult(
                 testing_request_id=request_id,
+                test_session_id=test_session_id,  # Link to session
                 organization_id=request.organization_id,  # Auto-populate from testing_request
                 test_name=test_name,
                 template_key=template_key,
@@ -306,6 +406,82 @@ class TestingService:
         if request.status == TestingRequestStatus.accepted:
             request.status = TestingRequestStatus.in_progress
             request.modified_by = tester_id
+
+        self.db.flush()  # generate result.id before evaluation
+
+        # ── Auto-evaluation ──────────────────────────────────────────────────
+        try:
+            from services.evaluation_service import EvaluationService
+            ev = EvaluationService.run(template_key, test_data, self.db)
+            result.evaluation_result = ev
+
+            # CRITICAL → override overall_result + pre-fill remedial recommendation
+            if ev["overall"] == "CRITICAL":
+                result.overall_result = "fail"
+                remedial = EvaluationService.build_remedial_summary(
+                    ev, request_title=getattr(request, "title", "") or ""
+                )
+                if remedial:
+                    result.remarks = (result.remarks or "") + (
+                        f"\n[AUTO-EVAL] {remedial}" if result.remarks else f"[AUTO-EVAL] {remedial}"
+                    )
+                # Pre-fill suggested_products on result (tester can review/edit before submit)
+                suggested = EvaluationService.collect_suggested_products(ev)
+                if suggested and not result.replacement_products:
+                    result.replacement_products = suggested
+
+            # ALERT → store revised_interval on result for scheduler
+            elif ev["overall"] == "ALERT":
+                revised = EvaluationService.get_min_revised_interval(ev)
+                if revised is not None:
+                    # Tag evaluation_result with revised interval for scheduler
+                    ev["revised_interval_days"] = revised
+                    result.evaluation_result = ev
+
+            # ── Notification hooks (fire-and-forget; never block save) ────────
+            try:
+                from services.notification_service import NotificationService
+                _nsvc = NotificationService(self.db)
+                if ev["overall"] == "CRITICAL":
+                    _nsvc.notify_eval_critical(request, result, ev)
+                elif ev["overall"] == "ALERT":
+                    _nsvc.notify_eval_alert(request, result, ev)
+            except Exception as _notif_err:
+                print(f"[WARN] Notification hook failed: {_notif_err}")
+
+        except Exception as _eval_err:  # evaluation must never block save
+            import traceback
+            print(f"[WARN] Evaluation failed for {template_key}: {_eval_err}")
+            traceback.print_exc()
+
+        # ── Auto-create TestSession for multi-session tracing ─────────────────
+        # Each save call = one session entry, giving a full audit trail of
+        # when the tester worked on this request and how many times.
+        # The TestResult row is still upserted (latest data), but TestSession
+        # accumulates one row per save — powering dashboard session counts,
+        # EE-TLSS compliance KPI, and the request-detail timeline.
+        try:
+            from models import TestSession
+            from sqlalchemy import func as _sfunc
+            _prev_count = (
+                self.db.query(_sfunc.count(TestSession.id))
+                .filter(TestSession.testing_request_id == request_id)
+                .scalar()
+            ) or 0
+            _session = TestSession(
+                testing_request_id=request_id,
+                organization_id=request.organization_id,
+                session_number=_prev_count + 1,
+                session_name=f"Session {_prev_count + 1}",
+                session_date=UTCDateTimeMixin._utc_now(),
+                status="completed",
+                template_key=template_key,
+                conducted_by=tester_id,
+                created_by=tester_id,
+            )
+            self.db.add(_session)
+        except Exception as _sess_err:
+            print(f"[WARN] TestSession auto-create failed: {_sess_err}")
 
         self.db.commit()
         self.db.refresh(result)

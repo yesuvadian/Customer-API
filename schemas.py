@@ -1,7 +1,7 @@
 import uuid
 from enum import Enum as PyEnum
 from pydantic import BaseModel, EmailStr, Field, constr
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel
@@ -584,6 +584,7 @@ class UserResponse(BaseModel):
     usertype: Optional[str] = None
     organization_id: Optional[str] = None
     department_id: Optional[str] = None  # User's assigned department
+    default_module_path: Optional[str] = None  # Default module path to navigate on login
 
     cts: datetime
     mts: datetime
@@ -964,6 +965,12 @@ class TestingRequestCreate(BaseModel):
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
 
+    # Equipment Asset Register link (auto-fills equipment_type_id, nameplate fields, location)
+    equipment_id: Optional[UUID] = None
+
+    # Request category: test | maintenance | inspection | repair_lifecycle
+    request_category: Optional[Literal["test", "maintenance", "inspection", "repair_lifecycle"]] = "test"
+
     # New department-based location
     organization_id: Optional[UUID] = None
     department_id: Optional[UUID] = None
@@ -980,7 +987,13 @@ class TestingRequestCreate(BaseModel):
     priority: Optional[str] = "normal"
     requested_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
+    scheduled_start_date: Optional[datetime] = None  # NEW: For scheduled tests
     notes: Optional[str] = None
+
+    # Multi-session support
+    is_multi_session: Optional[bool] = False
+    total_sessions_planned: Optional[int] = None
+    session_interval_days: Optional[int] = None
 
 class TestingRequestUpdate(BaseModel):
     title: Optional[str] = None
@@ -992,6 +1005,12 @@ class TestingRequestUpdate(BaseModel):
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
     assigned_tester_id: Optional[UUID] = None
+
+    # Equipment Asset Register link
+    equipment_id: Optional[UUID] = None
+
+    # Request category
+    request_category: Optional[Literal["test", "maintenance", "inspection", "repair_lifecycle"]] = None
 
     # New department-based location
     organization_id: Optional[UUID] = None
@@ -1008,7 +1027,13 @@ class TestingRequestUpdate(BaseModel):
     priority: Optional[str] = None
     requested_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
+    scheduled_start_date: Optional[datetime] = None  # NEW
     notes: Optional[str] = None
+
+    # Multi-session support
+    is_multi_session: Optional[bool] = None
+    total_sessions_planned: Optional[int] = None
+    session_interval_days: Optional[int] = None
 
 class TestingRequestAssign(BaseModel):
     tester_id: UUID
@@ -1027,6 +1052,13 @@ class TestingRequestResponse(BaseModel):
     equipment_type_name: Optional[str] = None
     equipment_name: Optional[str] = None  # Alias for Flutter UI
     test_type_name: Optional[str] = None
+
+    # Equipment Asset Register
+    equipment_id: Optional[UUID] = None
+    equipment_ueic: Optional[str] = None  # Computed from equipment relationship
+
+    # Request category
+    request_category: Optional[str] = "test"
 
     # New department-based location
     organization_id: Optional[UUID] = None
@@ -1052,9 +1084,17 @@ class TestingRequestResponse(BaseModel):
     accepted_at: Optional[datetime] = None
     requested_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
+    scheduled_start_date: Optional[datetime] = None  # NEW
     completed_at: Optional[datetime] = None
     notes: Optional[str] = None
     rejection_reason: Optional[str] = None
+
+    # Multi-session support
+    is_multi_session: Optional[bool] = False
+    total_sessions_planned: Optional[int] = None
+    session_interval_days: Optional[int] = None
+    session_count: int = 0  # Computed field
+
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
@@ -1151,6 +1191,7 @@ class TestResultResponse(BaseModel):
     test_data: Optional[dict] = None
     overall_result: Optional[str] = None
     replacement_products: Optional[list] = None
+    evaluation_result: Optional[dict] = None  # {overall, evaluated_at, fields}
     tested_by: Optional[UUID] = None
     tested_at: Optional[datetime] = None
     image_count: int = 0
@@ -1173,6 +1214,7 @@ class TestResultStructuredCreate(BaseModel):
     remarks: Optional[str] = None
     replacement_products: Optional[list] = None
     organization_id: Optional[UUID] = None
+    test_session_id: Optional[UUID] = None  # Link result to specific session
 
 class TestResultImageResponse(BaseModel):
     id: UUID
@@ -1189,6 +1231,7 @@ class TestResultImageResponse(BaseModel):
 class TestResultStructuredResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    test_session_id: Optional[UUID] = None  # Session this result belongs to
     organization_id: Optional[UUID] = None
     test_name: str
     template_key: Optional[str] = None
@@ -1196,11 +1239,142 @@ class TestResultStructuredResponse(BaseModel):
     overall_result: Optional[str] = None
     remarks: Optional[str] = None
     replacement_products: Optional[list] = None
+    evaluation_result: Optional[dict] = None  # {overall, evaluated_at, fields:[{key,label,value,unit,status,thresholds}]}
     tested_by: Optional[UUID] = None
     tested_at: Optional[datetime] = None
     images: List[TestResultImageResponse] = []
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Test Session Schemas (Multi-day/Multi-session Testing)
+# ==========================================
+
+class TestSessionCreate(BaseModel):
+    session_number: int
+    session_name: Optional[str] = None
+    session_date: datetime
+    scheduled_date: Optional[datetime] = None
+    template_key: Optional[str] = None
+    notes: Optional[str] = None
+    weather_conditions: Optional[str] = None
+    environmental_factors: Optional[str] = None
+    organization_id: Optional[UUID] = None
+
+class TestSessionUpdate(BaseModel):
+    session_name: Optional[str] = None
+    session_date: Optional[datetime] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    weather_conditions: Optional[str] = None
+    environmental_factors: Optional[str] = None
+    conducted_by: Optional[UUID] = None
+    witnessed_by: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+class TestSessionResponse(BaseModel):
+    id: UUID
+    testing_request_id: UUID
+    organization_id: Optional[UUID] = None
+    session_number: int
+    session_name: Optional[str] = None
+    session_date: datetime
+    scheduled_date: Optional[datetime] = None
+    status: str
+    template_key: Optional[str] = None
+    notes: Optional[str] = None
+    weather_conditions: Optional[str] = None
+    environmental_factors: Optional[str] = None
+    conducted_by: Optional[UUID] = None
+    witnessed_by: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    reading_count: int = 0
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Test Session Reading Schemas
+# ==========================================
+
+class TestSessionReadingCreate(BaseModel):
+    reading_number: int
+    reading_time: datetime
+    reading_data: dict
+    equipment_serial: Optional[str] = None
+    calibration_date: Optional[datetime] = None
+    remarks: Optional[str] = None
+    result_status: Optional[str] = None
+
+class TestSessionReadingUpdate(BaseModel):
+    reading_time: Optional[datetime] = None
+    reading_data: Optional[dict] = None
+    equipment_serial: Optional[str] = None
+    calibration_date: Optional[datetime] = None
+    remarks: Optional[str] = None
+    result_status: Optional[str] = None
+
+class TestSessionReadingImageResponse(BaseModel):
+    id: UUID
+    file_name: str
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    caption: Optional[str] = None
+    download_url: Optional[str] = None
+    sort_order: int
+    cts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class TestSessionReadingResponse(BaseModel):
+    id: UUID
+    test_session_id: UUID
+    reading_number: int
+    reading_time: datetime
+    reading_data: dict
+    equipment_serial: Optional[str] = None
+    calibration_date: Optional[datetime] = None
+    remarks: Optional[str] = None
+    result_status: Optional[str] = None
+    image_count: int = 0
+    images: List[TestSessionReadingImageResponse] = []
+    recorded_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==========================================
+# Session Comment Schemas
+# ==========================================
+
+class SessionCommentCreate(BaseModel):
+    comment: str
+
+class SessionCommentResponse(BaseModel):
+    id: str
+    session_id: str
+    comment: str
+    author_id: str
+    author_name: str
+    author_role: Optional[str] = None
+    created_at: Optional[str] = None
+    modified_at: Optional[str] = None
+    is_edited: bool = False
 
     class Config:
         from_attributes = True
@@ -1239,9 +1413,11 @@ class RecommendationResponse(BaseModel):
     replacement_products: Optional[list] = None
     approval_status: Optional[str] = None
     approved_by: Optional[UUID] = None
+    approved_by_name: Optional[str] = None   # resolved display name
     approved_at: Optional[datetime] = None
     approval_notes: Optional[str] = None
     submitted_by: Optional[UUID] = None
+    submitted_by_name: Optional[str] = None  # resolved display name
     submitted_at: Optional[datetime] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
@@ -2012,3 +2188,84 @@ class ApprovalResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==========================================
+# Equipment Asset Register Schemas
+# ==========================================
+
+class EquipmentCreate(BaseModel):
+    organization_id: UUID
+    department_id: UUID
+    equipment_type_id: int
+    voltage_class: Optional[str] = None
+    bay_number: Optional[str] = None
+    nameplate_data: Optional[dict] = None
+    commissioned_date: Optional[datetime] = None
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    factory_serial_number: Optional[str] = None
+    year_of_manufacture: Optional[int] = None
+
+
+class EquipmentUpdate(BaseModel):
+    nameplate_data: Optional[dict] = None
+    voltage_class: Optional[str] = None
+    bay_number: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    factory_serial_number: Optional[str] = None
+    year_of_manufacture: Optional[int] = None
+    commissioned_date: Optional[datetime] = None
+
+
+class EquipmentResponse(BaseModel):
+    id: UUID
+    ueic: str
+    organization_id: UUID
+    department_id: UUID
+    equipment_type_id: int
+    equipment_type_name: Optional[str] = None
+    department_name: Optional[str] = None
+    voltage_class: Optional[str] = None
+    bay_number: Optional[str] = None
+    serial_in_bay: Optional[str] = None
+    nameplate_data: Optional[dict] = None
+    status: str
+    replaces_equipment_id: Optional[UUID] = None
+    commissioned_date: Optional[datetime] = None
+    retired_date: Optional[datetime] = None
+    retirement_reason: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    factory_serial_number: Optional[str] = None
+    year_of_manufacture: Optional[int] = None
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EquipmentRetireRequest(BaseModel):
+    reason: str
+
+
+class EquipmentReplaceRequest(BaseModel):
+    reason: str
+    nameplate_data: Optional[dict] = None
+    commissioned_date: Optional[datetime] = None
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    factory_serial_number: Optional[str] = None
+    year_of_manufacture: Optional[int] = None
+
+
+class EquipmentCountResponse(BaseModel):
+    active: int = 0
+    retired: int = 0
+    scrapped: int = 0
+    under_repair: int = 0
+    total: int = 0

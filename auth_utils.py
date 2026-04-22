@@ -242,6 +242,7 @@ def build_user_privileges(db: Session, user_id) -> dict:
 
 def login_user(db: Session, email: str, password: str):
     try:
+        print("[DEBUG] login_user called - NEW VERSION WITH DASHBOARD_TYPE")
         # Always use UTC-aware time
         now = UTCDateTimeMixin._utc_now()
 
@@ -318,16 +319,26 @@ def login_user(db: Session, email: str, password: str):
         from models import OrgUserRole, OrgRole
 
         role_names = []
+        dashboard_type = "generic"  # default
 
         # Super-admin users bypass the org-role requirement
         if getattr(user, "usertype", None) == "super_admin":
             role_names = ["super_admin"]
+            dashboard_type = "admin"
         else:
             org_user_roles = db.query(OrgUserRole).filter_by(user_id=user.id, is_active=True).all()
             if org_user_roles:
                 org_role_ids = [ur.org_role_id for ur in org_user_roles]
                 org_roles = db.query(OrgRole).filter(OrgRole.id.in_(org_role_ids)).all()
                 role_names = [r.name for r in org_roles]
+
+                # Use dashboard_type from the first active role
+                # If user has multiple roles, prioritize: admin > supervisor > field > generic
+                priority = {"admin": 4, "supervisor": 3, "field": 2, "generic": 1}
+                for role in org_roles:
+                    role_dashboard = getattr(role, "default_dashboard_type", "generic")
+                    if priority.get(role_dashboard, 0) > priority.get(dashboard_type, 0):
+                        dashboard_type = role_dashboard
 
         # Check if user has at least one role
         if not role_names:
@@ -354,7 +365,7 @@ def login_user(db: Session, email: str, password: str):
                 }
 
         # Step 9: Login success
-        return {
+        result = {
             "access_token": create_access_token({"sub": str(user.id)}),
             "refresh_token": create_refresh_token(str(user.id)),
             "user": {
@@ -371,11 +382,15 @@ def login_user(db: Session, email: str, password: str):
                 "cts": UTCDateTimeMixin._make_aware(user.cts),
                 "mts": UTCDateTimeMixin._make_aware(user.mts),
                 "roles": role_names,
+                "dashboard_type": dashboard_type,
                 "plan": plan
             },
             "privileges": filtered_privileges
-
         }
+
+        # Debug log
+        print(f"[DEBUG] dashboard_type in result: {result['user'].get('dashboard_type')}")
+        return result
 
     except HTTPException:
         raise

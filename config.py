@@ -32,12 +32,14 @@ REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_SOCKET_TIMEOUT = int(os.getenv("REDIS_SOCKET_TIMEOUT", 5))
+REDIS_SOCKET_CONNECT_TIMEOUT = int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", 2))
 
 REDIS_CONFIG = {
     "host": REDIS_HOST,
     "port": REDIS_PORT,
     "db": REDIS_DB,
     "socket_timeout": REDIS_SOCKET_TIMEOUT,
+    "socket_connect_timeout": REDIS_SOCKET_CONNECT_TIMEOUT,  # fast fail if Redis is down
     "decode_responses": True,
 }
 

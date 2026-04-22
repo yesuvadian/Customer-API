@@ -61,6 +61,7 @@ class TestingRequestStatus(PyEnum):
     pending_approval = "pending_approval"
     assigned = "assigned"
     accepted = "accepted"
+    scheduled = "scheduled"  # NEW: Test is scheduled for future date
     in_progress = "in_progress"
     test_submitted = "test_submitted"
     under_approval = "under_approval"
@@ -74,6 +75,20 @@ class RecommendationType(PyEnum):
     fail = "fail"
     conditional = "conditional"
     retest = "retest"
+
+
+class EquipmentStatus(PyEnum):
+    active = "active"
+    retired = "retired"
+    scrapped = "scrapped"
+    under_repair = "under_repair"
+
+
+class RequestCategory(PyEnum):
+    test = "test"
+    maintenance = "maintenance"
+    inspection = "inspection"
+    repair_lifecycle = "repair_lifecycle"
 
 
 class Plan(Base):
@@ -230,6 +245,63 @@ class OrgDepartment(Base):
     parent_department = relationship("OrgDepartment", remote_side=[id], foreign_keys=[parent_department_id])
     sub_departments = relationship("OrgDepartment", back_populates="parent_department", foreign_keys=[parent_department_id], remote_side=[parent_department_id])
     user_roles = relationship("OrgUserRole", back_populates="department", cascade="all, delete-orphan")
+    equipment = relationship("Equipment", back_populates="department", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Equipment Asset Register Model
+# ------------------------------
+class Equipment(Base):
+    __tablename__ = "equipment"
+    __table_args__ = (
+        UniqueConstraint("ueic", name="uq_equipment_ueic"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ueic = Column(String(50), unique=True, nullable=False)  # Auto-generated: BZ-PNYA-220-01-CB-01
+
+    # Location — linked to department hierarchy (substation level)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="CASCADE"), nullable=False)
+
+    # Classification
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=False)
+
+    # UEIC components
+    voltage_class = Column(String(10), nullable=True)   # "400", "220", "110", "66"
+    bay_number = Column(String(10), nullable=True)       # "01", "02"
+    serial_in_bay = Column(String(10), nullable=True)    # "01"
+
+    # Nameplate data — dynamic JSONB (template-driven, same pattern as OrgTestTemplate)
+    nameplate_data = Column(JSONB, nullable=True)
+
+    # Lifecycle
+    status = Column(Enum(EquipmentStatus), default=EquipmentStatus.active, nullable=False)
+    replaces_equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=True)
+    commissioned_date = Column(DateTime(timezone=True), nullable=True)
+    retired_date = Column(DateTime(timezone=True), nullable=True)
+    retirement_reason = Column(Text, nullable=True)
+
+    # Manufacturer / identity (quick-access fields from nameplate_data)
+    manufacturer = Column(String(255), nullable=True)
+    model_number = Column(String(255), nullable=True)
+    factory_serial_number = Column(String(100), nullable=True)
+    year_of_manufacture = Column(Integer, nullable=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    department = relationship("OrgDepartment", back_populates="equipment", foreign_keys=[department_id])
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    replaces_equipment = relationship("Equipment", remote_side=[id], foreign_keys=[replaces_equipment_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
 
 
 # ------------------------------
@@ -253,6 +325,7 @@ class OrgRole(Base):
     is_dept_admin = Column(Boolean, default=False)
     is_tester_assignable = Column(Boolean, default=False)  # Can this role be assigned as tester in testing requests
     is_active = Column(Boolean, default=True)
+    default_module_id = Column(Integer, ForeignKey("public.modules.id"), nullable=True)  # Default module to navigate on login
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -263,6 +336,7 @@ class OrgRole(Base):
     organization = relationship("Organization", back_populates="roles")
     user_roles = relationship("OrgUserRole", back_populates="org_role", cascade="all, delete-orphan")
     permissions = relationship("OrgRolePermission", back_populates="org_role", cascade="all, delete-orphan")
+    default_module = relationship("Module", foreign_keys=[default_module_id])
 
 
 # ------------------------------
@@ -338,6 +412,7 @@ class RoleTemplate(Base):
     is_org_admin = Column(Boolean, default=False)
     is_dept_admin = Column(Boolean, default=False)
     auto_provision = Column(Boolean, default=False)
+    default_module_id = Column(Integer, ForeignKey("public.modules.id"), nullable=True)  # Default landing module
 
     permissions_template = Column(JSONB, default=[])
 
@@ -772,6 +847,7 @@ class Module(Base):
     path = Column(String(255))
     group_name = Column(String(50))
     is_active = Column(Boolean, default=True)
+    is_menu = Column(Boolean, default=True, nullable=False, server_default="true")
 
     created_by = Column(ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     modified_by = Column(ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
@@ -1121,6 +1197,7 @@ class CategoryDetails(Base):
 
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
+    category_type = Column(String(50), nullable=True)  # test, maintenance, inspection, repair_lifecycle
     is_active = Column(Boolean, default=True)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -1437,6 +1514,12 @@ class TestingRequest(Base):
     equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=True)
     test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id"), nullable=True)
 
+    # Equipment Asset Register link (auto-fills equipment_type_id, nameplate fields, location)
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=True)
+
+    # Request category: test | maintenance | inspection | repair_lifecycle
+    request_category = Column(Enum(RequestCategory), default=RequestCategory.test, nullable=False)
+
     # Organization & Department (new multi-tenancy approach)
     organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id"), nullable=True)
@@ -1462,7 +1545,13 @@ class TestingRequest(Base):
     # Dates
     requested_date = Column(DateTime(timezone=True), nullable=True)
     due_date = Column(DateTime(timezone=True), nullable=True)
+    scheduled_start_date = Column(DateTime(timezone=True), nullable=True)  # NEW: For scheduled tests
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Multi-session support
+    is_multi_session = Column(Boolean, default=False)  # NEW: Indicates multi-day/multi-session test
+    total_sessions_planned = Column(Integer, nullable=True)  # NEW: Number of planned sessions
+    session_interval_days = Column(Integer, nullable=True)  # NEW: Days between sessions
 
     # Notes
     notes = Column(Text, nullable=True)
@@ -1481,10 +1570,12 @@ class TestingRequest(Base):
     modifier = relationship("User", foreign_keys=[modified_by])
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
     test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
     organization = relationship("Organization", foreign_keys=[organization_id])
     department = relationship("OrgDepartment", foreign_keys=[department_id])
     test_results = relationship("TestResult", back_populates="testing_request", cascade="all, delete-orphan")
     recommendations = relationship("Recommendation", back_populates="testing_request", cascade="all, delete-orphan")
+    test_sessions = relationship("TestSession", back_populates="testing_request", cascade="all, delete-orphan")
 
 
 # ------------------------------
@@ -1576,6 +1667,9 @@ class TestResult(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
 
+    # Multi-session support: link result to specific test session
+    test_session_id = Column(UUID(as_uuid=True), ForeignKey("public.test_sessions.id", ondelete="SET NULL"), nullable=True)
+
     # Multi-tenancy
     organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
 
@@ -1598,6 +1692,10 @@ class TestResult(Base):
     template_key = Column(String(100), nullable=True)
     replacement_products = Column(JSONB, nullable=True)  # [{item_id, item_name, category, quantity}, ...]
 
+    # Auto-evaluation result (JSONB) — computed from template acceptance criteria
+    # {overall: "NORMAL"|"ALERT"|"CRITICAL", evaluated_at, fields: [{key, label, value, unit, status, thresholds}]}
+    evaluation_result = Column(JSONB, nullable=True)
+
     tested_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     tested_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -1608,6 +1706,7 @@ class TestResult(Base):
 
     # Relationships
     testing_request = relationship("TestingRequest", back_populates="test_results")
+    test_session = relationship("TestSession", foreign_keys=[test_session_id])
     organization = relationship("Organization", foreign_keys=[organization_id])
     images = relationship("TestResultImage", back_populates="test_result", cascade="all, delete-orphan")
     tester = relationship("User", foreign_keys=[tested_by])
@@ -1635,6 +1734,142 @@ class TestResultImage(Base):
 
     # Relationships
     test_result = relationship("TestResult", back_populates="images")
+
+
+# ------------------------------
+# Test Session Model (Multi-day/Multi-session Testing)
+# ------------------------------
+class TestSession(Base):
+    __tablename__ = "test_sessions"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=True)
+
+    session_number = Column(Integer, nullable=False)  # 1, 2, 3, etc.
+    session_name = Column(String(255), nullable=True)  # "Day 1 Morning", "Initial Reading", etc.
+    session_date = Column(DateTime(timezone=True), nullable=False)
+    scheduled_date = Column(DateTime(timezone=True), nullable=True)  # When it was planned
+
+    # Session status
+    status = Column(String(20), default="scheduled")  # scheduled, in_progress, completed, skipped
+
+    # Template reference
+    template_key = Column(String(100), nullable=True)  # Links to OrgTestTemplate
+
+    # Session notes
+    notes = Column(Text, nullable=True)
+    weather_conditions = Column(String(255), nullable=True)  # For outdoor tests
+    environmental_factors = Column(Text, nullable=True)  # Temperature, humidity, etc.
+
+    # Session team
+    conducted_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    witnessed_by = Column(String(255), nullable=True)  # External witness names
+
+    # Timing
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    testing_request = relationship("TestingRequest", back_populates="test_sessions")
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    conductor = relationship("User", foreign_keys=[conducted_by])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+    readings = relationship("TestSessionReading", back_populates="test_session", cascade="all, delete-orphan")
+    comments = relationship("SessionComment", back_populates="session", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Test Session Reading Model (Multiple readings per session)
+# ------------------------------
+class TestSessionReading(Base):
+    __tablename__ = "test_session_readings"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    test_session_id = Column(UUID(as_uuid=True), ForeignKey("public.test_sessions.id", ondelete="CASCADE"), nullable=False)
+
+    reading_number = Column(Integer, nullable=False)  # 1, 2, 3, etc. within the session
+    reading_time = Column(DateTime(timezone=True), nullable=False)
+
+    # Reading data (structured as JSONB for flexibility)
+    reading_data = Column(JSONB, nullable=False)  # Actual test measurements
+
+    # Additional metadata
+    equipment_serial = Column(String(100), nullable=True)
+    calibration_date = Column(DateTime(timezone=True), nullable=True)
+    remarks = Column(Text, nullable=True)
+
+    # Pass/fail for this specific reading
+    result_status = Column(String(20), nullable=True)  # pass, fail, conditional, warning
+
+    # Images/attachments for this specific reading
+    image_count = Column(Integer, default=0)
+
+    # Audit
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    test_session = relationship("TestSession", back_populates="readings")
+    recorder = relationship("User", foreign_keys=[recorded_by])
+    images = relationship("TestSessionReadingImage", back_populates="reading", cascade="all, delete-orphan")
+
+
+# ------------------------------
+# Test Session Reading Image Model
+# ------------------------------
+class TestSessionReadingImage(Base):
+    __tablename__ = "test_session_reading_images"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    reading_id = Column(UUID(as_uuid=True), ForeignKey("public.test_session_readings.id", ondelete="CASCADE"), nullable=False)
+
+    file_name = Column(String(255), nullable=False)
+    file_type = Column(String(100), nullable=True)
+    file_size = Column(Integer, nullable=True)
+    file_data = Column(LargeBinary, nullable=False)
+    caption = Column(String(500), nullable=True)
+    sort_order = Column(Integer, default=0)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    reading = relationship("TestSessionReading", back_populates="images")
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+# ------------------------------
+# Session Comment Model
+# ------------------------------
+class SessionComment(Base):
+    """Comments on test sessions (typically by approvers)"""
+    __tablename__ = "session_comments"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("public.test_sessions.id", ondelete="CASCADE"), nullable=False)
+
+    comment = Column(Text, nullable=False)
+    author_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    session = relationship("TestSession", back_populates="comments")
+    author = relationship("User", foreign_keys=[author_id])
 
 
 # ------------------------------
@@ -2088,3 +2323,184 @@ class ZohoImportMapping(Base):
     organization = relationship("Organization", foreign_keys=[organization_id])
     department = relationship("OrgDepartment", foreign_keys=[department_id])
     org_role = relationship("OrgRole", foreign_keys=[org_role_id])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Notification & Alert Engine
+# ══════════════════════════════════════════════════════════════════════════════
+
+class NotificationTemplate(Base):
+    """
+    Defines what to send (subject + body) and who to send it to (recipient_roles)
+    for each event_type / channel combination.
+    NULL organization_id = global default template.
+    """
+    __tablename__ = "notification_templates"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,  # NULL = global default
+    )
+
+    # e.g. "eval_critical", "eval_alert", "due_reminder", "overdue_alert",
+    #       "recommendation_approved", "test_submitted"
+    event_type = Column(String(100), nullable=False, index=True)
+    channel = Column(String(20), nullable=False)  # "email" | "sms" | "inapp"
+
+    subject_template = Column(String(500), nullable=True)   # Jinja2 / str.format
+    body_template = Column(Text, nullable=False)             # Jinja2 / str.format
+
+    # Role names whose members should receive this notification
+    # e.g. ["Originator", "Department Head", "Tester"]
+    recipient_roles = Column(JSONB, nullable=False, server_default="[]")
+
+    is_active = Column(Boolean, default=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class NotificationLog(Base):
+    """
+    Audit log of every notification attempt.  status lifecycle:
+      pending → sent | failed | digested | skipped
+    Retry counter incremented on each attempt up to max_retries (default 3).
+    """
+    __tablename__ = "notification_log"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), nullable=True)
+
+    event_type = Column(String(100), nullable=False, index=True)
+    channel = Column(String(20), nullable=False)            # "email" | "sms" | "inapp"
+
+    recipient_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    recipient_email = Column(String(255), nullable=True)
+    recipient_phone = Column(String(50), nullable=True)
+
+    subject = Column(String(500), nullable=True)
+    body = Column(Text, nullable=True)
+
+    status = Column(String(20), default="pending", index=True)  # pending/sent/failed/digested/skipped
+    error_message = Column(Text, nullable=True)
+
+    retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=3)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Source object that triggered this notification
+    source_id = Column(UUID(as_uuid=True), nullable=True)   # TestResult.id, TestingRequest.id, etc.
+    source_type = Column(String(100), nullable=True)        # "test_result", "testing_request", etc.
+
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    recipient = relationship("User", foreign_keys=[recipient_id])
+
+
+class UserNotification(Base):
+    """
+    In-app (bell icon) notifications.  One row per user per event.
+    Soft-deleted via is_read flag; hard-delete never needed.
+    """
+    __tablename__ = "user_notifications"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    organization_id = Column(UUID(as_uuid=True), nullable=True)
+
+    event_type = Column(String(100), nullable=False)
+    title = Column(String(500), nullable=False)
+    body = Column(Text, nullable=False)
+    severity = Column(String(20), nullable=True)  # "critical" | "alert" | "info"
+
+    # Source navigation payload (flutter can deep-link)
+    source_id = Column(UUID(as_uuid=True), nullable=True)
+    source_type = Column(String(100), nullable=True)
+    ueic = Column(String(100), nullable=True)  # Equipment UEIC for quick display
+
+    is_read = Column(Boolean, default=False, index=True)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
+# ── Reporting Suite ────────────────────────────────────────────────────────
+
+class ReportDefinition(Base):
+    """
+    One row = one report.  The 14 SRS reports are seeded as system rows.
+    Custom ad-hoc reports saved by users are additional rows.
+    """
+    __tablename__ = "report_definitions"
+    __table_args__ = {"schema": "public"}
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True),
+                             ForeignKey("public.organizations.id", ondelete="CASCADE"),
+                             nullable=True, index=True)
+    name            = Column(String(255), nullable=False)
+    description     = Column(Text, nullable=True)
+    query_key       = Column(String(100), nullable=False)
+    # JSON schema of available filter parameters
+    parameters      = Column(JSONB, nullable=False, server_default="{}")
+    output_format   = Column(String(20), nullable=False, default="excel")   # excel | pdf | both
+    frequency       = Column(String(20), nullable=False, default="on_demand")  # daily | weekly | monthly | on_demand
+    recipient_roles = Column(JSONB, nullable=False, server_default="[]")
+    is_active       = Column(Boolean, default=True)
+    is_system       = Column(Boolean, default=False)   # True for the 14 built-in SRS reports
+    last_generated_at = Column(DateTime(timezone=True), nullable=True)
+    created_by      = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by     = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts             = Column(DateTime(timezone=True), server_default=func.now())
+    mts             = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    logs = relationship("ReportLog", back_populates="definition",
+                        cascade="all, delete-orphan")
+
+
+class ReportLog(Base):
+    """Tracks every execution of a ReportDefinition (scheduled or ad-hoc)."""
+    __tablename__ = "report_logs"
+    __table_args__ = {"schema": "public"}
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    definition_id   = Column(UUID(as_uuid=True),
+                             ForeignKey("public.report_definitions.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    organization_id = Column(UUID(as_uuid=True), nullable=True)
+    generated_by    = Column(UUID(as_uuid=True),
+                             ForeignKey("public.users.id", ondelete="SET NULL"),
+                             nullable=True)
+    parameters_used = Column(JSONB, nullable=False, server_default="{}")
+    output_format   = Column(String(20), nullable=False, default="excel")
+    file_path       = Column(String(500), nullable=True)
+    file_name       = Column(String(255), nullable=True)
+    file_size       = Column(Integer, nullable=True)
+    row_count       = Column(Integer, nullable=True)
+    status          = Column(String(20), default="pending", index=True)
+                           # pending | generating | completed | failed
+    error_message   = Column(Text, nullable=True)
+    started_at      = Column(DateTime(timezone=True), nullable=True)
+    completed_at    = Column(DateTime(timezone=True), nullable=True)
+    cts             = Column(DateTime(timezone=True), server_default=func.now())
+
+    definition          = relationship("ReportDefinition", back_populates="logs")
+    generated_by_user   = relationship("User", foreign_keys=[generated_by])

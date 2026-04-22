@@ -1,7 +1,7 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -83,7 +83,10 @@ def get_recommendation_by_request(
         .first()
     )
     if not rec:
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No recommendation found for this testing request",
+        )
     service = ApprovalService(db)
     return service.get_approval_detail(rec.id)
 

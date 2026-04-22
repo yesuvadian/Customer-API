@@ -59,11 +59,24 @@ class RecommendationService:
         self.db.refresh(recommendation)
         return recommendation
 
+    @staticmethod
+    def _enrich(rec: Recommendation) -> Recommendation:
+        """Attach resolved user display names to the ORM object."""
+        def _name(user):
+            if not user:
+                return None
+            full = f"{user.firstname or ''} {user.lastname or ''}".strip()
+            return full or user.email or None
+
+        rec.submitted_by_name = _name(rec.submitter)
+        rec.approved_by_name = _name(rec.approver)
+        return rec
+
     def get_recommendation(self, recommendation_id: UUID) -> Recommendation:
         rec = self.db.query(Recommendation).filter(Recommendation.id == recommendation_id).first()
         if not rec:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found")
-        return rec
+        return self._enrich(rec)
 
     def get_recommendations(
         self,
@@ -77,7 +90,7 @@ class RecommendationService:
             query = query.filter(Recommendation.testing_request_id == testing_request_id)
         if organization_id:
             query = query.filter(Recommendation.organization_id == organization_id)
-        return query.order_by(Recommendation.cts.desc()).offset(skip).limit(limit).all()
+        return [self._enrich(r) for r in query.order_by(Recommendation.cts.desc()).offset(skip).limit(limit).all()]
 
     def update_recommendation(self, recommendation_id: UUID, data: dict, modified_by: UUID) -> Recommendation:
         rec = self.get_recommendation(recommendation_id)

@@ -79,10 +79,26 @@ from routers import (
     tester_assignment,
     org_test_templates,
     test_request_schedules,
+    test_sessions,  # NEW: Multi-session testing
+    session_comments,  # NEW: Session comments for approvers
+    tester_locations,  # Tester-to-zone mapping
 )
 
 # Organization Multi-Tenancy
 from routers import organizations, org_departments, org_users, org_roles
+
+# Equipment Asset Register
+from routers import equipment
+
+# Notification & Alert Engine
+from routers import notifications as notifications_router
+from routers import admin_notifications as admin_notifications_router
+
+# Dashboard KPIs
+from routers import dashboard_kpi
+
+# Reporting Suite
+from routers import reporting as reporting_router
 
 # Workflow Engine
 from routers import workflows
@@ -109,6 +125,127 @@ scheduler.add_job(
     hour=0,
     minute=0,
     id="daily_test_scheduler",
+)
+
+# Auto-transition elapsed multi-session tests (runs every hour)
+def _check_elapsed_multi_session_tests():
+    """Check for multi-session tests with elapsed end dates and auto-submit them."""
+    db = SessionLocal()
+    try:
+        from services.auto_status_transition_service import AutoStatusTransitionService
+        svc = AutoStatusTransitionService(db)
+        count = svc.check_all_pending_multi_session_tests()
+        if count > 0:
+            logger.info(f"Auto-submitted {count} tests due to elapsed deadlines")
+    except Exception as e:
+        logger.error(f"Error in elapsed test check: {e}", exc_info=True)
+    finally:
+        db.close()
+
+scheduler.add_job(
+    _check_elapsed_multi_session_tests,
+    trigger="cron",
+    minute=0,  # Run at the start of every hour
+    id="hourly_elapsed_test_check",
+)
+
+
+# Retry failed notifications (every 5 minutes)
+def _retry_failed_notifications():
+    db = SessionLocal()
+    try:
+        from services.notification_service import NotificationService
+        count = NotificationService(db).retry_failed()
+        if count:
+            logger.info(f"[Notif] Retried {count} failed notification(s)")
+    except Exception as e:
+        logger.error(f"[Notif] Retry job error: {e}")
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _retry_failed_notifications,
+    trigger="interval",
+    minutes=5,
+    id="notification_retry_job",
+)
+
+
+# Overdue & due-reminder check (runs daily at 07:00 UTC)
+def _check_overdue_and_due_reminders():
+    """
+    Scan open testing requests:
+    • due_date passed → notify_overdue
+    • due_date within 3 days → notify_due_reminder
+    """
+    from datetime import date, timedelta
+    db = SessionLocal()
+    try:
+        from models import TestingRequest, TestingRequestStatus
+        from services.notification_service import NotificationService
+        nsvc = NotificationService(db)
+        today = date.today()
+        reminder_cutoff = today + timedelta(days=3)
+
+        open_statuses = (
+            TestingRequestStatus.submitted,
+            TestingRequestStatus.assigned,
+            TestingRequestStatus.accepted,
+            TestingRequestStatus.in_progress,
+        )
+        requests = (
+            db.query(TestingRequest)
+            .filter(
+                TestingRequest.status.in_(open_statuses),
+                TestingRequest.due_date.isnot(None),
+            )
+            .all()
+        )
+        overdue = 0
+        reminded = 0
+        for req in requests:
+            try:
+                due = req.due_date.date() if hasattr(req.due_date, "date") else req.due_date
+                if due < today:
+                    nsvc.notify_overdue(req)
+                    overdue += 1
+                elif due <= reminder_cutoff:
+                    nsvc.notify_due_reminder(req)
+                    reminded += 1
+            except Exception as _e:
+                logger.warning(f"[Notif] Overdue check failed for req {req.id}: {_e}")
+        if overdue or reminded:
+            logger.info(f"[Notif] Overdue alerts: {overdue}, Due reminders: {reminded}")
+    except Exception as e:
+        logger.error(f"[Notif] Overdue check job error: {e}")
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_overdue_and_due_reminders,
+    trigger="cron",
+    hour=7,
+    minute=0,
+    id="overdue_due_reminder_job",
+)
+
+
+# Scheduled report generation (runs every hour, service decides which are due)
+def _run_scheduled_reports():
+    from services.reporting_service import run_scheduled_reports
+    try:
+        run_scheduled_reports(SessionLocal)
+    except Exception as e:
+        logger.error(f"[Reports] Scheduled report job error: {e}", exc_info=True)
+
+
+scheduler.add_job(
+    _run_scheduled_reports,
+    trigger="cron",
+    minute=0,   # top of every hour
+    id="scheduled_report_job",
 )
 
 # ── App Init ─────────────────────────────────────────────────────────────────
@@ -265,6 +402,9 @@ app.include_router(customer_care_router)
 # Testing Request System
 app.include_router(testing_requests.router)
 app.include_router(testing.router)
+app.include_router(test_sessions.router)  # NEW: Multi-session testing
+app.include_router(session_comments.router)  # NEW: Session comments for approvers
+app.include_router(tester_locations.router)  # Tester-to-zone mapping
 app.include_router(recommendations.router)
 app.include_router(approvals.router)
 app.include_router(testing_request_approvals.router)
@@ -274,6 +414,19 @@ app.include_router(tester_assignment.router)
 app.include_router(org_test_templates.router)
 app.include_router(org_test_templates.browser_router)
 app.include_router(test_request_schedules.router)
+
+# Equipment Asset Register
+app.include_router(equipment.router)
+
+# Notification & Alert Engine
+app.include_router(notifications_router.router)
+app.include_router(admin_notifications_router.router)
+
+# Dashboard KPIs
+app.include_router(dashboard_kpi.router)
+
+# Reporting Suite
+app.include_router(reporting_router.router)
 
 # Organization Multi-Tenancy
 app.include_router(organizations.router)
@@ -298,6 +451,16 @@ async def startup_event():
         "[Scheduler] APScheduler started — "
         "daily test request job scheduled at 00:00 UTC"
     )
+    # Seed default notification templates (idempotent)
+    try:
+        _db = SessionLocal()
+        from services.notification_service import seed_default_templates
+        seeded = seed_default_templates(_db)
+        if seeded:
+            logger.info(f"[Notif] Seeded {seeded} default notification template(s) on startup")
+        _db.close()
+    except Exception as _e:
+        logger.warning(f"[Notif] Template seed failed on startup (non-fatal): {_e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

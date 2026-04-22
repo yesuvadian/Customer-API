@@ -133,18 +133,47 @@ class ApprovalService:
                 "transformer_rating": request.transformer_rating,
                 "manufacturer": request.manufacturer,
                 "serial_number": request.serial_number,
+                "equipment_id": str(request.equipment_id) if request.equipment_id else None,
+                "equipment_ueic": request.equipment.ueic if request.equipment else None,
+                "department_name": request.department.name if request.department else None,
                 "originator_name": _user_name(request.originator_id),
                 "assigned_tester_name": _user_name(request.assigned_tester_id),
             }
 
-        # Build test results list
+        # Build field-label map from OrgTestTemplate (DB-first, then static fallback)
+        def _field_labels_for_key(template_key: str) -> dict:
+            """Return {field_key: label} from the template definition."""
+            labels = {}
+            if not template_key:
+                return labels
+            try:
+                from models import OrgTestTemplate
+                tmpl = (
+                    self.db.query(OrgTestTemplate)
+                    .filter(OrgTestTemplate.template_key == template_key)
+                    .first()
+                )
+                data = tmpl.template_data if tmpl and tmpl.template_data else {}
+                if not data:
+                    from test_templates import get_template_by_key
+                    data = get_template_by_key(template_key) or {}
+                for sec in data.get("sections", []):
+                    for f in sec.get("fields", []):
+                        labels[f["key"]] = f.get("label", f["key"])
+            except Exception:
+                pass
+            return labels
+
+        # Build test results list with field labels for friendly display
         test_results = []
         for r in results:
+            labels = _field_labels_for_key(r.template_key)
             test_results.append({
                 "id": str(r.id),
                 "test_name": r.test_name,
                 "template_key": r.template_key,
                 "test_data": r.test_data,
+                "field_labels": labels,   # {key: friendly_label} from template
                 "overall_result": r.overall_result,
                 "remarks": r.remarks,
                 "tested_by_name": _user_name(r.tested_by),
@@ -198,6 +227,15 @@ class ApprovalService:
 
         self.db.commit()
         self.db.refresh(rec)
+
+        # ── Notification: recommendation approved → notify procurement ─────────
+        if request:
+            try:
+                from services.notification_service import NotificationService
+                NotificationService(self.db).notify_recommendation_approved(request, rec)
+            except Exception as _n:
+                print(f"[WARN] recommendation_approved notification failed: {_n}")
+
         return rec
 
     def get_approval_stats(self, approver_id: UUID = None) -> dict:

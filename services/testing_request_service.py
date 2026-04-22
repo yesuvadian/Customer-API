@@ -36,6 +36,8 @@ class TestingRequestService:
             serial_number=data.get("serial_number"),
             equipment_type_id=data.get("equipment_type_id"),
             test_type_id=data.get("test_type_id"),
+            equipment_id=data.get("equipment_id"),
+            request_category=data.get("request_category", "test"),
             organization_id=data.get("organization_id"),
             department_id=data.get("department_id"),
             zone=data.get("zone"),
@@ -48,10 +50,14 @@ class TestingRequestService:
             priority=data.get("priority", "normal"),
             requested_date=data.get("requested_date"),
             due_date=data.get("due_date"),
+            scheduled_start_date=data.get("scheduled_start_date"),
             notes=data.get("notes"),
             status=TestingRequestStatus.draft,
             originator_id=originator_id,
             created_by=originator_id,
+            is_multi_session=data.get("is_multi_session", False),
+            total_sessions_planned=data.get("total_sessions_planned"),
+            session_interval_days=data.get("session_interval_days"),
         )
         self.db.add(request)
         self.db.commit()
@@ -69,6 +75,7 @@ class TestingRequestService:
         skip: int = 0,
         limit: int = 100,
         status_filter: Optional[str] = None,
+        category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
         organization_id: Optional[UUID] = None,
@@ -76,6 +83,8 @@ class TestingRequestService:
         query = self.db.query(TestingRequest)
         if status_filter:
             query = query.filter(TestingRequest.status == status_filter)
+        if category_filter:
+            query = query.filter(TestingRequest.request_category == category_filter)
         if originator_id:
             query = query.filter(TestingRequest.originator_id == originator_id)
         if tester_id:
@@ -144,6 +153,16 @@ class TestingRequestService:
         request.modified_by = modified_by
         self.db.commit()
         self.db.refresh(request)
+
+        # Trigger notification
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).notify_request_submitted(request)
+        except Exception as e:
+            # Log but don't fail the request
+            import logging
+            logging.getLogger(__name__).error(f"Notification failed: {e}")
+
         return request
 
     def assign_tester(self, request_id: UUID, tester_id: UUID, assigned_by: UUID) -> TestingRequest:
@@ -163,6 +182,15 @@ class TestingRequestService:
         request.modified_by = assigned_by
         self.db.commit()
         self.db.refresh(request)
+
+        # Trigger notification
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).notify_tester_assigned(request)
+        except Exception as e:
+            # Log but don't fail the assignment
+            import logging
+            logging.getLogger(__name__).error(f"Notification failed: {e}")
         return request
 
     def get_stats(self, user_id: UUID = None, organization_id: UUID = None) -> dict:
@@ -192,6 +220,14 @@ class TestingRequestService:
         approved = query.filter(TestingRequest.status == TestingRequestStatus.approved).count()
         rejected = query.filter(TestingRequest.status == TestingRequestStatus.rejected).count()
         completed = query.filter(TestingRequest.status == TestingRequestStatus.completed).count()
+        # Category breakdown
+        from models import RequestCategory
+        by_category = {}
+        for cat in RequestCategory:
+            by_category[cat.value] = query.filter(
+                TestingRequest.request_category == cat.value
+            ).count()
+
         return {
             "total": total,
             "draft": draft,
@@ -201,6 +237,7 @@ class TestingRequestService:
             "approved": approved,
             "rejected": rejected,
             "completed": completed,
+            "by_category": by_category,
         }
 
     # NOTE: Tester workflow transitions (accept, start, submit_results)
