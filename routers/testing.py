@@ -666,6 +666,87 @@ def preview_test_result(
 
             fields_html += '</div>'
 
+    # ── Session data section (multi-session testing) ─────────────────────────
+    from models import TestSession as _TestSession, TestSessionReading as _TestSessionReading
+    from sqlalchemy.orm import joinedload as _jl
+
+    _sessions = (
+        db.query(_TestSession)
+        .options(_jl(_TestSession.readings))
+        .filter(_TestSession.testing_request_id == result.testing_request_id)
+        .order_by(_TestSession.session_number)
+        .all()
+    )
+
+    SESSION_STATUS_COLORS = {
+        "completed":  "#4CAF50",
+        "in_progress": "#FF9800",
+        "skipped":    "#F44336",
+        "scheduled":  "#9E9E9E",
+    }
+    RESULT_STATUS_COLORS = {
+        "pass":        "#4CAF50",
+        "fail":        "#F44336",
+        "conditional": "#FF9800",
+        "warning":     "#FFC107",
+    }
+
+    def _fmt_dt(dt):
+        return dt.strftime("%d/%m/%Y %H:%M") if dt else "-"
+
+    sessions_html = ""
+    if _sessions:
+        sessions_html += '<div class="section"><h3>Session Data</h3>'
+        for s in _sessions:
+            s_status = (s.status or "scheduled").lower()
+            s_color  = SESSION_STATUS_COLORS.get(s_status, "#9E9E9E")
+            s_label  = s.session_name or f"Session {s.session_number}"
+            sessions_html += f'''
+            <div class="session-card">
+              <div class="session-header" style="background:#1E3C72;">
+                <span class="session-title">Session {s.session_number}: {s_label}</span>
+                <span class="session-badge" style="background:{s_color};">{s_status.upper()}</span>
+              </div>
+              <div class="session-meta">
+                <span><strong>Date:</strong> {_fmt_dt(s.session_date)}</span>
+                <span><strong>Started:</strong> {_fmt_dt(s.started_at)}</span>
+                <span><strong>Completed:</strong> {_fmt_dt(s.completed_at)}</span>
+                {f'<span><strong>Notes:</strong> {s.notes}</span>' if s.notes else ''}
+                {f'<span><strong>Witnessed By:</strong> {s.witnessed_by}</span>' if s.witnessed_by else ''}
+              </div>
+            '''
+            _readings = sorted(s.readings or [], key=lambda r: r.reading_number)
+            if _readings:
+                # Collect all measurement keys
+                _all_keys: list = []
+                for _r in _readings:
+                    for _k in (_r.reading_data or {}).keys():
+                        if _k not in _all_keys:
+                            _all_keys.append(_k)
+                _readable = [" ".join(w.capitalize() for w in k.split("_")) for k in _all_keys]
+                sessions_html += '<table class="data-table" style="margin-top:10px;"><thead><tr>'
+                for _h in ["#", "Time", "Result"] + _readable + ["Remarks"]:
+                    sessions_html += f"<th>{_h}</th>"
+                sessions_html += "</tr></thead><tbody>"
+                for _r in _readings:
+                    _rs = (_r.result_status or "").lower()
+                    _rc = RESULT_STATUS_COLORS.get(_rs, "#9E9E9E")
+                    sessions_html += "<tr>"
+                    sessions_html += f"<td style='text-align:center'>{_r.reading_number}</td>"
+                    sessions_html += f"<td style='text-align:center'>{_fmt_dt(_r.reading_time)}</td>"
+                    sessions_html += f"<td style='text-align:center'><span style='background:{_rc};color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600'>{_rs.upper() or '-'}</span></td>"
+                    for _k in _all_keys:
+                        sessions_html += f"<td>{(_r.reading_data or {}).get(_k, '-')}</td>"
+                    sessions_html += f"<td>{_r.remarks or '-'}</td>"
+                    sessions_html += "</tr>"
+                sessions_html += "</tbody></table>"
+            else:
+                sessions_html += "<p style='color:#888;font-style:italic;padding:10px 0'>No readings recorded.</p>"
+            sessions_html += "</div>"
+        sessions_html += "</div>"
+
+    fields_html += sessions_html
+
     html_page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -812,6 +893,41 @@ def preview_test_result(
             border-radius: 4px;
             overflow-x: auto;
             font-size: 12px;
+        }}
+        .session-card {{
+            margin-bottom: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }}
+        .session-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+        }}
+        .session-title {{
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+        }}
+        .session-badge {{
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }}
+        .session-meta {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            padding: 10px 16px;
+            background: #f8f9fa;
+            font-size: 12px;
+            color: #555;
+            border-bottom: 1px solid #e0e0e0;
         }}
         .preview-badge {{
             position: fixed;

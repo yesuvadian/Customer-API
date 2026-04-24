@@ -9,7 +9,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-from models import TestResult, TestingRequest, User
+from models import TestResult, TestSession, TestSessionReading, TestingRequest, User
 from sqlalchemy.orm import joinedload
 
 
@@ -135,6 +135,168 @@ class TestResultPDFService:
             ('GRID', (0, 0), (-1, -1), 0.75, colors.HexColor('#DDDDDD')),
         ]))
         story.append(table)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # SESSION DATA SECTION
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _render_session_data(self, request_id, story, heading_style, subheading_style, normal_style):
+        """
+        Append a 'Session Data' section to the PDF story for all TestSessions
+        linked to request_id.  Each session is rendered with a header row
+        (name + status badge) followed by a readings table.
+        """
+        sessions = (
+            self.db.query(TestSession)
+            .options(joinedload(TestSession.readings))
+            .filter(TestSession.testing_request_id == request_id)
+            .order_by(TestSession.session_number)
+            .all()
+        )
+        if not sessions:
+            return
+
+        story.append(PageBreak())
+        story.append(Paragraph("Session Data", heading_style))
+        story.append(Spacer(1, 0.1 * inch))
+
+        STATUS_COLORS = {
+            "completed":  colors.HexColor("#4CAF50"),
+            "in_progress": colors.HexColor("#FF9800"),
+            "skipped":    colors.HexColor("#F44336"),
+            "scheduled":  colors.HexColor("#9E9E9E"),
+        }
+        RESULT_COLORS = {
+            "pass":        colors.HexColor("#4CAF50"),
+            "fail":        colors.HexColor("#F44336"),
+            "conditional": colors.HexColor("#FF9800"),
+            "warning":     colors.HexColor("#FFC107"),
+        }
+
+        def _fmt(dt):
+            return dt.strftime("%d/%m/%Y %H:%M") if dt else "-"
+
+        for session in sessions:
+            status = (session.status or "scheduled").lower()
+            status_color = STATUS_COLORS.get(status, colors.HexColor("#9E9E9E"))
+            session_label = (
+                session.session_name
+                or f"Session {session.session_number}"
+            )
+
+            # ── Session header bar ──────────────────────────────────────────
+            hdr = Table(
+                [[f"Session {session.session_number}:  {session_label}", status.upper()]],
+                colWidths=[5.0 * inch, 1.5 * inch],
+            )
+            hdr.setStyle(TableStyle([
+                ("BACKGROUND",   (0, 0), (0, 0), colors.HexColor("#1E3C72")),
+                ("BACKGROUND",   (1, 0), (1, 0), status_color),
+                ("TEXTCOLOR",    (0, 0), (-1, -1), colors.white),
+                ("FONTNAME",     (0, 0), (-1, -1), "Helvetica-Bold"),
+                ("FONTSIZE",     (0, 0), (-1, -1), 11),
+                ("ALIGN",        (0, 0), (0, 0), "LEFT"),
+                ("ALIGN",        (1, 0), (1, 0), "CENTER"),
+                ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING",   (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING",(0, 0), (-1, -1), 8),
+                ("LEFTPADDING",  (0, 0), (0, 0), 12),
+            ]))
+            story.append(hdr)
+
+            # ── Session metadata ────────────────────────────────────────────
+            meta_rows = [
+                ["Date",       _fmt(session.session_date)],
+                ["Started",    _fmt(session.started_at)],
+                ["Completed",  _fmt(session.completed_at)],
+            ]
+            if session.notes:
+                meta_rows.append(["Notes", session.notes])
+            if session.weather_conditions:
+                meta_rows.append(["Weather", session.weather_conditions])
+            if session.witnessed_by:
+                meta_rows.append(["Witnessed By", session.witnessed_by])
+
+            meta = Table(meta_rows, colWidths=[1.5 * inch, 5.0 * inch])
+            meta.setStyle(TableStyle([
+                ("BACKGROUND",   (0, 0), (-1, -1), colors.HexColor("#F8F9FA")),
+                ("FONTNAME",     (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTSIZE",     (0, 0), (-1, -1), 9),
+                ("TEXTCOLOR",    (0, 0), (0, -1), colors.HexColor("#555555")),
+                ("ALIGN",        (0, 0), (-1, -1), "LEFT"),
+                ("VALIGN",       (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING",   (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
+                ("LEFTPADDING",  (0, 0), (-1, -1), 10),
+                ("GRID",         (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
+            ]))
+            story.append(meta)
+            story.append(Spacer(1, 0.1 * inch))
+
+            # ── Readings table ──────────────────────────────────────────────
+            readings = sorted(session.readings or [], key=lambda r: r.reading_number)
+            if not readings:
+                story.append(Paragraph("No readings recorded for this session.", normal_style))
+                story.append(Spacer(1, 0.2 * inch))
+                continue
+
+            story.append(Paragraph(f"Readings  ({len(readings)})", subheading_style))
+
+            # Collect all measurement keys across readings (preserving insertion order)
+            all_keys: list[str] = []
+            for r in readings:
+                for k in (r.reading_data or {}).keys():
+                    if k not in all_keys:
+                        all_keys.append(k)
+
+            # Header: #  |  Time  |  Result  |  <measurement cols>  |  Remarks
+            col_headers = (
+                ["#", "Time", "Result"]
+                + [" ".join(w.capitalize() for w in k.split("_")) for k in all_keys]
+                + ["Remarks"]
+            )
+            table_rows = [col_headers]
+            for r in readings:
+                result_label = (r.result_status or "-").upper()
+                row = [
+                    str(r.reading_number),
+                    _fmt(r.reading_time),
+                    result_label,
+                ]
+                for k in all_keys:
+                    row.append(str((r.reading_data or {}).get(k, "-")))
+                row.append(r.remarks or "-")
+                table_rows.append(row)
+
+            # Dynamic column widths (total 6.5 in)
+            n_measure = len(all_keys)
+            fixed_w = 0.35 + 0.90 + 0.70 + 1.10  # #, Time, Result, Remarks
+            measure_w = max(0.5, (6.5 - fixed_w) / max(n_measure, 1))
+            col_widths_r = (
+                [0.35 * inch, 0.90 * inch, 0.70 * inch]
+                + [measure_w * inch] * n_measure
+                + [1.10 * inch]
+            )
+
+            rtable = Table(table_rows, colWidths=col_widths_r, repeatRows=1)
+            rtable.setStyle(TableStyle([
+                ("BACKGROUND",   (0, 0), (-1, 0), colors.HexColor("#2A5298")),
+                ("TEXTCOLOR",    (0, 0), (-1, 0), colors.white),
+                ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE",     (0, 0), (-1, -1), 8),
+                ("ALIGN",        (0, 0), (2, -1), "CENTER"),
+                ("ALIGN",        (3, 0), (-1, -1), "LEFT"),
+                ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+                ("ROWBACKGROUNDS",(0, 1), (-1, -1),
+                    [colors.white, colors.HexColor("#EEF2FF")]),
+                ("TOPPADDING",   (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
+                ("LEFTPADDING",  (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("GRID",         (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ]))
+            story.append(rtable)
+            story.append(Spacer(1, 0.3 * inch))
 
     def generate_pdf(self, result_id: UUID) -> BytesIO:
         """Generate PDF for a test result with all test data"""
@@ -326,6 +488,13 @@ class TestResultPDFService:
             story.append(Paragraph("No test data available.", normal_style))
 
         story.append(Spacer(1, 0.3*inch))
+
+        # ============================================================
+        # SESSION DATA  (multi-session testing — all sessions + readings)
+        # ============================================================
+        self._render_session_data(
+            result.testing_request_id, story, heading_style, subheading_style, normal_style
+        )
 
         # ============================================================
         # REMARKS
