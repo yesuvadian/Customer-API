@@ -696,53 +696,94 @@ def preview_test_result(
 
     sessions_html = ""
     if _sessions:
+        # ── Part 1: Session Summary table ─────────────────────────────────────
+
+        def _dur(sess):
+            if sess.started_at and sess.completed_at:
+                mins = int((sess.completed_at - sess.started_at).total_seconds() / 60)
+                return f"{mins//60}h {mins%60}m" if mins >= 60 else f"{mins}m"
+            return "-"
+
         sessions_html += '<div class="section"><h3>Session Data</h3>'
+        sessions_html += '<h4 style="color:#2a5298;margin-bottom:8px">Session Summary</h4>'
+        sessions_html += '''<table class="data-table">
+          <thead><tr>
+            <th>#</th><th>Session Name</th><th>Date</th>
+            <th>Readings</th><th>Duration</th><th>Status</th>
+          </tr></thead><tbody>'''
         for s in _sessions:
             s_status = (s.status or "scheduled").lower()
             s_color  = SESSION_STATUS_COLORS.get(s_status, "#9E9E9E")
-            s_label  = s.session_name or f"Session {s.session_number}"
-            sessions_html += f'''
-            <div class="session-card">
-              <div class="session-header" style="background:#1E3C72;">
-                <span class="session-title">Session {s.session_number}: {s_label}</span>
-                <span class="session-badge" style="background:{s_color};">{s_status.upper()}</span>
-              </div>
-              <div class="session-meta">
-                <span><strong>Date:</strong> {_fmt_dt(s.session_date)}</span>
-                <span><strong>Started:</strong> {_fmt_dt(s.started_at)}</span>
-                <span><strong>Completed:</strong> {_fmt_dt(s.completed_at)}</span>
-                {f'<span><strong>Notes:</strong> {s.notes}</span>' if s.notes else ''}
-                {f'<span><strong>Witnessed By:</strong> {s.witnessed_by}</span>' if s.witnessed_by else ''}
-              </div>
-            '''
-            _readings = sorted(s.readings or [], key=lambda r: r.reading_number)
-            if _readings:
-                # Collect all measurement keys
-                _all_keys: list = []
-                for _r in _readings:
-                    for _k in (_r.reading_data or {}).keys():
-                        if _k not in _all_keys:
-                            _all_keys.append(_k)
-                _readable = [" ".join(w.capitalize() for w in k.split("_")) for k in _all_keys]
-                sessions_html += '<table class="data-table" style="margin-top:10px;"><thead><tr>'
-                for _h in ["#", "Time", "Result"] + _readable + ["Remarks"]:
-                    sessions_html += f"<th>{_h}</th>"
-                sessions_html += "</tr></thead><tbody>"
-                for _r in _readings:
-                    _rs = (_r.result_status or "").lower()
-                    _rc = RESULT_STATUS_COLORS.get(_rs, "#9E9E9E")
-                    sessions_html += "<tr>"
-                    sessions_html += f"<td style='text-align:center'>{_r.reading_number}</td>"
-                    sessions_html += f"<td style='text-align:center'>{_fmt_dt(_r.reading_time)}</td>"
-                    sessions_html += f"<td style='text-align:center'><span style='background:{_rc};color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600'>{_rs.upper() or '-'}</span></td>"
-                    for _k in _all_keys:
-                        sessions_html += f"<td>{(_r.reading_data or {}).get(_k, '-')}</td>"
-                    sessions_html += f"<td>{_r.remarks or '-'}</td>"
-                    sessions_html += "</tr>"
-                sessions_html += "</tbody></table>"
-            else:
-                sessions_html += "<p style='color:#888;font-style:italic;padding:10px 0'>No readings recorded.</p>"
-            sessions_html += "</div>"
+            r_count  = len(s.readings or [])
+            sessions_html += f'''<tr>
+              <td style="text-align:center">{s.session_number}</td>
+              <td>{s.session_name or f"Session {s.session_number}"}</td>
+              <td style="text-align:center">{_fmt_dt(s.session_date)[:10]}</td>
+              <td style="text-align:center">{r_count}</td>
+              <td style="text-align:center">{_dur(s)}</td>
+              <td style="text-align:center">
+                <span style="background:{s_color};color:#fff;padding:3px 10px;
+                  border-radius:10px;font-size:11px;font-weight:700">
+                  {s_status.upper()}
+                </span>
+              </td>
+            </tr>'''
+        sessions_html += "</tbody></table>"
+
+        # ── Part 2: Consolidated Readings table (all sessions, one table) ──────
+        _all_keys: list = []
+        _all_pairs: list = []
+        for s in _sessions:
+            for _r in sorted(s.readings or [], key=lambda r: r.reading_number):
+                _all_pairs.append((s, _r))
+                for _k in (_r.reading_data or {}).keys():
+                    if _k not in _all_keys:
+                        _all_keys.append(_k)
+
+        if _all_pairs:
+            _readable = [" ".join(w.capitalize() for w in k.split("_")) for k in _all_keys]
+            total_r = len(_all_pairs)
+            sessions_html += f'<h4 style="color:#2a5298;margin:20px 0 8px">Consolidated Readings ({total_r} total)</h4>'
+            sessions_html += '<table class="data-table"><thead><tr>'
+            for _h in ["Session", "#", "Date / Time", "Result"] + _readable + ["Remarks"]:
+                sessions_html += f"<th>{_h}</th>"
+            sessions_html += "</tr></thead><tbody>"
+
+            _prev_snum = None
+            for s, _r in _all_pairs:
+                # Group header row when session changes
+                if s.session_number != _prev_snum:
+                    _s_label = s.session_name or f"Session {s.session_number}"
+                    _n_cols = 4 + len(_all_keys) + 1
+                    sessions_html += f'''<tr>
+                      <td colspan="{_n_cols}"
+                          style="background:#2a5298;color:#fff;font-weight:700;
+                                 font-size:12px;padding:7px 12px;">
+                        Session {s.session_number}: {_s_label}
+                        &nbsp;·&nbsp; {_fmt_dt(s.session_date)[:10]}
+                      </td>
+                    </tr>'''
+                    _prev_snum = s.session_number
+
+                _rs  = (_r.result_status or "").lower()
+                _rc  = RESULT_STATUS_COLORS.get(_rs, "#9E9E9E")
+                sessions_html += "<tr>"
+                sessions_html += f"<td style='text-align:center;font-weight:600'>{s.session_number}</td>"
+                sessions_html += f"<td style='text-align:center'>{_r.reading_number}</td>"
+                sessions_html += f"<td style='text-align:center'>{_fmt_dt(_r.reading_time)}</td>"
+                sessions_html += (
+                    f"<td style='text-align:center'>"
+                    f"<span style='background:{_rc};color:#fff;padding:2px 8px;"
+                    f"border-radius:10px;font-size:11px;font-weight:600'>"
+                    f"{_rs.upper() or '-'}</span></td>"
+                )
+                for _k in _all_keys:
+                    sessions_html += f"<td>{(_r.reading_data or {}).get(_k, '-')}</td>"
+                sessions_html += f"<td>{_r.remarks or '-'}</td>"
+                sessions_html += "</tr>"
+
+            sessions_html += "</tbody></table>"
+
         sessions_html += "</div>"
 
     fields_html += sessions_html

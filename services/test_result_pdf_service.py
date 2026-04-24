@@ -142,9 +142,12 @@ class TestResultPDFService:
 
     def _render_session_data(self, request_id, story, heading_style, subheading_style, normal_style):
         """
-        Append a 'Session Data' section to the PDF story for all TestSessions
-        linked to request_id.  Each session is rendered with a header row
-        (name + status badge) followed by a readings table.
+        Append a 'Session Data' section with two parts:
+          1. Session Summary table  – one row per session (date, count, duration, status)
+          2. Consolidated Readings  – ALL readings from ALL sessions in one table,
+             with a coloured group-header row separating each session block.
+        Since all sessions use the same template the measurement columns are
+        identical across sessions, making cross-session trend comparison easy.
         """
         sessions = (
             self.db.query(TestSession)
@@ -161,10 +164,10 @@ class TestResultPDFService:
         story.append(Spacer(1, 0.1 * inch))
 
         STATUS_COLORS = {
-            "completed":  colors.HexColor("#4CAF50"),
+            "completed":   colors.HexColor("#4CAF50"),
             "in_progress": colors.HexColor("#FF9800"),
-            "skipped":    colors.HexColor("#F44336"),
-            "scheduled":  colors.HexColor("#9E9E9E"),
+            "skipped":     colors.HexColor("#F44336"),
+            "scheduled":   colors.HexColor("#9E9E9E"),
         }
         RESULT_COLORS = {
             "pass":        colors.HexColor("#4CAF50"),
@@ -176,127 +179,174 @@ class TestResultPDFService:
         def _fmt(dt):
             return dt.strftime("%d/%m/%Y %H:%M") if dt else "-"
 
-        for session in sessions:
-            status = (session.status or "scheduled").lower()
-            status_color = STATUS_COLORS.get(status, colors.HexColor("#9E9E9E"))
-            session_label = (
-                session.session_name
-                or f"Session {session.session_number}"
-            )
+        def _fmt_date(dt):
+            return dt.strftime("%d/%m/%Y") if dt else "-"
 
-            # ── Session header bar ──────────────────────────────────────────
-            hdr = Table(
-                [[f"Session {session.session_number}:  {session_label}", status.upper()]],
-                colWidths=[5.0 * inch, 1.5 * inch],
-            )
-            hdr.setStyle(TableStyle([
-                ("BACKGROUND",   (0, 0), (0, 0), colors.HexColor("#1E3C72")),
-                ("BACKGROUND",   (1, 0), (1, 0), status_color),
-                ("TEXTCOLOR",    (0, 0), (-1, -1), colors.white),
-                ("FONTNAME",     (0, 0), (-1, -1), "Helvetica-Bold"),
-                ("FONTSIZE",     (0, 0), (-1, -1), 11),
-                ("ALIGN",        (0, 0), (0, 0), "LEFT"),
-                ("ALIGN",        (1, 0), (1, 0), "CENTER"),
-                ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING",   (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING",(0, 0), (-1, -1), 8),
-                ("LEFTPADDING",  (0, 0), (0, 0), 12),
-            ]))
-            story.append(hdr)
+        def _duration(s):
+            if s.started_at and s.completed_at:
+                mins = int((s.completed_at - s.started_at).total_seconds() / 60)
+                return f"{mins // 60}h {mins % 60}m" if mins >= 60 else f"{mins}m"
+            return "-"
 
-            # ── Session metadata ────────────────────────────────────────────
-            meta_rows = [
-                ["Date",       _fmt(session.session_date)],
-                ["Started",    _fmt(session.started_at)],
-                ["Completed",  _fmt(session.completed_at)],
+        # ════════════════════════════════════════════════════════════════
+        # PART 1 — Session Summary (one row per session)
+        # ════════════════════════════════════════════════════════════════
+        story.append(Paragraph("Session Summary", subheading_style))
+
+        sum_hdr = ["#", "Session Name", "Date", "Readings", "Duration", "Status"]
+        sum_rows = [sum_hdr]
+        for s in sessions:
+            r_count = len(s.readings or [])
+            sum_rows.append([
+                str(s.session_number),
+                s.session_name or f"Session {s.session_number}",
+                _fmt_date(s.session_date),
+                str(r_count),
+                _duration(s),
+                (s.status or "scheduled").upper(),
+            ])
+
+        sum_styles = [
+            ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#1E3C72")),
+            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (-1, -1), 9),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("ALIGN",         (1, 1), (1, -1), "LEFT"),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+            ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
+            ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, colors.HexColor("#F8F9FA")]),
+        ]
+        # Colour the Status cell per session
+        for i, s in enumerate(sessions):
+            ri = i + 1
+            sc = STATUS_COLORS.get((s.status or "scheduled").lower(), colors.HexColor("#9E9E9E"))
+            sum_styles += [
+                ("BACKGROUND", (5, ri), (5, ri), sc),
+                ("TEXTCOLOR",  (5, ri), (5, ri), colors.white),
+                ("FONTNAME",   (5, ri), (5, ri), "Helvetica-Bold"),
             ]
-            if session.notes:
-                meta_rows.append(["Notes", session.notes])
-            if session.weather_conditions:
-                meta_rows.append(["Weather", session.weather_conditions])
-            if session.witnessed_by:
-                meta_rows.append(["Witnessed By", session.witnessed_by])
 
-            meta = Table(meta_rows, colWidths=[1.5 * inch, 5.0 * inch])
-            meta.setStyle(TableStyle([
-                ("BACKGROUND",   (0, 0), (-1, -1), colors.HexColor("#F8F9FA")),
-                ("FONTNAME",     (0, 0), (0, -1), "Helvetica-Bold"),
-                ("FONTSIZE",     (0, 0), (-1, -1), 9),
-                ("TEXTCOLOR",    (0, 0), (0, -1), colors.HexColor("#555555")),
-                ("ALIGN",        (0, 0), (-1, -1), "LEFT"),
-                ("VALIGN",       (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING",   (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
-                ("LEFTPADDING",  (0, 0), (-1, -1), 10),
-                ("GRID",         (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
-            ]))
-            story.append(meta)
-            story.append(Spacer(1, 0.1 * inch))
+        sum_table = Table(
+            sum_rows,
+            colWidths=[0.45*inch, 2.35*inch, 1.10*inch, 0.70*inch, 0.80*inch, 1.10*inch],
+            repeatRows=1,
+        )
+        sum_table.setStyle(TableStyle(sum_styles))
+        story.append(sum_table)
+        story.append(Spacer(1, 0.25 * inch))
 
-            # ── Readings table ──────────────────────────────────────────────
-            readings = sorted(session.readings or [], key=lambda r: r.reading_number)
-            if not readings:
-                story.append(Paragraph("No readings recorded for this session.", normal_style))
-                story.append(Spacer(1, 0.2 * inch))
-                continue
+        # ════════════════════════════════════════════════════════════════
+        # PART 2 — Consolidated Readings (all sessions in one table)
+        # ════════════════════════════════════════════════════════════════
 
-            story.append(Paragraph(f"Readings  ({len(readings)})", subheading_style))
-
-            # Collect all measurement keys across readings (preserving insertion order)
-            all_keys: list[str] = []
-            for r in readings:
+        # Collect measurement keys from ALL sessions (template is the same,
+        # so keys will be identical — we union just to be safe)
+        all_keys: list = []
+        all_pairs: list = []   # (session, reading) for every reading across all sessions
+        for s in sessions:
+            for r in sorted(s.readings or [], key=lambda x: x.reading_number):
+                all_pairs.append((s, r))
                 for k in (r.reading_data or {}).keys():
                     if k not in all_keys:
                         all_keys.append(k)
 
-            # Header: #  |  Time  |  Result  |  <measurement cols>  |  Remarks
-            col_headers = (
-                ["#", "Time", "Result"]
-                + [" ".join(w.capitalize() for w in k.split("_")) for k in all_keys]
-                + ["Remarks"]
-            )
-            table_rows = [col_headers]
-            for r in readings:
-                result_label = (r.result_status or "-").upper()
-                row = [
-                    str(r.reading_number),
-                    _fmt(r.reading_time),
-                    result_label,
+        if not all_pairs:
+            story.append(Paragraph("No readings recorded.", normal_style))
+            return
+
+        total_readings = len(all_pairs)
+        story.append(Paragraph(
+            f"Consolidated Readings  ({total_readings} readings across {len(sessions)} sessions)",
+            subheading_style,
+        ))
+
+        readable_keys = [" ".join(w.capitalize() for w in k.split("_")) for k in all_keys]
+        col_headers = ["Session", "#", "Date / Time", "Result"] + readable_keys + ["Remarks"]
+        num_cols = len(col_headers)
+
+        table_rows = [col_headers]
+        ts_list = [
+            # Header row
+            ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#1E3C72")),
+            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (-1, -1), 8),
+            ("ALIGN",         (0, 0), (3, -1), "CENTER"),
+            ("ALIGN",         (4, 0), (-1, -1), "LEFT"),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
+            ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+        ]
+
+        prev_snum = None
+        ri = 1   # current row index in the table (header = 0)
+
+        for s, r in all_pairs:
+            # ── Session group-header row (dark blue separator) ──────────────
+            if s.session_number != prev_snum:
+                label = s.session_name or f"Session {s.session_number}"
+                date_str = _fmt_date(s.session_date)
+                sep_text = f"  Session {s.session_number}:  {label}  ·  {date_str}"
+                # One cell spanning all columns
+                sep_row = [sep_text] + [""] * (num_cols - 1)
+                table_rows.append(sep_row)
+                ts_list += [
+                    ("SPAN",          (0, ri), (-1, ri)),
+                    ("BACKGROUND",    (0, ri), (-1, ri), colors.HexColor("#2A5298")),
+                    ("TEXTCOLOR",     (0, ri), (-1, ri), colors.white),
+                    ("FONTNAME",      (0, ri), (-1, ri), "Helvetica-Bold"),
+                    ("FONTSIZE",      (0, ri), (-1, ri), 9),
+                    ("TOPPADDING",    (0, ri), (-1, ri), 7),
+                    ("BOTTOMPADDING", (0, ri), (-1, ri), 7),
+                    ("LEFTPADDING",   (0, ri), (-1, ri), 10),
                 ]
-                for k in all_keys:
-                    row.append(str((r.reading_data or {}).get(k, "-")))
-                row.append(r.remarks or "-")
-                table_rows.append(row)
+                ri += 1
+                prev_snum = s.session_number
 
-            # Dynamic column widths (total 6.5 in)
-            n_measure = len(all_keys)
-            fixed_w = 0.35 + 0.90 + 0.70 + 1.10  # #, Time, Result, Remarks
-            measure_w = max(0.5, (6.5 - fixed_w) / max(n_measure, 1))
-            col_widths_r = (
-                [0.35 * inch, 0.90 * inch, 0.70 * inch]
-                + [measure_w * inch] * n_measure
-                + [1.10 * inch]
-            )
+            # ── Reading data row ────────────────────────────────────────────
+            r_status = (r.result_status or "").lower()
+            r_color  = RESULT_COLORS.get(r_status, colors.HexColor("#9E9E9E"))
+            row = [
+                str(s.session_number),
+                str(r.reading_number),
+                _fmt(r.reading_time),
+                (r.result_status or "-").upper(),
+            ]
+            for k in all_keys:
+                row.append(str((r.reading_data or {}).get(k, "-")))
+            row.append(r.remarks or "-")
+            table_rows.append(row)
 
-            rtable = Table(table_rows, colWidths=col_widths_r, repeatRows=1)
-            rtable.setStyle(TableStyle([
-                ("BACKGROUND",   (0, 0), (-1, 0), colors.HexColor("#2A5298")),
-                ("TEXTCOLOR",    (0, 0), (-1, 0), colors.white),
-                ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE",     (0, 0), (-1, -1), 8),
-                ("ALIGN",        (0, 0), (2, -1), "CENTER"),
-                ("ALIGN",        (3, 0), (-1, -1), "LEFT"),
-                ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
-                ("ROWBACKGROUNDS",(0, 1), (-1, -1),
-                    [colors.white, colors.HexColor("#EEF2FF")]),
-                ("TOPPADDING",   (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
-                ("LEFTPADDING",  (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("GRID",         (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
-            ]))
-            story.append(rtable)
-            story.append(Spacer(1, 0.3 * inch))
+            # Colour the Result cell
+            ts_list += [
+                ("BACKGROUND", (3, ri), (3, ri), r_color),
+                ("TEXTCOLOR",  (3, ri), (3, ri), colors.white),
+                ("FONTNAME",   (3, ri), (3, ri), "Helvetica-Bold"),
+            ]
+            ri += 1
+
+        # Column widths: Session(0.55) | #(0.30) | DateTime(1.10) | Result(0.70)
+        #                | [measures] | Remarks(1.10)  — total 6.5 in
+        n_measure = len(all_keys)
+        fixed_w   = 0.55 + 0.30 + 1.10 + 0.70 + 1.10
+        measure_w = max(0.55, (6.5 - fixed_w) / max(n_measure, 1))
+        col_widths_r = (
+            [0.55*inch, 0.30*inch, 1.10*inch, 0.70*inch]
+            + [measure_w * inch] * n_measure
+            + [1.10*inch]
+        )
+
+        ctable = Table(table_rows, colWidths=col_widths_r, repeatRows=1)
+        ctable.setStyle(TableStyle(ts_list))
+        story.append(ctable)
+        story.append(Spacer(1, 0.3 * inch))
 
     def generate_pdf(self, result_id: UUID) -> BytesIO:
         """Generate PDF for a test result with all test data"""
