@@ -166,8 +166,27 @@ def approve_test_results(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Approve submitted test results — delegates to the approval/recommendation workflow."""
+    """Approve submitted test results — delegates to the approval/recommendation workflow.
+    Blocked for: originator of the request, assigned tester."""
     from services.approval_service import ApprovalService
+
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+
+    # Prevent originator from approving their own request
+    if req.originator_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="The originator of a request cannot approve its results. An independent reviewer must approve.",
+        )
+    # Prevent assigned tester from approving results they submitted
+    if req.assigned_tester_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="The assigned tester cannot approve the results they submitted.",
+        )
+
     rec = (
         db.query(Recommendation)
         .filter(Recommendation.testing_request_id == request_id)
@@ -181,8 +200,7 @@ def approve_test_results(
         approver_id=current_user.id,
         notes=body.get("comment"),
     )
-    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
-    return _enrich(req)
+    return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
 
 
 @router.put("/{request_id}/reject_results", response_model=TestingRequestResponse)
@@ -192,8 +210,26 @@ def reject_test_results(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Reject submitted test results — delegates to the approval/recommendation workflow."""
+    """Reject submitted test results — delegates to the approval/recommendation workflow.
+    Blocked for: originator of the request, assigned tester."""
     from services.approval_service import ApprovalService
+
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+
+    # Prevent originator from rejecting/approving their own request
+    if req.originator_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="The originator of a request cannot reject its results.",
+        )
+    if req.assigned_tester_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="The assigned tester cannot reject the results they submitted.",
+        )
+
     rec = (
         db.query(Recommendation)
         .filter(Recommendation.testing_request_id == request_id)
@@ -210,8 +246,7 @@ def reject_test_results(
         approver_id=current_user.id,
         notes=comment,
     )
-    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
-    return _enrich(req)
+    return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
 
 
 @router.put("/{request_id}/submit_results", response_model=TestingRequestResponse)
