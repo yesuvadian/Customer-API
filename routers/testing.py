@@ -730,57 +730,87 @@ def preview_test_result(
             </tr>'''
         sessions_html += "</tbody></table>"
 
-        # ── Part 2: Consolidated Readings table (all sessions, one table) ──────
+        # ── Part 2: Merged-cell Readings table ─────────────────────────────────
+        # Session / Day column uses HTML rowspan so the session label appears
+        # once on the left, spanning all readings of that session.
+        # Columns = template measurement fields (same across all sessions)
+
         _all_keys: list = []
-        _all_pairs: list = []
         for s in _sessions:
             for _r in sorted(s.readings or [], key=lambda r: r.reading_number):
-                _all_pairs.append((s, _r))
                 for _k in (_r.reading_data or {}).keys():
                     if _k not in _all_keys:
                         _all_keys.append(_k)
 
-        if _all_pairs:
-            _readable = [" ".join(w.capitalize() for w in k.split("_")) for k in _all_keys]
-            total_r = len(_all_pairs)
-            sessions_html += f'<h4 style="color:#2a5298;margin:20px 0 8px">Consolidated Readings ({total_r} total)</h4>'
+        _has_readings = any(s.readings for s in _sessions)
+        if _has_readings:
+            _readable   = [" ".join(w.capitalize() for w in k.split("_")) for k in _all_keys]
+            _total_r    = sum(len(s.readings or []) for s in _sessions)
+
+            # Alternating session colours (bg for session-cell vs row cells)
+            _CELL_STYLES = [
+                ("background:#C8D9F5", "background:#EEF4FF"),   # blue tones
+                ("background:#C8EDD5", "background:#F4FFF4"),   # green tones
+            ]
+
+            sessions_html += (
+                f'<h4 style="color:#2a5298;margin:20px 0 8px">'
+                f'Detailed Readings ({_total_r} readings across {len(_sessions)} sessions)</h4>'
+            )
             sessions_html += '<table class="data-table"><thead><tr>'
-            for _h in ["Session", "#", "Date / Time", "Result"] + _readable + ["Remarks"]:
+            for _h in ["Session / Day", "R#"] + _readable + ["Result", "Remarks"]:
                 sessions_html += f"<th>{_h}</th>"
             sessions_html += "</tr></thead><tbody>"
 
-            _prev_snum = None
-            for s, _r in _all_pairs:
-                # Group header row when session changes
-                if s.session_number != _prev_snum:
-                    _s_label = s.session_name or f"Session {s.session_number}"
-                    _n_cols = 4 + len(_all_keys) + 1
-                    sessions_html += f'''<tr>
-                      <td colspan="{_n_cols}"
-                          style="background:#2a5298;color:#fff;font-weight:700;
-                                 font-size:12px;padding:7px 12px;">
-                        Session {s.session_number}: {_s_label}
-                        &nbsp;·&nbsp; {_fmt_dt(s.session_date)[:10]}
-                      </td>
-                    </tr>'''
-                    _prev_snum = s.session_number
+            for _s_idx, s in enumerate(_sessions):
+                _readings = sorted(s.readings or [], key=lambda r: r.reading_number)
+                if not _readings:
+                    continue
+                _n = len(_readings)
+                _cell_bg, _row_bg = _CELL_STYLES[_s_idx % 2]
+                _date_str   = _fmt_dt(s.session_date)[:10]
+                _name_label = s.session_name or f"Session {s.session_number}"
 
-                _rs  = (_r.result_status or "").lower()
-                _rc  = RESULT_STATUS_COLORS.get(_rs, "#9E9E9E")
-                sessions_html += "<tr>"
-                sessions_html += f"<td style='text-align:center;font-weight:600'>{s.session_number}</td>"
-                sessions_html += f"<td style='text-align:center'>{_r.reading_number}</td>"
-                sessions_html += f"<td style='text-align:center'>{_fmt_dt(_r.reading_time)}</td>"
-                sessions_html += (
-                    f"<td style='text-align:center'>"
-                    f"<span style='background:{_rc};color:#fff;padding:2px 8px;"
-                    f"border-radius:10px;font-size:11px;font-weight:600'>"
-                    f"{_rs.upper() or '-'}</span></td>"
+                # Thick top border between sessions (except first)
+                _sep_style = (
+                    'border-top:2px solid #1E3C72;'
+                    if _s_idx > 0 else ''
                 )
-                for _k in _all_keys:
-                    sessions_html += f"<td>{(_r.reading_data or {}).get(_k, '-')}</td>"
-                sessions_html += f"<td>{_r.remarks or '-'}</td>"
-                sessions_html += "</tr>"
+
+                for _r_idx, _r in enumerate(_readings):
+                    _rs = (_r.result_status or "").lower()
+                    _rc = RESULT_STATUS_COLORS.get(_rs, "#9E9E9E")
+
+                    sessions_html += f"<tr style='{_row_bg};{_sep_style if _r_idx == 0 else ''}'>"
+
+                    # Session / Day cell — only emitted for first reading; uses rowspan
+                    if _r_idx == 0:
+                        sessions_html += (
+                            f"<td rowspan='{_n}' style='{_cell_bg};{_sep_style}"
+                            f"font-weight:700;text-align:center;vertical-align:middle;"
+                            f"border-right:2px solid #1E3C72;line-height:1.6;"
+                            f"border-top:2px solid #1E3C72 !important'>"
+                            f"Session {s.session_number}<br>"
+                            f"<small style='font-weight:400'>{_name_label}</small><br>"
+                            f"<small style='color:#555'>{_date_str}</small>"
+                            f"</td>"
+                        )
+
+                    # R#
+                    sessions_html += f"<td style='text-align:center'>{_r.reading_number}</td>"
+                    # Measurement columns
+                    for _k in _all_keys:
+                        sessions_html += f"<td style='text-align:center'>{(_r.reading_data or {}).get(_k, '-')}</td>"
+                    # Result badge
+                    sessions_html += (
+                        f"<td style='text-align:center'>"
+                        f"<span style='background:{_rc};color:#fff;padding:2px 8px;"
+                        f"border-radius:10px;font-size:11px;font-weight:600'>"
+                        f"{_rs.upper() or '-'}</span></td>"
+                    )
+                    # Remarks
+                    sessions_html += f"<td>{_r.remarks or '-'}</td>"
+                    sessions_html += "</tr>"
 
             sessions_html += "</tbody></table>"
 

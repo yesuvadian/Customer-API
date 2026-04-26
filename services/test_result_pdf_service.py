@@ -142,12 +142,21 @@ class TestResultPDFService:
 
     def _render_session_data(self, request_id, story, heading_style, subheading_style, normal_style):
         """
-        Append a 'Session Data' section with two parts:
-          1. Session Summary table  – one row per session (date, count, duration, status)
-          2. Consolidated Readings  – ALL readings from ALL sessions in one table,
-             with a coloured group-header row separating each session block.
-        Since all sessions use the same template the measurement columns are
-        identical across sessions, making cross-session trend comparison easy.
+        Render session data as a single table where:
+          - ROWS  = sessions / days (Session cell is merged / spanned across all
+                    its readings so the day label appears once on the left)
+          - COLS  = template measurement fields (same across all sessions because
+                    all sessions share the same template)
+
+        Layout:
+          Session / Day  |  R#  |  <measurement columns…>  |  Result  |  Remarks
+          ───────────────┼──────┼──────────────────────────┼──────────┼─────────
+          Session 1      │  1   │  …                       │  PASS    │  …
+          Day 1          │  2   │  …                       │  PASS    │  …
+          01/04/2026     │  3   │  …                       │  PASS    │  …
+          ───────────────┼──────┼──────────────────────────┼──────────┼─────────
+          Session 2      │  1   │  …                       │  PASS    │  …
+          …
         """
         sessions = (
             self.db.query(TestSession)
@@ -175,9 +184,6 @@ class TestResultPDFService:
             "conditional": colors.HexColor("#FF9800"),
             "warning":     colors.HexColor("#FFC107"),
         }
-
-        def _fmt(dt):
-            return dt.strftime("%d/%m/%Y %H:%M") if dt else "-"
 
         def _fmt_date(dt):
             return dt.strftime("%d/%m/%Y") if dt else "-"
@@ -218,16 +224,15 @@ class TestResultPDFService:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
             ("LEFTPADDING",   (0, 0), (-1, -1), 8),
             ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
-            ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, colors.HexColor("#F8F9FA")]),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8F9FA")]),
         ]
-        # Colour the Status cell per session
         for i, s in enumerate(sessions):
-            ri = i + 1
+            ri_s = i + 1
             sc = STATUS_COLORS.get((s.status or "scheduled").lower(), colors.HexColor("#9E9E9E"))
             sum_styles += [
-                ("BACKGROUND", (5, ri), (5, ri), sc),
-                ("TEXTCOLOR",  (5, ri), (5, ri), colors.white),
-                ("FONTNAME",   (5, ri), (5, ri), "Helvetica-Bold"),
+                ("BACKGROUND", (5, ri_s), (5, ri_s), sc),
+                ("TEXTCOLOR",  (5, ri_s), (5, ri_s), colors.white),
+                ("FONTNAME",   (5, ri_s), (5, ri_s), "Helvetica-Bold"),
             ]
 
         sum_table = Table(
@@ -240,107 +245,140 @@ class TestResultPDFService:
         story.append(Spacer(1, 0.25 * inch))
 
         # ════════════════════════════════════════════════════════════════
-        # PART 2 — Consolidated Readings (all sessions in one table)
+        # PART 2 — Merged-cell Readings Table
+        # Session / Day column spans vertically across all readings of
+        # that session so the day label appears once on the left.
+        # Columns = template measurement fields (identical across sessions)
         # ════════════════════════════════════════════════════════════════
 
         # Collect measurement keys from ALL sessions (template is the same,
         # so keys will be identical — we union just to be safe)
         all_keys: list = []
-        all_pairs: list = []   # (session, reading) for every reading across all sessions
         for s in sessions:
             for r in sorted(s.readings or [], key=lambda x: x.reading_number):
-                all_pairs.append((s, r))
                 for k in (r.reading_data or {}).keys():
                     if k not in all_keys:
                         all_keys.append(k)
 
-        if not all_pairs:
+        has_readings = any(s.readings for s in sessions)
+        if not has_readings:
             story.append(Paragraph("No readings recorded.", normal_style))
             return
 
-        total_readings = len(all_pairs)
+        total_readings = sum(len(s.readings or []) for s in sessions)
         story.append(Paragraph(
-            f"Consolidated Readings  ({total_readings} readings across {len(sessions)} sessions)",
+            f"Detailed Readings  ({total_readings} readings across {len(sessions)} sessions)",
             subheading_style,
         ))
 
         readable_keys = [" ".join(w.capitalize() for w in k.split("_")) for k in all_keys]
-        col_headers = ["Session", "#", "Date / Time", "Result"] + readable_keys + ["Remarks"]
-        num_cols = len(col_headers)
+
+        # Column layout: Session/Day | R# | [measurement cols] | Result | Remarks
+        col_headers  = ["Session / Day", "R#"] + readable_keys + ["Result", "Remarks"]
+        num_cols     = len(col_headers)
+        result_col   = num_cols - 2   # second-to-last
+        remarks_col  = num_cols - 1   # last
+
+        # Alternating backgrounds per session group (blue tones vs green tones)
+        SESSION_ROW_BG  = [colors.HexColor("#EEF4FF"), colors.HexColor("#F4FFF4")]
+        SESSION_CELL_BG = [colors.HexColor("#C8D9F5"), colors.HexColor("#C8EDD5")]
 
         table_rows = [col_headers]
         ts_list = [
-            # Header row
+            # ── Header ──────────────────────────────────────────────────────
             ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#1E3C72")),
             ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
             ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE",      (0, 0), (-1, -1), 8),
-            ("ALIGN",         (0, 0), (3, -1), "CENTER"),
-            ("ALIGN",         (4, 0), (-1, -1), "LEFT"),
+            ("ALIGN",         (0, 0), (-1, 0),           "CENTER"),   # header: all centred
+            # ── Data column alignment ────────────────────────────────────────
+            ("ALIGN",         (0, 1), (0, -1),           "CENTER"),   # Session/Day
+            ("ALIGN",         (1, 1), (1, -1),           "CENTER"),   # R#
+            ("ALIGN",         (result_col,  1), (result_col,  -1), "CENTER"),  # Result
+            ("ALIGN",         (remarks_col, 1), (remarks_col, -1), "LEFT"),    # Remarks
+            # ── Global ──────────────────────────────────────────────────────
             ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
             ("TOPPADDING",    (0, 0), (-1, -1), 5),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ("LEFTPADDING",   (0, 0), (-1, -1), 6),
             ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
             ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            # Thicker right border on the Session/Day column (visual separator)
+            ("LINEAFTER",     (0, 0), (0, -1), 1.5, colors.HexColor("#1E3C72")),
         ]
 
-        prev_snum = None
-        ri = 1   # current row index in the table (header = 0)
+        # Measurement columns alignment (centre), guard against zero keys
+        if all_keys:
+            ts_list.append(("ALIGN", (2, 1), (result_col - 1, -1), "CENTER"))
 
-        for s, r in all_pairs:
-            # ── Session group-header row (dark blue separator) ──────────────
-            if s.session_number != prev_snum:
-                label = s.session_name or f"Session {s.session_number}"
-                date_str = _fmt_date(s.session_date)
-                sep_text = f"  Session {s.session_number}:  {label}  ·  {date_str}"
-                # One cell spanning all columns
-                sep_row = [sep_text] + [""] * (num_cols - 1)
-                table_rows.append(sep_row)
+        ri = 1   # row index in the table (0 = header)
+
+        for s_idx, s in enumerate(sessions):
+            readings = sorted(s.readings or [], key=lambda x: x.reading_number)
+            if not readings:
+                continue
+
+            n_readings       = len(readings)
+            session_start_ri = ri
+            session_end_ri   = ri + n_readings - 1
+
+            date_str      = _fmt_date(s.session_date)
+            name_label    = s.session_name or f"Session {s.session_number}"
+            session_label = f"Session {s.session_number}\n{name_label}\n{date_str}"
+
+            row_bg  = SESSION_ROW_BG[s_idx % 2]
+            cell_bg = SESSION_CELL_BG[s_idx % 2]
+
+            # Background for all data cells of this session (cols 1 onward)
+            ts_list.append(("BACKGROUND", (1, session_start_ri), (-1, session_end_ri), row_bg))
+            # Distinct background + bold for the Session/Day cell
+            ts_list += [
+                ("BACKGROUND", (0, session_start_ri), (0, session_end_ri), cell_bg),
+                ("FONTNAME",   (0, session_start_ri), (0, session_end_ri), "Helvetica-Bold"),
+            ]
+
+            # SPAN: merge Session/Day cell vertically across all readings
+            if n_readings > 1:
+                ts_list.append(("SPAN", (0, session_start_ri), (0, session_end_ri)))
+
+            # Thick blue separator line above each new session block
+            if s_idx > 0:
+                ts_list.append(
+                    ("LINEABOVE", (0, session_start_ri), (-1, session_start_ri),
+                     2, colors.HexColor("#1E3C72"))
+                )
+
+            for r_idx, r in enumerate(readings):
+                row_data = [
+                    session_label if r_idx == 0 else "",  # only populate first row of span
+                    str(r.reading_number),
+                ]
+                for k in all_keys:
+                    row_data.append(str((r.reading_data or {}).get(k, "-")))
+                r_status = (r.result_status or "").lower()
+                r_color  = RESULT_COLORS.get(r_status, colors.HexColor("#9E9E9E"))
+                row_data.append((r.result_status or "-").upper())
+                row_data.append(r.remarks or "-")
+                table_rows.append(row_data)
+
+                # Colour the Result cell
                 ts_list += [
-                    ("SPAN",          (0, ri), (-1, ri)),
-                    ("BACKGROUND",    (0, ri), (-1, ri), colors.HexColor("#2A5298")),
-                    ("TEXTCOLOR",     (0, ri), (-1, ri), colors.white),
-                    ("FONTNAME",      (0, ri), (-1, ri), "Helvetica-Bold"),
-                    ("FONTSIZE",      (0, ri), (-1, ri), 9),
-                    ("TOPPADDING",    (0, ri), (-1, ri), 7),
-                    ("BOTTOMPADDING", (0, ri), (-1, ri), 7),
-                    ("LEFTPADDING",   (0, ri), (-1, ri), 10),
+                    ("BACKGROUND", (result_col, ri), (result_col, ri), r_color),
+                    ("TEXTCOLOR",  (result_col, ri), (result_col, ri), colors.white),
+                    ("FONTNAME",   (result_col, ri), (result_col, ri), "Helvetica-Bold"),
                 ]
                 ri += 1
-                prev_snum = s.session_number
 
-            # ── Reading data row ────────────────────────────────────────────
-            r_status = (r.result_status or "").lower()
-            r_color  = RESULT_COLORS.get(r_status, colors.HexColor("#9E9E9E"))
-            row = [
-                str(s.session_number),
-                str(r.reading_number),
-                _fmt(r.reading_time),
-                (r.result_status or "-").upper(),
-            ]
-            for k in all_keys:
-                row.append(str((r.reading_data or {}).get(k, "-")))
-            row.append(r.remarks or "-")
-            table_rows.append(row)
-
-            # Colour the Result cell
-            ts_list += [
-                ("BACKGROUND", (3, ri), (3, ri), r_color),
-                ("TEXTCOLOR",  (3, ri), (3, ri), colors.white),
-                ("FONTNAME",   (3, ri), (3, ri), "Helvetica-Bold"),
-            ]
-            ri += 1
-
-        # Column widths: Session(0.55) | #(0.30) | DateTime(1.10) | Result(0.70)
-        #                | [measures] | Remarks(1.10)  — total 6.5 in
+        # ── Column widths ────────────────────────────────────────────────────
+        # Session/Day(1.20) | R#(0.30) | [measure cols] | Result(0.70) | Remarks(1.10)
+        # Total page content width = 6.5 in  (A4 − 0.75 in margins each side)
         n_measure = len(all_keys)
-        fixed_w   = 0.55 + 0.30 + 1.10 + 0.70 + 1.10
+        fixed_w   = 1.20 + 0.30 + 0.70 + 1.10          # inches (non-measure cols)
         measure_w = max(0.55, (6.5 - fixed_w) / max(n_measure, 1))
         col_widths_r = (
-            [0.55*inch, 0.30*inch, 1.10*inch, 0.70*inch]
+            [1.20*inch, 0.30*inch]
             + [measure_w * inch] * n_measure
-            + [1.10*inch]
+            + [0.70*inch, 1.10*inch]
         )
 
         ctable = Table(table_rows, colWidths=col_widths_r, repeatRows=1)
