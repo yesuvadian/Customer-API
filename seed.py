@@ -423,6 +423,18 @@ def seed_modules(session):
 {"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
 # ✅ REPORTING SUITE MODULE
 {"name": "Reports", "description": "Generic report engine — 14 SRS operational reports with Excel/PDF export", "path": "reports", "group_name": "Testing"},
+# ✅ DIRECT SUBMISSION MODULES (Stage 2 & Stage 10 — no tester assignment)
+{"name": "Failure Registry",
+ "description": "Stage 2 — Record equipment failure events (SRS Sec 3.3.3–3.3.4). "
+                "Accessible to: Field Staff, AEE, EE TLSS, TA&QC Officer.",
+ "path": "failure_registry",
+ "group_name": "Field Operations"},
+{"name": "TA&QC Inspections",
+ "description": "Stage 10 — TA&QC annual substation inspection observations with "
+                "severity classification and compliance tracking (SRS Sec 6). "
+                "Accessible to: TA&QC Officer.",
+ "path": "taqc_inspections",
+ "group_name": "Field Operations"},
     ]
 
     module_ids = {}
@@ -823,6 +835,27 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Test Assigner",   "module": "Reports", "can_view": True, "can_export": True},
         {"role": "Department Head", "module": "Reports", "can_view": True, "can_export": True},
         {"role": "Purchaser",       "module": "Reports", "can_view": True, "can_export": True},
+
+        # ✅ FAILURE REGISTRY — Stage 2 (SRS Sec 3.3.3)
+        # Accessible to field-level and supervisory roles; TA&QC can also submit.
+        {"role": "AEE Maintenance",         "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "EE TLSS",                 "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "EE RT",                   "module": "Failure Registry", "can_view": True, "can_add": True, "can_search": True},
+        {"role": "SEE W&M",                 "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "SEE RT",                  "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "CEE Transmission Zone",   "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "CEE RT&R&D",             "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "Field Tester",            "module": "Failure Registry", "can_view": True, "can_add": True},
+        {"role": "Lab Tester",              "module": "Failure Registry", "can_view": True, "can_add": True},
+
+        # ✅ TA&QC INSPECTIONS — Stage 10 (SRS Sec 6)
+        # Restricted to TA&QC Officers and supervisory roles.
+        {"role": "EE RT",                   "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "SEE RT",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "CEE RT&R&D",             "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "EE TLSS",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+        {"role": "SEE W&M",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+        {"role": "CEE Transmission Zone",   "module": "TA&QC Inspections", "can_view": True, "can_search": True},
     ]
 
     privileges_data.extend(testing_privileges)

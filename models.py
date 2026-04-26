@@ -89,6 +89,8 @@ class RequestCategory(PyEnum):
     maintenance = "maintenance"
     inspection = "inspection"
     repair_lifecycle = "repair_lifecycle"
+    failure_registry = "failure_registry"   # Stage 2 — equipment failure event record
+    taqc_inspection = "taqc_inspection"     # Stage 10 — TA&QC annual inspection
 
 
 class Plan(Base):
@@ -1552,6 +1554,9 @@ class TestingRequest(Base):
     is_multi_session = Column(Boolean, default=False)  # NEW: Indicates multi-day/multi-session test
     total_sessions_planned = Column(Integer, nullable=True)  # NEW: Number of planned sessions
     session_interval_days = Column(Integer, nullable=True)  # NEW: Days between sessions
+
+    # Direct submission (Failure Registry / TA&QC — no tester assignment step)
+    is_direct_submission = Column(Boolean, default=False)  # True = filler IS the submitter
 
     # Notes
     notes = Column(Text, nullable=True)
