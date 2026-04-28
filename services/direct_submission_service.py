@@ -24,6 +24,8 @@ from models import (
     TestingRequestStatus,
     TestResult,
     RequestCategory,
+    Recommendation,
+    RecommendationType,
     User,
 )
 from utils.common_service import UTCDateTimeMixin
@@ -35,20 +37,29 @@ _PREFIX = {
     RequestCategory.taqc_inspection: "TQ",
 }
 
-# Roles allowed to submit each category
+# Roles allowed to submit each category.
+# These match BOTH global roles (Admin/SuperAdmin) and org-level role names.
 _ALLOWED_ROLES: dict[RequestCategory, set[str]] = {
     RequestCategory.failure_registry: {
-        "Field Staff",
-        "AEE",
+        # Global roles
+        "Admin", "SuperAdmin",
+        # KPTCL org roles — field staff who witness/record failures
+        "Field Staff", "Field Tester",
+        "AEE", "AEE Maintenance",
         "EE TLSS",
         "TA&QC Officer",
-        "Admin",
-        "SuperAdmin",
+        "Originator",
+        # Supervisory who may also file
+        "Department Head", "Test Assigner",
     },
     RequestCategory.taqc_inspection: {
+        # Global roles
+        "Admin", "SuperAdmin",
+        # KPTCL org roles for TA&QC
         "TA&QC Officer",
-        "Admin",
-        "SuperAdmin",
+        "AEE Maintenance",
+        "EE TLSS",
+        "Department Head",
     },
 }
 
@@ -76,22 +87,33 @@ class DirectSubmissionService:
     def _check_role_access(
         self, user: User, category: RequestCategory
     ) -> None:
-        """Raise 403 if the user does not have a permitted role for this category."""
-        from models import Role, UserRole
+        """Raise 403 if the user does not have a permitted role for this category.
+        Checks both global user_roles and org_user_roles (org-level roles).
+        """
+        from models import Role, UserRole, OrgRole, OrgUserRole
 
-        user_roles = (
+        # 1. Global roles (admin@relu.com, superadmin@system.com)
+        global_roles = (
             self.db.query(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
             .filter(UserRole.user_id == user.id)
             .all()
         )
-        user_role_names = {r[0] for r in user_roles}
+        # 2. Org-level roles (KPTCL users: ee.tlss@kptcl.com, aee.maintenance@kptcl.com …)
+        org_roles = (
+            self.db.query(OrgRole.name)
+            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
+            .filter(OrgUserRole.user_id == user.id)
+            .all()
+        )
+
+        user_role_names = {r[0] for r in global_roles} | {r[0] for r in org_roles}
         allowed = _ALLOWED_ROLES.get(category, set())
 
         if not user_role_names.intersection(allowed):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Your role is not permitted to submit {category.value} records.",
+                detail=f"Your role ({', '.join(user_role_names) or 'none'}) is not permitted to submit {category.value} records.",
             )
 
     # ── main operation ────────────────────────────────────────────────────────
@@ -146,6 +168,10 @@ class DirectSubmissionService:
             "fail" if category == RequestCategory.failure_registry else "advisory"
         )
 
+        # Resolve org — prefer body, fall back to submitter's own org
+        org_id = data.get("organization_id") or getattr(submitter, "organization_id", None)
+        dept_id = data.get("department_id")
+
         # ── TestingRequest ────────────────────────────────────────────────────
         req = TestingRequest(
             request_number=request_number,
@@ -153,8 +179,8 @@ class DirectSubmissionService:
             description=data.get("description"),
             request_category=category,
             equipment_id=data.get("equipment_id"),
-            organization_id=data.get("organization_id"),
-            department_id=data.get("department_id"),
+            organization_id=org_id,
+            department_id=dept_id,
             priority=data.get("priority", "normal"),
             notes=data.get("notes"),
             status=TestingRequestStatus.under_approval,
@@ -179,6 +205,36 @@ class DirectSubmissionService:
             tested_at=now,
         )
         self.db.add(result)
+        self.db.flush()
+
+        # ── Recommendation (enables approval workflow) ─────────────────────────
+        # Map overall_result → RecommendationType for the approval queue
+        _result_to_rec_type = {
+            "pass":             RecommendationType.pass_test,
+            "conditional_pass": RecommendationType.conditional,
+            "fail":             RecommendationType.fail,
+            "advisory":         RecommendationType.conditional,
+            "retest":           RecommendationType.retest,
+        }
+        rec_type = _result_to_rec_type.get(
+            (data.get("overall_result") or default_result).lower(),
+            RecommendationType.conditional,
+        )
+        rec = Recommendation(
+            testing_request_id=req.id,
+            organization_id=org_id,
+            recommendation_type=rec_type,
+            summary=(
+                f"[Direct Submission] {category.value.replace('_',' ').title()} — "
+                f"{data.get('title', req.request_number)}"
+            ),
+            detailed_notes=data.get("remarks"),
+            approval_status="pending",
+            submitted_by=submitter.id,
+            submitted_at=now,
+            created_by=submitter.id,
+        )
+        self.db.add(rec)
         self.db.commit()
         self.db.refresh(req)
         self.db.refresh(result)

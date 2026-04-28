@@ -332,20 +332,22 @@ def _build_session_html(session: TestSession, readings: list, request: TestingRe
     reading_rows = ""
     for r in readings:
         rd = r.reading_data or {}
-        data_cells = "".join(
-            f"<td style='padding:6px 10px;border:1px solid #e0e0e0'><b>{k.replace('_',' ').title()}</b>: {fmt(v)}</td>"
+        # Render measurement data as a compact list inside a single cell (not nested <td>)
+        data_html = "".join(
+            f"<div style='margin:2px 0'><b style='color:#1b3a6b'>{k.replace('_',' ').title()}</b>: {fmt(v)}</div>"
             for k, v in rd.items()
-        )
-        result_color = "#1a7340" if (r.result_status or "").lower() == "pass" else \
-                       "#b71c1c" if (r.result_status or "").lower() == "fail" else "#555"
+        ) or "<span style='color:#aaa'>—</span>"
+        result_s = (r.result_status or "").lower()
+        result_color = "#1a7340" if result_s == "pass" else "#b71c1c" if result_s == "fail" else "#c75b00"
+        result_bg   = "#e8f5e9"  if result_s == "pass" else "#ffebee"  if result_s == "fail" else "#fff3e0"
         reading_rows += f"""
         <tr>
-          <td style='padding:6px 10px;border:1px solid #e0e0e0;text-align:center'>{r.reading_number}</td>
-          <td style='padding:6px 10px;border:1px solid #e0e0e0'>{fmt(r.reading_time)}</td>
-          <td style='padding:6px 10px;border:1px solid #e0e0e0'>{data_cells}</td>
-          <td style='padding:6px 10px;border:1px solid #e0e0e0'>{fmt(r.equipment_serial)}</td>
-          <td style='padding:6px 10px;border:1px solid #e0e0e0;color:{result_color};font-weight:600'>{(r.result_status or '-').upper()}</td>
-          <td style='padding:6px 10px;border:1px solid #e0e0e0'>{fmt(r.remarks)}</td>
+          <td style='padding:6px 10px;border:1px solid #e0e0e0;text-align:center;font-weight:600'>{r.reading_number}</td>
+          <td style='padding:6px 10px;border:1px solid #e0e0e0;white-space:nowrap'>{fmt(r.reading_time)}</td>
+          <td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:12px'>{data_html}</td>
+          <td style='padding:6px 10px;border:1px solid #e0e0e0;text-align:center'>{fmt(r.equipment_serial)}</td>
+          <td style='padding:6px 10px;border:1px solid #e0e0e0;text-align:center;background:{result_bg};color:{result_color};font-weight:700;border-radius:4px'>{(r.result_status or '—').upper()}</td>
+          <td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:12px;color:#555'>{fmt(r.remarks)}</td>
         </tr>"""
 
     no_readings = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#888">No readings recorded for this session</td></tr>' if not readings else ""
