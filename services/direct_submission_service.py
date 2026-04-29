@@ -336,23 +336,26 @@ class DirectSubmissionService:
 
     @staticmethod
     def _serialize(req: TestingRequest) -> dict:
-        orig = req.originator
-        orig_name = (
-            f"{orig.firstname or ''} {orig.lastname or ''}".strip() or orig.email
-            if orig else "-"
-        )
         return {
             "id": str(req.id),
             "request_number": req.request_number,
             "title": req.title,
-            "request_category": req.request_category.value if req.request_category else None,
-            "status": req.status.value if req.status else None,
+
+            "request_category": getattr(req.request_category, "value", None),
+            "status": getattr(req.status, "value", None),
             "priority": req.priority,
-            "equipment_ueic": req.equipment.ueic if req.equipment else None,
-            "equipment_name": req.equipment.name if req.equipment else None,
-            "organization": req.organization.name if req.organization else None,
-            "department": req.department.name if req.department else None,
-            "submitted_by": orig_name,
+
+            "equipment_ueic": getattr(req.equipment, "ueic", None),
+            "equipment_manufacturer": getattr(req.equipment, "manufacturer", None),
+
+            "organization": getattr(req.organization, "name", None),
+            "department": getattr(req.department, "name", None),
+
+            "submitted_by": (
+                f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip()
+                if req.originator else "-"
+            ),
+
             "submitted_at": req.cts.isoformat() if req.cts else None,
             "notes": req.notes,
         }
