@@ -29,8 +29,12 @@ def _advance_date(current: datetime, frequency: ScheduleFrequency) -> datetime:
         return current + relativedelta(months=1)
     elif frequency == ScheduleFrequency.quarterly:
         return current + relativedelta(months=3)
+    elif frequency == ScheduleFrequency.semi_annual:
+        return current + relativedelta(months=6)
     elif frequency == ScheduleFrequency.yearly:
         return current + relativedelta(years=1)
+    elif frequency == ScheduleFrequency.triennial:
+        return current + relativedelta(years=3)
     return current
 
 

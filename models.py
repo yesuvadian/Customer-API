@@ -47,7 +47,9 @@ class ScheduleFrequency(PyEnum):
     biweekly = "biweekly"
     monthly = "monthly"
     quarterly = "quarterly"
+    semi_annual = "semi_annual"   # 180 days
     yearly = "yearly"
+    triennial = "triennial"       # 3 years / 1095 days
 
 
 class ScheduleLogStatus(PyEnum):
@@ -1558,6 +1560,9 @@ class TestingRequest(Base):
     # Direct submission (Failure Registry / TA&QC — no tester assignment step)
     is_direct_submission = Column(Boolean, default=False)  # True = filler IS the submitter
 
+    # Test Register: master catalogue template row (equipment_id=NULL, equipment_type_id set)
+    is_schedule_template = Column(Boolean, default=False, nullable=False)  # True = register entry
+
     # Notes
     notes = Column(Text, nullable=True)
     rejection_reason = Column(Text, nullable=True)
@@ -1602,6 +1607,12 @@ class TestRequestSchedule(Base):
     advance_days = Column(Integer, default=1, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
 
+    # Test Register columns — populated only on template-derived schedules
+    revised_periodicity_days = Column(Integer, nullable=True)  # overrides frequency after ALERT result
+    oem_reference = Column(Text, nullable=True)                # OEM/IS standard clause that mandates this test
+    responsible_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+    reviewing_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
@@ -1611,6 +1622,8 @@ class TestRequestSchedule(Base):
     test_request = relationship("TestingRequest", foreign_keys=[test_request_id])
     organization = relationship("Organization", foreign_keys=[organization_id])
     creator = relationship("User", foreign_keys=[created_by])
+    responsible_role = relationship("OrgRole", foreign_keys=[responsible_role_id])
+    reviewing_role = relationship("OrgRole", foreign_keys=[reviewing_role_id])
     logs = relationship("TestRequestScheduleLog", back_populates="schedule", cascade="all, delete-orphan")
 
 

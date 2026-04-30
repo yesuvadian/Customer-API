@@ -83,6 +83,7 @@ from routers import (
     session_comments,  # NEW: Session comments for approvers
     tester_locations,  # Tester-to-zone mapping
     direct_submissions,  # NEW: Failure Registry & TA&QC direct-submit modules
+    test_register,       # NEW: Test Register — periodic maintenance catalogue
 )
 
 # Organization Multi-Tenancy
@@ -416,6 +417,7 @@ app.include_router(org_test_templates.router)
 app.include_router(org_test_templates.browser_router)
 app.include_router(test_request_schedules.router)
 app.include_router(direct_submissions.router)  # NEW: Failure Registry & TA&QC
+app.include_router(test_register.router)       # NEW: Test Register catalogue
 
 # Equipment Asset Register
 app.include_router(equipment.router)

@@ -22,6 +22,7 @@ from schemas import (
     EquipmentCountResponse,
 )
 from services.equipment_service import EquipmentService
+from services.test_register_service import TestRegisterService
 
 router = APIRouter(
     prefix="/equipment",
@@ -150,6 +151,20 @@ def create_equipment(
     )
     db.commit()
     db.refresh(equipment)
+
+    # ── Commissioning hook: auto-clone Test Register templates ────────────────
+    try:
+        reg_svc = TestRegisterService(db)
+        commission_result = reg_svc.commission_equipment(equipment.id, current_user)
+        if commission_result["requests_created"] > 0:
+            print(
+                f"[Test Register] Commissioned {commission_result['requests_created']} "
+                f"schedule(s) for UEIC {equipment.ueic}"
+            )
+    except Exception as exc:
+        # Non-fatal: commissioning failure must not block equipment creation
+        print(f"[WARN] Test Register commissioning failed for {equipment.id}: {exc}")
+
     return _to_response(equipment)
 
 

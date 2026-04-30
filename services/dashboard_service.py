@@ -162,7 +162,8 @@ class DashboardService:
         """Show total active requests (all statuses except rejected/cancelled)."""
         q = self._org_filter(
             self.db.query(TestingRequest).filter(
-                TestingRequest.status.in_(OPEN_STATUSES)
+                TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         )
         total = q.count()
@@ -200,6 +201,7 @@ class DashboardService:
                 TestingRequest.due_date.isnot(None),
                 TestingRequest.due_date >= since,
                 TestingRequest.due_date <= now,
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         )
         total = q.count()
@@ -232,6 +234,7 @@ class DashboardService:
                 TestingRequest.due_date.isnot(None),
                 TestingRequest.due_date < now,
                 TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         )
         total = q.count()
@@ -297,6 +300,7 @@ class DashboardService:
         q = self._org_filter(
             self.db.query(TestingRequest).filter(
                 TestingRequest.request_category == RequestCategory.inspection,
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         )
         open_count = q.filter(TestingRequest.status.in_(OPEN_STATUSES)).count()
@@ -341,6 +345,7 @@ class DashboardService:
                 TestingRequest.due_date.isnot(None),
                 TestingRequest.due_date < now,
                 TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         ).order_by(TestingRequest.due_date.asc()).all()
 
@@ -506,6 +511,7 @@ class DashboardService:
                 TestingRequest.request_category == RequestCategory.repair_lifecycle,
                 TestingRequest.status.in_(OPEN_STATUSES),
                 TestingRequest.is_multi_session.is_(True),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         ).order_by(TestingRequest.cts.desc()).limit(10).all()
 
@@ -564,6 +570,7 @@ class DashboardService:
                 TestingRequest.due_date.isnot(None),
                 TestingRequest.due_date < now,
                 TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         ).order_by(TestingRequest.due_date.asc())
 

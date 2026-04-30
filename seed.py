@@ -435,6 +435,13 @@ def seed_modules(session):
                 "Accessible to: TA&QC Officer.",
  "path": "taqc_inspections",
  "group_name": "Field Operations"},
+# ✅ TEST REGISTER MODULE (SRS §5.1.1)
+{"name": "Test Register",
+ "description": "SRS §5.1.1 — Periodic test catalogue: defines what tests are mandatory, "
+                "how often, and by which role for each equipment type. "
+                "Accessible to: EE TLSS, Department Head, AEE Maintenance.",
+ "path": "test_register",
+ "group_name": "Condition Monitoring"},
     ]
 
     module_ids = {}
@@ -1440,6 +1447,52 @@ def seed_test_type_categories(session, master_ids):
                 "S8: Final Inspection",
                 "S9: Dispatch",
                 "S10: Erection, Testing & Commissioning",
+            ],
+        },
+        # ── Lightning Arrester ───────────────────────────────────────────────
+        "Lightning Arrester": {
+            "test": [
+                "Insulation Resistance / Leakage Current Test",
+                "V-I Characteristic Test",
+                "Power Frequency Voltage Withstand Test",
+            ],
+            "maintenance": [
+                "Routine Visual Inspection",
+                "LA Major Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+            "repair_lifecycle": [
+                "S1: Failure Report",
+                "S2: Repair Committee",
+                "S3: Replacement / Repair",
+            ],
+        },
+        # ── Battery Bank ─────────────────────────────────────────────────────
+        "Battery Bank": {
+            "test": [
+                "Specific Gravity Check",
+                "Float Voltage per Cell",
+                "Discharge / Capacity Test",
+                "Electrolyte Level Check",
+                "Terminal Voltage Measurement",
+            ],
+            "maintenance": [
+                "Routine Battery Maintenance",
+                "Battery Bank Major Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+                "Environmental",
+            ],
+            "repair_lifecycle": [
+                "S1: Failure Report",
+                "S2: Battery Replacement",
             ],
         },
     }
@@ -3976,6 +4029,233 @@ def seed_org_role_permissions_for_modules(session, module_ids):
         print("[INFO] org_role_permissions: all entries already exist.")
 
 
+def seed_test_register(session, org):
+    """
+    SRS §5.1.1 — Seed the Test Register for a KPTCL organisation.
+
+    Creates TestingRequest (is_schedule_template=True) + TestRequestSchedule rows
+    for each mandatory periodic test grouped by equipment type.
+
+    Idempotent — skips entries whose request_number already exists.
+    """
+    if not org:
+        print("[SKIP] seed_test_register: no org supplied.")
+        return
+
+    from models import (
+        CategoryMaster, OrgRole, ScheduleFrequency,
+        TestingRequest, TestingRequestStatus, TestRequestSchedule, RequestCategory
+    )
+    from datetime import datetime, timezone
+    import uuid as _uuid
+
+    now = datetime.now(timezone.utc)
+
+    # ── look up system user (org admin) as template originator ────────────────
+    from models import User, OrgUserRole
+    admin_role = session.query(OrgRole).filter_by(
+        organization_id=org.id, name="Org Admin"
+    ).first()
+    system_user = None
+    if admin_role:
+        link = session.query(OrgUserRole).filter_by(org_role_id=admin_role.id).first()
+        if link:
+            system_user = session.query(User).filter_by(id=link.user_id).first()
+    if not system_user:
+        system_user = session.query(User).filter_by(email="superadmin@system.com").first()
+    if not system_user:
+        print("[WARN] seed_test_register: no system user found — skipping.")
+        return
+
+    # ── look up key OrgRoles ──────────────────────────────────────────────────
+    def get_role(name):
+        return session.query(OrgRole).filter_by(
+            organization_id=org.id, name=name
+        ).first()
+
+    aee_maintenance = get_role("AEE Maintenance")
+    ee_tlss         = get_role("EE TLSS")
+    field_tester    = get_role("Field Tester")
+    aee_role        = get_role("AEE")
+
+    responsible_default = aee_maintenance
+    reviewing_default   = ee_tlss
+
+    # ── helper: get equipment type master ─────────────────────────────────────
+    def get_eq_type(name):
+        return session.query(CategoryMaster).filter_by(
+            name=name, is_active=True
+        ).first()
+
+    # ── register catalogue ────────────────────────────────────────────────────
+    # (equipment_type_name, test_name, template_key, frequency, advance_days,
+    #  responsible_role, reviewing_role, revised_periodicity_days, oem_reference)
+    REGISTER = [
+        # ── Power Transformer ─────────────────────────────────────────────────
+        ("Power Transformer", "DGA — Dissolved Gas Analysis",
+         "transformer_dga",
+         ScheduleFrequency.yearly, 15,
+         aee_maintenance, ee_tlss, 180,
+         "IS 10593 / IS 1866 Cl.4.2"),
+
+        ("Power Transformer", "BDV — Oil Dielectric Strength",
+         "transformer_bdv",
+         ScheduleFrequency.semi_annual, 10,
+         aee_maintenance, ee_tlss, 90,
+         "IS 6792 Cl.5.1"),
+
+        ("Power Transformer", "IR — Winding Insulation Resistance",
+         "transformer_ir",
+         ScheduleFrequency.semi_annual, 10,
+         aee_maintenance, ee_tlss, None,
+         "IS 2026 Pt.1"),
+
+        ("Power Transformer", "Tan Delta / Power Factor Test",
+         "transformer_tan_delta",
+         ScheduleFrequency.triennial, 30,
+         aee_maintenance, ee_tlss, None,
+         "IS 2026 Pt.1 / IEC 60076-1"),
+
+        # ── Circuit Breaker ───────────────────────────────────────────────────
+        ("Circuit Breaker", "SF6 Gas Purity Test",
+         "cb_sf6_purity",
+         ScheduleFrequency.yearly, 15,
+         aee_maintenance, ee_tlss, 180,
+         "IEC 60376 / IS 13734"),
+
+        ("Circuit Breaker", "SF6 Gas Pressure Check",
+         "cb_sf6_pressure",
+         ScheduleFrequency.quarterly, 7,
+         field_tester or aee_maintenance, aee_maintenance or ee_tlss, None,
+         "Manufacturer O&M Manual"),
+
+        ("Circuit Breaker", "IR — Insulation Resistance",
+         "cb_ir",
+         ScheduleFrequency.semi_annual, 10,
+         aee_maintenance, ee_tlss, None,
+         "IEC 62271-100"),
+
+        ("Circuit Breaker", "Contact Resistance Test",
+         "cb_contact_resistance",
+         ScheduleFrequency.semi_annual, 10,
+         aee_maintenance, ee_tlss, None,
+         "IEC 62271-100 Cl.6.4"),
+
+        # ── Current Transformer ───────────────────────────────────────────────
+        ("Current Transformer", "IR — Insulation Resistance",
+         "ct_ir",
+         ScheduleFrequency.yearly, 15,
+         aee_maintenance, ee_tlss, None,
+         "IS 2705 / IEC 61869-2"),
+
+        ("Current Transformer", "Ratio & Phase Error Test",
+         "ct_ratio",
+         ScheduleFrequency.yearly, 15,
+         aee_maintenance, ee_tlss, None,
+         "IS 2705 Cl.8"),
+
+        # ── Lightning Arrester ────────────────────────────────────────────────
+        ("Lightning Arrester", "IR / Leakage Current Test",
+         "la_ir",
+         ScheduleFrequency.yearly, 15,
+         aee_maintenance, ee_tlss, 180,
+         "IS 3070 Pt.3 / IEC 60099-4"),
+
+        ("Lightning Arrester", "V-I Characteristic Test",
+         "la_vi",
+         ScheduleFrequency.triennial, 30,
+         aee_maintenance, ee_tlss, None,
+         "IEC 60099-4 Cl.8.3"),
+
+        # ── Battery Bank ──────────────────────────────────────────────────────
+        ("Battery Bank", "Specific Gravity Check",
+         "battery_specific_gravity",
+         ScheduleFrequency.quarterly, 7,
+         field_tester or aee_maintenance, aee_maintenance or ee_tlss, None,
+         "IS 1651 / Manufacturer Manual"),
+
+        ("Battery Bank", "Float Voltage per Cell",
+         "battery_float_voltage",
+         ScheduleFrequency.monthly, 5,
+         field_tester or aee_maintenance, aee_maintenance or ee_tlss, None,
+         "IS 1652 / Manufacturer Manual"),
+
+        ("Battery Bank", "Discharge / Capacity Test",
+         "battery_capacity",
+         ScheduleFrequency.yearly, 15,
+         aee_maintenance, ee_tlss, None,
+         "IS 1651 Cl.10"),
+    ]
+
+    created = 0
+    skipped = 0
+
+    for (eq_type_name, test_name, tpl_key, freq, adv_days,
+         resp_role, rev_role, revised_days, oem_ref) in REGISTER:
+
+        eq_type = get_eq_type(eq_type_name)
+        if not eq_type:
+            print(f"  [WARN] Equipment type '{eq_type_name}' not found — skipping '{test_name}'")
+            skipped += 1
+            continue
+
+        # Idempotency: skip if a template with this title + org + eq_type already exists
+        existing = session.query(TestingRequest).filter_by(
+            title=test_name,
+            organization_id=org.id,
+            equipment_type_id=eq_type.id,
+            is_schedule_template=True,
+        ).first()
+        if existing:
+            skipped += 1
+            continue
+
+        req_num = f"TR-REG-{now.strftime('%Y%m%d')}-{(created + 1):04d}"
+        req = TestingRequest(
+            id=_uuid.uuid4(),
+            request_number=req_num,
+            title=test_name,
+            description=f"Mandatory periodic test per {oem_ref}" if oem_ref else None,
+            equipment_type_id=eq_type.id,
+            organization_id=org.id,
+            request_category=RequestCategory.test,
+            priority="normal",
+            notes=oem_ref,
+            status=TestingRequestStatus.draft,
+            is_schedule_template=True,
+            is_direct_submission=False,
+            originator_id=system_user.id,
+            created_by=system_user.id,
+            requested_date=now,
+        )
+        session.add(req)
+        session.flush()
+
+        sched = TestRequestSchedule(
+            id=_uuid.uuid4(),
+            test_request_id=req.id,
+            organization_id=org.id,
+            frequency=freq,
+            start_date=now,
+            next_run_date=now,   # placeholder; overwritten on commissioning
+            advance_days=adv_days,
+            is_active=True,
+            responsible_role_id=getattr(resp_role, "id", None),
+            reviewing_role_id=getattr(rev_role, "id", None),
+            revised_periodicity_days=revised_days,
+            oem_reference=oem_ref,
+            created_by=system_user.id,
+        )
+        session.add(sched)
+        created += 1
+
+    session.commit()
+    print(
+        f"[OK] Test Register seeded: {created} templates created, "
+        f"{skipped} skipped (already exist or missing eq type)."
+    )
+
+
 def run_seed():
     # ── Create ALL SQLAlchemy tables (idempotent — safe on existing DB) ──────
     print("[INIT] Creating database schema via Base.metadata.create_all …")
@@ -4047,6 +4327,10 @@ def run_seed():
 
         # Sample Equipment (after departments + equipment types exist)
         seed_sample_equipment(session, kptcl_org)
+
+        # Test Register (SRS §5.1.1) — after KPTCL org + roles + equipment types exist
+        print("\n--- Test Register Seeding (SRS §5.1.1) ---")
+        seed_test_register(session, kptcl_org)
 
         # Zoho Import Mapping (after KPTCL org + departments exist)
         seed_zoho_import_mapping(session, kptcl_org)
