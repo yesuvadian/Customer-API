@@ -27,6 +27,7 @@ from models import (
     Recommendation,
     RecommendationType,
     User,
+    Equipment,
 )
 from utils.common_service import UTCDateTimeMixin
 
@@ -274,9 +275,10 @@ class DirectSubmissionService:
             self.db.query(TestingRequest)
             .options(
                 joinedload(TestingRequest.originator),
-                joinedload(TestingRequest.equipment),
+                joinedload(TestingRequest.equipment).joinedload(Equipment.equipment_type),
                 joinedload(TestingRequest.organization),
                 joinedload(TestingRequest.department),
+                joinedload(TestingRequest.test_results),
             )
             .filter(
                 TestingRequest.request_category == cat,
@@ -297,9 +299,10 @@ class DirectSubmissionService:
             self.db.query(TestingRequest)
             .options(
                 joinedload(TestingRequest.originator),
-                joinedload(TestingRequest.equipment),
+                joinedload(TestingRequest.equipment).joinedload(Equipment.equipment_type),
                 joinedload(TestingRequest.organization),
                 joinedload(TestingRequest.department),
+                joinedload(TestingRequest.test_results),
             )
             .filter(
                 TestingRequest.id == request_id,
@@ -336,6 +339,14 @@ class DirectSubmissionService:
 
     @staticmethod
     def _serialize(req: TestingRequest) -> dict:
+        # Pull the first (and typically only) TestResult for direct submissions
+        result = req.test_results[0] if req.test_results else None
+
+        eq = req.equipment
+        eq_type_name = None
+        if eq and eq.equipment_type:
+            eq_type_name = getattr(eq.equipment_type, "name", None)
+
         return {
             "id": str(req.id),
             "request_number": req.request_number,
@@ -345,8 +356,9 @@ class DirectSubmissionService:
             "status": getattr(req.status, "value", None),
             "priority": req.priority,
 
-            "equipment_ueic": getattr(req.equipment, "ueic", None),
-            "equipment_manufacturer": getattr(req.equipment, "manufacturer", None),
+            "equipment_ueic": getattr(eq, "ueic", None),
+            "equipment_type_name": eq_type_name,
+            "equipment_manufacturer": getattr(eq, "manufacturer", None),
 
             "organization": getattr(req.organization, "name", None),
             "department": getattr(req.department, "name", None),
@@ -356,6 +368,13 @@ class DirectSubmissionService:
                 if req.originator else "-"
             ),
 
-            "submitted_at": req.cts.isoformat() if req.cts else None,
+            # Use "cts" key to match Flutter client expectations
+            "cts": req.cts.isoformat() if req.cts else None,
+
             "notes": req.notes,
+
+            # TestResult fields — populated for all direct submissions
+            "test_data": result.test_data if result else {},
+            "overall_result": result.overall_result if result else None,
+            "remarks": result.remarks if result else None,
         }
