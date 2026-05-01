@@ -200,20 +200,23 @@ class ReportingService:
 
     def _run_query(self, query_key: str, params: dict) -> list[dict]:
         registry = {
-            "equipment_condition_summary":    self._q_equipment_condition,
-            "overdue_tests_report":           self._q_overdue_tests,
-            "active_alerts_report":           self._q_active_alerts,
-            "flagged_equipment_report":       self._q_flagged_equipment,
-            "repair_progress_report":         self._q_repair_progress,
-            "maintenance_overdue_report":     self._q_maintenance_overdue,
-            "procurement_pipeline_report":    self._q_procurement_pipeline,
-            "open_remediation_report":        self._q_open_remediation,
-            "testing_request_status_report":  self._q_testing_request_status,
-            "test_results_summary_report":    self._q_test_results_summary,
-            "recommendation_approval_report": self._q_recommendation_approval,
-            "compliance_status_report":       self._q_compliance_status,
-            "tester_performance_report":      self._q_tester_performance,
-            "monthly_kpi_report":             self._q_monthly_kpi,
+            "equipment_condition_summary":      self._q_equipment_condition,
+            "overdue_tests_report":             self._q_overdue_tests,
+            "active_alerts_report":             self._q_active_alerts,
+            "flagged_equipment_report":         self._q_flagged_equipment,
+            "repair_progress_report":           self._q_repair_progress,
+            "maintenance_overdue_report":       self._q_maintenance_overdue,
+            "procurement_pipeline_report":      self._q_procurement_pipeline,
+            "open_remediation_report":          self._q_open_remediation,
+            "testing_request_status_report":    self._q_testing_request_status,
+            "test_results_summary_report":      self._q_test_results_summary,
+            "recommendation_approval_report":   self._q_recommendation_approval,
+            "compliance_status_report":         self._q_compliance_status,
+            "tester_performance_report":        self._q_tester_performance,
+            "monthly_kpi_report":               self._q_monthly_kpi,
+            # §3.3.3 Equipment Failure Registry
+            "equipment_failure_annual_report":  self._q_equipment_failure_annual,
+            "equipment_failure_performance_report": self._q_equipment_failure_performance,
         }
         fn = registry.get(query_key)
         if not fn:
@@ -672,6 +675,145 @@ class ReportingService:
         """)
         return self._exec(sql)
 
+    # ── §3.3.3 Equipment Failure Registry ─────────────────────────────────────
+
+    def _q_equipment_failure_annual(self, p: dict) -> list[dict]:
+        """Annual Equipment Failure Report — grouped by type, make, model.
+        Auto-generated each calendar year; also available on demand.
+        Parameter: year (int, defaults to previous calendar year).
+        """
+        org  = _org_clause(self.org_id, "e")
+        year = int(_p(p, "year", date.today().year - 1))
+        sql  = text(f"""
+            SELECT
+                COALESCE(cm.name, 'Unknown Type')                AS equipment_type,
+                COALESCE(e.manufacturer, 'Unknown Make')          AS make,
+                COALESCE(
+                    e.model_number,
+                    e.voltage_class || ' kV',
+                    '—')                                          AS model_rating,
+                COALESCE(e.voltage_class || ' kV', '—')          AS voltage_class,
+                COUNT(DISTINCT e.id)                              AS total_equipment,
+                COUNT(DISTINCT CASE
+                    WHEN res.evaluation_result->>'overall' = 'CRITICAL'
+                    THEN e.id END)                                AS units_with_failures,
+                COUNT(CASE
+                    WHEN res.evaluation_result->>'overall' = 'CRITICAL'
+                    THEN res.id END)                              AS failure_incidents,
+                COUNT(CASE
+                    WHEN res.evaluation_result->>'overall' = 'ALERT'
+                    THEN res.id END)                              AS alert_incidents,
+                ROUND(
+                    100.0
+                    * COUNT(DISTINCT CASE
+                        WHEN res.evaluation_result->>'overall' = 'CRITICAL'
+                        THEN e.id END)
+                    / NULLIF(COUNT(DISTINCT e.id), 0),
+                1)                                                AS failure_rate_pct,
+                MAX(CASE
+                    WHEN res.evaluation_result->>'overall' = 'CRITICAL'
+                    THEN res.tested_at END)::date                 AS most_recent_failure
+            FROM   public.equipment e
+            LEFT JOIN public."CategoryMaster"  cm  ON cm.id  = e.equipment_type_id
+            LEFT JOIN public.testing_requests  tr  ON tr.equipment_id = e.id
+            LEFT JOIN public.test_results      res
+                   ON res.testing_request_id = tr.id
+                  AND EXTRACT(YEAR FROM res.tested_at) = {year}
+            WHERE  e.status != 'retired'
+              {org}
+            GROUP  BY cm.name, e.manufacturer, e.model_number, e.voltage_class
+            ORDER  BY failure_incidents DESC NULLS LAST,
+                      equipment_type, make, model_rating
+        """)
+        return self._exec(sql)
+
+    def _q_equipment_failure_performance(self, p: dict) -> list[dict]:
+        """On-demand Performance Analysis — failure rates across makes, types,
+        voltage classes, and age bands.
+        Filters: date_from, date_to, equipment_type, make, voltage_class, age_band.
+        """
+        org = _org_clause(self.org_id, "e")
+
+        # Optional result-date filter (applied to the test_results JOIN)
+        df = _date(_p(p, "date_from"))
+        dt = _date(_p(p, "date_to"))
+        date_clause = ""
+        if df:
+            date_clause += f" AND res.tested_at >= '{df}'"
+        if dt:
+            date_clause += f" AND res.tested_at <= '{dt}'"
+
+        # Optional dimension filters (applied in WHERE)
+        type_filter  = _p(p, "equipment_type", "")
+        make_filter  = _p(p, "make", "")
+        vcls_filter  = _p(p, "voltage_class", "")
+        aband_filter = _p(p, "age_band", "")
+
+        dim_clause = ""
+        if type_filter:
+            dim_clause += f" AND cm.name = '{type_filter}'"
+        if make_filter:
+            dim_clause += f" AND LOWER(e.manufacturer) LIKE LOWER('%{make_filter}%')"
+        if vcls_filter:
+            dim_clause += f" AND e.voltage_class = '{vcls_filter}'"
+        if aband_filter:
+            age_map = {
+                "0-10 years":  "BETWEEN 0 AND 10",
+                "10-20 years": "BETWEEN 11 AND 20",
+                "20+ years":   "> 20",
+            }
+            if aband_filter in age_map:
+                dim_clause += (
+                    f" AND (EXTRACT(YEAR FROM NOW()) - e.year_of_manufacture)"
+                    f" {age_map[aband_filter]}"
+                )
+
+        sql = text(f"""
+            SELECT
+                COALESCE(cm.name, 'Unknown Type')                AS equipment_type,
+                COALESCE(e.manufacturer, 'Unknown Make')          AS make,
+                COALESCE(e.voltage_class || ' kV', '—')          AS voltage_class,
+                CASE
+                    WHEN e.year_of_manufacture IS NULL THEN 'Unknown'
+                    WHEN (EXTRACT(YEAR FROM NOW())
+                         - e.year_of_manufacture) <= 10 THEN '0-10 years'
+                    WHEN (EXTRACT(YEAR FROM NOW())
+                         - e.year_of_manufacture) <= 20 THEN '10-20 years'
+                    ELSE '20+ years'
+                END                                               AS age_band,
+                COUNT(DISTINCT e.id)                              AS total_equipment,
+                COUNT(DISTINCT CASE
+                    WHEN res.evaluation_result->>'overall' = 'CRITICAL'
+                    THEN e.id END)                                AS units_with_critical,
+                COUNT(CASE
+                    WHEN res.evaluation_result->>'overall' = 'CRITICAL'
+                    THEN res.id END)                              AS critical_failures,
+                COUNT(CASE
+                    WHEN res.evaluation_result->>'overall' = 'ALERT'
+                    THEN res.id END)                              AS alert_incidents,
+                ROUND(
+                    100.0
+                    * COUNT(DISTINCT CASE
+                        WHEN res.evaluation_result->>'overall' = 'CRITICAL'
+                        THEN e.id END)
+                    / NULLIF(COUNT(DISTINCT e.id), 0),
+                1)                                                AS failure_rate_pct,
+                COUNT(DISTINCT res.id)                            AS total_tests_conducted
+            FROM   public.equipment e
+            LEFT JOIN public."CategoryMaster"  cm  ON cm.id  = e.equipment_type_id
+            LEFT JOIN public.testing_requests  tr  ON tr.equipment_id = e.id
+            LEFT JOIN public.test_results      res
+                   ON res.testing_request_id = tr.id
+                  {date_clause}
+            WHERE  e.status != 'retired'
+              {org}
+              {dim_clause}
+            GROUP  BY cm.name, e.manufacturer, e.voltage_class, age_band
+            ORDER  BY failure_rate_pct DESC NULLS LAST,
+                      equipment_type, make, voltage_class
+        """)
+        return self._exec(sql)
+
     # ── Executor ───────────────────────────────────────────────────────────
 
     def _exec(self, sql) -> list[dict]:
@@ -899,7 +1041,11 @@ def run_scheduled_reports(db_factory) -> int:
                 svc = ReportingService(db, defn.organization_id)
                 fmt = defn.output_format if defn.output_format in ("excel", "pdf") \
                       else "excel"
-                svc.generate(defn.id, {}, fmt)
+                # For annual reports auto-triggered in January, report on the previous year
+                params: dict = {}
+                if defn.frequency == "annual":
+                    params = {"year": str(now.year - 1)}
+                svc.generate(defn.id, params, fmt)
                 count += 1
             except Exception as exc:
                 print(f"[Reports] Scheduled '{defn.name}' failed: {exc}")
@@ -918,4 +1064,10 @@ def _is_due(defn: ReportDefinition, now: datetime) -> bool:
         return delta >= 7 * 86_400
     if defn.frequency == "monthly":
         return (now - defn.last_generated_at).days >= 28
+    if defn.frequency == "annual":
+        # Due on the 1st of January each year, after the previous year ends
+        return (
+            now.month == 1 and now.day <= 7           # first week of January
+            and defn.last_generated_at.year < now.year  # not yet run this year
+        )
     return False

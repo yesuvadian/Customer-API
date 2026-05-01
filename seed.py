@@ -3959,6 +3959,27 @@ def seed_report_definitions(session):
             "output_format": "excel",
             "frequency": "monthly",
         },
+        # §3.3.3 Equipment Failure Registry
+        {
+            "name": "Equipment Failure Annual Report",
+            "description": (
+                "Yearly failure summary grouped by equipment type, make, and model. "
+                "Available as PDF or Excel. Auto-generated each calendar year."
+            ),
+            "query_key": "equipment_failure_annual_report",
+            "output_format": "excel",
+            "frequency": "annual",
+        },
+        {
+            "name": "Equipment Failure Performance Analysis",
+            "description": (
+                "On-demand report comparing failure rates across makes, equipment types, "
+                "voltage classes, and age bands."
+            ),
+            "query_key": "equipment_failure_performance_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+        },
     ]
 
     created = 0

@@ -62,6 +62,15 @@ QUERY_KEYS = [
      "description": "Tester completion rates and average turnaround times"},
     {"key": "monthly_kpi_report",             "label": "Monthly KPI Summary",
      "description": "Monthly aggregated KPIs: requests, completions, alerts, findings"},
+    # §3.3.3 Equipment Failure Registry
+    {"key": "equipment_failure_annual_report",
+     "label": "Equipment Failure Annual Report",
+     "description": "Yearly failure summary grouped by equipment type, make, and model. "
+                    "Parameter: year (default = previous calendar year)."},
+    {"key": "equipment_failure_performance_report",
+     "label": "Equipment Failure Performance Analysis",
+     "description": "On-demand comparative failure-rate analysis across makes, types, "
+                    "voltage classes, and age bands. Supports date range and dimension filters."},
 ]
 
 
