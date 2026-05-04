@@ -86,6 +86,160 @@ class EquipmentStatus(PyEnum):
     under_repair = "under_repair"
 
 
+# =============================================================================
+# Repair Workflow Models
+# =============================================================================
+
+class RepairWorkflowDefinition(Base):
+    __tablename__ = "repair_workflow_definitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, default="Transformer Repair Lifecycle")
+    is_active = Column(Boolean, default=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class RepairStageDefinition(Base):
+    __tablename__ = "repair_stage_definitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    code = Column(String, unique=True, nullable=False)   # FAILURE_REPORT, COMMITTEE_REVIEW …
+    sequence = Column(Integer, nullable=False)
+    weight = Column(Integer, default=10)                 # progress contribution
+    is_active = Column(Boolean, default=True)
+    is_mandatory = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class RepairStageTemplate(Base):
+    """1-to-1 mapping: one stage → one form template."""
+    __tablename__ = "repair_stage_templates"
+
+    stage_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_stage_definitions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    template_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("org_test_templates.id", ondelete="CASCADE"),
+    )
+
+
+class RepairStageRole(Base):
+    """Stage ↔ OrgRole RBAC. can_edit = may fill form; can_approve = may advance/reject."""
+    __tablename__ = "repair_stage_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id", ondelete="CASCADE"))
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"))
+    can_edit = Column(Boolean, default=True)
+    can_approve = Column(Boolean, default=True)
+
+    __table_args__ = (UniqueConstraint("stage_id", "role_id", name="uq_repair_stage_role"),)
+
+
+class RepairStageTransition(Base):
+    """Directed transition graph.  action: 'approve' | 'reject'.  to_stage_id=NULL → terminal."""
+    __tablename__ = "repair_stage_transitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    from_stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
+    to_stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"), nullable=True)
+    action = Column(String, nullable=False)   # approve / reject
+
+    __table_args__ = (UniqueConstraint("from_stage_id", "action", name="uq_repair_transition"),)
+
+
+class RepairWorkflow(Base):
+    """One workflow instance per failing transformer."""
+    __tablename__ = "repair_workflows"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("equipment.id"))
+    current_stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
+    # Traceability: the FR- TestingRequest that triggered this workflow
+    source_failure_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("testing_requests.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status = Column(String, default="active")   # active / completed / cancelled
+    progress = Column(Integer, default=0)        # 0–100 weight-based
+    started_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class RepairStageInstance(Base):
+    """Per-stage per-workflow execution record."""
+    __tablename__ = "repair_stage_instances"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="CASCADE"))
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
+    status = Column(String, default="not_started")   # not_started / in_progress / completed / rejected
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    remarks = Column(Text)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("workflow_id", "stage_id", name="uq_repair_instance"),)
+
+
+class RepairStageData(Base):
+    """Form data captured at each stage (JSONB)."""
+    __tablename__ = "repair_stage_data"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    stage_instance_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_instances.id", ondelete="CASCADE"))
+    form_data = Column(JSONB)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class RepairStageDocument(Base):
+    """Uploaded files for file-type fields inside a stage."""
+    __tablename__ = "repair_stage_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    stage_instance_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_instances.id", ondelete="CASCADE"))
+    field_key = Column(String)       # which form field this document belongs to
+    file_name = Column(String)
+    file_path = Column(Text)         # relative path: uploads/repair/<uuid>_<name>
+    mime_type = Column(String)
+    size_bytes = Column(Integer)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    uploaded_at = Column(DateTime, server_default=func.now())
+
+
+class RepairStageAuditLog(Base):
+    """Immutable audit trail — every action on every workflow."""
+    __tablename__ = "repair_stage_audit_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id"))
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
+    action = Column(String)          # created / saved / approve / reject / started
+    performed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    performed_at = Column(DateTime, server_default=func.now())
+    note = Column(Text)
+
+
 class RequestCategory(PyEnum):
     test = "test"
     maintenance = "maintenance"

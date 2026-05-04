@@ -2290,3 +2290,80 @@ class EquipmentCountResponse(BaseModel):
     scrapped: int = 0
     under_repair: int = 0
     total: int = 0
+
+
+# =============================================================================
+# Repair Workflow Schemas
+# =============================================================================
+
+class RepairStageCreate(BaseModel):
+    name: str
+    code: str
+    sequence: int
+    weight: int = 10
+    is_mandatory: bool = True
+
+
+class RepairStageUpdate(BaseModel):
+    name: Optional[str] = None
+    sequence: Optional[int] = None
+    weight: Optional[int] = None
+    is_active: Optional[bool] = None
+    is_mandatory: Optional[bool] = None
+
+
+class RepairRoleAssignment(BaseModel):
+    role_id: UUID
+    can_edit: bool = True
+    can_approve: bool = True   # default True so stage actors can also approve
+
+
+class RepairTransitionUpsert(BaseModel):
+    from_stage_id: UUID
+    to_stage_id: Optional[UUID] = None   # None = terminal (end of workflow)
+    action: str                          # "approve" | "reject"
+
+
+class RepairWorkflowStartRequest(BaseModel):
+    equipment_id: UUID
+
+
+class RepairWorkflowResponse(BaseModel):
+    id: UUID
+    equipment_id: Optional[UUID] = None
+    current_stage_id: Optional[UUID] = None
+    status: str
+    progress: int
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RepairAdvanceRequest(BaseModel):
+    remarks: Optional[str] = None
+
+
+class RepairSaveDataRequest(BaseModel):
+    form_data: dict
+
+
+class RepairStageDefResponse(BaseModel):
+    id: UUID
+    name: str
+    code: str
+    sequence: int
+    weight: int
+    is_active: bool
+    is_mandatory: bool
+    template_id: Optional[UUID] = None
+    roles: List[dict] = []
+    transitions: List[dict] = []
+
+    class Config:
+        from_attributes = True
+
+
+# Backward-compat alias (old router used RepairWorkflowCreate)
+RepairWorkflowCreate = RepairWorkflowStartRequest

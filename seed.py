@@ -15,6 +15,9 @@ from models import (
     ZohoImportMapping, Equipment, EquipmentStatus,
     # Reporting Suite
     ReportDefinition,
+    # Repair Workflow
+    RepairStageDefinition, RepairStageTemplate, RepairStageRole,
+    RepairStageTransition, OrgTestTemplate,
 )
 from security_utils import get_password_hash  # password hashing utils
 
@@ -1427,6 +1430,13 @@ def seed_modules(session):
                 "Accessible to: EE TLSS, Department Head, AEE Maintenance.",
  "path": "test_register",
  "group_name": "Condition Monitoring"},
+# ✅ REPAIR WORKFLOW MODULE
+{"name": "Repair Workflows",
+ "description": "Transformer repair lifecycle — 10-stage workflow from Failure Reporting to Commissioning. "
+                "Config (org-admin only): define stages, forms, roles, transitions. "
+                "Execution: stage-role RBAC driven; each stage locks to authorized roles only.",
+ "path": "repair-workflows",
+ "group_name": "Field Operations"},
     ]
 
     module_ids = {}
@@ -1848,6 +1858,27 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "EE TLSS",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
         {"role": "SEE W&M",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
         {"role": "CEE Transmission Zone",   "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+
+        # ✅ REPAIR WORKFLOWS — Transformer repair lifecycle (10 stages)
+        # Stage-level RBAC is enforced in the service layer via RepairStageRole.
+        # Module-level privileges here control who can see the module in the nav.
+        # Config endpoints (PUT /repair-workflows/config/*) require is_org_admin.
+
+        # All stage-acting roles: can view + add (save data) + approve (advance/reject)
+        {"role": "AEE Maintenance",         "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "TRC Member",              "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "CEE RT&R&D",             "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "CEE Transmission Zone",   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Vendor",                  "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Inspection Engineer",     "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Finance Officer",         "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "QA Team",                 "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "EE RT",                   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "SEE RT",                  "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
+
+        # Supervisory roles: view + export only (no stage actions)
+        {"role": "EE TLSS",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
+        {"role": "SEE W&M",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -5495,6 +5526,13 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Notification seed failed (non-fatal): {_e}")
 
+        # Repair Workflow — stages, templates, roles, transitions
+        print("\n--- Repair Workflow Seeding ---")
+        try:
+            seed_workflow(session)
+        except Exception as _e:
+            print(f"[WARN] Repair workflow seed failed (non-fatal): {_e}")
+
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")
         print("=" * 80)
@@ -5669,6 +5707,145 @@ def seed_zoho_import_mapping(session, kptcl_org):
     session.add(mapping)
     session.commit()
     print(f"[OK] Zoho import mapping created: KPTCL -> Originator, dept={dept.name if dept else 'None'}")
+
+
+def seed_workflow(session):
+    """
+    Seed repair workflow stages, templates, role assignments, and transitions.
+
+    Source files (all at repo root):
+      REPAIR_WORKFLOW_STAGES.json   — [{name, sequence}]
+      REPAIR_STAGE_TEMPLATES.json   — {template_key: {name, template_type, sections, ...}}
+      STAGE_TEMPLATE_MAP.json       — {stage_name: template_key}
+      repair_stage_roles.json       — [{stage_code, roles:[role_name,...]}]
+      Repair_Role_Transitions.json  — [{from, to, action}]  (stage names)
+    """
+    import json as _json
+
+    def _load(fname):
+        path = os.path.join(os.path.dirname(__file__), fname)
+        with open(path) as fh:
+            return _json.load(fh)
+
+    stages_raw      = _load("REPAIR_WORKFLOW_STAGES.json")
+    templates_raw   = _load("REPAIR_STAGE_TEMPLATES.json")
+    stage_tmpl_map  = _load("STAGE_TEMPLATE_MAP.json")        # {stage_name: template_key}
+    roles_raw       = _load("repair_stage_roles.json")         # [{stage_code, roles:[...]}]
+    transitions_raw = _load("Repair_Role_Transitions.json")    # [{from, to, action}]
+
+    # Canonical stage_name → code mapping (must stay in sync with JSON files)
+    NAME_TO_CODE = {
+        "Failure Reporting":      "FAILURE_REPORT",
+        "Committee Review":       "COMMITTEE_REVIEW",
+        "Vendor Assignment":      "VENDOR_ASSIGNMENT",
+        "Lifting":                "LIFTING",
+        "Joint Inspection":       "JOINT_INSPECTION",
+        "Estimate & Work Award":  "ESTIMATE",
+        "Repair QA":              "QA",
+        "Final Inspection":       "FINAL_INSPECTION",
+        "Dispatch":               "DISPATCH",
+        "Commissioning":          "COMMISSIONING",
+    }
+    CODE_TO_NAME = {v: k for k, v in NAME_TO_CODE.items()}
+
+    # ── 1. Templates ──────────────────────────────────────────────────────────
+    template_map = {}   # key → UUID
+    for key, t in templates_raw.items():
+        existing = session.query(OrgTestTemplate).filter_by(template_key=key).first()
+        if existing:
+            template_map[key] = existing.id
+            continue
+        obj = OrgTestTemplate(
+            id=uuid.uuid4(),
+            template_key=key,
+            template_type=t["template_type"],
+            template_data=t,
+            created_at=datetime.utcnow(),
+        )
+        session.add(obj)
+        session.flush()
+        template_map[key] = obj.id
+    print(f"[OK] Repair templates: {len(template_map)} ready")
+
+    # ── 2. Stages ─────────────────────────────────────────────────────────────
+    stage_map = {}      # name → UUID
+    code_map  = {}      # code → UUID
+    for s in stages_raw:
+        name = s["name"]
+        code = NAME_TO_CODE.get(name, name.upper().replace(" ", "_"))
+        existing = session.query(RepairStageDefinition).filter_by(code=code).first()
+        if existing:
+            stage_map[name] = existing.id
+            code_map[code]  = existing.id
+            continue
+        stage = RepairStageDefinition(
+            id=uuid.uuid4(),
+            name=name,
+            code=code,
+            sequence=s["sequence"],
+            weight=s.get("weight", 10),
+            is_active=True,
+            is_mandatory=True,
+        )
+        session.add(stage)
+        session.flush()
+        stage_map[name] = stage.id
+        code_map[code]  = stage.id
+    print(f"[OK] Repair stages: {len(stage_map)} ready")
+
+    # ── 3. Stage → Template mapping ───────────────────────────────────────────
+    for stage_name, tmpl_key in stage_tmpl_map.items():
+        stage_id   = stage_map.get(stage_name)
+        template_id = template_map.get(tmpl_key)
+        if not stage_id or not template_id:
+            continue
+        exists = session.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
+        if not exists:
+            session.add(RepairStageTemplate(stage_id=stage_id, template_id=template_id))
+
+    # ── 4. Stage → Role mapping ───────────────────────────────────────────────
+    for entry in roles_raw:
+        stage_code = entry.get("stage_code") or entry.get("code")
+        stage_id   = code_map.get(stage_code)
+        if not stage_id:
+            print(f"[WARN] Stage code not found: {stage_code}")
+            continue
+        for role_name in entry.get("roles", []):
+            role = session.query(OrgRole).filter_by(name=role_name).first()
+            if not role:
+                print(f"[WARN] Role not found: {role_name}")
+                continue
+            exists = session.query(RepairStageRole).filter_by(
+                stage_id=stage_id, role_id=role.id
+            ).first()
+            if not exists:
+                session.add(RepairStageRole(
+                    id=uuid.uuid4(),
+                    stage_id=stage_id,
+                    role_id=role.id,
+                    can_edit=True,
+                    can_approve=True,   # same role fills AND approves the stage
+                ))
+
+    # ── 5. Transitions ────────────────────────────────────────────────────────
+    for t in transitions_raw:
+        from_id = stage_map.get(t["from"])
+        to_id   = stage_map.get(t.get("to"))  # None = terminal
+        if not from_id:
+            continue
+        exists = session.query(RepairStageTransition).filter_by(
+            from_stage_id=from_id, action=t["action"]
+        ).first()
+        if not exists:
+            session.add(RepairStageTransition(
+                id=uuid.uuid4(),
+                from_stage_id=from_id,
+                to_stage_id=to_id,
+                action=t["action"],
+            ))
+
+    session.commit()
+    print("✅ Repair workflow seeded successfully")
 
 
 def seed_kptcl_only(org_id: str):
