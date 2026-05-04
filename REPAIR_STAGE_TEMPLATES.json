@@ -1,152 +1,174 @@
- {
-
-    "repair_stage_failure_reporting": {
-        "name": "Failure Reporting",
-        "template_type": "repair_stage",
-        "equipment_type": "Power Transformer",
-        "sections": [
-            {
-                "title": "Failure Details",
-                "fields": [
-                    {"key": "failure_date", "label": "Failure Date", "type": "date", "required": true},
-                    {"key": "failure_description", "label": "Description", "type": "textarea", "required": true},
-                    {"key": "failure_report_doc", "label": "Failure Report", "type": "file", "required": true}
-                ]
-            }
+{
+  "repair_stage_failure_reporting": {
+    "name": "Failure Reporting",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "Failure Details",
+        "fields": [
+          {"key": "failure_date", "label": "Failure Date", "type": "date", "required": true},
+          {"key": "failure_description", "label": "Failure Description", "type": "textarea", "required": true},
+          {"key": "failure_report_doc", "label": "Failure Report Document", "type": "file", "required": true}
         ]
-    },
+      }
+    ]
+  },
 
-    "repair_stage_committee_review": {
-        "name": "Committee Review",
-        "template_type": "repair_stage",
-        "sections": [
-            {
-                "title": "Committee Decision",
-                "fields": [
-                   {"key": "meeting_date", "label": "Meeting Date", "type": "date", "required": true},
-
-                    {"key": "decision", "label": "Decision", "type": "dropdown", "required": true,
-                     "options": ["Repair", "Scrap", "Further Inspection"]},
-                    {"key": "minutes_doc", "label": "Minutes", "type": "file", "required": true}
-                ]
-            }
+  "repair_stage_committee_review": {
+    "name": "Committee Review",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "Committee Decision",
+        "fields": [
+          {"key": "meeting_date", "label": "Meeting Date", "type": "date", "required": true},
+          {
+            "key": "decision",
+            "label": "Decision",
+            "type": "select",
+            "required": true,
+            "options": ["Repair", "Scrap", "Further Inspection"]
+          },
+          {"key": "minutes_doc", "label": "Minutes Document", "type": "file", "required": true}
         ]
-    },
+      }
+    ]
+  },
 
-    "repair_stage_vendor_assignment": {
-        "name": "Vendor Assignment",
-        "template_type": "repair_stage",
-        "sections": [
-            {
-                "title": "Assignment",
-                "fields": [
-                    {"key": "vendor_name", "type": "text", "required": true},
-                    {"key": "assignment_letter", "type": "file", "required": true}
-                ]
-            }
+  "repair_stage_vendor_assignment": {
+    "name": "Vendor Assignment",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "Assignment",
+        "fields": [
+          {"key": "vendor_name", "label": "Vendor Name", "type": "text", "required": true},
+          {"key": "assignment_letter", "label": "Assignment Letter", "type": "file", "required": true}
         ]
-    },
+      }
+    ]
+  },
 
-    "repair_stage_lifting": {
-        "name": "Lifting",
-        "template_type": "repair_stage",
-        "sections": [
-            {
-                "title": "Transport",
-                "fields": [
-                    {"key": "lifting_date", "type": "date", "required": true},
-                    {"key": "vehicle_number", "type": "text", "required": true},
-                    {"key": "driver_name", "type": "text", "required": true},
-                    {"key": "dispatch_document", "type": "file", "required": true}
-                ]
-            }
+  "repair_stage_lifting": {
+    "name": "Lifting",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "Transport Details",
+        "fields": [
+          {"key": "lifting_date", "label": "Lifting Date", "type": "date", "required": true},
+          {"key": "vehicle_number", "label": "Vehicle Number", "type": "text", "required": true},
+          {"key": "driver_name", "label": "Driver Name", "type": "text", "required": true},
+          {"key": "dispatch_document", "label": "Dispatch Document", "type": "file", "required": true}
         ]
-    },
+      }
+    ]
+  },
 
-    "repair_stage_joint_inspection": {
-        "name": "Joint Inspection",
-        "template_type": "repair_stage",
-        "sections": [
-            {
-                "title": "Inspection",
-                "fields": [
-                    {"key": "inspection_date", "type": "date", "required": true},
-                    {"key": "inspection_report", "type": "file", "required": true}
-                ]
-            }
+  "repair_stage_joint_inspection": {
+    "name": "Joint Inspection",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "Inspection Details",
+        "fields": [
+          {"key": "inspection_date", "label": "Inspection Date", "type": "date", "required": true},
+          {"key": "inspection_report", "label": "Inspection Report", "type": "file", "required": true}
         ]
-    },
+      }
+    ]
+  },
 
-    "repair_stage_estimate": {
-        "name": "Estimate",
-        "template_type": "repair_stage",
-        "sections": [
-            {
-                "title": "Estimate",
-                "fields": [
-                    {"key": "estimated_cost", "type": "number", "required": true},
-                    {"key": "estimate_document", "type": "file", "required": true},
-                    {"key": "work_award_letter", "type": "file", "required": true}
-                ]
-            }
+  "repair_stage_estimate": {
+    "name": "Estimate & Work Award",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "Estimate Details",
+        "fields": [
+          {"key": "estimated_cost", "label": "Estimated Cost", "type": "number", "required": true},
+          {"key": "estimate_document", "label": "Estimate Document", "type": "file", "required": true},
+          {"key": "work_award_letter", "label": "Work Award Letter", "type": "file", "required": true}
         ]
-    },
+      }
+    ]
+  },
 
-    "repair_stage_qa": {
-        "name": "Repair QA",
-        "template_type": "repair_stage",
-        "sections": [
-            {
-                "title": "QA",
-                "fields": [
-                    {"key": "inspection_notes", "type": "textarea"},
-                    {"key": "inspection_report", "type": "file", "required": true}
-                ]
-            }
+  "repair_stage_qa": {
+    "name": "Repair QA",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "QA Inspection",
+        "fields": [
+          {"key": "inspection_notes", "label": "Inspection Notes", "type": "textarea"},
+          {"key": "inspection_report", "label": "Inspection Report", "type": "file", "required": true}
         ]
-    },
+      }
+    ]
+  },
 
-    "repair_stage_final_inspection": {
-        "name": "Final Inspection",
-        "template_type": "repair_stage",
-        "sections": [
-            {
-                "title": "Final",
-                "fields": [
-                    {"key": "final_inspection_date", "type": "date", "required": true},
-                    {"key": "final_report", "type": "file", "required": true}
-                ]
-            }
+  "repair_stage_final_inspection": {
+    "name": "Final Inspection",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "Final Inspection",
+        "fields": [
+          {"key": "final_inspection_date", "label": "Final Inspection Date", "type": "date", "required": true},
+          {"key": "final_report", "label": "Final Report", "type": "file", "required": true}
         ]
-    },
+      }
+    ]
+  },
 
-    "repair_stage_dispatch": {
-        "name": "Dispatch",
-        "template_type": "repair_stage",
-        "sections": [
-            {
-                "title": "Dispatch",
-                "fields": [
-                    {"key": "dispatch_date", "type": "date", "required": true},
-                    {"key": "transport_details", "type": "text"},
-                    {"key": "insurance_document", "type": "file", "required": true}
-                ]
-            }
+  "repair_stage_dispatch": {
+    "name": "Dispatch",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "Dispatch Details",
+        "fields": [
+          {"key": "dispatch_date", "label": "Dispatch Date", "type": "date", "required": true},
+          {"key": "transport_details", "label": "Transport Details", "type": "text"},
+          {"key": "insurance_document", "label": "Insurance Document", "type": "file", "required": true}
         ]
-    },
+      }
+    ]
+  },
 
-    "repair_stage_commissioning": {
-        "name": "Commissioning",
-        "template_type": "repair_stage",
-        "sections": [
-            {
-                "title": "Commissioning",
-                "fields": [
-                    {"key": "commissioning_date", "type": "date", "required": true},
-                    {"key": "test_results", "type": "file", "required": true},
-                    {"key": "remarks", "type": "textarea"}
-                ]
-            }
+  "repair_stage_commissioning": {
+    "name": "Commissioning",
+    "template_type": "repair_stage",
+    "category_code": "TRANSFORMER",
+    "category_detail_code": "POWER_TRANSFORMER",
+    "sections": [
+      {
+        "title": "Commissioning",
+        "fields": [
+          {"key": "commissioning_date", "label": "Commissioning Date", "type": "date", "required": true},
+          {"key": "test_results", "label": "Test Results", "type": "file", "required": true},
+          {"key": "remarks", "label": "Remarks", "type": "textarea"}
         ]
-    }
+      }
+    ]
+  }
 }
