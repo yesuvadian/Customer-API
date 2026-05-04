@@ -10,7 +10,7 @@ from fastapi.security import HTTPBearer
 from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
-from routers import websocket_routes
+from routers import repair_workflow, websocket_routes
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.test_request_schedule_service import TestRequestScheduleService
 
@@ -470,6 +470,7 @@ app.include_router(workflows.router)
 
 # WebSocket
 app.include_router(websocket_routes.router)
+app.include_router(repair_workflow.router)
 
 # ✅ Vendor Directory — fetches vendors from supplier portal
 app.include_router(vendor_directory_router)

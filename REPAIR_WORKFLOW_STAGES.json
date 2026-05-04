@@ -1,0 +1,12 @@
+ [
+    {"code": "FAILURE_REPORT", "name": "Failure Reporting", "sequence": 1, "template_key": "repair_stage_failure_reporting"},
+    {"code": "COMMITTEE_REVIEW", "name": "Committee Review", "sequence": 2, "template_key": "repair_stage_committee_review"},
+    {"code": "VENDOR_ASSIGNMENT", "name": "Vendor Assignment", "sequence": 3, "template_key": "repair_stage_vendor_assignment"},
+    {"code": "LIFTING", "name": "Lifting", "sequence": 4, "template_key": "repair_stage_lifting"},
+    {"code": "JOINT_INSPECTION", "name": "Joint Inspection", "sequence": 5, "template_key": "repair_stage_joint_inspection"},
+    {"code": "ESTIMATE", "name": "Estimate", "sequence": 6, "template_key": "repair_stage_estimate"},
+    {"code": "QA", "name": "Repair QA", "sequence": 7, "template_key": "repair_stage_qa"},
+    {"code": "FINAL_INSPECTION", "name": "Final Inspection", "sequence": 8, "template_key": "repair_stage_final_inspection"},
+    {"code": "DISPATCH", "name": "Dispatch", "sequence": 9, "template_key": "repair_stage_dispatch"},
+    {"code": "COMMISSIONING", "name": "Commissioning", "sequence": 10, "template_key": "repair_stage_commissioning"}
+]

@@ -1125,26 +1125,62 @@ def seed_users(session):
 
 def seed_roles(session):
     roles_data = [
-        {"name": "Admin", "description": "Full access to all modules"},
-        {"name": "Viewer", "description": "Read-only access"},
-        {"name": "Operator", "description": "Can scan and submit inventory"},
-        {"name": "Auditor", "description": "Can view scan history and audit trails"},
-        {"name": "Vendor", "description": "Can have access over products"},
-         # ✅ ERP SERVICE ROLE
-        {"name": "ERP_SERVICE", "description": "Automated ERP sync service"},
-        # ✅ TESTING REQUEST SYSTEM ROLES
-        {"name": "Originator", "description": "Creates testing requests and raises procurement"},
-        {"name": "Tester", "description": "Performs transformer testing and uploads results"},
-        {"name": "Approver", "description": "Reviews and approves or rejects recommendations"},
-        # ✅ SRS-SPECIFIED DESIGNATION ROLES (SEACMS-AI v1.3 Section 2.3)
-        {"name": "AEE Maintenance", "description": "Assistant Executive Engineer - Field-level maintenance responsible officer"},
-        {"name": "EE TLSS", "description": "Executive Engineer - Transmission Line & Substation primary reviewer"},
-        {"name": "SEE W&M", "description": "Superintending Engineer - Works & Maintenance circle supervisor"},
-        {"name": "EE RT", "description": "Executive Engineer - Research & Testing"},
-        {"name": "SEE RT", "description": "Superintending Engineer - Research & Testing"},
-        {"name": "CEE Transmission Zone", "description": "Chief Engineer Executive - Transmission zone management"},
-        {"name": "CEE RT&R&D", "description": "Chief Engineer Executive - Research Testing & R&D"},
-    ]
+
+    # =========================
+    # 🔐 SYSTEM ROLES
+    # =========================
+    {"name": "ADMIN", "description": "Full access to all modules"},
+    {"name": "VIEWER", "description": "Read-only access"},
+    {"name": "OPERATOR", "description": "Can scan and submit inventory"},
+    {"name": "AUDITOR", "description": "Can view scan history and audit trails"},
+
+    # =========================
+    # 🏭 EXTERNAL / SERVICE
+    # =========================
+    {"name": "VENDOR", "description": "Approved repair vendor with access to assigned transformers"},
+    {"name": "ERP_SERVICE", "description": "Automated ERP sync service"},
+
+    # =========================
+    # 🧪 TESTING WORKFLOW ROLES
+    # =========================
+    {"name": "ORIGINATOR", "description": "Creates testing requests and raises procurement"},
+    {"name": "TESTER", "description": "Performs transformer testing and uploads results"},
+    {"name": "APPROVER", "description": "Reviews and approves or rejects recommendations"},
+
+    # =========================
+    # ⚡ KPTCL FIELD ROLES
+    # =========================
+    {"name": "AE_JE", "description": "Assistant Engineer / Junior Engineer - failure reporting & commissioning"},
+    {"name": "AEE_MAINTENANCE", "description": "Assistant Executive Engineer - field maintenance authority"},
+    {"name": "EE_TLSS", "description": "Executive Engineer - Transmission Line & Substation reviewer"},
+    {"name": "SEE_WM", "description": "Superintending Engineer - Works & Maintenance supervisor"},
+
+    # =========================
+    # 🧠 TECHNICAL / COMMITTEE
+    # =========================
+    {"name": "TRC_MEMBER", "description": "Transformer Repair Committee member responsible for stage review decisions"},
+
+    # =========================
+    # 🧪 INSPECTION & QA
+    # =========================
+    {"name": "INSPECTION_ENGINEER", "description": "Performs joint and final inspections"},
+    {"name": "QA_TEAM", "description": "Performs stage-wise quality inspections during repair"},
+
+    # =========================
+    # 💰 FINANCE
+    # =========================
+    {"name": "FINANCE_OFFICER", "description": "Approves estimates and financial sanction for repair"},
+
+    # =========================
+    # 🏢 SPECIALIZED ENGINEERING (R&D / TRANSMISSION)
+    # =========================
+    {"name": "EE_RT", "description": "Executive Engineer - Research & Testing"},
+    {"name": "SEE_RT", "description": "Superintending Engineer - Research & Testing"},
+
+    {"name": "CEE_TRANSMISSION_ZONE", "description": "Chief Engineer Executive - Transmission zone authority"},
+    {"name": "CEE_RT_RD", "description": "Chief Engineer Executive - Research, Testing & R&D"}
+
+]
 
     role_ids = {}
     for r in roles_data:

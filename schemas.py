@@ -597,6 +597,35 @@ class UserResponse(BaseModel):
 
 
 
+
+class RepairWorkflowResponse(BaseModel):
+    id: UUID
+    testing_request_id: UUID
+    equipment_id: Optional[UUID] = None
+
+    current_stage: int
+    status: str  # active / completed / rejected
+    progress: int
+
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    # Audit fields (aligned with your system)
+    created_by: Optional[UUID] = None
+    modified_by: Optional[UUID] = None
+    created_at: Optional[datetime] = None
+    modified_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RepairWorkflowCreate(BaseModel):
+    testing_request_id: UUID
+    equipment_id: Optional[UUID] = None  # optional (if not already in request)
+
+    class Config:
+        from_attributes = True
     
 class LoginResponse(BaseModel):
     access_token: str
