@@ -4640,7 +4640,65 @@ def seed_kptcl_organization(session):
     print(f"[OK] Created {created_users} KPTCL field/lab tester users and assigned roles")
 
     return org
+# ---------------------------------------------------------------------------
+# ADD: Notifications Module + Role Mapping
+# ---------------------------------------------------------------------------
 
+def seed_notifications_module_and_permissions(session):
+    # 1. Ensure Module exists
+    notifications_module = session.query(Module).filter_by(name="Notifications").first()
+    if not notifications_module:
+        notifications_module = Module(
+            name="Notifications",
+            route="/notifications",
+            description="Notifications screen"
+        )
+        session.add(notifications_module)
+        session.flush()  # ensures ID is available
+
+    # 2. Get Org Admin role (org-level)
+    org_admin_role = session.query(OrgRole).filter_by(name="Org Admin").first()
+
+    if org_admin_role:
+        existing_perm = session.query(OrgRolePermission).filter_by(
+            role_id=org_admin_role.id,
+            module_id=notifications_module.id
+        ).first()
+
+        if not existing_perm:
+            session.add(
+                OrgRolePermission(
+                    role_id=org_admin_role.id,
+                    module_id=notifications_module.id,
+                    can_view=True,
+                    can_create=True,
+                    can_edit=True,
+                    can_delete=True
+                )
+            )
+
+    # 3. (Optional but recommended) Global role mapping
+    global_org_admin_role = session.query(Role).filter_by(name="Org Admin").first()
+
+    if global_org_admin_role:
+        existing_global_perm = session.query(RoleModulePrivilege).filter_by(
+            role_id=global_org_admin_role.id,
+            module_id=notifications_module.id
+        ).first()
+
+        if not existing_global_perm:
+            session.add(
+                RoleModulePrivilege(
+                    role_id=global_org_admin_role.id,
+                    module_id=notifications_module.id,
+                    can_view=True,
+                    can_create=True,
+                    can_edit=True,
+                    can_delete=True
+                )
+            )
+
+    session.commit()
 
 def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     """
@@ -5402,7 +5460,7 @@ def run_seed():
 
         # Zoho Import Mapping (after KPTCL org + departments exist)
         seed_zoho_import_mapping(session, kptcl_org)
-
+        seed_notifications_module_and_permissions(session)
         # Org role permissions — AFTER all orgs + org_roles are created
         # DISABLED: This grants VIEW to ALL modules for ALL roles, breaking RBAC
         # Proper permissions are already set via role templates during org role provisioning
