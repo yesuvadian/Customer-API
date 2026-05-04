@@ -4645,7 +4645,9 @@ def seed_kptcl_organization(session):
 # ---------------------------------------------------------------------------
 
 def seed_notifications_module_and_permissions(session):
+    # ─────────────────────────────────────────────────────────────
     # 1. Ensure Module exists
+    # ─────────────────────────────────────────────────────────────
     notifications_module = session.query(Module).filter_by(name="Notifications").first()
     if not notifications_module:
         notifications_module = Module(
@@ -4654,49 +4656,66 @@ def seed_notifications_module_and_permissions(session):
             description="Notifications screen"
         )
         session.add(notifications_module)
-        session.flush()  # ensures ID is available
+        session.flush()
 
-    # 2. Get Org Admin role (org-level)
-    org_admin_role = session.query(OrgRole).filter_by(name="Org Admin").first()
+    # ─────────────────────────────────────────────────────────────
+    # 2. Get KPTCL org
+    # ─────────────────────────────────────────────────────────────
+    kptcl_org = session.query(Organization).filter_by(name="KPTCL").first()
+    if not kptcl_org:
+        raise Exception("KPTCL organization not found")
 
-    if org_admin_role:
-        existing_perm = session.query(OrgRolePermission).filter_by(
-            role_id=org_admin_role.id,
-            module_id=notifications_module.id
-        ).first()
+    # ─────────────────────────────────────────────────────────────
+    # 3. Get user
+    # ─────────────────────────────────────────────────────────────
+    user = session.query(User).filter_by(email="orgadmin@kptcl.com").first()
+    if not user:
+        raise Exception("User orgadmin@kptcl.com not found")
 
-        if not existing_perm:
-            session.add(
-                OrgRolePermission(
-                    role_id=org_admin_role.id,
-                    module_id=notifications_module.id,
-                    can_view=True,
-                    can_create=True,
-                    can_edit=True,
-                    can_delete=True
-                )
+    # ─────────────────────────────────────────────────────────────
+    # 4. Validate user belongs to KPTCL org
+    # ─────────────────────────────────────────────────────────────
+    org_user_role = session.query(OrgUserRole).filter_by(
+        user_id=user.id,
+        organization_id=kptcl_org.id
+    ).first()
+
+    if not org_user_role:
+        raise Exception("User is not part of KPTCL organization")
+
+    # ─────────────────────────────────────────────────────────────
+    # 5. Get Org Admin role (ORG-SCOPED)
+    # ─────────────────────────────────────────────────────────────
+    org_admin_role = session.query(OrgRole).filter_by(
+        organization_id=kptcl_org.id,
+        name="Org Admin",
+        is_active=True
+    ).first()
+
+    if not org_admin_role:
+        raise Exception("Org Admin role not found for KPTCL")
+
+    # ─────────────────────────────────────────────────────────────
+    # 6. Assign permission (ORG-SCOPED)
+    # ─────────────────────────────────────────────────────────────
+    existing_perm = session.query(OrgRolePermission).filter_by(
+        org_role_id=org_admin_role.id,
+        module_id=notifications_module.id
+    ).first()
+
+    if not existing_perm:
+        session.add(
+            OrgRolePermission(
+                org_role_id=org_admin_role.id,
+                module_id=notifications_module.id,
+                can_view=True,
+                can_create=False,
+                can_edit=False,
+                can_delete=False
+                # 🔥 Add this IF your model has it:
+                # organization_id=kptcl_org.id
             )
-
-    # 3. (Optional but recommended) Global role mapping
-    global_org_admin_role = session.query(Role).filter_by(name="Org Admin").first()
-
-    if global_org_admin_role:
-        existing_global_perm = session.query(RoleModulePrivilege).filter_by(
-            role_id=global_org_admin_role.id,
-            module_id=notifications_module.id
-        ).first()
-
-        if not existing_global_perm:
-            session.add(
-                RoleModulePrivilege(
-                    role_id=global_org_admin_role.id,
-                    module_id=notifications_module.id,
-                    can_view=True,
-                    can_create=True,
-                    can_edit=True,
-                    can_delete=True
-                )
-            )
+        )
 
     session.commit()
 
