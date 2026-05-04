@@ -322,10 +322,28 @@ class EquipmentService:
         old_equipment_id: UUID,
         reason: str,
         created_by: Optional[UUID] = None,
+        reason_type: str = "other",
+        recommendation_id: Optional[UUID] = None,
+        analysis_report_path: Optional[str] = None,
         **new_equipment_kwargs,
     ) -> tuple:
-        """Retire old equipment and register a new replacement. Returns (old, new)."""
+        """Retire old equipment and register a new replacement. Returns (old, new).
+
+        When reason_type='recommendation_compliance' and recommendation_id is set,
+        the originating Recommendation row is auto-closed (approval_status='fulfilled').
+        """
         old = cls.retire_equipment(db, old_equipment_id, reason, modified_by=created_by)
+
+        # Auto-close the originating recommendation
+        if reason_type == "recommendation_compliance" and recommendation_id:
+            try:
+                from models import Recommendation
+                rec = db.query(Recommendation).filter(Recommendation.id == recommendation_id).first()
+                if rec:
+                    rec.approval_status = "fulfilled"
+                    db.flush()
+            except Exception:
+                pass  # Non-fatal: recommendation link is informational
 
         # Create replacement with same location and type
         new_kwargs = {
@@ -339,7 +357,15 @@ class EquipmentService:
         new_kwargs.update(new_equipment_kwargs)
 
         new_equipment = cls.create_equipment(db, **new_kwargs)
+        # Forward link: new equipment records which unit it replaced
         new_equipment.replaces_equipment_id = old.id
+        new_equipment.replacement_reason_type = reason_type
+        if recommendation_id:
+            new_equipment.replacement_recommendation_id = recommendation_id
+        if analysis_report_path:
+            new_equipment.analysis_report_path = analysis_report_path
+        # Reverse link: retired equipment records which unit replaced it
+        old.replaced_by_id = new_equipment.id
         db.flush()
 
         return old, new_equipment

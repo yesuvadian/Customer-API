@@ -4,7 +4,17 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from models import Recommendation, RecommendationType, TestingRequest, TestingRequestStatus, TestResult, User
+from datetime import datetime, timezone
+
+from models import (
+    Recommendation,
+    RecommendationType,
+    RequestCategory,
+    TestingRequest,
+    TestingRequestStatus,
+    TestResult,
+    User,
+)
 from utils.common_service import UTCDateTimeMixin
 
 
@@ -203,7 +213,7 @@ class ApprovalService:
 
     def approve_recommendation(
         self, recommendation_id: UUID, approver_id: UUID, notes: Optional[str] = None
-    ) -> Recommendation:
+    ) -> dict:
         rec = self.db.query(Recommendation).filter(Recommendation.id == recommendation_id).first()
         if not rec:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found")
@@ -236,7 +246,133 @@ class ApprovalService:
             except Exception as _n:
                 print(f"[WARN] recommendation_approved notification failed: {_n}")
 
-        return rec
+        # ── Failure Registry post-approval logic ──────────────────────────────
+        # If this is a failure_registry direct submission, read the outcome from
+        # the test_data JSONB and optionally auto-create a repair_lifecycle TR.
+        fr_outcome = None
+        fr_number = None
+        fr_equipment_ueic = None
+        fr_failure_category = None
+        fr_failure_date = None
+        auto_repair_tr_number = None
+
+        if request and request.request_category == RequestCategory.failure_registry:
+            # Pull the latest TestResult to read test_data
+            tr_result = (
+                self.db.query(TestResult)
+                .filter(TestResult.testing_request_id == request.id)
+                .order_by(TestResult.tested_at.desc())
+                .first()
+            )
+            td = tr_result.test_data if tr_result and tr_result.test_data else {}
+
+            fr_outcome = (td.get("outcome") or "").strip()
+            fr_failure_category = td.get("failure_category")
+            fr_failure_date = td.get("failure_date")
+            fr_number = request.request_number
+            fr_equipment_ueic = (
+                request.equipment.ueic if request.equipment else None
+            )
+
+            if fr_outcome.lower() == "repair":
+                # Auto-create a repair_lifecycle TestingRequest so it appears
+                # in the TR assigner queue immediately after FR approval.
+                auto_repair_tr_number = self._create_repair_tr(
+                    source_request=request,
+                    td=td,
+                    approver_id=approver_id,
+                )
+
+            # Notify the FR submitter of the approval outcome
+            try:
+                from services.notification_service import NotificationService
+                submitter = self.db.query(User).filter(
+                    User.id == request.originator_id
+                ).first() if request.originator_id else None
+                if submitter:
+                    NotificationService(self.db).fire(
+                        event_type="fr_approved",
+                        context={"fr_number": fr_number or "", "outcome": fr_outcome or "Approved"},
+                        organization_id=request.organization_id,
+                        source_id=request.id,
+                        source_type="testing_request",
+                        severity="info",
+                        extra_recipients=[submitter],
+                    )
+            except Exception as _n:
+                print(f"[WARN] fr_approved notification failed: {_n}")
+
+        return {
+            "id": str(rec.id),
+            "testing_request_id": str(rec.testing_request_id),
+            "recommendation_type": rec.recommendation_type.value if rec.recommendation_type else None,
+            "approval_status": rec.approval_status,
+            "approved_by": str(rec.approved_by) if rec.approved_by else None,
+            "approved_at": rec.approved_at.isoformat() if rec.approved_at else None,
+            "approval_notes": rec.approval_notes,
+            # Failure Registry extras (null for non-FR approvals)
+            "fr_outcome": fr_outcome or None,
+            "fr_number": fr_number,
+            "fr_equipment_ueic": fr_equipment_ueic,
+            "fr_failure_category": fr_failure_category,
+            "fr_failure_date": fr_failure_date,
+            "auto_created_repair_tr": auto_repair_tr_number,
+        }
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _generate_tr_number(self, prefix: str) -> str:
+        """Generate a sequential request number like RL-20260501-0001."""
+        from sqlalchemy import func
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        count = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.request_number.like(f"{prefix}-{today}-%"))
+            .scalar()
+        )
+        return f"{prefix}-{today}-{(count + 1):04d}"
+
+    def _create_repair_tr(
+        self,
+        source_request: TestingRequest,
+        td: dict,
+        approver_id: UUID,
+    ) -> str:
+        """Auto-create a repair_lifecycle TestingRequest linked to an approved FR-."""
+        from sqlalchemy import func
+
+        now = datetime.now(timezone.utc)
+        rn = self._generate_tr_number("RL")
+
+        failure_category = td.get("failure_category", "")
+        failure_date = td.get("failure_date", "")
+        fr_title = source_request.title or source_request.request_number
+
+        repair_tr = TestingRequest(
+            request_number=rn,
+            title=f"[Repair] {fr_title}",
+            description=(
+                f"Auto-created from Failure Registry approval.\n"
+                f"Source FR: {source_request.request_number}\n"
+                f"Failure Category: {failure_category}\n"
+                f"Failure Date: {failure_date}"
+            ),
+            request_category=RequestCategory.repair_lifecycle,
+            equipment_id=source_request.equipment_id,
+            organization_id=source_request.organization_id,
+            department_id=source_request.department_id,
+            priority=source_request.priority or "normal",
+            status=TestingRequestStatus.submitted,   # → lands in assigner queue
+            is_direct_submission=False,
+            source_failure_id=source_request.id,     # traceability FK
+            originator_id=source_request.originator_id,
+            created_by=approver_id,
+            requested_date=now,
+        )
+        self.db.add(repair_tr)
+        self.db.commit()
+        self.db.refresh(repair_tr)
+        return repair_tr.request_number
 
     def get_approval_stats(self, approver_id: UUID = None) -> dict:
         """Return approval counts: pending, approved, rejected, total_reviewed."""
@@ -311,4 +447,28 @@ class ApprovalService:
 
         self.db.commit()
         self.db.refresh(rec)
+
+        # Notify the submitter of rejection
+        if request and request.request_category == RequestCategory.failure_registry:
+            try:
+                from services.notification_service import NotificationService
+                submitter = self.db.query(User).filter(
+                    User.id == request.originator_id
+                ).first() if request.originator_id else None
+                if submitter:
+                    NotificationService(self.db).fire(
+                        event_type="fr_rejected",
+                        context={
+                            "fr_number": request.request_number,
+                            "reason": notes or "No reason provided",
+                        },
+                        organization_id=request.organization_id,
+                        source_id=request.id,
+                        source_type="testing_request",
+                        severity="alert",
+                        extra_recipients=[submitter],
+                    )
+            except Exception as _n:
+                print(f"[WARN] fr_rejected notification failed: {_n}")
+
         return rec

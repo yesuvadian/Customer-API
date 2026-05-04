@@ -16,7 +16,8 @@ Access is role-gated inside the service layer.
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -93,6 +94,29 @@ def list_direct_submissions(
         limit=limit,
         own_only=own_only,
     )
+
+
+@router.post("/{submission_id}/attach")
+async def attach_file(
+    submission_id: UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload a file attachment (photo, PDF, or document) to a direct submission."""
+    svc = DirectSubmissionService(db)
+    return await svc.attach_file(submission_id, file, current_user)
+
+
+@router.get("/{submission_id}/attachment")
+def download_attachment(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Download the file attachment for a direct submission."""
+    svc = DirectSubmissionService(db)
+    return svc.get_attachment(submission_id, current_user)
 
 
 @router.get("/{submission_id}")

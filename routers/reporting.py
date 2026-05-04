@@ -71,6 +71,21 @@ QUERY_KEYS = [
      "label": "Equipment Failure Performance Analysis",
      "description": "On-demand comparative failure-rate analysis across makes, types, "
                     "voltage classes, and age bands. Supports date range and dimension filters."},
+    # §3.3.4 Failure Resolution
+    {"key": "failure_resolution_report",
+     "label": "Failure Resolution Report",
+     "description": "End-to-end traceability report: each Failure Registry (FR-) record "
+                    "with its outcome (Repair / Replacement / Under Investigation) and the "
+                    "linked Repair Lifecycle work order status. "
+                    "Parameters: date_from, date_to (failure_date), outcome (all | Repair | "
+                    "Replacement | Under Investigation)."},
+    # §3.5 Equipment Lifecycle
+    {"key": "equipment_lifecycle_report",
+     "label": "Equipment Lifecycle Summary",
+     "description": "One row per equipment unit: commissioned date, test count, failure count, "
+                    "last test result, and current status. "
+                    "Parameters: status, voltage_class, department_id, date_from, date_to "
+                    "(commissioned date range)."},
 ]
 
 

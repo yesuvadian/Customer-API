@@ -240,6 +240,13 @@ class DirectSubmissionService:
         self.db.refresh(req)
         self.db.refresh(result)
 
+        # Notify approvers that a new submission is pending
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).notify_request_submitted(req)
+        except Exception as _n:
+            print(f"[WARN] request_submitted notification failed: {_n}")
+
         return {
             "request_id": str(req.id),
             "result_id": str(result.id),
@@ -377,4 +384,86 @@ class DirectSubmissionService:
             "test_data": result.test_data if result else {},
             "overall_result": result.overall_result if result else None,
             "remarks": result.remarks if result else None,
+
+            # Attachment metadata (file_data itself is not serialised here)
+            "has_attachment": bool(result and result.file_data),
+            "attachment_name": result.file_name if result else None,
+            "attachment_size": result.file_size if result else None,
+            "attachment_type": result.file_type if result else None,
         }
+
+    # ── file attachment ───────────────────────────────────────────────────────
+
+    async def attach_file(
+        self,
+        request_id: UUID,
+        file,          # UploadFile — typed loosely to avoid import cycle
+        user: User,
+    ) -> dict:
+        """Store a file attachment on the TestResult linked to this submission."""
+        req = (
+            self.db.query(TestingRequest)
+            .filter(
+                TestingRequest.id == request_id,
+                TestingRequest.is_direct_submission.is_(True),
+            )
+            .first()
+        )
+        if not req:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Submission not found",
+            )
+
+        result = (
+            self.db.query(TestResult)
+            .filter(TestResult.testing_request_id == request_id)
+            .order_by(TestResult.tested_at.desc())
+            .first()
+        )
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="TestResult not found for this submission",
+            )
+
+        # Read and store
+        data = await file.read()
+        result.file_name = file.filename
+        result.file_type = file.content_type or "application/octet-stream"
+        result.file_size = len(data)
+        result.file_data = data
+        self.db.commit()
+
+        return {
+            "file_name": file.filename,
+            "file_size": len(data),
+            "file_type": file.content_type,
+        }
+
+    def get_attachment(self, request_id: UUID, user: User):
+        """Return the binary file attachment for a submission."""
+        from fastapi.responses import Response as FastResponse
+
+        result = (
+            self.db.query(TestResult)
+            .filter(TestResult.testing_request_id == request_id)
+            .order_by(TestResult.tested_at.desc())
+            .first()
+        )
+        if not result or not result.file_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No attachment found for this submission",
+            )
+
+        fname = result.file_name or "attachment"
+        ctype = result.file_type or "application/octet-stream"
+        return FastResponse(
+            content=bytes(result.file_data),
+            media_type=ctype,
+            headers={
+                "Content-Disposition": f'attachment; filename="{fname}"',
+                "Content-Length": str(result.file_size or len(result.file_data)),
+            },
+        )

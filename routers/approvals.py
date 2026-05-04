@@ -91,13 +91,24 @@ def get_recommendation_by_request(
     return service.get_approval_detail(rec.id)
 
 
-@router.put("/{recommendation_id}/approve", response_model=RecommendationResponse)
+@router.put("/{recommendation_id}/approve")
 def approve_recommendation(
     recommendation_id: UUID,
     data: ApprovalAction,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Approve a recommendation.
+
+    For Failure Registry (FR-) records the response includes extra fields:
+      fr_outcome            — "repair" | "replacement" | "under_investigation" | …
+      fr_number             — the FR- request number
+      fr_equipment_ueic     — UEIC of the failed equipment
+      fr_failure_category   — e.g. "Electrical"
+      fr_failure_date       — ISO date string from test_data
+      auto_created_repair_tr — RL- request number if a repair TR was auto-created
+    """
     service = ApprovalService(db)
     return service.approve_recommendation(
         recommendation_id=recommendation_id,

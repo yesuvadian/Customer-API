@@ -362,6 +362,13 @@ def get_aee_dashboard(
             'last_session_date': last_session_date,
         })
 
+    # Failure Registry pending (status = under_approval)
+    fr_pending = db.query(func.count(TestingRequest.id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        TestingRequest.request_category == 'failure_registry',
+        TestingRequest.status == 'under_approval',
+    ).scalar() or 0
+
     # Equipment status breakdown
     operational = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
@@ -381,6 +388,7 @@ def get_aee_dashboard(
             'assigned_tests': assigned_tests,
             'equipment_count': equipment_count,
             'maintenance_due': maintenance_due,
+            'fr_pending': fr_pending,
         },
         'assignments': assignments_list,
         'equipment_status': {
@@ -475,6 +483,13 @@ def get_ee_tlss_dashboard(
     # AI Predictions (placeholder - no AI model yet)
     ai_predictions = 0
 
+    # Failure Registry pending
+    fr_pending = db.query(func.count(TestingRequest.id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        TestingRequest.request_category == 'failure_registry',
+        TestingRequest.status == 'under_approval',
+    ).scalar() or 0
+
     # Overdue tests breakdown by age
     overdue_breakdown = []
     overdue_requests = db.query(TestingRequest).filter(
@@ -522,6 +537,7 @@ def get_ee_tlss_dashboard(
             'taqc_compliance': taqc_compliance,
             'equipment_monitored': total_equipment,
             'ai_predictions': ai_predictions,
+            'fr_pending': fr_pending,
         },
         'overdue_breakdown': overdue_breakdown,
         'alerts_feed': alerts_feed,
@@ -574,6 +590,13 @@ def get_see_dashboard(
         Equipment.status == 'under_repair'
     ).scalar() or 0
 
+    # Failure Registry pending
+    fr_pending = db.query(func.count(TestingRequest.id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        TestingRequest.request_category == 'failure_registry',
+        TestingRequest.status == 'under_approval',
+    ).scalar() or 0
+
     # Pending reviews list
     pending_reviews = db.query(TestingRequest).filter(
         TestingRequest.organization_id == svc.org_id,
@@ -598,6 +621,7 @@ def get_see_dashboard(
             'pending_approvals': pending_approvals,
             'critical_issues': critical_issues,
             'equipment_units': total_equipment,
+            'fr_pending': fr_pending,
         },
         'pending_reviews': reviews_list,
     }
@@ -636,6 +660,13 @@ def get_cee_dashboard(
         TestingRequest.status.in_(['submitted', 'pending_approval'])
     ).scalar() or 0
 
+    # Failure Registry pending
+    fr_pending = db.query(func.count(TestingRequest.id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        TestingRequest.request_category == 'failure_registry',
+        TestingRequest.status == 'under_approval',
+    ).scalar() or 0
+
     # Pending strategic decisions
     strategic_decisions = db.query(TestingRequest).filter(
         TestingRequest.organization_id == svc.org_id,
@@ -659,6 +690,7 @@ def get_cee_dashboard(
             'zone_reliability': zone_reliability,
             'major_decisions': major_decisions,
             'zone_equipment': zone_equipment,
+            'fr_pending': fr_pending,
         },
         'strategic_decisions': decisions_list,
     }

@@ -152,7 +152,34 @@ scheduler.add_job(
 )
 
 
-# Retry failed notifications (every 5 minutes)
+# ── Dispatch pending email/SMS notifications (every 1 minute) ────────────────
+# fire() only enqueues (status='pending'); this job does the actual sending.
+# Keeps notification logic completely out of the core API request path.
+def _process_pending_notifications():
+    db = SessionLocal()
+    try:
+        from services.notification_service import NotificationService
+        result = NotificationService(db).process_pending_notifications()
+        if result["total"]:
+            logger.info(
+                f"[Notif] Pending dispatch — "
+                f"sent={result['sent']} failed={result['failed']} skipped={result['skipped']}"
+            )
+    except Exception as e:
+        logger.error(f"[Notif] process_pending job error: {e}")
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _process_pending_notifications,
+    trigger="interval",
+    minutes=1,
+    id="notification_pending_job",
+)
+
+
+# ── Retry failed notifications (every 5 minutes) ─────────────────────────────
 def _retry_failed_notifications():
     db = SessionLocal()
     try:
@@ -455,16 +482,19 @@ async def startup_event():
         "[Scheduler] APScheduler started — "
         "daily test request job scheduled at 00:00 UTC"
     )
-    # Seed default notification templates (idempotent)
+    # Seed default notification templates + variables (idempotent)
     try:
         _db = SessionLocal()
-        from services.notification_service import seed_default_templates
-        seeded = seed_default_templates(_db)
-        if seeded:
-            logger.info(f"[Notif] Seeded {seeded} default notification template(s) on startup")
+        from services.notification_service import seed_default_templates, seed_default_variables
+        seeded_t = seed_default_templates(_db)
+        seeded_v = seed_default_variables(_db)
+        if seeded_t:
+            logger.info(f"[Notif] Seeded {seeded_t} default notification template(s) on startup")
+        if seeded_v:
+            logger.info(f"[Notif] Seeded {seeded_v} default notification variable(s) on startup")
         _db.close()
     except Exception as _e:
-        logger.warning(f"[Notif] Template seed failed on startup (non-fatal): {_e}")
+        logger.warning(f"[Notif] Seed failed on startup (non-fatal): {_e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

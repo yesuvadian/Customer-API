@@ -28,6 +28,991 @@ def get_db_session():
         session.close()
 
 
+# ---------------------------------------------------------------------------
+# Nameplate field-entry templates for 19 KPTCL substation equipment types.
+# Seeded into OrgTestTemplate (is_system=True, org_id=NULL) once at startup.
+# After seeding the DB row is the live source — this dict is seed-only.
+# ---------------------------------------------------------------------------
+
+NAMEPLATE_TEMPLATES = {
+
+    # ── 1. Power Transformer ─────────────────────────────────────────────────
+    "nameplate_power_transformer": {
+        "name": "Power Transformer",
+        "equipment_type": "Power Transformer",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",  "label": "Substation Name",  "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",        "label": "Bay Number",        "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",     "label": "Voltage Class",     "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                ]
+            },
+            {
+                "title": "Manufacturer Details",
+                "fields": [
+                    {"key": "manufacturer_name",    "label": "Manufacturer Name",     "type": "text",   "required": True,  "read_only": False},
+                    {"key": "country_of_origin",    "label": "Country of Origin",     "type": "text",   "required": False, "read_only": False},
+                    {"key": "year_of_manufacture",  "label": "Year of Manufacture",   "type": "number", "required": True,  "read_only": False},
+                    {"key": "factory_serial_number","label": "Factory Serial Number", "type": "text",   "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Transformer Type & Cooling",
+                "fields": [
+                    {"key": "type",           "label": "Transformer Type", "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["Auto", "Two-Winding", "Three-Winding"]},
+                    {"key": "cooling_class",  "label": "Cooling Class",    "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["ONAN", "ONAF", "ODAF", "OFAF"]},
+                    {"key": "rated_mva_onan", "label": "Rated MVA (ONAN)", "type": "number",   "required": True,  "read_only": False, "unit": "MVA"},
+                    {"key": "rated_mva_onaf", "label": "Rated MVA (ONAF)", "type": "number",   "required": False, "read_only": False, "unit": "MVA"},
+                    {"key": "rated_mva_odaf", "label": "Rated MVA (ODAF)", "type": "number",   "required": False, "read_only": False, "unit": "MVA"},
+                ]
+            },
+            {
+                "title": "Voltage & Current Ratings",
+                "fields": [
+                    {"key": "hv_voltage",  "label": "HV Voltage",  "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "mv_voltage",  "label": "MV Voltage",  "type": "number", "required": False, "read_only": False, "unit": "kV"},
+                    {"key": "lv_voltage",  "label": "LV Voltage",  "type": "number", "required": False, "read_only": False, "unit": "kV"},
+                    {"key": "hv_current",  "label": "HV Current",  "type": "number", "required": True,  "read_only": False, "unit": "A"},
+                    {"key": "mv_current",  "label": "MV Current",  "type": "number", "required": False, "read_only": False, "unit": "A"},
+                    {"key": "lv_current",  "label": "LV Current",  "type": "number", "required": False, "read_only": False, "unit": "A"},
+                ]
+            },
+            {
+                "title": "Electrical Characteristics",
+                "fields": [
+                    {"key": "vector_group",          "label": "Vector Group",      "type": "text",   "required": True,  "read_only": False},
+                    {"key": "impedance_voltage_pct", "label": "Impedance Voltage", "type": "number", "required": True,  "read_only": False, "unit": "%"},
+                    {"key": "no_load_loss",          "label": "No-Load Loss",      "type": "number", "required": False, "read_only": False, "unit": "kW"},
+                    {"key": "full_load_loss",        "label": "Full-Load Loss",    "type": "number", "required": False, "read_only": False, "unit": "kW"},
+                ]
+            },
+            {
+                "title": "OLTC Details",
+                "fields": [
+                    {"key": "oltc_make",          "label": "OLTC Make",          "type": "text",     "required": False, "read_only": False},
+                    {"key": "oltc_type",          "label": "OLTC Type",          "type": "text",     "required": False, "read_only": False},
+                    {"key": "oltc_rated_current", "label": "OLTC Rated Current", "type": "number",   "required": False, "read_only": False, "unit": "A"},
+                    {"key": "oltc_positions",     "label": "OLTC Positions",     "type": "number",   "required": False, "read_only": False},
+                    {"key": "oltc_drive_type",    "label": "OLTC Drive Type",    "type": "dropdown", "required": False, "read_only": False,
+                     "options": ["Motor", "Manual"]},
+                ]
+            },
+            {
+                "title": "Insulating Oil",
+                "fields": [
+                    {"key": "oil_type",                  "label": "Oil Type",           "type": "dropdown", "required": False, "read_only": False,
+                     "options": ["Mineral Oil", "Synthetic Ester", "Natural Ester"]},
+                    {"key": "oil_volume_litres",         "label": "Oil Volume",         "type": "number",   "required": False, "read_only": False, "unit": "L"},
+                    {"key": "conservator_volume_litres", "label": "Conservator Volume", "type": "number",   "required": False, "read_only": False, "unit": "L"},
+                ]
+            },
+            {
+                "title": "Commissioning & Procurement",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date",     "required": True,  "read_only": False},
+                    {"key": "po_number",             "label": "PO Number",             "type": "text",     "required": False, "read_only": False},
+                    {"key": "contract_number",       "label": "Contract Number",       "type": "text",     "required": False, "read_only": False},
+                    {"key": "vendor_ranking",        "label": "Vendor Ranking",        "type": "dropdown", "required": False, "read_only": False,
+                     "options": ["1", "2", "3", "4", "5"]},
+                    {"key": "warranty_expiry_date",  "label": "Warranty Expiry Date",  "type": "date",     "required": False, "read_only": False},
+                    {"key": "insurance_details",     "label": "Insurance Details",     "type": "textarea", "required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "sld_bay",          "label": "SLD of Bay",              "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 2. Circuit Breaker ───────────────────────────────────────────────────
+    "nameplate_circuit_breaker": {
+        "name": "Circuit Breaker",
+        "equipment_type": "Circuit Breaker",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",          "label": "Bay Number",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",       "label": "Voltage Class",       "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Ratings",
+                "fields": [
+                    {"key": "type",                   "label": "Breaker Type",            "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["SF6", "Vacuum", "Oil", "Air Blast"]},
+                    {"key": "number_of_poles",        "label": "Number of Poles",         "type": "number",   "required": True,  "read_only": False},
+                    {"key": "rated_voltage",          "label": "Rated Voltage",           "type": "number",   "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "rated_current",          "label": "Rated Current",           "type": "number",   "required": True,  "read_only": False, "unit": "A"},
+                    {"key": "rated_breaking_current", "label": "Rated Breaking Current",  "type": "number",   "required": True,  "read_only": False, "unit": "kA rms"},
+                    {"key": "rated_making_current",   "label": "Rated Making Current",    "type": "number",   "required": False, "read_only": False, "unit": "kA peak"},
+                    {"key": "short_circuit_duration", "label": "Short-Circuit Duration",  "type": "number",   "required": False, "read_only": False, "unit": "s"},
+                ]
+            },
+            {
+                "title": "Operating Mechanism",
+                "fields": [
+                    {"key": "mechanism_type",  "label": "Mechanism Type",  "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["Spring", "Hydraulic", "Pneumatic"]},
+                    {"key": "mechanism_make",  "label": "Mechanism Make",  "type": "text",     "required": False, "read_only": False},
+                    {"key": "mechanism_model", "label": "Mechanism Model", "type": "text",     "required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "SF6 Gas Details",
+                "fields": [
+                    {"key": "sf6_rated_pressure",      "label": "SF6 Rated Pressure",      "type": "number", "required": False, "read_only": False, "unit": "bar"},
+                    {"key": "sf6_alarm_pressure",      "label": "SF6 Alarm Pressure",      "type": "number", "required": False, "read_only": False, "unit": "bar"},
+                    {"key": "sf6_gas_weight_per_pole", "label": "SF6 Gas Weight per Pole", "type": "number", "required": False, "read_only": False, "unit": "kg"},
+                ]
+            },
+            {
+                "title": "Contacts & Coils",
+                "fields": [
+                    {"key": "close_coils_count",  "label": "Close Coils (Count)",  "type": "number", "required": False, "read_only": False},
+                    {"key": "trip_coils_count",   "label": "Trip Coils (Count)",   "type": "number", "required": False, "read_only": False},
+                    {"key": "aux_contact_config", "label": "Aux Contact Config",   "type": "text",   "required": False, "read_only": False},
+                    {"key": "contact_travel",     "label": "Contact Travel",       "type": "number", "required": False, "read_only": False, "unit": "mm"},
+                    {"key": "min_trip_current",   "label": "Minimum Trip Current", "type": "number", "required": False, "read_only": False, "unit": "A"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning",               "label": "Date of Commissioning",               "type": "date",   "required": True,  "read_only": False},
+                    {"key": "operations_counter_at_commissioning", "label": "Operations Counter at Commissioning", "type": "number", "required": False, "read_only": False, "default": 0},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 3. Current Transformer ───────────────────────────────────────────────
+    "nameplate_current_transformer": {
+        "name": "Current Transformer",
+        "equipment_type": "Current Transformer",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",          "label": "Bay Number",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",       "label": "Voltage Class",       "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Ratings",
+                "fields": [
+                    {"key": "type",                  "label": "Type",                  "type": "dropdown", "required": True,  "read_only": False, "options": ["AIS", "GIS"]},
+                    {"key": "rated_voltage",         "label": "Rated Voltage",         "type": "number",   "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "rated_current",         "label": "Rated Current",         "type": "number",   "required": True,  "read_only": False, "unit": "A"},
+                    {"key": "burden_va",             "label": "Burden",                "type": "number",   "required": False, "read_only": False, "unit": "VA"},
+                    {"key": "accuracy_class",        "label": "Accuracy Class",        "type": "text",     "required": False, "read_only": False},
+                    {"key": "short_circuit_current", "label": "Short-Circuit Current", "type": "number",   "required": False, "read_only": False, "unit": "kA"},
+                    {"key": "ct_ratio",              "label": "CT Ratio",              "type": "text",     "required": False, "read_only": False, "placeholder": "e.g. 200/1"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True,  "read_only": False},
+                    {"key": "po_number",             "label": "PO Number",             "type": "text", "required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 4. Potential Transformer ─────────────────────────────────────────────
+    "nameplate_potential_transformer": {
+        "name": "Potential Transformer",
+        "equipment_type": "Potential Transformer",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",          "label": "Bay Number",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",       "label": "Voltage Class",       "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Ratings",
+                "fields": [
+                    {"key": "type",             "label": "Type",             "type": "dropdown", "required": True,  "read_only": False, "options": ["AIS", "GIS"]},
+                    {"key": "rated_voltage_hv", "label": "Rated HV Voltage", "type": "number",   "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "rated_voltage_lv", "label": "Rated LV Voltage", "type": "number",   "required": True,  "read_only": False, "unit": "V"},
+                    {"key": "burden_va",        "label": "Burden",           "type": "number",   "required": False, "read_only": False, "unit": "VA"},
+                    {"key": "accuracy_class",   "label": "Accuracy Class",   "type": "text",     "required": False, "read_only": False},
+                    {"key": "pt_ratio",         "label": "PT Ratio",         "type": "text",     "required": False, "read_only": False, "placeholder": "e.g. 11000/110"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 5. Capacitor Voltage Transformer ────────────────────────────────────
+    "nameplate_capacitor_voltage_transformer": {
+        "name": "Capacitor Voltage Transformer",
+        "equipment_type": "Capacitor Voltage Transformer",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",          "label": "Bay Number",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",       "label": "Voltage Class",       "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Ratings",
+                "fields": [
+                    {"key": "system_voltage",               "label": "System Voltage",               "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "electromagnetic_unit_voltage", "label": "Electromagnetic Unit Voltage", "type": "number", "required": False, "read_only": False, "unit": "kV"},
+                    {"key": "capacitor_stack",              "label": "Capacitor Stack",              "type": "text",   "required": False, "read_only": False},
+                    {"key": "burden_va",                    "label": "Burden",                       "type": "number", "required": False, "read_only": False, "unit": "VA"},
+                    {"key": "accuracy_class",               "label": "Accuracy Class",               "type": "text",   "required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 6. Surge Arrestor ───────────────────────────────────────────────────
+    "nameplate_surge_arrestor": {
+        "name": "Surge Arrestor",
+        "equipment_type": "Surge Arrestor",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",          "label": "Bay Number",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",       "label": "Voltage Class",       "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Ratings",
+                "fields": [
+                    {"key": "type",                        "label": "Type",                         "type": "dropdown", "required": True,  "read_only": False, "options": ["AIS", "GIS"]},
+                    {"key": "rated_voltage",               "label": "Rated Voltage",                "type": "number",   "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "continuous_operating_voltage","label": "Continuous Operating Voltage", "type": "number",   "required": False, "read_only": False, "unit": "kV"},
+                    {"key": "energy_capability",           "label": "Energy Capability",            "type": "number",   "required": False, "read_only": False, "unit": "kJ"},
+                    {"key": "discharge_current",           "label": "Discharge Current",            "type": "number",   "required": False, "read_only": False, "unit": "kA"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 7. Isolator / Disconnector ───────────────────────────────────────────
+    "nameplate_isolator": {
+        "name": "Isolator / Disconnector",
+        "equipment_type": "Isolator / Disconnector",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",          "label": "Bay Number",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",       "label": "Voltage Class",       "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Ratings",
+                "fields": [
+                    {"key": "type",                   "label": "Type",                   "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["AIS-Manual", "AIS-Motor", "GIS"]},
+                    {"key": "rated_voltage",          "label": "Rated Voltage",          "type": "number",   "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "rated_current",          "label": "Rated Current",          "type": "number",   "required": True,  "read_only": False, "unit": "A"},
+                    {"key": "short_circuit_duration", "label": "Short-Circuit Duration", "type": "number",   "required": False, "read_only": False, "unit": "s"},
+                    {"key": "operating_mechanism",    "label": "Operating Mechanism",    "type": "dropdown", "required": False, "read_only": False,
+                     "options": ["Motor", "Manual"]},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 8. Control & Relay Panel ─────────────────────────────────────────────
+    "nameplate_control_relay_panel": {
+        "name": "Control & Relay Panel",
+        "equipment_type": "Control & Relay Panel",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "panel_number",        "label": "Panel Number",        "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",       "label": "Voltage Class",       "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Panel Details",
+                "fields": [
+                    {"key": "panel_type",           "label": "Panel Type",           "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["Numerical", "Electromechanical"]},
+                    {"key": "protection_functions", "label": "Protection Functions", "type": "textarea", "required": False, "read_only": False},
+                    {"key": "relay_make",            "label": "Relay Make",           "type": "text",     "required": False, "read_only": False},
+                    {"key": "relay_model",           "label": "Relay Model",          "type": "text",     "required": False, "read_only": False},
+                    {"key": "dc_supply_voltage",     "label": "DC Supply Voltage",    "type": "number",   "required": False, "read_only": False, "unit": "V"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 9. Battery Set ──────────────────────────────────────────────────────
+    "nameplate_battery_set": {
+        "name": "Battery Set",
+        "equipment_type": "Battery Set",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "battery_id",          "label": "Battery ID",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "type",           "label": "Battery Type",    "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["Lead Acid", "VRLA", "Ni-Cd"]},
+                    {"key": "cell_count",     "label": "Cell Count",      "type": "number",   "required": True,  "read_only": False},
+                    {"key": "cell_voltage",   "label": "Cell Voltage",    "type": "number",   "required": True,  "read_only": False, "unit": "V"},
+                    {"key": "ah_capacity",    "label": "Ah Capacity",     "type": "number",   "required": True,  "read_only": False, "unit": "Ah"},
+                    {"key": "float_voltage",  "label": "Float Voltage",   "type": "number",   "required": False, "read_only": False, "unit": "V"},
+                    {"key": "nominal_voltage","label": "Nominal Voltage", "type": "number",   "required": False, "read_only": False, "unit": "V"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning","label": "Date of Commissioning","type": "date","required": True,  "read_only": False},
+                    {"key": "warranty_expiry_date", "label": "Warranty Expiry Date", "type": "date","required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 10. Battery Charger ──────────────────────────────────────────────────
+    "nameplate_battery_charger": {
+        "name": "Battery Charger",
+        "equipment_type": "Battery Charger",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "charger_id",          "label": "Charger ID",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "charger_type",      "label": "Charger Type",         "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["Float cum Boost", "Float Only"]},
+                    {"key": "input_voltage",     "label": "Input Voltage",         "type": "number",   "required": True,  "read_only": False, "unit": "V"},
+                    {"key": "output_voltage",    "label": "Output Voltage",        "type": "number",   "required": True,  "read_only": False, "unit": "V"},
+                    {"key": "output_current",    "label": "Output Current",        "type": "number",   "required": True,  "read_only": False, "unit": "A"},
+                    {"key": "float_voltage_set", "label": "Float Voltage Setting", "type": "number",   "required": False, "read_only": False, "unit": "V"},
+                    {"key": "boost_voltage_set", "label": "Boost Voltage Setting", "type": "number",   "required": False, "read_only": False, "unit": "V"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 11. Wave Trap ────────────────────────────────────────────────────────
+    "nameplate_wave_trap": {
+        "name": "Wave Trap",
+        "equipment_type": "Wave Trap",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",          "label": "Bay Number",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",       "label": "Voltage Class",       "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "rated_current",    "label": "Rated Current",    "type": "number", "required": True,  "read_only": False, "unit": "A"},
+                    {"key": "tuning_frequency", "label": "Tuning Frequency", "type": "number", "required": False, "read_only": False, "unit": "Hz"},
+                    {"key": "inductance",       "label": "Inductance",       "type": "number", "required": False, "read_only": False, "unit": "mH"},
+                    {"key": "attenuation_db",   "label": "Attenuation",      "type": "number", "required": False, "read_only": False, "unit": "dB"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 12. Station Auxiliary Transformer ────────────────────────────────────
+    "nameplate_station_auxiliary_transformer": {
+        "name": "Station Auxiliary Transformer",
+        "equipment_type": "Station Auxiliary Transformer",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Ratings",
+                "fields": [
+                    {"key": "type",          "label": "Type",              "type": "dropdown", "required": True,  "read_only": False, "options": ["Dry", "Oil"]},
+                    {"key": "rated_kva",     "label": "Rated kVA",         "type": "number",   "required": True,  "read_only": False, "unit": "kVA"},
+                    {"key": "hv_voltage",    "label": "HV Voltage",        "type": "number",   "required": True,  "read_only": False, "unit": "V"},
+                    {"key": "lv_voltage",    "label": "LV Voltage",        "type": "number",   "required": True,  "read_only": False, "unit": "V"},
+                    {"key": "vector_group",  "label": "Vector Group",      "type": "text",     "required": False, "read_only": False},
+                    {"key": "impedance_pct", "label": "Impedance Voltage", "type": "number",   "required": False, "read_only": False, "unit": "%"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 13. LTAC Panel ──────────────────────────────────────────────────────
+    "nameplate_ltac_panel": {
+        "name": "LTAC Panel",
+        "equipment_type": "LTAC Panel",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "panel_id",            "label": "Panel ID",            "type": "text",   "required": True,  "read_only": False},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "rated_voltage",              "label": "Rated Voltage",              "type": "number", "required": True,  "read_only": False, "unit": "V"},
+                    {"key": "rated_current",              "label": "Rated Current",              "type": "number", "required": True,  "read_only": False, "unit": "A"},
+                    {"key": "incoming_feeder",            "label": "Incoming Feeder",            "type": "text",   "required": False, "read_only": False},
+                    {"key": "number_of_outgoing_feeders", "label": "No. of Outgoing Feeders",   "type": "number", "required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 14. Fire Fighting System ─────────────────────────────────────────────
+    "nameplate_fire_fighting_system": {
+        "name": "Fire Fighting System",
+        "equipment_type": "Fire Fighting System",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "system_id",           "label": "System ID",           "type": "text",   "required": True,  "read_only": False},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "type",                "label": "System Type",          "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["Fixed", "Trolley-mounted", "Portable"]},
+                    {"key": "medium",              "label": "Fire-Fighting Medium", "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["CO2", "DCP", "Foam", "Water Mist"]},
+                    {"key": "capacity",            "label": "Capacity",             "type": "number",   "required": True,  "read_only": False, "unit": "kg"},
+                    {"key": "last_refill_date",    "label": "Last Refill Date",     "type": "date",     "required": False, "read_only": False},
+                    {"key": "next_inspection_date","label": "Next Inspection Date", "type": "date",     "required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 15. PLCC Panel ──────────────────────────────────────────────────────
+    "nameplate_plcc_panel": {
+        "name": "PLCC Panel",
+        "equipment_type": "PLCC Panel",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "panel_id",            "label": "Panel ID",            "type": "text",   "required": True,  "read_only": False},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "frequency_range",    "label": "Frequency Range",  "type": "text",   "required": False, "read_only": False, "placeholder": "e.g. 30–500 kHz"},
+                    {"key": "power_output_watts", "label": "Power Output",     "type": "number", "required": False, "read_only": False, "unit": "W"},
+                    {"key": "line_trap_tuning",   "label": "Line Trap Tuning", "type": "text",   "required": False, "read_only": False},
+                    {"key": "associated_line",    "label": "Associated Line",  "type": "text",   "required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 16. Digital Communication Panel ─────────────────────────────────────
+    "nameplate_digital_communication_panel": {
+        "name": "Digital Communication Panel",
+        "equipment_type": "Digital Communication Panel",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "panel_id",            "label": "Panel ID",            "type": "text",   "required": True,  "read_only": False},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "technology",    "label": "Technology", "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["SDH", "OFC", "OPGW", "PDH"]},
+                    {"key": "capacity",      "label": "Capacity",   "type": "text",     "required": False, "read_only": False, "placeholder": "e.g. STM-1, 155 Mbps"},
+                    {"key": "fiber_type",    "label": "Fiber Type", "type": "text",     "required": False, "read_only": False, "placeholder": "e.g. Single-mode G.652"},
+                    {"key": "wavelength_nm", "label": "Wavelength", "type": "number",   "required": False, "read_only": False, "unit": "nm"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 17. Diesel Generator Set ─────────────────────────────────────────────
+    "nameplate_diesel_generator_set": {
+        "name": "Diesel Generator Set",
+        "equipment_type": "Diesel Generator Set",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "rated_kva",          "label": "Rated kVA",         "type": "number", "required": True,  "read_only": False, "unit": "kVA"},
+                    {"key": "rated_kw",           "label": "Rated kW",          "type": "number", "required": True,  "read_only": False, "unit": "kW"},
+                    {"key": "rated_voltage",      "label": "Rated Voltage",     "type": "number", "required": True,  "read_only": False, "unit": "V"},
+                    {"key": "power_factor",       "label": "Power Factor",      "type": "number", "required": False, "read_only": False},
+                    {"key": "speed_rpm",          "label": "Speed",             "type": "number", "required": False, "read_only": False, "unit": "rpm"},
+                    {"key": "fuel_tank_capacity", "label": "Fuel Tank Capacity","type": "number", "required": False, "read_only": False, "unit": "L"},
+                    {"key": "engine_make",        "label": "Engine Make",       "type": "text",   "required": False, "read_only": False},
+                    {"key": "engine_model",       "label": "Engine Model",      "type": "text",   "required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True,  "read_only": False},
+                    {"key": "last_maintenance_date", "label": "Last Maintenance Date", "type": "date", "required": False, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 18. Electronic Tri-vector Meter ──────────────────────────────────────
+    "nameplate_electronic_trivector_meter": {
+        "name": "Electronic Tri-vector Meter",
+        "equipment_type": "Electronic Tri-vector Meter",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",          "label": "Bay Number",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "type",           "label": "Meter Type",         "type": "text",     "required": False, "read_only": False, "default": "ETV"},
+                    {"key": "accuracy_class", "label": "Accuracy Class",     "type": "text",     "required": False, "read_only": False},
+                    {"key": "ct_ratio",       "label": "CT Ratio",           "type": "text",     "required": False, "read_only": False, "placeholder": "e.g. 200/1"},
+                    {"key": "pt_ratio",       "label": "PT Ratio",           "type": "text",     "required": False, "read_only": False, "placeholder": "e.g. 11000/110"},
+                    {"key": "meter_constant", "label": "Meter Constant",     "type": "number",   "required": False, "read_only": False},
+                    {"key": "communication",  "label": "Communication Port", "type": "dropdown", "required": False, "read_only": False,
+                     "options": ["RS485", "Ethernet", "IEC 61850"]},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date",    "required": True,  "read_only": False},
+                    {"key": "seal_intact",           "label": "Seal Intact",           "type": "boolean", "required": False, "read_only": False, "default": True},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+    # ── 19. Protection Relay ─────────────────────────────────────────────────
+    "nameplate_protection_relay": {
+        "name": "Protection Relay",
+        "equipment_type": "Protection Relay",
+        "template_type": "nameplate",
+        "sections": [
+            {
+                "title": "Identification",
+                "fields": [
+                    {"key": "substation_name",    "label": "Substation Name",    "type": "text",   "required": True,  "read_only": False},
+                    {"key": "bay_number",          "label": "Bay Number",          "type": "text",   "required": True,  "read_only": False},
+                    {"key": "voltage_class",       "label": "Voltage Class",       "type": "number", "required": True,  "read_only": False, "unit": "kV"},
+                    {"key": "make",                "label": "Make",                "type": "text",   "required": True,  "read_only": False},
+                    {"key": "model",               "label": "Model",               "type": "text",   "required": True,  "read_only": False},
+                    {"key": "serial_number",       "label": "Serial Number",       "type": "text",   "required": True,  "read_only": False},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "number", "required": True,  "read_only": False},
+                ]
+            },
+            {
+                "title": "Technical Details",
+                "fields": [
+                    {"key": "type",              "label": "Relay Type",       "type": "dropdown", "required": True,  "read_only": False,
+                     "options": ["Numerical", "Static", "Electromechanical"]},
+                    {"key": "relay_function",    "label": "Relay Function(s)","type": "textarea", "required": True,  "read_only": False,
+                     "placeholder": "e.g. 51 OC, 50 Instantaneous, 64 Earth Fault"},
+                    {"key": "rated_current",     "label": "Rated Current",    "type": "number",   "required": False, "read_only": False, "unit": "A"},
+                    {"key": "rated_voltage",     "label": "Rated Voltage",    "type": "number",   "required": False, "read_only": False, "unit": "V"},
+                    {"key": "burden_va",         "label": "Burden",           "type": "number",   "required": False, "read_only": False, "unit": "VA"},
+                    {"key": "operating_time_ms", "label": "Operating Time",   "type": "number",   "required": False, "read_only": False, "unit": "ms"},
+                ]
+            },
+            {
+                "title": "Commissioning",
+                "fields": [
+                    {"key": "date_of_commissioning", "label": "Date of Commissioning", "type": "date", "required": True, "read_only": False},
+                ]
+            },
+            {
+                "title": "Documents",
+                "fields": [
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
+                ]
+            },
+        ]
+    },
+
+}  # end NAMEPLATE_TEMPLATES
+
+
+NAMEPLATE_EQUIPMENT_TYPES = [
+    ("Power Transformer",             "nameplate_power_transformer"),
+    ("Circuit Breaker",               "nameplate_circuit_breaker"),
+    ("Current Transformer",           "nameplate_current_transformer"),
+    ("Potential Transformer",         "nameplate_potential_transformer"),
+    ("Capacitor Voltage Transformer", "nameplate_capacitor_voltage_transformer"),
+    ("Surge Arrestor",                "nameplate_surge_arrestor"),
+    ("Isolator / Disconnector",       "nameplate_isolator"),
+    ("Control & Relay Panel",         "nameplate_control_relay_panel"),
+    ("Battery Set",                   "nameplate_battery_set"),
+    ("Battery Charger",               "nameplate_battery_charger"),
+    ("Wave Trap",                     "nameplate_wave_trap"),
+    ("Station Auxiliary Transformer", "nameplate_station_auxiliary_transformer"),
+    ("LTAC Panel",                    "nameplate_ltac_panel"),
+    ("Fire Fighting System",          "nameplate_fire_fighting_system"),
+    ("PLCC Panel",                    "nameplate_plcc_panel"),
+    ("Digital Communication Panel",   "nameplate_digital_communication_panel"),
+    ("Diesel Generator Set",          "nameplate_diesel_generator_set"),
+    ("Electronic Tri-vector Meter",   "nameplate_electronic_trivector_meter"),
+    ("Protection Relay",              "nameplate_protection_relay"),
+]
+
+NAMEPLATE_TYPE_TO_TEMPLATE = {name: key for name, key in NAMEPLATE_EQUIPMENT_TYPES}
+
+
 # ----------------- Seed Functions -----------------
 
 def seed_users(session):
@@ -1580,6 +2565,43 @@ def seed_test_type_categories(session, master_ids):
     session.commit()
     print("[OK] Equipment & Test Type categories seeded successfully.")
     print("[OK] Category-based types (maintenance, inspection, repair_lifecycle) seeded.")
+
+    # ── Nameplate test types (one "Nameplate" CategoryDetails per equipment type) ──
+    nameplate_created = 0
+    for equipment_name in NAMEPLATE_TYPE_TO_TEMPLATE:
+        existing_master = session.query(CategoryMaster).filter_by(name=equipment_name).first()
+        if not existing_master:
+            master = CategoryMaster(
+                name=equipment_name,
+                description="Testing Equipment",
+                is_active=True,
+            )
+            session.add(master)
+            session.flush()
+            master_id = master.id
+        else:
+            master_id = existing_master.id
+        master_ids[equipment_name] = master_id
+
+        existing_detail = session.query(CategoryDetails).filter_by(
+            name="Nameplate",
+            category_master_id=master_id,
+        ).first()
+        if not existing_detail:
+            session.add(CategoryDetails(
+                name="Nameplate",
+                description=f"Nameplate data entry for {equipment_name}",
+                category_type="nameplate",
+                category_master_id=master_id,
+                is_active=True,
+            ))
+            nameplate_created += 1
+        else:
+            existing_detail.is_active = True
+            existing_detail.category_type = "nameplate"
+
+    session.commit()
+    print(f"[OK] Nameplate test types seeded: {nameplate_created} new entries.")
 
     # ── Priority master ──
     priority_master_name = "Testing Priority"
@@ -3980,6 +5002,31 @@ def seed_report_definitions(session):
             "output_format": "excel",
             "frequency": "on_demand",
         },
+        # §3.3.4 Failure Resolution
+        {
+            "name": "Failure Resolution Report",
+            "description": (
+                "End-to-end traceability: each Failure Registry record with its outcome "
+                "(Repair / Replacement / Under Investigation) and the linked Repair Lifecycle "
+                "work-order status. Supports date range and outcome filters."
+            ),
+            "query_key": "failure_resolution_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+        },
+        # §3.5 Equipment Lifecycle
+        {
+            "name": "Equipment Lifecycle Summary",
+            "description": (
+                "One row per equipment unit showing commissioned date, total test count, "
+                "total failure count, last test date and result, and current status. "
+                "Supports filters: status, voltage_class, department_id, date_from, date_to "
+                "(commissioned date range)."
+            ),
+            "query_key": "equipment_lifecycle_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+        },
     ]
 
     created = 0
@@ -4360,6 +5407,17 @@ def run_seed():
         # DISABLED: This grants VIEW to ALL modules for ALL roles, breaking RBAC
         # Proper permissions are already set via role templates during org role provisioning
         # seed_org_role_permissions_for_modules(session, module_ids)
+
+        # Notification defaults — templates + variable registry (idempotent)
+        print("\n--- Notification Defaults Seeding ---")
+        try:
+            from services.notification_service import seed_default_templates, seed_default_variables
+            seeded_t = seed_default_templates(session)
+            seeded_v = seed_default_variables(session)
+            print(f"[OK] Notification templates : {seeded_t} inserted (0 = already seeded)")
+            print(f"[OK] Notification variables : {seeded_v} inserted (0 = already seeded)")
+        except Exception as _e:
+            print(f"[WARN] Notification seed failed (non-fatal): {_e}")
 
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")

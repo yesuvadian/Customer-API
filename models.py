@@ -282,10 +282,19 @@ class Equipment(Base):
 
     # Lifecycle
     status = Column(Enum(EquipmentStatus), default=EquipmentStatus.active, nullable=False)
+    # Replacement chain — bidirectional:
+    #   new_equipment.replaces_equipment_id = old_equipment.id  (new → old)
+    #   old_equipment.replaced_by_id        = new_equipment.id  (old → new)
     replaces_equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=True)
+    replaced_by_id        = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=True)
     commissioned_date = Column(DateTime(timezone=True), nullable=True)
     retired_date = Column(DateTime(timezone=True), nullable=True)
     retirement_reason = Column(Text, nullable=True)
+
+    # Replacement workflow (SRS §3.3.1)
+    replacement_reason_type = Column(String(30), nullable=True)   # "recommendation_compliance" | "other"
+    replacement_recommendation_id = Column(UUID(as_uuid=True), nullable=True)  # FK to Recommendation (soft ref)
+    analysis_report_path = Column(String(500), nullable=True)     # uploaded PDF path when reason_type="other"
 
     # Manufacturer / identity (quick-access fields from nameplate_data)
     manufacturer = Column(String(255), nullable=True)
@@ -303,7 +312,11 @@ class Equipment(Base):
     organization = relationship("Organization", foreign_keys=[organization_id])
     department = relationship("OrgDepartment", back_populates="equipment", foreign_keys=[department_id])
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
-    replaces_equipment = relationship("Equipment", remote_side=[id], foreign_keys=[replaces_equipment_id])
+    # replaces_equipment: the OLD unit this one replaced (new → old)
+    replaces_equipment = relationship(
+        "Equipment", remote_side=[id], foreign_keys=[replaces_equipment_id],
+        backref="replaced_by_equipment",   # old.replaced_by_equipment → [new]
+    )
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
 
@@ -1560,6 +1573,14 @@ class TestingRequest(Base):
     # Direct submission (Failure Registry / TA&QC — no tester assignment step)
     is_direct_submission = Column(Boolean, default=False)  # True = filler IS the submitter
 
+    # Failure Registry → Repair Lifecycle traceability
+    # Populated when approve_recommendation() auto-creates a repair_lifecycle TR from an FR- record
+    source_failure_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.testing_requests.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Test Register: master catalogue template row (equipment_id=NULL, equipment_type_id set)
     is_schedule_template = Column(Boolean, default=False, nullable=False)  # True = register entry
 
@@ -1586,6 +1607,7 @@ class TestingRequest(Base):
     test_results = relationship("TestResult", back_populates="testing_request", cascade="all, delete-orphan")
     recommendations = relationship("Recommendation", back_populates="testing_request", cascade="all, delete-orphan")
     test_sessions = relationship("TestSession", back_populates="testing_request", cascade="all, delete-orphan")
+    source_failure = relationship("TestingRequest", foreign_keys=[source_failure_id], remote_side="TestingRequest.id")
 
 
 # ------------------------------
@@ -2372,8 +2394,12 @@ class NotificationTemplate(Base):
     body_template = Column(Text, nullable=False)             # Jinja2 / str.format
 
     # Role names whose members should receive this notification
-    # e.g. ["Originator", "Department Head", "Tester"]
+    # e.g. ["Originator", "Department Head", "EE TLSS"]
     recipient_roles = Column(JSONB, nullable=False, server_default="[]")
+
+    # Additional individual email addresses (outside role membership)
+    # e.g. ["manager@utility.com", "external-auditor@gov.in"]
+    extra_recipient_emails = Column(JSONB, nullable=False, server_default="[]")
 
     is_active = Column(Boolean, default=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
@@ -2458,6 +2484,51 @@ class UserNotification(Base):
     cts = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", foreign_keys=[user_id])
+
+
+class NotificationVariable(Base):
+    """
+    Registry of template variables available for use in notification bodies.
+
+    System variables (is_system=True, organization_id=NULL) are seeded on startup
+    and cannot be deleted — only disabled per org.
+
+    Org admins may register custom variables (organization_id=<org_id>) that
+    can be embedded in their org-specific templates using {{var_key}} syntax.
+
+    var_key    : the key used in templates, e.g. "report.retriexls"
+    resolver_key: the dot-path or flat key used to look up the value from the
+                  fire() context dict passed by the trigger caller.
+    sample_value: preview value shown in the template designer UI.
+    """
+    __tablename__ = "notification_variables"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,           # NULL = global system variable
+        index=True,
+    )
+
+    var_key      = Column(String(200), nullable=False, index=True)  # e.g. "report.retriexls"
+    label        = Column(String(255), nullable=False)               # human-readable
+    group_name   = Column(String(100), nullable=False)               # UI grouping
+    description  = Column(Text, nullable=True)
+    sample_value = Column(String(500), nullable=True)                # preview in designer
+
+    # Code-side key to look up the resolved value from fire() context dict.
+    # Usually same as var_key; legacy flat keys (e.g. "equipment") differ.
+    resolver_key = Column(String(200), nullable=True)
+
+    is_system = Column(Boolean, default=False, nullable=False)  # system vars: no delete
+    is_active = Column(Boolean, default=True,  nullable=False)
+
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
 
 
 # ── Reporting Suite ────────────────────────────────────────────────────────

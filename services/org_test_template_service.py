@@ -283,32 +283,30 @@ class OrgTestTemplateService:
 
     def provision_global_defaults(self) -> int:
         """
-        Seed global default templates from test_templates.py.
+        Seed global default templates from test_templates.py and nameplate_templates.py.
         Creates one OrgTestTemplate row per test_type_id that maps to a template.
-        Safe to call multiple times — skips already-existing (test_type_id, template_key).
+        Safe to call multiple times — skips already-existing rows.
         Returns the count of newly inserted rows.
         """
         from test_templates import TEST_TEMPLATES, TEST_TYPE_TO_TEMPLATE
+        from models import CategoryMaster
 
         inserted = 0
 
-        # For each test_type_name → template_key mapping
+        # ── Test / maintenance / inspection / repair templates ────────────────
         for type_name, template_key in TEST_TYPE_TO_TEMPLATE.items():
-            # Get the template data
             template_data = TEST_TEMPLATES.get(template_key)
             if not template_data:
-                continue  # Skip if template doesn't exist
+                continue
 
-            # Resolve test_type_id from CategoryDetails
             detail = (
                 self.db.query(CategoryDetails)
                 .filter(CategoryDetails.name == type_name)
                 .first()
             )
             if not detail:
-                continue  # Skip if test type not found
+                continue
 
-            # Check if already exists for this test_type_id
             existing = (
                 self.db.query(OrgTestTemplate)
                 .filter(
@@ -320,15 +318,57 @@ class OrgTestTemplateService:
             if existing:
                 continue
 
-            tmpl = OrgTestTemplate(
+            self.db.add(OrgTestTemplate(
                 org_id=None,
                 template_key=template_key,
                 test_type_id=detail.id,
                 template_data=template_data,
                 is_system=True,
                 version=1,
+            ))
+            inserted += 1
+
+        # ── Nameplate templates ───────────────────────────────────────────────
+        from seed import NAMEPLATE_TEMPLATES, NAMEPLATE_TYPE_TO_TEMPLATE
+
+        for eq_type_name, template_key in NAMEPLATE_TYPE_TO_TEMPLATE.items():
+            template_data = NAMEPLATE_TEMPLATES.get(template_key)
+            if not template_data:
+                continue
+
+            # "Nameplate" CategoryDetails under this equipment's CategoryMaster
+            detail = (
+                self.db.query(CategoryDetails)
+                .join(CategoryMaster, CategoryDetails.category_master_id == CategoryMaster.id)
+                .filter(
+                    CategoryDetails.name == "Nameplate",
+                    CategoryDetails.category_type == "nameplate",
+                    CategoryMaster.name == eq_type_name,
+                )
+                .first()
             )
-            self.db.add(tmpl)
+            if not detail:
+                continue
+
+            existing = (
+                self.db.query(OrgTestTemplate)
+                .filter(
+                    OrgTestTemplate.org_id == None,  # noqa: E711
+                    OrgTestTemplate.test_type_id == detail.id,
+                )
+                .first()
+            )
+            if existing:
+                continue
+
+            self.db.add(OrgTestTemplate(
+                org_id=None,
+                template_key=template_key,
+                test_type_id=detail.id,
+                template_data=template_data,
+                is_system=True,
+                version=1,
+            ))
             inserted += 1
 
         self.db.commit()

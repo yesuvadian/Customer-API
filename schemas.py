@@ -2195,7 +2195,7 @@ class ApprovalResponse(BaseModel):
 # ==========================================
 
 class EquipmentCreate(BaseModel):
-    organization_id: UUID
+    organization_id: Optional[UUID] = None
     department_id: UUID
     equipment_type_id: int
     voltage_class: Optional[str] = None
@@ -2219,6 +2219,20 @@ class EquipmentUpdate(BaseModel):
     commissioned_date: Optional[datetime] = None
 
 
+class EquipmentChainRef(BaseModel):
+    """Lightweight reference used inside EquipmentResponse for chain links."""
+    id: UUID
+    ueic: str
+    status: str
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    commissioned_date: Optional[datetime] = None
+    retired_date: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class EquipmentResponse(BaseModel):
     id: UUID
     ueic: str
@@ -2232,7 +2246,12 @@ class EquipmentResponse(BaseModel):
     serial_in_bay: Optional[str] = None
     nameplate_data: Optional[dict] = None
     status: str
-    replaces_equipment_id: Optional[UUID] = None
+    # Replacement chain (bidirectional)
+    replaces_equipment_id: Optional[UUID] = None   # UUID of the old unit this replaced
+    replaces_equipment: Optional[EquipmentChainRef] = None  # inline summary of the old unit
+    replaced_by_id: Optional[UUID] = None          # UUID of the new unit that replaced this one
+    replaced_by: Optional[EquipmentChainRef] = None  # inline summary of the new unit
+    replacement_reason_type: Optional[str] = None
     commissioned_date: Optional[datetime] = None
     retired_date: Optional[datetime] = None
     retirement_reason: Optional[str] = None
@@ -2255,6 +2274,8 @@ class EquipmentRetireRequest(BaseModel):
 
 class EquipmentReplaceRequest(BaseModel):
     reason: str
+    reason_type: str = "other"          # "recommendation_compliance" | "other"
+    recommendation_id: Optional[UUID] = None  # required when reason_type="recommendation_compliance"
     nameplate_data: Optional[dict] = None
     commissioned_date: Optional[datetime] = None
     manufacturer: Optional[str] = None
