@@ -4661,7 +4661,7 @@ def seed_notifications_module_and_permissions(session):
     # ─────────────────────────────────────────────────────────────
     # 2. Get KPTCL org
     # ─────────────────────────────────────────────────────────────
-    kptcl_org = session.query(Organization).filter_by(name="KPTCL").first()
+    kptcl_org = session.query(Organization).filter_by(display_name="KPTCL").first()
     if not kptcl_org:
         raise Exception("KPTCL organization not found")
 
@@ -4677,7 +4677,6 @@ def seed_notifications_module_and_permissions(session):
     # ─────────────────────────────────────────────────────────────
     org_user_role = session.query(OrgUserRole).filter_by(
         user_id=user.id,
-        organization_id=kptcl_org.id
     ).first()
 
     if not org_user_role:
@@ -4709,7 +4708,7 @@ def seed_notifications_module_and_permissions(session):
                 org_role_id=org_admin_role.id,
                 module_id=notifications_module.id,
                 can_view=True,
-                can_create=False,
+                can_add=False,
                 can_edit=False,
                 can_delete=False
                 # 🔥 Add this IF your model has it:
