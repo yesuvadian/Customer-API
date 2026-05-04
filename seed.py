@@ -6,8 +6,8 @@ from typing import Dict, Optional
 from sqlalchemy import text
 from database import VendorSessionLocal, Base, vendor_engine
 from models import (
-    CategoryDetails, CategoryMaster, Country, Division, Plan, Product,
-    ProductCategory, ProductSubCategory, Role, RoleModulePrivilege,
+    CategoryDetails, CategoryMaster, Country, Division, OrgTestTemplate, Plan, Product,
+    ProductCategory, ProductSubCategory, RepairStageDefinition, RepairStageRole, RepairStageTemplate, RepairStageTransition, Role, RoleModulePrivilege,
     State, City, User, UserRole, Module,
     # Organization models
     Organization, OrgDepartment, OrgRole, OrgUserRole,
@@ -1254,6 +1254,7 @@ def seed_category_master(session):
         {"name": "Bank Document Types", "description": "Dropdown values for required company bank documents (e.g., cancelled cheque, bank statement)."},
         {"name": "GST Slabs", "description": "GST percentage slabs applicable to goods and services in India."},
         {"name": "Utility", "description": "Type of utility - Generation, Transmission, DISCOM."},
+        
     ]
 
     master_ids = {}
@@ -2457,18 +2458,7 @@ def seed_test_type_categories(session, master_ids):
                 "Environmental",
                 "General Maintenance",
             ],
-            "repair_lifecycle": [
-                "S1: Failure Report",
-                "S2: Repair Committee",
-                "S3: Allotment to Repairer",
-                "S4: Lifting by Repairer",
-                "S5: Joint Inspection at Vendor",
-                "S6: Estimate & Revised Work Award",
-                "S7: Stage Inspections",
-                "S8: Final Inspection",
-                "S9: Dispatch",
-                "S10: Erection, Testing & Commissioning",
-            ],
+           
         },
         # ── Lightning Arrester ───────────────────────────────────────────────
         "Lightning Arrester": {
@@ -5629,7 +5619,183 @@ def seed_zoho_import_mapping(session, kptcl_org):
     session.add(mapping)
     session.commit()
     print(f"[OK] Zoho import mapping created: KPTCL -> Originator, dept={dept.name if dept else 'None'}")
+def seed_workflow(db):
 
+    import uuid
+    from datetime import datetime
+
+    stages = load_json("REPAIR_WORKFLOW_STAGES.json")
+    templates = load_json("REPAIR_STAGE_TEMPLATES.json")
+    stage_template_map = load_json("STAGE_TEMPLATE_MAP.json")
+    # repair_stage_roles.json is a LIST: [{stage_code, roles}, ...]
+    stage_role_list = load_json("repair_stage_roles.json")
+    # Repair_Role_Transitions.json is a LIST: [{from, to, action}, ...]  — match by stage name
+    transitions = load_json("Repair_Role_Transitions.json")
+
+    # Derived name → code mapping (from stage sequence / template map keys)
+    NAME_TO_CODE = {
+        "Failure Reporting":   "FAILURE_REPORT",
+        "Committee Review":    "COMMITTEE_REVIEW",
+        "Vendor Assignment":   "VENDOR_ASSIGNMENT",
+        "Lifting":             "LIFTING",
+        "Joint Inspection":    "JOINT_INSPECTION",
+        "Estimate & Work Award": "ESTIMATE",
+        "Repair QA":           "QA",
+        "Final Inspection":    "FINAL_INSPECTION",
+        "Dispatch":            "DISPATCH",
+        "Commissioning":       "COMMISSIONING",
+    }
+
+    # -------------------------------
+    # 1. TEMPLATES
+    # -------------------------------
+    template_map = {}
+
+    for key, t in templates.items():
+
+        existing = db.query(OrgTestTemplate).filter_by(template_key=key).first()
+        if existing:
+            template_map[key] = existing.id
+            continue
+
+        obj = OrgTestTemplate(
+            id=uuid.uuid4(),
+            template_key=key,
+            template_type=t["template_type"],
+            template_data=t,
+            created_at=datetime.utcnow()
+        )
+
+        db.add(obj)
+        db.flush()
+
+        template_map[key] = obj.id
+
+    # -------------------------------
+    # 2. STAGES
+    # Keyed by name for template/transition lookup;
+    # also keyed by code for role lookup.
+    # -------------------------------
+    stage_map_by_name = {}  # stage name -> stage.id
+    stage_map_by_code = {}  # stage code -> stage.id
+
+    for s in stages:
+        stage_name = s["name"]
+        stage_code = s.get("code") or NAME_TO_CODE.get(stage_name, stage_name.upper().replace(" ", "_"))
+
+        existing = db.query(RepairStageDefinition).filter_by(name=stage_name).first()
+        if existing:
+            stage_map_by_name[stage_name] = existing.id
+            stage_map_by_code[existing.code] = existing.id
+            continue
+
+        stage = RepairStageDefinition(
+            id=uuid.uuid4(),
+            name=stage_name,
+            code=stage_code,
+            sequence=s["sequence"],
+            weight=s.get("weight", 10),
+            is_mandatory=s.get("is_mandatory", True),
+            is_active=True,
+        )
+
+        db.add(stage)
+        db.flush()
+
+        stage_map_by_name[stage_name] = stage.id
+        stage_map_by_code[stage_code] = stage.id
+
+    # -------------------------------
+    # 3. STAGE → TEMPLATE
+    # -------------------------------
+    for stage_name, template_key in stage_template_map.items():
+
+        stage_id = stage_map_by_name.get(stage_name)
+        template_id = template_map.get(template_key)
+
+        if not stage_id or not template_id:
+            continue
+
+        exists = db.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
+
+        if not exists:
+            db.add(RepairStageTemplate(
+                stage_id=stage_id,
+                template_id=template_id
+            ))
+        else:
+            exists.template_id = template_id
+
+    # -------------------------------
+    # 4. STAGE → ROLE
+    # repair_stage_roles.json: [{stage_code, roles: [role_name, ...]}, ...]
+    # Match stage by code column; match role by name column.
+    # -------------------------------
+    for entry in stage_role_list:
+        stage_code = entry.get("stage_code")
+        stage_id = stage_map_by_code.get(stage_code)
+
+        if not stage_id:
+            print(f"  [WARN] seed_workflow: stage_code '{stage_code}' not found — skipping roles")
+            continue
+
+        for role_name in entry.get("roles", []):
+            role = db.query(OrgRole).filter_by(name=role_name).first()
+            if not role:
+                print(f"  [WARN] seed_workflow: role '{role_name}' not found in org_roles")
+                continue
+
+            exists = db.query(RepairStageRole).filter_by(
+                stage_id=stage_id,
+                role_id=role.id
+            ).first()
+
+            if not exists:
+                db.add(RepairStageRole(
+                    id=uuid.uuid4(),
+                    stage_id=stage_id,
+                    role_id=role.id,
+                    can_edit=True,
+                    can_approve=False,
+                ))
+
+    # -------------------------------
+    # 5. TRANSITIONS
+    # Repair_Role_Transitions.json: [{from, to, action}, ...]
+    # Match stages by name.
+    # -------------------------------
+    for t in transitions:
+        from_id = stage_map_by_name.get(t["from"])
+        to_id = stage_map_by_name.get(t["to"])
+
+        if not from_id:
+            print(f"  [WARN] seed_workflow: transition from-stage '{t['from']}' not found")
+            continue
+
+        exists = db.query(RepairStageTransition).filter_by(
+            from_stage_id=from_id,
+            action=t["action"]
+        ).first()
+
+        if not exists:
+            db.add(RepairStageTransition(
+                id=uuid.uuid4(),
+                from_stage_id=from_id,
+                to_stage_id=to_id,
+                action=t["action"]
+            ))
+        else:
+            exists.to_stage_id = to_id
+
+    db.commit()
+    # -------------------------------
+    # DONE
+    # -------------------------------
+    print("✅ Workflow seeded")
+
+def load_json(file_name):
+    with open(file_name, "r") as f:
+        return json.load(f)
 
 def seed_kptcl_only(org_id: str):
     """

@@ -1,0 +1,12 @@
+[
+  {"stage_code": "FAILURE_REPORT", "roles": ["AE_JE"]},
+  {"stage_code": "COMMITTEE_REVIEW", "roles": ["TRC_MEMBER"]},
+  {"stage_code": "VENDOR_ASSIGNMENT", "roles": ["CEE_RT_RD", "CEE_TRANSMISSION_ZONE"]},
+  {"stage_code": "LIFTING", "roles": ["VENDOR"]},
+  {"stage_code": "JOINT_INSPECTION", "roles": ["VENDOR", "INSPECTION_ENGINEER"]},
+  {"stage_code": "ESTIMATE", "roles": ["FINANCE_OFFICER"]},
+  {"stage_code": "QA", "roles": ["QA_TEAM"]},
+  {"stage_code": "FINAL_INSPECTION", "roles": ["INSPECTION_ENGINEER"]},
+  {"stage_code": "DISPATCH", "roles": ["VENDOR"]},
+  {"stage_code": "COMMISSIONING", "roles": ["AE_JE"]}
+]

@@ -88,180 +88,139 @@ class EquipmentStatus(PyEnum):
 class RepairWorkflowDefinition(Base):
     __tablename__ = "repair_workflow_definitions"
 
-    id = Column(UUID, primary_key=True)
-    name = Column(String)  # "Transformer Repair Lifecycle"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, default="Transformer Repair Lifecycle")
     is_active = Column(Boolean, default=True)
-    created_by = Column(UUID)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
 
 class RepairStageDefinition(Base):
     __tablename__ = "repair_stage_definitions"
 
-    id = Column(UUID, primary_key=True)
-
-    workflow_id = Column(UUID, ForeignKey("repair_workflow_definitions.id"))
-
-    name = Column(String)
-    code = Column(String)  # FAILURE_REPORT, INSPECTION, etc.
-
-    sequence = Column(Integer)  # ordering
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    code = Column(String, unique=True, nullable=False)
+    sequence = Column(Integer, nullable=False)
     weight = Column(Integer, default=10)
-
     is_active = Column(Boolean, default=True)
-    created_by = Column(UUID)
+    is_mandatory = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-class RepairStageRole(Base):
-    __tablename__ = "repair_stage_roles"
-
-    stage_id = Column(UUID, ForeignKey("repair_stage_definitions.id"))
-    role_id = Column(UUID, ForeignKey("org_roles.id"))
-
-    can_edit = Column(Boolean, default=True)
-    can_approve = Column(Boolean, default=False)
-    created_by = Column(UUID)
-    created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 class RepairStageTemplate(Base):
     __tablename__ = "repair_stage_templates"
 
-    stage_id = Column(UUID, ForeignKey("repair_stage_definitions.id"))
-    template_id = Column(UUID, ForeignKey("org_test_templates.id"))
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id", ondelete="CASCADE"), primary_key=True)
+    template_id = Column(UUID(as_uuid=True), ForeignKey("org_test_templates.id", ondelete="CASCADE"))
+
+
+class RepairStageRole(Base):
+    __tablename__ = "repair_stage_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id", ondelete="CASCADE"))
+    role_id = Column(UUID(as_uuid=True), ForeignKey("org_roles.id", ondelete="CASCADE"))
+    can_edit = Column(Boolean, default=True)
+    can_approve = Column(Boolean, default=False)
+
+    __table_args__ = (UniqueConstraint("stage_id", "role_id", name="uq_repair_stage_role"),)
+
+
+class RepairStageTransition(Base):
+    __tablename__ = "repair_stage_transitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    from_stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
+    to_stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
+    action = Column(String, nullable=False)  # approve / reject
+
+    __table_args__ = (UniqueConstraint("from_stage_id", "action", name="uq_repair_transition"),)
+
 
 class RequestCategory(PyEnum):
     test = "test"
     maintenance = "maintenance"
     inspection = "inspection"
     repair_lifecycle = "repair_lifecycle"
-    failure_registry = "failure_registry"   # Stage 2 — equipment failure event record
-    taqc_inspection = "taqc_inspection"     # Stage 10 — TA&QC annual inspection
+    failure_registry = "failure_registry"
+    taqc_inspection = "taqc_inspection"
+
 
 class RepairWorkflow(Base):
     __tablename__ = "repair_workflows"
 
-    id = Column(UUID(as_uuid=True), primary_key=True)
-    testing_request_id = Column(UUID, ForeignKey("testing_requests.id"), unique=True)
-
-    equipment_id = Column(UUID, ForeignKey("equipment.id"))
-
-    current_stage = Column(Integer)  # 1–10
-    status = Column(String)  # active / completed / rejected
-
-    progress = Column(Integer)  # 0–100
-
-    started_at = Column(DateTime)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("equipment.id"))
+    current_stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
+    status = Column(String, default="active")  # active / completed / rejected
+    progress = Column(Integer, default=0)  # 0–100
+    started_at = Column(DateTime, server_default=func.now())
     completed_at = Column(DateTime)
-
-    created_by = Column(UUID)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-class RepairStageDefinition(Base):
-    __tablename__ = "repair_stage_definitions"
-
-    id = Column(Integer, primary_key=True)  # 1–10
-    name = Column(String)
-    description = Column(Text)
-
-    sequence = Column(Integer)
-    weight = Column(Integer, default=10)
-
-    is_mandatory = Column(Boolean, default=True)
-    created_by = Column(UUID)
-    created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 class RepairStageInstance(Base):
     __tablename__ = "repair_stage_instances"
 
-    id = Column(UUID(as_uuid=True), primary_key=True)
-
-    workflow_id = Column(UUID, ForeignKey("repair_workflows.id"))
-    stage_id = Column(Integer, ForeignKey("repair_stage_definitions.id"))
-
-    status = Column(String)  
-    # not_started / in_progress / completed / rejected
-
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="CASCADE"))
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
+    status = Column(String, default="not_started")  # not_started / in_progress / completed / rejected
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
-
-    completed_by = Column(UUID, ForeignKey("users.id"))
-
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     remarks = Column(Text)
-    created_by = Column(UUID)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("workflow_id", "stage_id", name="uq_repair_instance"),)
 
 
 class RepairStageData(Base):
     __tablename__ = "repair_stage_data"
 
-    id = Column(UUID(as_uuid=True), primary_key=True)
-
-    stage_instance_id = Column(UUID, ForeignKey("repair_stage_instances.id"))
-
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    stage_instance_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_instances.id", ondelete="CASCADE"))
     form_data = Column(JSONB)
-    created_by = Column(UUID)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-class RepairStageRole(Base):
-    __tablename__ = "repair_stage_roles"
-
-    id = Column(Integer, primary_key=True)
-
-    stage_id = Column(Integer, ForeignKey("repair_stage_definitions.id"))
-    role_id = Column(UUID, ForeignKey("org_roles.id"))
-
-    can_edit = Column(Boolean, default=True)
-    can_approve = Column(Boolean, default=False)
-    created_by = Column(UUID)
-    created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())    
-
-class RepairStageTransition(Base):
-    __tablename__ = "repair_stage_transitions"
-
-    id = Column(Integer, primary_key=True)
-
-    from_stage = Column(Integer)
-    to_stage = Column(Integer)
-
-    action = Column(String)  # approve / reject / fail
-
-    is_default = Column(Boolean, default=False)
-    created_by = Column(UUID)
-    created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())  
 
 class RepairStageDocument(Base):
     __tablename__ = "repair_stage_documents"
 
-    id = Column(UUID(as_uuid=True), primary_key=True)
-
-    stage_instance_id = Column(UUID, ForeignKey("repair_stage_instances.id"))
-
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    stage_instance_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_instances.id", ondelete="CASCADE"))
+    field_key = Column(String)
     file_name = Column(String)
-    file_url = Column(Text)
+    file_path = Column(Text)
+    mime_type = Column(String)
+    size_bytes = Column(Integer)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    uploaded_at = Column(DateTime, server_default=func.now())
 
-    uploaded_by = Column(UUID)
-    uploaded_at = Column(DateTime, server_default=func.now())    
-    created_by = Column(UUID)
-    created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID)
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())  
+
+class RepairStageAuditLog(Base):
+    __tablename__ = "repair_stage_audit_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id"))
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
+    action = Column(String)
+    performed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    performed_at = Column(DateTime, server_default=func.now())
+    note = Column(Text)
 
 class Plan(Base):
     __tablename__ = "plans"

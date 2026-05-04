@@ -1,0 +1,9 @@
+ [
+    {"from": "Failure Reporting", "action": "approve", "to": "Committee Review"},
+    {"from": "Committee Review", "action": "approve", "to": "Vendor Assignment"},
+    {"from": "Committee Review", "action": "reject", "to": "Failure Reporting"},
+    {"from": "Vendor Assignment", "action": "approve", "to": "Lifting"},
+    {"from": "Joint Inspection", "action": "reject", "to": "Lifting"},
+    {"from": "Final Inspection", "action": "reject", "to": "Repair QA"},
+    {"from": "Dispatch", "action": "approve", "to": "Commissioning"}
+]
