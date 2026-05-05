@@ -820,7 +820,7 @@ class RepairWorkflowService:
         logs = (
             self.db.query(RepairStageAuditLog)
             .filter(RepairStageAuditLog.workflow_id == workflow_id)
-            .order_by(RepairStageAuditLog.created_at)
+            .order_by(RepairStageAuditLog.performed_at)
             .all()
         )
         result = []

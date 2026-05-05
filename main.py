@@ -105,9 +105,6 @@ from routers import reporting as reporting_router
 # Workflow Engine
 from routers import workflows
 
-# Repair Workflow
-from routers import repair_workflow as repair_workflow_router
-
 # ── APScheduler ──────────────────────────────────────────────────────────────
 scheduler = BackgroundScheduler(timezone="UTC")
 
@@ -472,11 +469,10 @@ app.include_router(org_roles.router)
 app.include_router(workflows.router)
 
 # Repair Lifecycle Workflow
-app.include_router(repair_workflow_router.router)
+app.include_router(repair_workflow.router)
 
 # WebSocket
 app.include_router(websocket_routes.router)
-app.include_router(repair_workflow.router)
 
 # ✅ Vendor Directory — fetches vendors from supplier portal
 app.include_router(vendor_directory_router)

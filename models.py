@@ -96,9 +96,9 @@ class RepairWorkflowDefinition(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, default="Transformer Repair Lifecycle")
     is_active = Column(Boolean, default=True)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
@@ -127,7 +127,7 @@ class RepairStageTemplate(Base):
     )
     template_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("org_test_templates.id", ondelete="CASCADE"),
+        ForeignKey("public.org_test_templates.id", ondelete="CASCADE"),
     )
 
 
@@ -161,21 +161,21 @@ class RepairWorkflow(Base):
     __tablename__ = "repair_workflows"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    equipment_id = Column(UUID(as_uuid=True), ForeignKey("equipment.id"))
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"))
     current_stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
     # Traceability: the FR- TestingRequest that triggered this workflow
     source_failure_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("testing_requests.id", ondelete="SET NULL"),
+        ForeignKey("public.testing_requests.id", ondelete="SET NULL"),
         nullable=True,
     )
     status = Column(String, default="active")   # active / completed / cancelled
     progress = Column(Integer, default=0)        # 0–100 weight-based
     started_at = Column(DateTime, server_default=func.now())
     completed_at = Column(DateTime)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
@@ -189,11 +189,11 @@ class RepairStageInstance(Base):
     status = Column(String, default="not_started")   # not_started / in_progress / completed / rejected
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
-    completed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     remarks = Column(Text)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (UniqueConstraint("workflow_id", "stage_id", name="uq_repair_instance"),)
@@ -206,9 +206,9 @@ class RepairStageData(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     stage_instance_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_instances.id", ondelete="CASCADE"))
     form_data = Column(JSONB)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
@@ -223,7 +223,7 @@ class RepairStageDocument(Base):
     file_path = Column(Text)         # relative path: uploads/repair/<uuid>_<name>
     mime_type = Column(String)
     size_bytes = Column(Integer)
-    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     uploaded_at = Column(DateTime, server_default=func.now())
 
 
@@ -235,7 +235,7 @@ class RepairStageAuditLog(Base):
     workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id"))
     stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
     action = Column(String)          # created / saved / approve / reject / started
-    performed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    performed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     performed_at = Column(DateTime, server_default=func.now())
     note = Column(Text)
 

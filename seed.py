@@ -5923,9 +5923,10 @@ def seed_workflow(session):
       Repair_Role_Transitions.json  — [{from, to, action}]  (stage names)
     """
     import json as _json
+    import os as _os
 
     def _load(fname):
-        path = os.path.join(os.path.dirname(__file__), fname)
+        path = _os.path.join(_os.path.dirname(__file__), fname)
         with open(path) as fh:
             return _json.load(fh)
 
@@ -5960,9 +5961,8 @@ def seed_workflow(session):
         obj = OrgTestTemplate(
             id=uuid.uuid4(),
             template_key=key,
-            template_type=t["template_type"],
             template_data=t,
-            created_at=datetime.utcnow(),
+            is_system=True,
         )
         session.add(obj)
         session.flush()
@@ -6006,6 +6006,9 @@ def seed_workflow(session):
             session.add(RepairStageTemplate(stage_id=stage_id, template_id=template_id))
 
     # ── 4. Stage → Role mapping ───────────────────────────────────────────────
+    # Query ALL org roles with the same name (one per org) so that RBAC works
+    # for users in ANY organization (e.g. KPTCL and SAMPLEORG both have
+    # "AEE Maintenance" — both must be seeded into repair_stage_roles).
     for entry in roles_raw:
         stage_code = entry.get("stage_code") or entry.get("code")
         stage_id   = code_map.get(stage_code)
@@ -6013,21 +6016,22 @@ def seed_workflow(session):
             print(f"[WARN] Stage code not found: {stage_code}")
             continue
         for role_name in entry.get("roles", []):
-            role = session.query(OrgRole).filter_by(name=role_name).first()
-            if not role:
-                print(f"[WARN] Role not found: {role_name}")
+            matched_roles = session.query(OrgRole).filter(OrgRole.name == role_name).all()
+            if not matched_roles:
+                print(f"[WARN] Role not found in any org: {role_name}")
                 continue
-            exists = session.query(RepairStageRole).filter_by(
-                stage_id=stage_id, role_id=role.id
-            ).first()
-            if not exists:
-                session.add(RepairStageRole(
-                    id=uuid.uuid4(),
-                    stage_id=stage_id,
-                    role_id=role.id,
-                    can_edit=True,
-                    can_approve=True,   # same role fills AND approves the stage
-                ))
+            for role in matched_roles:
+                exists = session.query(RepairStageRole).filter_by(
+                    stage_id=stage_id, role_id=role.id
+                ).first()
+                if not exists:
+                    session.add(RepairStageRole(
+                        id=uuid.uuid4(),
+                        stage_id=stage_id,
+                        role_id=role.id,
+                        can_edit=True,
+                        can_approve=True,   # same role fills AND approves the stage
+                    ))
 
     # ── 5. Transitions ────────────────────────────────────────────────────────
     for t in transitions_raw:
@@ -6047,7 +6051,7 @@ def seed_workflow(session):
             ))
 
     session.commit()
-    print("✅ Repair workflow seeded successfully")
+    print("[OK] Repair workflow seeded successfully")
 
 
 def seed_kptcl_only(org_id: str):
