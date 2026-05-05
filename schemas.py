@@ -597,35 +597,6 @@ class UserResponse(BaseModel):
 
 
 
-
-class RepairWorkflowResponse(BaseModel):
-    id: UUID
-    testing_request_id: UUID
-    equipment_id: Optional[UUID] = None
-
-    current_stage: int
-    status: str  # active / completed / rejected
-    progress: int
-
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-
-    # Audit fields (aligned with your system)
-    created_by: Optional[UUID] = None
-    modified_by: Optional[UUID] = None
-    created_at: Optional[datetime] = None
-    modified_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-
-class RepairWorkflowCreate(BaseModel):
-    testing_request_id: UUID
-    equipment_id: Optional[UUID] = None  # optional (if not already in request)
-
-    class Config:
-        from_attributes = True
     
 class LoginResponse(BaseModel):
     access_token: str
@@ -2321,23 +2292,36 @@ class EquipmentCountResponse(BaseModel):
     total: int = 0
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Repair Workflow Schemas
-# ---------------------------------------------------------------------------
+# =============================================================================
 
-class RepairStageDefResponse(BaseModel):
-    id: UUID
+class RepairStageCreate(BaseModel):
     name: str
     code: str
     sequence: int
-    weight: int
-    is_active: bool
-    is_mandatory: bool
-    template_id: Optional[UUID] = None
-    roles: list = []
+    weight: int = 10
+    is_mandatory: bool = True
 
-    class Config:
-        from_attributes = True
+
+class RepairStageUpdate(BaseModel):
+    name: Optional[str] = None
+    sequence: Optional[int] = None
+    weight: Optional[int] = None
+    is_active: Optional[bool] = None
+    is_mandatory: Optional[bool] = None
+
+
+class RepairRoleAssignment(BaseModel):
+    role_id: UUID
+    can_edit: bool = True
+    can_approve: bool = True   # default True so stage actors can also approve
+
+
+class RepairTransitionUpsert(BaseModel):
+    from_stage_id: UUID
+    to_stage_id: Optional[UUID] = None   # None = terminal (end of workflow)
+    action: str                          # "approve" | "reject"
 
 
 class RepairWorkflowStartRequest(BaseModel):
@@ -2365,34 +2349,21 @@ class RepairSaveDataRequest(BaseModel):
     form_data: dict
 
 
-class RepairStageCreate(BaseModel):
+class RepairStageDefResponse(BaseModel):
+    id: UUID
     name: str
     code: str
     sequence: int
-    weight: int = 10
-    is_mandatory: bool = True
+    weight: int
+    is_active: bool
+    is_mandatory: bool
+    template_id: Optional[UUID] = None
+    roles: List[dict] = []
+    transitions: List[dict] = []
+
+    class Config:
+        from_attributes = True
 
 
-class RepairStageUpdate(BaseModel):
-    name: Optional[str] = None
-    sequence: Optional[int] = None
-    weight: Optional[int] = None
-    is_active: Optional[bool] = None
-    is_mandatory: Optional[bool] = None
-
-
-class RepairRoleAssignment(BaseModel):
-    role_id: UUID
-    can_edit: bool = True
-    can_approve: bool = False
-
-
-class RepairTransitionUpsert(BaseModel):
-    from_stage_id: UUID
-    to_stage_id: Optional[UUID] = None
-    action: str  # approve / reject
-
-
-# Also export the old RepairWorkflowCreate alias for backward compat
-class RepairWorkflowCreate(BaseModel):
-    equipment_id: Optional[UUID] = None
+# Backward-compat alias (old router used RepairWorkflowCreate)
+RepairWorkflowCreate = RepairWorkflowStartRequest

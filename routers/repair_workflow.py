@@ -2,6 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -24,87 +25,142 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-# ---------------------------------------------------------------------------
-# Admin Config Routes   (/repair-workflows/config/...)
-# ---------------------------------------------------------------------------
+# =============================================================================
+# Admin Config   — module: repair-workflows  |  HTTP method drives privilege
+# =============================================================================
 
 @router.get("/config/stages")
 def list_stages(db: Session = Depends(get_db)):
     """List all stage definitions with template, roles, and transitions."""
-    svc = RepairWorkflowService(db)
-    return svc.list_stages()
+    return RepairWorkflowService(db).list_stages()
 
 
 @router.post("/config/stages")
-def create_stage(payload: RepairStageCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Create a new stage definition."""
-    svc = RepairWorkflowService(db)
-    return svc.create_stage(payload.dict(), user.id)
+def create_stage(
+    payload: RepairStageCreate,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Create a new stage definition. Requires org-admin role."""
+    try:
+        return RepairWorkflowService(db).create_stage(payload.dict(), user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.put("/config/stages/reorder")
-def reorder_stages(items: List[dict], db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Bulk reorder stages. Body: [{id, sequence}, ...]"""
-    svc = RepairWorkflowService(db)
-    svc.reorder_stages(items, user.id)
+def reorder_stages(
+    items: List[dict],
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Bulk reorder stages. Body: [{id, sequence}, ...]. Requires org-admin role."""
+    try:
+        RepairWorkflowService(db).reorder_stages(items, user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"message": "Reordered successfully"}
 
 
 @router.put("/config/stages/{stage_id}")
-def update_stage(stage_id: UUID, payload: RepairStageUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Update a stage definition."""
-    svc = RepairWorkflowService(db)
+def update_stage(
+    stage_id: UUID,
+    payload: RepairStageUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Update a stage definition. Requires org-admin role."""
     try:
-        return svc.update_stage(stage_id, payload.dict(exclude_none=True), user.id)
+        return RepairWorkflowService(db).update_stage(
+            stage_id, payload.dict(exclude_none=True), user.id
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 
-@router.put("/config/stages/{stage_id}/template")
-def set_stage_template(stage_id: UUID, payload: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Assign a template to a stage. Body: {template_id: UUID}"""
-    svc = RepairWorkflowService(db)
+@router.delete("/config/stages/{stage_id}")
+def deactivate_stage(
+    stage_id: UUID,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Soft-delete a stage (sets is_active=False). Requires org-admin role."""
     try:
-        svc.set_stage_template(stage_id, payload["template_id"], user.id)
+        RepairWorkflowService(db).deactivate_stage(stage_id, user.id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"message": "Stage deactivated"}
+
+
+@router.put("/config/stages/{stage_id}/template")
+def set_stage_template(
+    stage_id: UUID,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Assign a form template to a stage. Body: {template_id}. Requires org-admin role."""
+    try:
+        RepairWorkflowService(db).set_stage_template(
+            stage_id, payload["template_id"], user.id
+        )
     except (ValueError, KeyError) as e:
         raise HTTPException(400, str(e))
     return {"message": "Template assigned"}
 
 
 @router.put("/config/stages/{stage_id}/roles")
-def set_stage_roles(stage_id: UUID, roles: List[RepairRoleAssignment], db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Replace all role assignments for a stage."""
-    svc = RepairWorkflowService(db)
-    svc.set_stage_roles(stage_id, [r.dict() for r in roles], user.id)
+def set_stage_roles(
+    stage_id: UUID,
+    roles: List[RepairRoleAssignment],
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Replace all role assignments for a stage. Requires org-admin role."""
+    try:
+        RepairWorkflowService(db).set_stage_roles(
+            stage_id, [r.dict() for r in roles], user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"message": "Roles updated"}
 
 
 @router.get("/config/transitions")
 def list_transitions(db: Session = Depends(get_db)):
     """List all stage transitions."""
-    svc = RepairWorkflowService(db)
-    return svc.list_transitions()
+    return RepairWorkflowService(db).list_transitions()
 
 
 @router.put("/config/transitions")
-def upsert_transitions(transitions: List[RepairTransitionUpsert], db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Bulk upsert stage transitions."""
-    svc = RepairWorkflowService(db)
-    svc.upsert_transitions([t.dict() for t in transitions], user.id)
+def upsert_transitions(
+    transitions: List[RepairTransitionUpsert],
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Bulk upsert stage transitions. Requires org-admin role."""
+    try:
+        RepairWorkflowService(db).upsert_transitions(
+            [t.dict() for t in transitions], user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"message": "Transitions updated"}
 
 
-# ---------------------------------------------------------------------------
-# Workflow Execution Routes   (/repair-workflows/...)
-# ---------------------------------------------------------------------------
+# =============================================================================
+# Workflow Execution
+# =============================================================================
 
 @router.post("/start")
-def start_workflow(payload: RepairWorkflowStartRequest, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def start_workflow(
+    payload: RepairWorkflowStartRequest,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """Start a new repair workflow for a piece of equipment."""
-    svc = RepairWorkflowService(db)
     try:
-        wf = svc.start_workflow(payload.equipment_id, user.id)
-        return wf
+        return RepairWorkflowService(db).start_workflow(payload.equipment_id, user.id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -117,44 +173,54 @@ def list_workflows(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """List workflows with optional filters."""
-    svc = RepairWorkflowService(db)
-    return svc.list_workflows(equipment_id=equipment_id, status=status, skip=skip, limit=limit)
+    """List repair workflows. Filter by equipment_id and/or status."""
+    return RepairWorkflowService(db).list_workflows(
+        equipment_id=equipment_id, status=status, skip=skip, limit=limit
+    )
 
 
 @router.get("/{workflow_id}/current-form")
 def current_form(workflow_id: UUID, db: Session = Depends(get_db)):
-    """Get the current stage form template and saved data."""
-    svc = RepairWorkflowService(db)
+    """Get the current stage form template and any previously saved data."""
     try:
-        return svc.get_current_form(workflow_id)
+        return RepairWorkflowService(db).get_current_form(workflow_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 
 @router.get("/{workflow_id}/timeline")
 def timeline(workflow_id: UUID, db: Session = Depends(get_db)):
-    """Full audit trail for the workflow."""
-    svc = RepairWorkflowService(db)
-    return svc.get_timeline(workflow_id)
+    """Full audit trail — every action taken on this workflow in chronological order."""
+    return RepairWorkflowService(db).get_timeline(workflow_id)
 
 
 @router.get("/{workflow_id}/progress")
 def get_progress(workflow_id: UUID, db: Session = Depends(get_db)):
-    """Current stage, progress percentage, and status."""
-    svc = RepairWorkflowService(db)
+    """Current stage, progress percentage, and overall workflow status."""
     try:
-        return svc.get_progress(workflow_id)
+        return RepairWorkflowService(db).get_progress(workflow_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.get("/{workflow_id}/stages/{stage_id}/documents")
+def list_stage_documents(
+    workflow_id: UUID,
+    stage_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """List all uploaded documents for a specific stage."""
+    try:
+        return RepairWorkflowService(db).list_stage_documents(workflow_id, stage_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 
 @router.get("/{workflow_id}")
 def get_workflow(workflow_id: UUID, db: Session = Depends(get_db)):
-    """Full workflow detail including all stage instances."""
-    svc = RepairWorkflowService(db)
+    """Full workflow detail including all stage instances and their status."""
     try:
-        return svc.get_workflow_detail(workflow_id)
+        return RepairWorkflowService(db).get_workflow_detail(workflow_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -167,10 +233,15 @@ def save_stage(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Save form data for a stage."""
-    svc = RepairWorkflowService(db)
+    """
+    Save form data for a stage.
+    - Requires the caller's org role to be listed in RepairStageRole for this stage.
+    - Runs template validation before persisting.
+    """
     try:
-        return svc.save_stage_data(workflow_id, stage_id, payload.form_data, user.id)
+        return RepairWorkflowService(db).save_stage_data(
+            workflow_id, stage_id, payload.form_data, user.id
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -184,11 +255,15 @@ async def upload_stage_file(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Upload a file for a specific field in a stage."""
-    svc = RepairWorkflowService(db)
+    """
+    Upload a file for a specific field in a stage.
+    - Requires the caller's org role to be authorized for this stage.
+    - Stores file in uploads/repair/ and records a RepairStageDocument row.
+    - Patches form_data[field_key] with the document reference automatically.
+    """
     try:
         file_bytes = await file.read()
-        return svc.upload_stage_file(
+        return RepairWorkflowService(db).upload_stage_file(
             workflow_id=workflow_id,
             stage_id=stage_id,
             field_key=field_key,
@@ -201,21 +276,52 @@ async def upload_stage_file(
         raise HTTPException(400, str(e))
 
 
-@router.post("/{workflow_id}/advance")
-def advance(workflow_id: UUID, payload: RepairAdvanceRequest = RepairAdvanceRequest(), db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Approve current stage and advance to next."""
-    svc = RepairWorkflowService(db)
+@router.get("/documents/{doc_id}/download")
+def download_document(doc_id: UUID, db: Session = Depends(get_db)):
+    """Download a previously uploaded stage document by its document ID."""
     try:
-        return svc.advance_stage(workflow_id, payload.remarks, user.id)
+        abs_path, file_name, mime_type = RepairWorkflowService(db).get_document_file(doc_id)
+        return FileResponse(
+            path=abs_path,
+            filename=file_name,
+            media_type=mime_type or "application/octet-stream",
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/{workflow_id}/advance")
+def advance(
+    workflow_id: UUID,
+    payload: RepairAdvanceRequest = RepairAdvanceRequest(),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Approve current stage and advance to the next.
+    - Requires can_approve on this stage.
+    - Uses RepairStageTransition table; falls back to sequential order.
+    - On final stage completion, sets equipment.status back to 'active'.
+    """
+    try:
+        return RepairWorkflowService(db).advance_stage(workflow_id, payload.remarks, user.id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
 
 @router.post("/{workflow_id}/reject")
-def reject(workflow_id: UUID, payload: RepairAdvanceRequest = RepairAdvanceRequest(), db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Reject current stage and move back to previous."""
-    svc = RepairWorkflowService(db)
+def reject(
+    workflow_id: UUID,
+    payload: RepairAdvanceRequest = RepairAdvanceRequest(),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Reject current stage and move back to the previous.
+    - Requires can_approve on this stage.
+    - Uses RepairStageTransition table; falls back to sequential reverse.
+    """
     try:
-        return svc.reject_stage(workflow_id, payload.remarks, user.id)
+        return RepairWorkflowService(db).reject_stage(workflow_id, payload.remarks, user.id)
     except ValueError as e:
         raise HTTPException(400, str(e))

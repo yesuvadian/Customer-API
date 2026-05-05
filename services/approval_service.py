@@ -338,9 +338,10 @@ class ApprovalService:
         td: dict,
         approver_id: UUID,
     ) -> str:
-        """Auto-create a repair_lifecycle TestingRequest linked to an approved FR-."""
-        from sqlalchemy import func
-
+        """
+        Auto-create a repair_lifecycle TestingRequest linked to an approved FR-,
+        and trigger the 10-stage RepairWorkflow for the equipment.
+        """
         now = datetime.now(timezone.utc)
         rn = self._generate_tr_number("RL")
 
@@ -348,6 +349,7 @@ class ApprovalService:
         failure_date = td.get("failure_date", "")
         fr_title = source_request.title or source_request.request_number
 
+        # ── RL- ticket (traceability / audit record) ──────────────────────────
         repair_tr = TestingRequest(
             request_number=rn,
             title=f"[Repair] {fr_title}",
@@ -362,7 +364,7 @@ class ApprovalService:
             organization_id=source_request.organization_id,
             department_id=source_request.department_id,
             priority=source_request.priority or "normal",
-            status=TestingRequestStatus.submitted,   # → lands in assigner queue
+            status=TestingRequestStatus.submitted,
             is_direct_submission=False,
             source_failure_id=source_request.id,     # traceability FK
             originator_id=source_request.originator_id,
@@ -372,6 +374,34 @@ class ApprovalService:
         self.db.add(repair_tr)
         self.db.commit()
         self.db.refresh(repair_tr)
+
+        # ── Trigger the 10-stage repair workflow ──────────────────────────────
+        if source_request.equipment_id:
+            try:
+                from services.repair_workflow_service import RepairWorkflowService
+                from models import RepairWorkflow
+
+                svc = RepairWorkflowService(self.db)
+                workflow_dict = svc.start_workflow(
+                    equipment_id=source_request.equipment_id,
+                    user_id=approver_id,
+                )
+                # Link FR → Workflow for traceability
+                wf = self.db.query(RepairWorkflow).filter(
+                    RepairWorkflow.id == UUID(workflow_dict["id"])
+                ).first()
+                if wf:
+                    wf.source_failure_id = source_request.id
+                    self.db.commit()
+
+                print(
+                    f"[INFO] Repair workflow {workflow_dict['id']} started "
+                    f"for equipment {source_request.equipment_id} (FR: {source_request.request_number})"
+                )
+            except Exception as e:
+                # Workflow trigger failure must NOT break the approval transaction
+                print(f"[WARN] Repair workflow auto-start failed: {e}")
+
         return repair_tr.request_number
 
     def get_approval_stats(self, approver_id: UUID = None) -> dict:
