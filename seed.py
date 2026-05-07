@@ -1019,111 +1019,10 @@ NAMEPLATE_TYPE_TO_TEMPLATE = {name: key for name, key in NAMEPLATE_EQUIPMENT_TYP
 # ----------------- Seed Functions -----------------
 
 def seed_users(session):
-    COMMON_PASSWORD = "utility@123"
-    newly_created_user_ids = []
-    users_data = [
-        {"first_name": "Admin", "last_name": "User", "email": "admin@relu.com",
-         "phone_number": "9999999999", "password": "Admin@123"},
-        {"first_name": "Viewer", "last_name": "User", "email": "viewer@relu.com",
-         "phone_number": "8888888888", "password": "Viewer@123"},
-        {"first_name": "Operator", "last_name": "User", "email": "operator@relu.com",
-         "phone_number": "7777777777", "password": "Operator@123"},
-        {"first_name": "Auditor", "last_name": "User", "email": "auditor@relu.com",
-         "phone_number": "6666666666", "password": "Auditor@123"},
-        {"first_name": "Vendor", "last_name": "User", "email": "vendor@relu.com",
-         "phone_number": "5555555555", "password": "vendor@123"},
-        {"first_name": "ERP", "last_name": "Service", "email": "erp_bot@relu.com",
-         "phone_number": "4444444444", "password": "ErpBot@123"},
-        # {"first_name": "Originator", "last_name": "User", "email": "dakshanamurthy@hotmail.com",
-        #  "phone_number": "3333333333", "password": "Originator@123"},
-        {"first_name": "Tester", "last_name": "User", "email": "tester@relu.com",
-         "phone_number": "2222222222", "password": "Tester@123"},
-        {"first_name": "Approver", "last_name": "User", "email": "approver@relu.com",
-         "phone_number": "1111111111", "password": "Approver@123"},
-        # Testers per circle/division
-        {"first_name": "Ramesh", "last_name": "AE - BMAZ North", "email": "tester.bmaz.north@relu.com",
-         "phone_number": "2200000001"},
-        {"first_name": "Suresh", "last_name": "AE - BMAZ South", "email": "tester.bmaz.south@relu.com",
-         "phone_number": "2200000002"},
-        {"first_name": "Mahesh", "last_name": "AE - BRAZ", "email": "tester.braz@relu.com",
-         "phone_number": "2200000003"},
-        {"first_name": "Ganesh", "last_name": "AE - Hubli Division", "email": "tester.hubli@relu.com",
-         "phone_number": "2200000004"},
-        {"first_name": "Naresh", "last_name": "AE - Belagavi Division", "email": "tester.belagavi@relu.com",
-         "phone_number": "2200000005"},
-        {"first_name": "Rajesh", "last_name": "AE - Mysuru Division", "email": "tester.mysuru@relu.com",
-         "phone_number": "2200000006"},
-        {"first_name": "Dinesh", "last_name": "AE - Gulbarga Division", "email": "tester.gulbarga@relu.com",
-         "phone_number": "2200000007"},
-        {"first_name": "Harish", "last_name": "AE - Bellary Division", "email": "tester.bellary@relu.com",
-         "phone_number": "2200000008"},
-          # ✅ SHEET USERS (NEW → customer)
-        {"first_name": "MVS", "last_name": "MANIAN", "email": "venkat@vmepl.com",
-         "phone_number": "9876543210", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "BMAZ NORTH", "email": "ceenz@bescom.co.in",
-         "phone_number": "+91-8277892599", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "BMAZ SOUTH", "email": "cebmaz@bescom.co.in",
-         "phone_number": "+91-9449045888", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "BRAZ", "email": "cebraz@bescom.co.in",
-         "phone_number": "+91-9448234567", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "CTAZ", "email": "cectaz@bescom.co.in",
-         "phone_number": "+91-9448461466", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "O&M ZONE HUBBALLI", "email": "ceomz.hubli@hescom.co.in",
-         "phone_number": "+91-9448277608", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "BELAGAVI ZONE", "email": "ceomzbgm@hescom.co.in",
-         "phone_number": "+91-9448370243", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "MANGALURU ZONE", "email": "ceemangaluru@mesco.in",
-         "phone_number": "+91-9448289424", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "SHIVAMOGGA ZONE", "email": "ceeshivamogga@mesco.in",
-         "phone_number": "+91-9480880565", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "MYSURU ZONE", "email": "ceez@cescmysore.org",
-         "phone_number": "+91-9448994722", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "HASSAN ZONE", "email": "ceehsnzone@cescmysore.org",
-         "phone_number": "+91-9448998099", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "GULBARGA ZONE", "email": "cegulbarga@gescom.in",
-         "phone_number": "+91-9448359005", "usertype": "customer"},
-
-        {"first_name": "CHIEF ENGINEER", "last_name": "BELLARY ZONE", "email": "cebellary@gescom.in",
-         "phone_number": "+91-9448359029", "usertype": "customer"},
-    ]
-
-    for u in users_data:
-        exists = session.query(User.id).filter_by(email=u["email"]).first()
-        if exists:
-            continue  # ❌ do nothing for existing users
-
-        user = User(
-            id=uuid.uuid4(),
-            firstname=u["first_name"],
-            lastname=u["last_name"],
-            email=u["email"],
-            phone_number=u["phone_number"],
-            password_hash=get_password_hash(COMMON_PASSWORD),
-            usertype=u.get("usertype", None),
-            isactive=True,
-            email_confirmed=True,
-            phone_confirmed=True
-        )
-        session.add(user)
-        session.flush()
-
-        # ⭐ Track newly inserted users ONLY
-        newly_created_user_ids.append(user.id)
-
-    session.commit()
-    print("[OK] New users seeded.")
-    return newly_created_user_ids
+    # Hardcoded test users removed — use seed_dept_filter_users() for KPTCL
+    # role-based users, or create users through the application UI.
+    print("[SKIP] seed_users: no hardcoded users — skipped.")
+    return []  # return empty list; downstream assign_viewer_role_to_new_users is a no-op
 
 
 def seed_roles(session):
@@ -1459,6 +1358,12 @@ def seed_modules(session):
                 "severity classification and compliance tracking (SRS Sec 6). "
                 "Accessible to: TA&QC Officer.",
  "path": "taqc_inspections",
+ "group_name": "Field Operations"},
+{"name": "Procurement Approvals",
+ "description": "Finance Approver queue — review and approve / reject replacement procurement "
+                "requests created after Technical Approver approves a 'replacement' recommendation. "
+                "Accessible to: Finance Approver role.",
+ "path": "procurement_approvals",
  "group_name": "Field Operations"},
 # ✅ TEST REGISTER MODULE (SRS §5.1.1)
 {"name": "Test Register",
@@ -1955,44 +1860,9 @@ def seed_privileges(session, role_ids, module_ids):
 
 
 def seed_user_roles(session, role_ids):
-    user_roles_data = [
-        {"email": "admin@relu.com", "role": "Admin"},
-        {"email": "viewer@relu.com", "role": "Viewer"},
-        {"email": "operator@relu.com", "role": "Operator"},
-        {"email": "auditor@relu.com", "role": "Auditor"},
-        {"email": "vendor@relu.com", "role": "Vendor"},
-          # ✅ ERP SERVICE USER ROLE
-        {"email": "erp_bot@relu.com", "role": "ERP_SERVICE"},
-        # ✅ TESTING REQUEST SYSTEM USER ROLES
-        {"email": "originator@relu.com", "role": "Originator"},
-        {"email": "tester@relu.com", "role": "Tester"},
-        {"email": "approver@relu.com", "role": "Approver"},
-        # Circle/Division testers
-        {"email": "tester.bmaz.north@relu.com", "role": "Tester"},
-        {"email": "tester.bmaz.south@relu.com", "role": "Tester"},
-        {"email": "tester.braz@relu.com", "role": "Tester"},
-        {"email": "tester.hubli@relu.com", "role": "Tester"},
-        {"email": "tester.belagavi@relu.com", "role": "Tester"},
-        {"email": "tester.mysuru@relu.com", "role": "Tester"},
-        {"email": "tester.gulbarga@relu.com", "role": "Tester"},
-        {"email": "tester.bellary@relu.com", "role": "Tester"},
-    ]
-
-    for ur in user_roles_data:
-        user = session.query(User).filter_by(email=ur["email"]).first()
-        role_id = role_ids.get(ur["role"])
-        if user and role_id:
-            # Single-role rule: remove any existing roles first
-            session.query(UserRole).filter(
-                UserRole.user_id == user.id,
-                UserRole.role_id != role_id
-            ).delete()
-
-            exists = session.query(UserRole).filter_by(user_id=user.id, role_id=role_id).first()
-            if not exists:
-                session.add(UserRole(user_id=user.id, role_id=role_id))
-    session.commit()
-    print("[OK] User-role assignments seeded successfully (single-role enforced).")
+    # Hardcoded role assignments removed — roles are assigned via the
+    # application UI or seed_dept_filter_users() for dept-filter test users.
+    print("[SKIP] seed_user_roles: no hardcoded role assignments — skipped.")
 
 
 # ----------------- TNEB Product Seed -----------------
@@ -5457,6 +5327,324 @@ def seed_test_register(session, org):
     )
 
 
+def migrate_new_status_values(session):
+    """
+    Add new TestingRequestStatus enum values to PostgreSQL.
+    PostgreSQL requires explicit ALTER TYPE to add enum values.
+    Safe to run multiple times — uses IF NOT EXISTS.
+    """
+    from sqlalchemy import text
+    new_values = ["under_review", "finance_pending", "outcome_active", "commissioned"]
+    for val in new_values:
+        try:
+            session.execute(text(
+                f"ALTER TYPE testingrequeststatus ADD VALUE IF NOT EXISTS '{val}';"
+            ))
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"[WARN] Could not add enum value '{val}': {e}")
+
+    # Add next_action and schedule_frequency columns to recommendations
+    try:
+        session.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='recommendations'
+                    AND column_name='next_action'
+                ) THEN
+                    ALTER TABLE public.recommendations ADD COLUMN next_action VARCHAR(20);
+                END IF;
+
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='recommendations'
+                    AND column_name='schedule_frequency'
+                ) THEN
+                    ALTER TABLE public.recommendations ADD COLUMN schedule_frequency VARCHAR(20);
+                END IF;
+            END$$;
+        """))
+        session.commit()
+        print("[OK] recommendations.next_action + schedule_frequency columns ensured.")
+    except Exception as e:
+        session.rollback()
+        print(f"[WARN] recommendations column migration: {e}")
+
+    print("[OK] Status enum migration complete.")
+
+
+def seed_tr_workflows(session):
+    """
+    Seed the IntegratedWorkflowEngine with three workflows:
+      1. failure_registry  — FR Pass 1 only (Test Assigner initial-approve)
+      2. testing_request   — TR flow shared by FR-spawned TR and Adhoc TR
+      3. taqc_inspection   — E&C commissioning flow
+
+    Idempotent — skips if workflow already seeded.
+    Permission matrix rows use role name lookup (OrgRole) for all orgs.
+    """
+    from models import (
+        Workflow, WorkflowState, WorkflowTransition, PermissionMatrix, OrgRole
+    )
+
+    # ── Role name → all OrgRole ids mapping (across all orgs) ────────────────
+    def _role_ids(role_name: str):
+        return [r.id for r in session.query(OrgRole).filter_by(name=role_name, is_active=True).all()]
+
+    def _get_or_create_workflow(wf_type: str, name: str):
+        existing = session.query(Workflow).filter_by(
+            workflow_type=wf_type, organization_id=None, is_active=True
+        ).first()
+        if existing:
+            print(f"  [SKIP] Workflow '{wf_type}' already exists.")
+            return existing, True
+        wf = Workflow(
+            name=name,
+            workflow_type=wf_type,
+            organization_id=None,
+            is_active=True,
+            version=1,
+        )
+        session.add(wf)
+        session.flush()
+        return wf, False
+
+    def _state(wf_id, code, name, state_type="intermediate", order=0, color="#3FA9F5"):
+        existing = session.query(WorkflowState).filter_by(
+            workflow_id=wf_id, state_code=code
+        ).first()
+        if existing:
+            return existing
+        s = WorkflowState(
+            workflow_id=wf_id,
+            state_code=code,
+            state_name=name,
+            state_type=state_type,
+            display_order=order,
+            color=color,
+            is_active=True,
+        )
+        session.add(s)
+        session.flush()
+        return s
+
+    def _transition(wf_id, from_state, to_state, action, label,
+                    color="#3FA9F5", requires_comment=False,
+                    conditions=None, order=0):
+        existing = session.query(WorkflowTransition).filter_by(
+            workflow_id=wf_id,
+            from_state_id=from_state.id,
+            to_state_id=to_state.id,
+            action_code=action,
+        ).first()
+        if existing:
+            return existing
+        t = WorkflowTransition(
+            workflow_id=wf_id,
+            from_state_id=from_state.id,
+            to_state_id=to_state.id,
+            transition_name=label,
+            action_code=action,
+            button_label=label,
+            button_color=color,
+            requires_comment=requires_comment,
+            conditions=conditions,
+            display_order=order,
+            is_active=True,
+        )
+        session.add(t)
+        session.flush()
+        return t
+
+    def _permission(wf_id, transition, role_name, scope="department_tree"):
+        for role_id in _role_ids(role_name):
+            existing = session.query(PermissionMatrix).filter_by(
+                transition_id=transition.id, role_id=role_id
+            ).first()
+            if existing:
+                continue
+            session.add(PermissionMatrix(
+                workflow_id=wf_id,
+                transition_id=transition.id,
+                role_id=role_id,
+                scope_type=scope,
+                can_execute=True,
+                can_view=True,
+                is_active=True,
+            ))
+        session.flush()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 1. FAILURE REGISTRY WORKFLOW
+    # ══════════════════════════════════════════════════════════════════════════
+    print("  Seeding: failure_registry workflow …")
+    fr_wf, existed = _get_or_create_workflow("failure_registry", "Failure Registry Workflow")
+    if not existed:
+        # States
+        fr_submitted  = _state(fr_wf.id, "submitted",  "Submitted",  "intermediate", 0, "#FF9800")
+        fr_approved   = _state(fr_wf.id, "approved",   "Approved",   "terminal",     1, "#4CAF50")
+        fr_rejected   = _state(fr_wf.id, "rejected",   "Rejected",   "terminal",     2, "#F44336")
+
+        # Transitions
+        t_init_approve = _transition(fr_wf.id, fr_submitted, fr_approved,
+                                     "initial_approve", "Initial Approve",
+                                     color="#4CAF50", order=0)
+        t_fr_reject    = _transition(fr_wf.id, fr_submitted, fr_rejected,
+                                     "reject", "Reject",
+                                     color="#F44336", requires_comment=True, order=1)
+
+        # Permissions
+        _permission(fr_wf.id, t_init_approve, "Test Assigner")
+        _permission(fr_wf.id, t_fr_reject,    "Test Assigner")
+
+        session.commit()
+        print("  [OK] failure_registry workflow seeded.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 2. TESTING REQUEST WORKFLOW  (shared by FR-spawned TR + Adhoc TR)
+    # ══════════════════════════════════════════════════════════════════════════
+    print("  Seeding: testing_request workflow …")
+    tr_wf, existed = _get_or_create_workflow("testing_request", "Testing Request Workflow")
+    if not existed:
+        # States
+        s_submitted      = _state(tr_wf.id, "submitted",      "Submitted",        "intermediate",  0, "#FF9800")
+        s_assigned       = _state(tr_wf.id, "assigned",       "Assigned",         "intermediate",  1, "#2196F3")
+        s_accepted       = _state(tr_wf.id, "accepted",       "Accepted",         "intermediate",  2, "#03A9F4")
+        s_under_approval = _state(tr_wf.id, "under_approval", "Under Approval",   "intermediate",  3, "#9C27B0")
+        s_under_review   = _state(tr_wf.id, "under_review",   "Under Review",     "intermediate",  4, "#FF5722")
+        s_finance_pend   = _state(tr_wf.id, "finance_pending","Finance Pending",  "intermediate",  5, "#FF9800")
+        s_outcome        = _state(tr_wf.id, "outcome_active", "Outcome Active",   "terminal",      6, "#4CAF50")
+        s_closed         = _state(tr_wf.id, "closed",         "Closed",           "terminal",      7, "#9E9E9E")
+        s_rejected       = _state(tr_wf.id, "rejected",       "Rejected",         "terminal",      8, "#F44336")
+
+        # submitted → assigned / rejected
+        t_assign = _transition(tr_wf.id, s_submitted, s_assigned,
+                               "approve_and_assign", "Approve & Assign", color="#4CAF50", order=0)
+        t_tr_reject = _transition(tr_wf.id, s_submitted, s_rejected,
+                                  "reject", "Reject", color="#F44336",
+                                  requires_comment=True, order=1)
+
+        # assigned → accepted
+        t_accept = _transition(tr_wf.id, s_assigned, s_accepted,
+                               "accept", "Accept Assignment", color="#2196F3", order=0)
+
+        # accepted → under_approval
+        t_submit_result = _transition(tr_wf.id, s_accepted, s_under_approval,
+                                      "submit_result", "Submit Result", color="#9C27B0", order=0)
+
+        # under_approval → outcome_active (conditional on next_action)
+        t_approve_maint = _transition(tr_wf.id, s_under_approval, s_outcome,
+                                      "approve", "Approve",
+                                      conditions={"next_action": "maintenance"}, order=0)
+        t_approve_insp  = _transition(tr_wf.id, s_under_approval, s_outcome,
+                                      "approve", "Approve",
+                                      conditions={"next_action": "inspection"}, order=1)
+        t_approve_rl    = _transition(tr_wf.id, s_under_approval, s_outcome,
+                                      "approve", "Approve",
+                                      conditions={"next_action": "repair_cycle"}, order=2)
+        t_approve_none  = _transition(tr_wf.id, s_under_approval, s_closed,
+                                      "approve", "Approve",
+                                      conditions={"next_action": "none"}, order=3)
+        t_approve_repl  = _transition(tr_wf.id, s_under_approval, s_finance_pend,
+                                      "approve", "Approve",
+                                      conditions={"next_action": "replacement"}, order=4)
+
+        # under_approval → under_review (tech reject)
+        t_tech_reject = _transition(tr_wf.id, s_under_approval, s_under_review,
+                                    "reject", "Reject", color="#F44336",
+                                    requires_comment=True, order=5)
+
+        # under_review → accepted (tester resubmit)
+        t_resubmit = _transition(tr_wf.id, s_under_review, s_accepted,
+                                 "resubmit", "Resubmit", color="#FF5722", order=0)
+
+        # finance_pending → outcome_active / under_review
+        t_fin_approve = _transition(tr_wf.id, s_finance_pend, s_outcome,
+                                    "finance_approve", "Finance Approve", color="#4CAF50", order=0)
+        t_fin_reject  = _transition(tr_wf.id, s_finance_pend, s_under_review,
+                                    "finance_reject", "Finance Reject", color="#F44336",
+                                    requires_comment=True, order=1)
+
+        # ── Permissions ────────────────────────────────────────────────────────
+        _permission(tr_wf.id, t_assign,       "Test Assigner")
+        _permission(tr_wf.id, t_tr_reject,    "Test Assigner")
+        _permission(tr_wf.id, t_accept,       "Tester")
+        _permission(tr_wf.id, t_accept,       "Field Tester")
+        _permission(tr_wf.id, t_accept,       "Lab Tester")
+        _permission(tr_wf.id, t_submit_result,"Tester")
+        _permission(tr_wf.id, t_submit_result,"Field Tester")
+        _permission(tr_wf.id, t_submit_result,"Lab Tester")
+
+        for t_appr in [t_approve_maint, t_approve_insp, t_approve_rl,
+                       t_approve_none, t_approve_repl, t_tech_reject]:
+            _permission(tr_wf.id, t_appr, "Technical Approver")
+
+        _permission(tr_wf.id, t_resubmit,    "Tester")
+        _permission(tr_wf.id, t_resubmit,    "Field Tester")
+        _permission(tr_wf.id, t_resubmit,    "Lab Tester")
+        _permission(tr_wf.id, t_fin_approve, "Finance Approver")
+        _permission(tr_wf.id, t_fin_reject,  "Finance Approver")
+
+        session.commit()
+        print("  [OK] testing_request workflow seeded.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 3. TAQC INSPECTION WORKFLOW
+    # ══════════════════════════════════════════════════════════════════════════
+    print("  Seeding: taqc_inspection workflow …")
+    taqc_wf, existed = _get_or_create_workflow("taqc_inspection", "TAQC / E&C Inspection Workflow")
+    if not existed:
+        # States
+        q_submitted      = _state(taqc_wf.id, "submitted",      "Submitted",       "intermediate", 0, "#FF9800")
+        q_assigned       = _state(taqc_wf.id, "assigned",       "Assigned",        "intermediate", 1, "#2196F3")
+        q_accepted       = _state(taqc_wf.id, "accepted",       "Accepted",        "intermediate", 2, "#03A9F4")
+        q_under_approval = _state(taqc_wf.id, "under_approval", "Under Approval",  "intermediate", 3, "#9C27B0")
+        q_under_review   = _state(taqc_wf.id, "under_review",   "Under Review",    "intermediate", 4, "#FF5722")
+        q_commissioned   = _state(taqc_wf.id, "commissioned",   "Commissioned",    "terminal",     5, "#4CAF50")
+        q_rejected       = _state(taqc_wf.id, "rejected",       "Rejected",        "terminal",     6, "#F44336")
+
+        # Transitions
+        t_q_assign    = _transition(taqc_wf.id, q_submitted, q_assigned,
+                                    "approve_and_assign", "Approve & Assign", color="#4CAF50", order=0)
+        t_q_reject    = _transition(taqc_wf.id, q_submitted, q_rejected,
+                                    "reject", "Reject", color="#F44336",
+                                    requires_comment=True, order=1)
+        t_q_accept    = _transition(taqc_wf.id, q_assigned, q_accepted,
+                                    "accept", "Accept Assignment", color="#2196F3", order=0)
+        t_q_submit_ec = _transition(taqc_wf.id, q_accepted, q_under_approval,
+                                    "submit_ec_form", "Submit E&C Form", color="#9C27B0", order=0)
+        t_q_approve   = _transition(taqc_wf.id, q_under_approval, q_commissioned,
+                                    "approve", "Approve & Commission", color="#4CAF50", order=0)
+        t_q_tech_rej  = _transition(taqc_wf.id, q_under_approval, q_under_review,
+                                    "reject", "Reject", color="#F44336",
+                                    requires_comment=True, order=1)
+        t_q_resubmit  = _transition(taqc_wf.id, q_under_review, q_accepted,
+                                    "resubmit", "Resubmit", color="#FF5722", order=0)
+
+        # Permissions
+        _permission(taqc_wf.id, t_q_assign,    "Test Assigner")
+        _permission(taqc_wf.id, t_q_reject,    "Test Assigner")
+        _permission(taqc_wf.id, t_q_accept,    "Tester")
+        _permission(taqc_wf.id, t_q_accept,    "Field Tester")
+        _permission(taqc_wf.id, t_q_accept,    "Lab Tester")
+        _permission(taqc_wf.id, t_q_submit_ec, "Tester")
+        _permission(taqc_wf.id, t_q_submit_ec, "Field Tester")
+        _permission(taqc_wf.id, t_q_submit_ec, "Lab Tester")
+        _permission(taqc_wf.id, t_q_approve,   "Technical Approver")
+        _permission(taqc_wf.id, t_q_tech_rej,  "Technical Approver")
+        _permission(taqc_wf.id, t_q_resubmit,  "Tester")
+        _permission(taqc_wf.id, t_q_resubmit,  "Field Tester")
+        _permission(taqc_wf.id, t_q_resubmit,  "Lab Tester")
+
+        session.commit()
+        print("  [OK] taqc_inspection workflow seeded.")
+
+    print("[OK] TR / FR / TAQC workflow seeding complete.")
+
+
 def run_seed():
     # ── Create ALL SQLAlchemy tables (idempotent — safe on existing DB) ──────
     print("[INIT] Creating database schema via Base.metadata.create_all …")
@@ -5559,6 +5747,31 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Repair workflow seed failed (non-fatal): {_e}")
 
+        # TR / FR / TAQC Workflow Engine — states, transitions, permission matrix
+        print("\n--- TR / FR / TAQC Workflow Engine Seeding ---")
+        try:
+            seed_tr_workflows(session)
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] TR workflow seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # Migrate new enum values into PostgreSQL
+        print("\n--- DB Migration: new status enum values ---")
+        try:
+            migrate_new_status_values(session)
+        except Exception as _e:
+            print(f"[WARN] Status enum migration (non-fatal): {_e}")
+
+        # Dept-filter test users — always seeded under the default KPTCL org
+        print("\n--- Dept-filter test users (KPTCL org) ---")
+        try:
+            seed_dept_filter_users(session, org=kptcl_org)
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Dept-filter seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")
         print("=" * 80)
@@ -5567,7 +5780,8 @@ def run_seed():
         print("  2. Sample Org Admin: orgadmin@sampleorg.com / OrgAdmin123!")
         if kptcl_org:
             print("  3. KPTCL Org Admin: orgadmin@kptcl.com / admin123")
-        print(f"  {4 if kptcl_org else 3}. View API docs: http://localhost:8000/docs")
+        print("  4. Dept-filter users: tester.north / tester.south / tester.mysuru @ kptcl.com / TestDept@123")
+        print(f"  {5 if kptcl_org else 4}. View API docs: http://localhost:8000/docs")
         print("\n" + "=" * 80 + "\n")
 
 
@@ -6054,6 +6268,373 @@ def seed_workflow(session):
     print("[OK] Repair workflow seeded successfully")
 
 
+# ── Department-filter test seed ───────────────────────────────────────────────
+# Seeds KPTCL org with 3 peer divisions, each having the full set of 10
+# role-users.  Purpose: validate IntegratedWorkflowEngine department-scope
+# filters (exact / department_tree / organization / any).
+#
+# Hierarchy:  BLR_ZONE  →  BLR_CIRCLE  →  RT_NORTH / RT_SOUTH / MYSURU
+# Users:      {role}.north / .south / .mysuru @ kptcl.com   (pw: TestDept@123)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DFT_ROLES = [
+    ("Org Admin",           True,  False),
+    ("Dept Head",           False, True),
+    ("Originator",          False, False),
+    ("Tester",              False, False),
+    ("Test Assigner",       False, False),
+    ("Technical Approver",  False, False),
+    ("Finance Approver",    False, False),
+    ("EE TLSS",             False, False),
+    ("TA&QC Officer",       False, False),
+    ("Section Head",        False, True),
+]
+
+_DFT_DEPTS = [
+    ("north",  "RT North Division",  "north"),
+    ("south",  "RT South Division",  "south"),
+    ("mysuru", "Mysuru Division",     "mysuru"),
+]
+
+_DFT_ROLE_EMAIL = {
+    "Org Admin":           "orgadmin",
+    "Dept Head":           "depthead",
+    "Originator":          "originator",
+    "Tester":              "tester",
+    "Test Assigner":       "assigner",
+    "Technical Approver":  "techapprover",
+    "Finance Approver":    "financeapprover",
+    "EE TLSS":             "eetlss",
+    "TA&QC Officer":       "taqc",
+    "Section Head":        "sectionhead",
+}
+
+_DFT_ROLE_FNAME = {
+    "Org Admin":           "Admin",
+    "Dept Head":           "DeptHead",
+    "Originator":          "Originator",
+    "Tester":              "Tester",
+    "Test Assigner":       "Assigner",
+    "Technical Approver":  "TechApprover",
+    "Finance Approver":    "FinApprover",
+    "EE TLSS":             "EETLSS",
+    "TA&QC Officer":       "TAQC",
+    "Section Head":        "SectionHead",
+}
+
+_DFT_PHONE = {
+    ("north",  "Org Admin"):           "9900001001",
+    ("north",  "Dept Head"):           "9900001002",
+    ("north",  "Originator"):          "9900001003",
+    ("north",  "Tester"):              "9900001004",
+    ("north",  "Test Assigner"):       "9900001005",
+    ("north",  "Technical Approver"):  "9900001006",
+    ("north",  "Finance Approver"):    "9900001007",
+    ("north",  "EE TLSS"):             "9900001008",
+    ("north",  "TA&QC Officer"):       "9900001009",
+    ("north",  "Section Head"):        "9900001010",
+    ("south",  "Org Admin"):           "9900002001",
+    ("south",  "Dept Head"):           "9900002002",
+    ("south",  "Originator"):          "9900002003",
+    ("south",  "Tester"):              "9900002004",
+    ("south",  "Test Assigner"):       "9900002005",
+    ("south",  "Technical Approver"):  "9900002006",
+    ("south",  "Finance Approver"):    "9900002007",
+    ("south",  "EE TLSS"):             "9900002008",
+    ("south",  "TA&QC Officer"):       "9900002009",
+    ("south",  "Section Head"):        "9900002010",
+    ("mysuru", "Org Admin"):           "9900003001",
+    ("mysuru", "Dept Head"):           "9900003002",
+    ("mysuru", "Originator"):          "9900003003",
+    ("mysuru", "Tester"):              "9900003004",
+    ("mysuru", "Test Assigner"):       "9900003005",
+    ("mysuru", "Technical Approver"):  "9900003006",
+    ("mysuru", "Finance Approver"):    "9900003007",
+    ("mysuru", "EE TLSS"):             "9900003008",
+    ("mysuru", "TA&QC Officer"):       "9900003009",
+    ("mysuru", "Section Head"):        "9900003010",
+}
+
+
+def _dft_get_or_create_org(session) -> Organization:
+    org = session.query(Organization).filter_by(code="KPTCL").first()
+    if org:
+        print(f"  [SKIP] Org KPTCL already exists  ({org.id})")
+        return org
+    now = datetime.now()
+    org = Organization(
+        name="Karnataka Power Transmission Corporation Limited",
+        code="KPTCL",
+        display_name="KPTCL",
+        organization_type="utility",
+        industry="Power Transmission",
+        primary_email="info@kptcl.com",
+        primary_phone="+91-80-22207684",
+        is_active=True,
+        is_verified=True,
+        settings={},
+        cts=now, mts=now,
+    )
+    session.add(org)
+    session.flush()
+    print(f"  [NEW] Org KPTCL created  ({org.id})")
+    return org
+
+
+def _dft_get_or_create_dept(session, org_id, name, code,
+                             parent_id=None) -> OrgDepartment:
+    d = session.query(OrgDepartment).filter_by(
+        organization_id=org_id, code=code
+    ).first()
+    if d:
+        return d
+    now = datetime.now()
+    d = OrgDepartment(
+        organization_id=org_id,
+        name=name,
+        code=code,
+        parent_department_id=parent_id,
+        is_active=True,
+        cts=now, mts=now,
+    )
+    session.add(d)
+    session.flush()
+    return d
+
+
+# Maps dept-filter role names to their default dashboard module path.
+# Must match the Module.path values seeded in seed_modules().
+_DFT_ROLE_MODULE_PATH = {
+    "Org Admin":           "admin_dashboard",
+    "Dept Head":           "see_dashboard",
+    "Section Head":        "see_dashboard",
+    "Technical Approver":  "see_dashboard",
+    "Finance Approver":    "see_dashboard",
+    "EE TLSS":             "ee_tlss_dashboard",
+    "TA&QC Officer":       "ee_tlss_dashboard",
+    "Originator":          "aee_dashboard",
+    "Tester":              "aee_dashboard",
+    "Test Assigner":       "aee_dashboard",
+}
+
+
+def _dft_get_or_create_role(session, org_id, name,
+                             is_org_admin=False, is_dept_admin=False) -> OrgRole:
+    r = session.query(OrgRole).filter_by(
+        organization_id=org_id, name=name
+    ).first()
+    if r:
+        # Backfill default_module_id if not already set
+        if not r.default_module_id:
+            module_path = _DFT_ROLE_MODULE_PATH.get(name)
+            if module_path:
+                mod = session.query(Module).filter_by(path=module_path).first()
+                if mod:
+                    r.default_module_id = mod.id
+                    session.flush()
+        return r
+    now = datetime.now()
+
+    # Resolve default_module_id from module path (mirrors what full seed does)
+    module_path = _DFT_ROLE_MODULE_PATH.get(name)
+    default_module_id = None
+    if module_path:
+        mod = session.query(Module).filter_by(path=module_path).first()
+        if mod:
+            default_module_id = mod.id
+
+    r = OrgRole(
+        organization_id=org_id,
+        name=name,
+        description=f"{name} — seeded for dept-filter testing",
+        role_type="default",
+        is_org_admin=is_org_admin,
+        is_dept_admin=is_dept_admin,
+        is_active=True,
+        default_module_id=default_module_id,
+        cts=now, mts=now,
+    )
+    session.add(r)
+    session.flush()
+    return r
+
+
+def _dft_get_or_create_user(session, org_id, email,
+                             firstname, lastname, phone, dept_id) -> User:
+    u = session.query(User).filter_by(email=email).first()
+    if u:
+        u.organization_id = org_id
+        u.department_id   = dept_id
+        session.flush()
+        return u
+    now = datetime.now()
+    u = User(
+        email=email,
+        password_hash=get_password_hash("TestDept@123"),
+        firstname=firstname,
+        lastname=lastname,
+        phone_number=phone,
+        organization_id=org_id,
+        department_id=dept_id,
+        isactive=True,
+        email_confirmed=True,
+        phone_confirmed=True,
+        cts=now, mts=now,
+    )
+    session.add(u)
+    session.flush()
+    return u
+
+
+def _dft_assign_role(session, user_id, role_id, dept_id):
+    exists = session.query(OrgUserRole).filter_by(
+        user_id=user_id, org_role_id=role_id
+    ).first()
+    if exists:
+        return
+    now = datetime.now()
+    session.add(OrgUserRole(
+        user_id=user_id,
+        org_role_id=role_id,
+        department_id=dept_id,
+        is_active=True,
+        assigned_at=now,
+    ))
+    session.flush()
+
+
+def seed_dept_filter_users(session, org=None):
+    """
+    Seeds KPTCL org with 3 department divisions, each having the complete set
+    of 10 role-users (30 users total).  Used to validate department-scope
+    filters in IntegratedWorkflowEngine.
+
+    Pass the already-created KPTCL Organization object as `org` so this
+    function reuses it as the default org rather than doing a separate lookup.
+
+    Hierarchy:  BLR_ZONE → BLR_CIRCLE → RT_NORTH / RT_SOUTH / MYSURU
+    Email:      {role}.{dept}@kptcl.com   (e.g. tester.north@kptcl.com)
+    Password:   TestDept@123
+    """
+    print("\n" + "=" * 72)
+    print("  DEPT FILTER TEST SEED  —  3 depts × 10 roles = 30 users")
+    print("=" * 72)
+
+    # 1. Organisation — reuse the already-seeded KPTCL org (default org)
+    print("\n[1] Organisation")
+    org = org or _dft_get_or_create_org(session)
+    oid = org.id
+
+    # 2. Department hierarchy
+    print("\n[2] Department hierarchy")
+    zone = _dft_get_or_create_dept(
+        session, oid,
+        name="Bangalore Zone", code="BLR_ZONE",
+    )
+    print(f"  Zone   : {zone.name}")
+
+    circle = _dft_get_or_create_dept(
+        session, oid,
+        name="Bangalore Transmission Circle", code="BLR_CIRCLE",
+        parent_id=zone.id,
+    )
+    print(f"  Circle : {circle.name}")
+
+    div_north  = _dft_get_or_create_dept(
+        session, oid,
+        name="RT North Division", code="RT_NORTH",
+        parent_id=circle.id,
+    )
+    div_south  = _dft_get_or_create_dept(
+        session, oid,
+        name="RT South Division", code="RT_SOUTH",
+        parent_id=circle.id,
+    )
+    div_mysuru = _dft_get_or_create_dept(
+        session, oid,
+        name="Mysuru Division", code="MYSURU",
+        parent_id=circle.id,
+    )
+    dept_map = {"north": div_north, "south": div_south, "mysuru": div_mysuru}
+    for slug, dept in dept_map.items():
+        print(f"  Div [{slug:6s}]: {dept.name}  ({dept.id})")
+
+    # 3. Roles  (org-scoped, shared across all 3 divisions)
+    print("\n[3] Roles")
+    role_map: dict = {}
+    for name, is_admin, is_dept in _DFT_ROLES:
+        r = _dft_get_or_create_role(session, oid, name, is_admin, is_dept)
+        role_map[name] = r
+        tag = " [org-admin]" if is_admin else (" [dept-admin]" if is_dept else "")
+        print(f"  {name}{tag}")
+
+    # 4. Users  (3 depts × 10 roles = 30 users)
+    print("\n[4] Users  (password: TestDept@123 for all)")
+    print(f"  {'Email':48s}  {'Role':22s}  Dept")
+    print("  " + "-" * 85)
+
+    for dept_slug, dept_label, email_sfx in _DFT_DEPTS:
+        dept_obj = dept_map[dept_slug]
+        for role_name, is_admin, is_dept in _DFT_ROLES:
+            email     = f"{_DFT_ROLE_EMAIL[role_name]}.{email_sfx}@kptcl.com"
+            firstname = _DFT_ROLE_FNAME[role_name]
+            lastname  = dept_label.split()[0]          # "RT" or "Mysuru"
+            phone     = _DFT_PHONE[(dept_slug, role_name)]
+
+            u = _dft_get_or_create_user(
+                session, oid, email, firstname, lastname, phone, dept_obj.id,
+            )
+            _dft_assign_role(session, u.id, role_map[role_name].id, dept_obj.id)
+            print(f"  {email:48s}  {role_name:22s}  {dept_label}")
+
+    # 5. Top-level users: circle & zone levels
+    print("\n[5] Top-level hierarchy users  (circle + zone)")
+    _top_level_users = [
+        # (email,                   fname,  lname,    role_name,             dept_obj)
+        ("ee.circle@kptcl.com",   "EE",   "Circle", "EE TLSS",             circle),
+        ("see.circle@kptcl.com",  "SEE",  "Circle", "Technical Approver",  circle),
+        ("cee.zone@kptcl.com",    "CEE",  "Zone",   "Org Admin",           zone),
+        ("see.zone@kptcl.com",    "SEE",  "Zone",   "Technical Approver",  zone),
+    ]
+    for email, fname, lname, role_name, dept_obj in _top_level_users:
+        phone = "9000000099"
+        u = _dft_get_or_create_user(
+            session, oid, email, fname, lname, phone, dept_obj.id,
+        )
+        r = role_map.get(role_name)
+        if r:
+            _dft_assign_role(session, u.id, r.id, dept_obj.id)
+        print(f"  {email:48s}  {role_name:22s}  {dept_obj.name}")
+
+    session.commit()
+
+    print("\n" + "=" * 72)
+    print("  SEED COMPLETE -- 34 users created / updated  (30 leaf + 4 top-level)")
+    print("=" * 72)
+    print("""
+Department-filter validation matrix:
+  scope=exact (leaf-level users)
+    tester.north  -> sees ONLY RT_NORTH TRs
+    tester.south  -> sees ONLY RT_SOUTH TRs
+    tester.mysuru -> sees ONLY MYSURU TRs
+
+  scope=department_tree (circle-level users)
+    ee.circle     -> sees RT_NORTH + RT_SOUTH + MYSURU TRs  (all 3 divisions)
+    see.circle    -> sees RT_NORTH + RT_SOUTH + MYSURU TRs
+
+  scope=zone (zone-level users)
+    cee.zone      -> sees BLR_CIRCLE + all divisions beneath it
+    see.zone      -> sees BLR_CIRCLE + all divisions beneath it
+
+  scope=organization (org-admin)
+    orgadmin.north / .south / .mysuru -> all see ALL KPTCL TRs
+
+  Cross-dept isolation:
+    tester.north should NOT see tester.south's requests
+    tester.south should NOT see tester.mysuru's requests
+""")
+
+
 def seed_kptcl_only(org_id: str):
     """
     Run only KPTCL department seeding for a specific organization.
@@ -6073,20 +6654,22 @@ if __name__ == "__main__":
     import sys
 
     try:
-        # Check for --kptcl flag for KPTCL-only seeding
+        # --kptcl <org_id>  → seed KPTCL departments only (no full seed)
         if len(sys.argv) > 2 and sys.argv[1] == "--kptcl":
             org_id = sys.argv[2]
             seed_kptcl_only(org_id)
+
         else:
-            # Run full seed
+            # Full seed — dept-filter users are always included inside run_seed()
             run_seed()
 
-            # Optionally seed KPTCL if --with-kptcl flag is provided with org_id
+            # --with-kptcl <org_id>  → also seed KPTCL departments after full seed
             if len(sys.argv) > 2 and sys.argv[1] == "--with-kptcl":
                 org_id = sys.argv[2]
                 print("\n[INFO] Seeding KPTCL departments...")
                 with get_db_session() as session:
                     seed_kptcl_departments(session, org_id)
+
     except Exception as e:
         import traceback
         traceback.print_exc()

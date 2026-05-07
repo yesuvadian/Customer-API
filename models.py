@@ -71,12 +71,25 @@ class TestingRequestStatus(PyEnum):
     rejected = "rejected"
     procurement_initiated = "procurement_initiated"
     completed = "completed"
+    # Workflow engine states
+    under_review = "under_review"       # tech approver rejected → tester revises
+    finance_pending = "finance_pending" # replacement → waiting Finance Approver
+    outcome_active = "outcome_active"   # approved + dispatched (terminal)
+    commissioned = "commissioned"       # TAQC approved + equipment created (terminal)
 
 class RecommendationType(PyEnum):
     pass_test = "pass"
     fail = "fail"
     conditional = "conditional"
     retest = "retest"
+
+
+class NextActionType(PyEnum):
+    none = "none"
+    maintenance = "maintenance"
+    inspection = "inspection"
+    repair_cycle = "repair_cycle"
+    replacement = "replacement"
 
 
 class EquipmentStatus(PyEnum):
@@ -496,7 +509,7 @@ class OrgRole(Base):
     is_dept_admin = Column(Boolean, default=False)
     is_tester_assignable = Column(Boolean, default=False)  # Can this role be assigned as tester in testing requests
     is_active = Column(Boolean, default=True)
-    default_module_id = Column(Integer, ForeignKey("public.modules.id"), nullable=True)  # Default module to navigate on login
+    default_module_id = Column(Integer, ForeignKey("public.modules.id"), nullable=True)  # Default module — determines dashboard type
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -2083,6 +2096,10 @@ class Recommendation(Base):
     summary = Column(Text, nullable=False)
     detailed_notes = Column(Text, nullable=True)
     replacement_products = Column(JSONB, nullable=True)  # [{item_id, item_name, category, quantity}, ...]
+
+    # Next action dispatch — set by Tester when submitting result
+    next_action = Column(Enum(NextActionType), nullable=True)
+    schedule_frequency = Column(Enum(ScheduleFrequency), nullable=True)  # for maintenance/inspection
 
     # Approval
     approval_status = Column(String(20), default="pending")

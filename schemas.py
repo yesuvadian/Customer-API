@@ -969,7 +969,7 @@ class TestingRequestCreate(BaseModel):
     equipment_id: Optional[UUID] = None
 
     # Request category: test | maintenance | inspection | repair_lifecycle
-    request_category: Optional[Literal["test", "maintenance", "inspection", "repair_lifecycle"]] = "test"
+    request_category: Optional[Literal["test", "maintenance", "inspection", "repair_lifecycle", "failure_registry", "taqc_inspection"]] = "test"
 
     # New department-based location
     organization_id: Optional[UUID] = None
@@ -1390,17 +1390,28 @@ class RecommendationCreate(BaseModel):
     summary: str
     detailed_notes: Optional[str] = None
     organization_id: Optional[UUID] = None
+    # next_action dispatch — set by Tester when submitting result
+    next_action: Optional[str] = None          # none|maintenance|inspection|repair_cycle|replacement
+    schedule_frequency: Optional[str] = None   # yearly|quarterly|monthly|semi_annual etc.
 
 class RecommendationUpdate(BaseModel):
     recommendation_type: Optional[str] = None
     summary: Optional[str] = None
     detailed_notes: Optional[str] = None
+    next_action: Optional[str] = None
+    schedule_frequency: Optional[str] = None
 
 class ApprovalAction(BaseModel):
     notes: Optional[str] = None
 
 class SubmitTestResultsBody(BaseModel):
     replacement_products: Optional[list] = None  # [{item_id, item_name, category, quantity}, ...]
+    # Recommendation fields — when provided, a recommendation is created/updated directly
+    recommendation_type: Optional[str] = None   # pass | fail | conditional | retest
+    summary: Optional[str] = None
+    detailed_notes: Optional[str] = None
+    next_action: Optional[str] = None           # none | maintenance | inspection | repair_cycle | replacement
+    schedule_frequency: Optional[str] = None    # yearly | half_yearly | quarterly | monthly
 
 
 class RecommendationResponse(BaseModel):
@@ -1411,6 +1422,8 @@ class RecommendationResponse(BaseModel):
     summary: str
     detailed_notes: Optional[str] = None
     replacement_products: Optional[list] = None
+    next_action: Optional[str] = None
+    schedule_frequency: Optional[str] = None
     approval_status: Optional[str] = None
     approved_by: Optional[UUID] = None
     approved_by_name: Optional[str] = None   # resolved display name

@@ -577,6 +577,66 @@ class NotificationService:
             severity="info",
         )
 
+    def notify_procurement_pending(self, request, pr_number: str) -> None:
+        """Triggered when a ProcurementRequest is created — notifies Finance Approvers."""
+        self.fire(
+            event_type="procurement_pending",
+            context={
+                "request_number": getattr(request, "request_number", ""),
+                "pr_number": pr_number,
+                "title": getattr(request, "title", ""),
+            },
+            organization_id=getattr(request, "organization_id", None),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="info",
+        )
+
+    def notify_recommendation_rejected(self, request, rec) -> None:
+        """Triggered when a Technical Approver rejects a recommendation — notifies tester."""
+        self.fire(
+            event_type="recommendation_rejected",
+            context={
+                "request_number": getattr(request, "request_number", ""),
+                "reason": rec.approval_notes or "No reason provided",
+            },
+            organization_id=getattr(request, "organization_id", None),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="alert",
+        )
+
+    def notify_procurement_decision(self, request, pr_number: str, decision: str, notes: str = "") -> None:
+        """Triggered when Finance Approver approves or rejects a procurement — notifies originator/tester."""
+        self.fire(
+            event_type="procurement_decision",
+            context={
+                "request_number": getattr(request, "request_number", ""),
+                "pr_number": pr_number,
+                "decision": decision,          # "approved" or "rejected"
+                "notes": notes or "",
+            },
+            organization_id=getattr(request, "organization_id", None),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="info" if decision == "approved" else "alert",
+        )
+
+    def notify_tester_declined(self, request, tester_name: str, reason: str) -> None:
+        """Triggered when a tester declines an assignment — notifies Test Assigner."""
+        self.fire(
+            event_type="tester_declined",
+            context={
+                "request_number": getattr(request, "request_number", ""),
+                "tester_name": tester_name,
+                "reason": reason,
+            },
+            organization_id=getattr(request, "organization_id", None),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="alert",
+        )
+
     def notify_overdue(self, request) -> None:
         """Triggered by scheduler when due_date has passed and request is still open."""
         equipment_label = (

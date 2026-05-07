@@ -197,6 +197,8 @@ class ApprovalService:
             "recommendation_type": rec.recommendation_type.value if rec.recommendation_type else None,
             "summary": rec.summary,
             "detailed_notes": rec.detailed_notes,
+            "next_action": rec.next_action.value if rec.next_action else None,
+            "schedule_frequency": rec.schedule_frequency.value if rec.schedule_frequency else None,
             "approval_status": rec.approval_status,
             "approved_by": str(rec.approved_by) if rec.approved_by else None,
             "approved_at": rec.approved_at.isoformat() if rec.approved_at else None,
@@ -229,16 +231,14 @@ class ApprovalService:
         rec.approval_notes = notes
         rec.modified_by = approver_id
 
-        # Update testing request status
         request = self.db.query(TestingRequest).filter(TestingRequest.id == rec.testing_request_id).first()
         if request:
-            request.status = TestingRequestStatus.approved
             request.modified_by = approver_id
 
         self.db.commit()
         self.db.refresh(rec)
 
-        # ── Notification: recommendation approved → notify procurement ─────────
+        # ── Notification ──────────────────────────────────────────────────────
         if request:
             try:
                 from services.notification_service import NotificationService
@@ -246,77 +246,26 @@ class ApprovalService:
             except Exception as _n:
                 print(f"[WARN] recommendation_approved notification failed: {_n}")
 
-        # ── Failure Registry post-approval logic ──────────────────────────────
-        # If this is a failure_registry direct submission, read the outcome from
-        # the test_data JSONB and optionally auto-create a repair_lifecycle TR.
-        fr_outcome = None
-        fr_number = None
-        fr_equipment_ueic = None
-        fr_failure_category = None
-        fr_failure_date = None
-        auto_repair_tr_number = None
-
-        if request and request.request_category == RequestCategory.failure_registry:
-            # Pull the latest TestResult to read test_data
-            tr_result = (
-                self.db.query(TestResult)
-                .filter(TestResult.testing_request_id == request.id)
-                .order_by(TestResult.tested_at.desc())
-                .first()
-            )
-            td = tr_result.test_data if tr_result and tr_result.test_data else {}
-
-            fr_outcome = (td.get("outcome") or "").strip()
-            fr_failure_category = td.get("failure_category")
-            fr_failure_date = td.get("failure_date")
-            fr_number = request.request_number
-            fr_equipment_ueic = (
-                request.equipment.ueic if request.equipment else None
-            )
-
-            if fr_outcome.lower() == "repair":
-                # Auto-create a repair_lifecycle TestingRequest so it appears
-                # in the TR assigner queue immediately after FR approval.
-                auto_repair_tr_number = self._create_repair_tr(
-                    source_request=request,
-                    td=td,
-                    approver_id=approver_id,
-                )
-
-            # Notify the FR submitter of the approval outcome
+        # ── next_action dispatch (new flow) ───────────────────────────────────
+        dispatch_result = {}
+        if request and rec.next_action is not None:
             try:
-                from services.notification_service import NotificationService
-                submitter = self.db.query(User).filter(
-                    User.id == request.originator_id
-                ).first() if request.originator_id else None
-                if submitter:
-                    NotificationService(self.db).fire(
-                        event_type="fr_approved",
-                        context={"fr_number": fr_number or "", "outcome": fr_outcome or "Approved"},
-                        organization_id=request.organization_id,
-                        source_id=request.id,
-                        source_type="testing_request",
-                        severity="info",
-                        extra_recipients=[submitter],
-                    )
-            except Exception as _n:
-                print(f"[WARN] fr_approved notification failed: {_n}")
+                from services.workflow_dispatch_service import WorkflowDispatchService
+                dispatch_result = WorkflowDispatchService(self.db).dispatch(request, rec, approver_id)
+            except Exception as _d:
+                print(f"[WARN] next_action dispatch failed: {_d}")
 
         return {
             "id": str(rec.id),
             "testing_request_id": str(rec.testing_request_id),
             "recommendation_type": rec.recommendation_type.value if rec.recommendation_type else None,
+            "next_action": rec.next_action.value if rec.next_action else None,
+            "schedule_frequency": rec.schedule_frequency.value if rec.schedule_frequency else None,
             "approval_status": rec.approval_status,
             "approved_by": str(rec.approved_by) if rec.approved_by else None,
             "approved_at": rec.approved_at.isoformat() if rec.approved_at else None,
             "approval_notes": rec.approval_notes,
-            # Failure Registry extras (null for non-FR approvals)
-            "fr_outcome": fr_outcome or None,
-            "fr_number": fr_number,
-            "fr_equipment_ueic": fr_equipment_ueic,
-            "fr_failure_category": fr_failure_category,
-            "fr_failure_date": fr_failure_date,
-            "auto_created_repair_tr": auto_repair_tr_number,
+            **dispatch_result,
         }
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -468,10 +417,10 @@ class ApprovalService:
         rec.approval_notes = notes
         rec.modified_by = approver_id
 
-        # Update testing request status
+        # Move TR to under_review so tester can revise and resubmit
         request = self.db.query(TestingRequest).filter(TestingRequest.id == rec.testing_request_id).first()
         if request:
-            request.status = TestingRequestStatus.rejected
+            request.status = TestingRequestStatus.under_review
             request.rejection_reason = notes
             request.modified_by = approver_id
 
@@ -479,26 +428,31 @@ class ApprovalService:
         self.db.refresh(rec)
 
         # Notify the submitter of rejection
-        if request and request.request_category == RequestCategory.failure_registry:
+        if request:
             try:
                 from services.notification_service import NotificationService
-                submitter = self.db.query(User).filter(
-                    User.id == request.originator_id
-                ).first() if request.originator_id else None
-                if submitter:
-                    NotificationService(self.db).fire(
-                        event_type="fr_rejected",
-                        context={
-                            "fr_number": request.request_number,
-                            "reason": notes or "No reason provided",
-                        },
-                        organization_id=request.organization_id,
-                        source_id=request.id,
-                        source_type="testing_request",
-                        severity="alert",
-                        extra_recipients=[submitter],
-                    )
+                ns = NotificationService(self.db)
+                if request.request_category == RequestCategory.failure_registry:
+                    submitter = self.db.query(User).filter(
+                        User.id == request.originator_id
+                    ).first() if request.originator_id else None
+                    if submitter:
+                        ns.fire(
+                            event_type="fr_rejected",
+                            context={
+                                "fr_number": request.request_number,
+                                "reason": notes or "No reason provided",
+                            },
+                            organization_id=request.organization_id,
+                            source_id=request.id,
+                            source_type="testing_request",
+                            severity="alert",
+                            extra_recipients=[submitter],
+                        )
+                else:
+                    # Standard TR rejection — notify the assigned tester to revise
+                    ns.notify_recommendation_rejected(request, rec)
             except Exception as _n:
-                print(f"[WARN] fr_rejected notification failed: {_n}")
+                print(f"[WARN] recommendation_rejected notification failed: {_n}")
 
         return rec

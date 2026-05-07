@@ -4,10 +4,36 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 
-from models import TestingRequest, TestingRequestStatus, User
+from models import (
+    TestingRequest, TestingRequestStatus, User,
+    CategoryMaster, CategoryDetails,
+    Organization, OrgDepartment,
+    Role, UserRole, TesterLocation,
+    OrgRole, OrgUserRole,
+)
 from utils.common_service import UTCDateTimeMixin
+
+
+def get_dept_subtree_ids(db: Session, dept_id: UUID) -> List[UUID]:
+    """Return dept_id plus all its recursive child department IDs.
+
+    Uses a PostgreSQL recursive CTE to walk the org_departments tree.
+    This allows zone/circle-level users to see TRs from all child depts.
+    """
+    result = db.execute(text("""
+        WITH RECURSIVE dept_tree AS (
+            SELECT id FROM public.org_departments WHERE id = :root_id AND is_active = true
+            UNION ALL
+            SELECT d.id
+            FROM   public.org_departments d
+            JOIN   dept_tree dt ON d.parent_department_id = dt.id
+            WHERE  d.is_active = true
+        )
+        SELECT id FROM dept_tree
+    """), {"root_id": str(dept_id)})
+    return [row[0] for row in result.fetchall()]
 
 
 class TestingRequestService:
@@ -79,6 +105,8 @@ class TestingRequestService:
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
         organization_id: Optional[UUID] = None,
+        department_id: Optional[UUID] = None,
+        department_ids: Optional[List[UUID]] = None,  # subtree list (overrides department_id)
     ) -> List[TestingRequest]:
         query = self.db.query(TestingRequest)
         if status_filter:
@@ -91,6 +119,11 @@ class TestingRequestService:
             query = query.filter(TestingRequest.assigned_tester_id == tester_id)
         if organization_id:
             query = query.filter(TestingRequest.organization_id == organization_id)
+        # department_ids (subtree) takes priority over single department_id
+        if department_ids is not None:
+            query = query.filter(TestingRequest.department_id.in_(department_ids))
+        elif department_id:
+            query = query.filter(TestingRequest.department_id == department_id)
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
 
     def get_requests_for_user(
@@ -242,3 +275,229 @@ class TestingRequestService:
 
     # NOTE: Tester workflow transitions (accept, start, submit_results)
     # are in services/testing_service.py, used by routers/testing.py.
+
+    # ── Lookup / dropdown helpers ────────────────────────────────────────────
+    # All methods below serve router-level GET endpoints.
+    # No DB access belongs in the router; call these methods instead.
+
+    def get_department_hierarchy(
+        self,
+        org_id: Optional[UUID] = None,
+        parent_id: Optional[UUID] = None,
+    ) -> list:
+        """Return organisations (when org_id is None) or departments.
+
+        Used by Flutter location-picker dropdowns.
+        """
+        if org_id is None:
+            orgs = (
+                self.db.query(Organization)
+                .filter(Organization.is_active.is_(True))
+                .order_by(Organization.name)
+                .all()
+            )
+            return [
+                {"id": str(o.id), "name": o.name, "code": o.code, "type": "organization"}
+                for o in orgs
+            ]
+
+        q = self.db.query(OrgDepartment).filter(
+            OrgDepartment.organization_id == org_id,
+            OrgDepartment.is_active.is_(True),
+        )
+        q = (
+            q.filter(OrgDepartment.parent_department_id.is_(None))
+            if parent_id is None
+            else q.filter(OrgDepartment.parent_department_id == parent_id)
+        )
+        depts = q.order_by(OrgDepartment.name).all()
+        return [
+            {
+                "id": str(d.id),
+                "name": d.name,
+                "code": d.code,
+                "parent_department_id": str(d.parent_department_id) if d.parent_department_id else None,
+                "has_children": self.db.query(OrgDepartment)
+                    .filter(
+                        OrgDepartment.parent_department_id == d.id,
+                        OrgDepartment.is_active.is_(True),
+                    )
+                    .count() > 0,
+                "type": "department",
+            }
+            for d in depts
+        ]
+
+    def list_equipment_types(self) -> list:
+        """Return CategoryMaster rows where description='Testing Equipment'
+        with their CategoryDetails grouped by request category."""
+        masters = (
+            self.db.query(CategoryMaster)
+            .filter(
+                CategoryMaster.description == "Testing Equipment",
+                CategoryMaster.is_active.is_(True),
+            )
+            .order_by(CategoryMaster.name)
+            .all()
+        )
+        result = []
+        for m in masters:
+            all_types = (
+                self.db.query(CategoryDetails)
+                .filter(
+                    CategoryDetails.category_master_id == m.id,
+                    CategoryDetails.is_active.is_(True),
+                )
+                .order_by(CategoryDetails.name)
+                .all()
+            )
+            types_by_category: dict = {
+                "test": [], "maintenance": [], "inspection": [], "repair_lifecycle": []
+            }
+            for t in all_types:
+                cat = t.category_type or "test"
+                bucket = types_by_category.get(cat, types_by_category["test"])
+                bucket.append(
+                    {"id": t.id, "name": t.name, "category_type": t.category_type}
+                )
+            result.append({
+                "id": m.id,
+                "name": m.name,
+                "tests": types_by_category["test"],    # legacy field
+                "types_by_category": types_by_category,
+            })
+        return result
+
+    def get_dropdown_values(self, master_desc: str) -> list:
+        """Return CategoryDetails for the CategoryMaster identified by description."""
+        master = (
+            self.db.query(CategoryMaster)
+            .filter(
+                CategoryMaster.description == master_desc,
+                CategoryMaster.is_active.is_(True),
+            )
+            .first()
+        )
+        if not master:
+            return []
+        details = (
+            self.db.query(CategoryDetails)
+            .filter(
+                CategoryDetails.category_master_id == master.id,
+                CategoryDetails.is_active.is_(True),
+            )
+            .order_by(CategoryDetails.id)
+            .all()
+        )
+        return [{"id": d.id, "name": d.name} for d in details]
+
+    def list_testers(
+        self,
+        zone: Optional[str] = None,
+        ce_circle: Optional[str] = None,
+        se_division: Optional[str] = None,
+        ee_subdivision: Optional[str] = None,
+    ) -> list:
+        """Return active users with the 'Tester' role, optionally filtered by location."""
+        tester_role = self.db.query(Role).filter(Role.name == "Tester").first()
+        if not tester_role:
+            return []
+
+        has_location_filter = any([zone, ce_circle, se_division, ee_subdivision])
+
+        if has_location_filter:
+            q = (
+                self.db.query(User, TesterLocation)
+                .join(UserRole, UserRole.user_id == User.id)
+                .join(TesterLocation, TesterLocation.user_id == User.id)
+                .filter(
+                    UserRole.role_id == tester_role.id,
+                    User.isactive.is_(True),
+                    TesterLocation.is_active.is_(True),
+                )
+            )
+            if zone:
+                q = q.filter(TesterLocation.zone == zone)
+            if ce_circle:
+                q = q.filter(TesterLocation.ce_circle == ce_circle)
+            if se_division:
+                q = q.filter(TesterLocation.se_division == se_division)
+            if ee_subdivision:
+                q = q.filter(TesterLocation.ee_subdivision == ee_subdivision)
+
+            return [
+                {
+                    "id": str(u.id),
+                    "name": f"{u.firstname} {u.lastname}".strip(),
+                    "email": u.email,
+                    "zone": tl.zone,
+                    "ce_circle": tl.ce_circle,
+                    "se_division": tl.se_division,
+                    "ee_subdivision": tl.ee_subdivision,
+                }
+                for u, tl in q.order_by(User.firstname).all()
+            ]
+        else:
+            testers = (
+                self.db.query(User)
+                .join(UserRole, UserRole.user_id == User.id)
+                .filter(UserRole.role_id == tester_role.id, User.isactive.is_(True))
+                .order_by(User.firstname)
+                .all()
+            )
+            result = []
+            for t in testers:
+                loc = (
+                    self.db.query(TesterLocation)
+                    .filter(TesterLocation.user_id == t.id, TesterLocation.is_active.is_(True))
+                    .first()
+                )
+                result.append({
+                    "id": str(t.id),
+                    "name": f"{t.firstname} {t.lastname}".strip(),
+                    "email": t.email,
+                    "zone": loc.zone if loc else None,
+                    "ce_circle": loc.ce_circle if loc else None,
+                    "se_division": loc.se_division if loc else None,
+                    "ee_subdivision": loc.ee_subdivision if loc else None,
+                })
+            return result
+
+    def get_user_scope(
+        self, user_id: UUID, org_id: Optional[UUID]
+    ) -> tuple:
+        """Return (is_org_admin: bool, department_id: UUID | None).
+
+        Routes use this to determine whether to apply a department filter
+        and which department to filter by.
+        """
+        is_org_admin = (
+            self.db.query(OrgRole)
+            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
+            .filter(
+                OrgUserRole.user_id == user_id,
+                OrgUserRole.is_active.is_(True),
+                OrgRole.is_org_admin.is_(True),
+            )
+            .first()
+        ) is not None
+
+        if is_org_admin:
+            return True, None
+
+        user_dept_role = (
+            self.db.query(OrgUserRole)
+            .filter(
+                OrgUserRole.user_id == user_id,
+                OrgUserRole.is_active.is_(True),
+                OrgUserRole.department_id.isnot(None),
+            )
+            .first()
+        )
+        if user_dept_role and user_dept_role.department_id:
+            return False, user_dept_role.department_id
+
+        # Fallback to user.department_id
+        user = self.db.query(User).filter(User.id == user_id).first()
+        dept_id = user.department_id if user else None
+        return False, dept_id

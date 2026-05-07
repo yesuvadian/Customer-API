@@ -256,6 +256,27 @@ def submit_test_results(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # If recommendation fields are supplied directly, create/update the recommendation
+    # via RecommendationService (supports next_action, schedule_frequency routing).
+    if body and body.recommendation_type and body.summary:
+        from services.recommendation_service import RecommendationService
+        rec_svc = RecommendationService(db)
+        rec_svc.create_recommendation(
+            testing_request_id=request_id,
+            recommendation_type=body.recommendation_type,
+            summary=body.summary,
+            submitted_by=current_user.id,
+            detailed_notes=body.detailed_notes,
+            next_action=body.next_action,
+            schedule_frequency=body.schedule_frequency,
+        )
+        # Refresh the TestingRequest to return updated status
+        req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+        if not req:
+            raise HTTPException(status_code=404, detail="Testing request not found")
+        return _enrich(req)
+
+    # Legacy path: auto-derive recommendation from uploaded test result data
     service = TestingService(db)
     req = service.submit_test_results(
         request_id,
@@ -263,6 +284,58 @@ def submit_test_results(
         replacement_products=body.replacement_products if body else None,
     )
     return _enrich(req)
+
+
+@router.put("/{request_id}/decline")
+def decline_assignment(
+    request_id: UUID,
+    body: Optional[dict] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Tester declines an assigned testing request.
+    - Status must be 'accepted' or 'in_progress'
+    - Only the assigned tester can decline
+    - Sets status back to 'submitted', clears assigned_tester_id
+    - Notifies Test Assigner role
+    """
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+    if req.assigned_tester_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the assigned tester can decline this request")
+    if req.status not in [TestingRequestStatus.accepted, TestingRequestStatus.in_progress]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot decline a request in status '{req.status.value}'"
+        )
+
+    reason = (body or {}).get("reason", "No reason provided")
+    req.status = TestingRequestStatus.submitted
+    req.assigned_tester_id = None
+    req.rejection_reason = reason
+    req.modified_by = current_user.id
+    db.commit()
+
+    try:
+        from services.notification_service import NotificationService
+        NotificationService(db).fire(
+            event_type="tester_declined",
+            context={
+                "request_number": req.request_number,
+                "tester_name": f"{current_user.firstname or ''} {current_user.lastname or ''}".strip() or current_user.email,
+                "reason": reason,
+            },
+            organization_id=req.organization_id,
+            source_id=req.id,
+            source_type="testing_request",
+            severity="alert",
+        )
+    except Exception as _n:
+        print(f"[WARN] tester_declined notification failed: {_n}")
+
+    return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
 
 
 # ─── Template & Structured Results ──────────────────────────
