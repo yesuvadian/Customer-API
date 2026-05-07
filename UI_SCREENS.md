@@ -6,24 +6,22 @@
 
 ### Department Users (password: `TestDept@123`)
 
-| Email | Role Key | Dept |
-|---|---|---|
-| `orgadmin.north@kptcl.com` | OrgAdmin | North |
-| `depthead.north@kptcl.com` | DeptHead | North |
-| `originator.north@kptcl.com` | Originator | North |
-| `tester.north@kptcl.com` | Tester | North |
-| `assigner.north@kptcl.com` | TestAssigner | North |
-| `techapprover.north@kptcl.com` | TechApprover | North |
-| `financeapprover.north@kptcl.com` | FinanceApprover | North |
-| `eetlss.north@kptcl.com` | EeTlss | North |
-| `taqc.north@kptcl.com` | TaqcOfficer | North |
-| `sectionhead.north@kptcl.com` | SectionHead | North |
-| `originator.south@kptcl.com` | Originator | South |
-| `tester.south@kptcl.com` | Tester | South |
-| `taqc.south@kptcl.com` | TaqcOfficer | South |
-| `originator.mysuru@kptcl.com` | Originator | Mysuru |
-| `tester.mysuru@kptcl.com` | Tester | Mysuru |
-| `taqc.mysuru@kptcl.com` | TaqcOfficer | Mysuru |
+All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{dept}@kptcl.com`
+
+| Role | Email prefix | North | South | Mysuru | OrgRole |
+|---|---|---|---|---|---|
+| Org Admin | `orgadmin` | `orgadmin.north@kptcl.com` | `orgadmin.south@kptcl.com` | `orgadmin.mysuru@kptcl.com` | `Org Admin` |
+| Dept Head | `depthead` | `depthead.north@kptcl.com` | `depthead.south@kptcl.com` | `depthead.mysuru@kptcl.com` | `Dept Head` |
+| Originator | `originator` | `originator.north@kptcl.com` | `originator.south@kptcl.com` | `originator.mysuru@kptcl.com` | `Originator` |
+| Tester | `tester` | `tester.north@kptcl.com` | `tester.south@kptcl.com` | `tester.mysuru@kptcl.com` | `Tester` |
+| Test Assigner | `assigner` | `assigner.north@kptcl.com` | `assigner.south@kptcl.com` | `assigner.mysuru@kptcl.com` | `Test Assigner` |
+| Technical Approver | `techapprover` | `techapprover.north@kptcl.com` | `techapprover.south@kptcl.com` | `techapprover.mysuru@kptcl.com` | `Technical Approver` |
+| Finance Approver | `financeapprover` | `financeapprover.north@kptcl.com` | `financeapprover.south@kptcl.com` | `financeapprover.mysuru@kptcl.com` | `Finance Approver` |
+| EE TLSS | `eetlss` | `eetlss.north@kptcl.com` | `eetlss.south@kptcl.com` | `eetlss.mysuru@kptcl.com` | `EE TLSS` |
+| TA&QC Officer | `taqc` | `taqc.north@kptcl.com` | `taqc.south@kptcl.com` | `taqc.mysuru@kptcl.com` | `TA&QC Officer` |
+| Section Head | `sectionhead` | `sectionhead.north@kptcl.com` | `sectionhead.south@kptcl.com` | `sectionhead.mysuru@kptcl.com` | `Section Head` |
+
+> **30 users total** — 10 roles × 3 departments. Seeded by `seed_dept_filter_users()` in `seed.py`.
 
 ### Hierarchy Users (password: `TestDept@123`)
 
@@ -119,10 +117,14 @@
 
 | Scenario | Login | Expected |
 |---|---|---|
-| Valid login (all 10 north roles) | `*.north@kptcl.com` / `TestDept@123` | 200 + `access_token` |
-| Valid login (KPTCL admins) | `orgadmin@kptcl.com` / `admin123` | 200 + `access_token` |
+| Valid login — all 10 roles, North dept | `*.north@kptcl.com` / `TestDept@123` | 200 + `access_token` |
+| Valid login — all 10 roles, South dept | `*.south@kptcl.com` / `TestDept@123` | 200 + `access_token` |
+| Valid login — all 10 roles, Mysuru dept | `*.mysuru@kptcl.com` / `TestDept@123` | 200 + `access_token` |
+| Valid login — KPTCL admins | `orgadmin@kptcl.com` / `admin123` | 200 + `access_token` |
 | Wrong password | `orgadmin.north@kptcl.com` / `wrong` | 401 |
 | Non-existent user | `nobody@kptcl.com` | 401 / 404 |
+
+> **30 logins verified** in one loop (10 roles × 3 depts). North tokens stored as `TOKENS["RoleKey"]`; all dept tokens available as `TOKENS["RoleKey_North"]` / `TOKENS["RoleKey_South"]` / `TOKENS["RoleKey_Mysuru"]`.
 
 ---
 
@@ -375,6 +377,119 @@ When a TechApprover sends results back for revision (`under_review`), the tester
 |---|---|---|
 | Circle user sees all leaf division TRs | `ee.circle@kptcl.com` | Sees North + South + Mysuru |
 | Zone user sees all divisions under zone | `cee.zone@kptcl.com` | Sees everything circle sees |
+
+---
+
+## 4. Department Structure & Filter Impact on UI
+
+### KPTCL Department Hierarchy
+
+```
+KPTCL (organisation)
+└── Bangalore Zone          (BLR_ZONE)      ← cee.zone / see.zone
+    └── Bangalore Transmission Circle  (BLR_CIRCLE)  ← ee.circle / see.circle
+        ├── RT North Division  (RT_NORTH)   ← *.north@kptcl.com
+        ├── RT South Division  (RT_SOUTH)   ← *.south@kptcl.com
+        └── Mysuru Division    (MYSURU)     ← *.mysuru@kptcl.com
+```
+
+Each leaf division has **identical** role coverage — 10 users, same OrgRoles, same permissions.
+
+---
+
+### What "dept filter" means on each UI screen
+
+Every list endpoint (`GET /testing_requests/`, `GET /direct-submissions/`, `GET /equipment`, etc.) applies a **department scope** based on the logged-in user's `department_id` and their role's `scope` setting.
+
+| Scope | Applied to | What the user sees |
+|---|---|---|
+| `exact` | Leaf-level users (*.north / .south / .mysuru) | **Only** records belonging to their own department |
+| `department_tree` | Circle-level users (ee.circle, see.circle) | Records from **all divisions** under the circle (North + South + Mysuru) |
+| `zone` | Zone-level users (cee.zone, see.zone) | Records from **all circles and divisions** under the zone |
+| `organization` | Org Admins (orgadmin.*) | **All** records across the entire KPTCL organisation |
+
+---
+
+### Per-module dept-filter behaviour
+
+#### Testing Requests list (`/testing_requests/`)
+
+| Who logs in | Records shown |
+|---|---|
+| `originator.north` | Only TRs from RT North Division |
+| `originator.south` | Only TRs from RT South Division |
+| `originator.mysuru` | Only TRs from Mysuru Division |
+| `assigner.north` | Only TRs needing assignment in North |
+| `techapprover.north` | Only pending approvals for North TRs |
+| `ee.circle` | TRs from all 3 leaf divisions |
+| `cee.zone` | TRs from all divisions under zone |
+| `orgadmin.north` | All KPTCL TRs (org-wide, despite being in North dept) |
+
+> The Flutter list screen filters by `department_id` scoped to the user's hierarchy. A `tester.south` user who logs in will never see a North TR in any list, grid, or search result.
+
+---
+
+#### Failure Registry (`/direct-submissions/?category=failure_registry`)
+
+| Who logs in | Records shown |
+|---|---|
+| `originator.north` | Only FR submissions from North |
+| `originator.south` | Only FR submissions from South |
+| `originator.mysuru` | Only FR submissions from Mysuru |
+| `techapprover.north` | Only FR approvals in North (under_approval queue) |
+| `orgadmin.*` | All FR submissions org-wide |
+
+> Dept isolation verified in test §19: after submitting one FR per dept, each originator's list returns **only** their own dept's records with zero cross-dept overlap.
+
+---
+
+#### TA&QC Inspections (`/direct-submissions/?category=taqc_inspection`)
+
+| Who logs in | Records shown |
+|---|---|
+| `taqc.north` | Only TAQC inspections from North |
+| `taqc.south` | Only TAQC inspections from South |
+| `taqc.mysuru` | Only TAQC inspections from Mysuru |
+| `techapprover.north` | Pending TAQC approvals for North only |
+| `ee.circle` | Inspections across all 3 divisions |
+
+> Dept isolation verified in test §20: `taqc.north` list must NOT contain South or Mysuru inspection IDs.
+
+---
+
+#### Equipment Register (`/equipment`)
+
+| Who logs in | Equipment shown |
+|---|---|
+| `eetlss.north` | Equipment in RT North Division |
+| `eetlss.south` | Equipment in RT South Division |
+| `eetlss.mysuru` | Equipment in Mysuru Division |
+| `orgadmin.*` | All equipment across KPTCL |
+
+---
+
+### Flutter UI rendering rules driven by dept filter
+
+1. **Login → Dashboard**: The default landing module (`default_module_id` on the OrgRole) is the same for the same role across all 3 depts. `tester.south` and `tester.north` both land on `aee_dashboard`.
+
+2. **List screens refresh**: When the user pulls-to-refresh or navigates back, the API re-applies the dept filter. A user cannot see another dept's data by sharing a link or ID — the server validates `department_id` ownership.
+
+3. **Equipment dropdown / search**: When an Originator or Tester searches for equipment (e.g., inside a Testing Request form), only equipment belonging to their `department_id` (or subtree) is returned. `originator.south` cannot accidentally link a North piece of equipment.
+
+4. **Approvals queue**: `techapprover.north`'s pending list shows only North TRs/FRs/TAQCs. `techapprover.south` and `techapprover.mysuru` each see only their own dept's queue — no shared queue.
+
+5. **Notifications**: System notifications (new TR submitted, approval pending, etc.) are scoped to the recipient's dept. A South tester does not receive a push for a North TR assignment.
+
+---
+
+### Cross-dept isolation test matrix
+
+| North user | South user | Mysuru user | Expected |
+|---|---|---|---|
+| sees North TRs | sees South TRs | sees Mysuru TRs | ✅ dept-exact scope |
+| does NOT see South TRs | does NOT see North TRs | does NOT see South TRs | ✅ no cross-dept leak |
+| `orgadmin.north` sees all | `orgadmin.south` sees all | `orgadmin.mysuru` sees all | ✅ org-admin overrides dept |
+| `ee.circle` sees all 3 | `ee.circle` sees all 3 | `ee.circle` sees all 3 | ✅ circle hierarchy scope |
 
 ---
 
