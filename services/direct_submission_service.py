@@ -28,6 +28,8 @@ from models import (
     RecommendationType,
     User,
     Equipment,
+    OrgRole,
+    OrgUserRole,
 )
 from utils.common_service import UTCDateTimeMixin
 
@@ -169,9 +171,9 @@ class DirectSubmissionService:
             "fail" if category == RequestCategory.failure_registry else "advisory"
         )
 
-        # Resolve org — prefer body, fall back to submitter's own org
-        org_id = data.get("organization_id") or getattr(submitter, "organization_id", None)
-        dept_id = data.get("department_id")
+        # Resolve org/dept — prefer body, fall back to submitter's own values
+        org_id  = data.get("organization_id") or getattr(submitter, "organization_id", None)
+        dept_id = data.get("department_id")    or getattr(submitter, "department_id",   None)
 
         # ── TestingRequest ────────────────────────────────────────────────────
         # failure_registry → submitted  (goes to Test Assigner queue for initial_approve)
@@ -272,6 +274,41 @@ class DirectSubmissionService:
 
     # ── list submissions ──────────────────────────────────────────────────────
 
+    def _get_user_scope(self, user: User):
+        """
+        Return (is_org_admin: bool, department_id: UUID | None).
+        Mirrors the scope logic used by testing_request_service so that
+        direct-submission lists are dept-filtered consistently.
+        """
+        is_org_admin = (
+            self.db.query(OrgRole)
+            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
+            .filter(
+                OrgUserRole.user_id == user.id,
+                OrgUserRole.is_active.is_(True),
+                OrgRole.is_org_admin.is_(True),
+            )
+            .first()
+        ) is not None
+
+        if is_org_admin:
+            return True, None
+
+        user_dept_role = (
+            self.db.query(OrgUserRole)
+            .filter(
+                OrgUserRole.user_id == user.id,
+                OrgUserRole.is_active.is_(True),
+                OrgUserRole.department_id.isnot(None),
+            )
+            .first()
+        )
+        if user_dept_role and user_dept_role.department_id:
+            return False, user_dept_role.department_id
+
+        # Fallback to user.department_id
+        return False, user.department_id
+
     def list_submissions(
         self,
         category: str,
@@ -281,8 +318,9 @@ class DirectSubmissionService:
         own_only: bool = False,
     ) -> list:
         """
-        Return direct-submission records for a given category.
-        If own_only=True, returns only records created by this user.
+        Return direct-submission records for a given category, dept-scoped
+        to the logged-in user (same scope rules as /testing_requests/).
+        If own_only=True, additionally restricts to records created by this user.
         """
         try:
             cat = RequestCategory(category)
@@ -307,6 +345,11 @@ class DirectSubmissionService:
             )
             .order_by(TestingRequest.cts.desc())
         )
+
+        # Apply department scope — org-admins see all; others see only their dept
+        is_org_admin, dept_id = self._get_user_scope(user)
+        if not is_org_admin and dept_id:
+            query = query.filter(TestingRequest.department_id == dept_id)
 
         if own_only:
             query = query.filter(TestingRequest.originator_id == user.id)

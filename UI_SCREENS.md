@@ -524,3 +524,70 @@ Each combination goes through: **Create → Submit → Assign → Accept → Sta
 | Submit results with `"recommendation_type": "fail"` | → `under_approval` |
 | TechApprover rejects | `PUT /testing/{id}/reject_results` → `rejected` |
 | Separate TR: Tester decline path | `PUT /testing/{id}/decline` → back to `submitted` |
+
+---
+
+### Section 24 — Schedule (Power Transformer × 4 TR Categories)
+
+Tests the `TestRequestSchedule` CRUD for all four TR categories applied to a Power Transformer equipment.
+
+**Who**: `KptclAdmin` (schedule CRUD), `Originator.north` (create TR)  
+**Equipment**: Power Transformer (PT), RT North Division
+
+| Step | API | Payload | Notes |
+|---|---|---|---|
+| Create TR | `POST /testing_requests/` | `request_category: test \| inspection \| maintenance \| repair_lifecycle` | One TR per category |
+| Submit TR | `PUT /testing_requests/{id}/submit` | — | → `submitted` |
+| Create schedule | `POST /testing_requests/{id}/schedule/` | `{"frequency":"yearly","advance_days":7}` | → 201, `is_active=true` |
+| Get schedule | `GET /testing_requests/{id}/schedule/` | — | Returns schedule with `next_run_date` |
+| Update schedule | `PUT /testing_requests/{id}/schedule/` | `{"frequency":"quarterly","advance_days":14}` | Frequency changed |
+| Pause | `PATCH /testing_requests/{id}/schedule/pause` | — | `is_active=false` |
+| Resume | `PATCH /testing_requests/{id}/schedule/resume` | — | `is_active=true` |
+| Get logs | `GET /testing_requests/{id}/schedule/logs` | — | Auto-generation history |
+
+**Schedule frequencies**: `yearly` · `half_yearly` · `quarterly` · `monthly`
+
+**Categories covered**: `test` · `inspection` · `maintenance` · `repair_lifecycle`
+
+> Auto-dispatch also creates MN/IN schedules when a TAQC or FR TR is approved with `next_action=maintenance` or `next_action=inspection` — those use the `WorkflowDispatch` path, not this CRUD endpoint.
+
+---
+
+### Section 25 — Multi-Session (Power Transformer, test category)
+
+Tests the multi-session testing workflow: create sessions, record readings per session, complete and get statistics.
+
+**Who**: `Tester.north` (sessions + readings), `Originator.north` (TR), `TestAssigner.north` (assign)  
+**Equipment**: Power Transformer (PT), RT North Division  
+**TR Category**: `test`
+
+| Step | API | Notes |
+|---|---|---|
+| Create TR | `POST /testing_requests/` | `request_category: test` |
+| Submit → Assign → Accept → Start | Standard lifecycle | TR status → `in_progress` |
+| Create session 1 | `POST /testing_requests/{id}/sessions/` | `session_number:1, session_date: today` |
+| Create session 2 | `POST /testing_requests/{id}/sessions/` | `session_number:2, session_date: today+1` |
+| Create session 3 | `POST /testing_requests/{id}/sessions/` | `session_number:3, session_date: today+2` |
+| List sessions | `GET /testing_requests/{id}/sessions/` | Returns all 3 sessions |
+| Start session 1 | `POST /testing_requests/{id}/sessions/{sid}/start` | Status → `in_progress` |
+| Add reading 1 | `POST /testing_requests/{id}/sessions/{sid}/readings` | `reading_data: {insulation_resistance_mohm, temperature_c, humidity_percent}` |
+| Add reading 2 | `POST /testing_requests/{id}/sessions/{sid}/readings` | Second measurement |
+| List readings | `GET /testing_requests/{id}/sessions/{sid}/readings` | Returns 2 readings |
+| Session statistics | `GET /testing_requests/{id}/sessions/{sid}/statistics` | `reading_count`, pass/fail, duration |
+| Complete session 1 | `POST /testing_requests/{id}/sessions/{sid}/complete` | Status → `completed` |
+| Auto-generate | `POST /testing_requests/{id}/sessions/auto-generate` | Creates remaining sessions if `total_sessions_planned` is set |
+
+**Session reading payload example**:
+```json
+{
+  "reading_number": 1,
+  "reading_time": "2026-05-07T10:00:00Z",
+  "reading_data": {
+    "insulation_resistance_mohm": 550,
+    "temperature_c": 28,
+    "humidity_percent": 60
+  },
+  "result_status": "pass",
+  "remarks": "Reading 1 — normal"
+}
+```

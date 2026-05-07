@@ -13,6 +13,7 @@ Server must be running on http://localhost:8000
 import sys
 import json
 import time
+from datetime import datetime, timezone as _tz, timedelta as _td
 import requests
 from requests.exceptions import ConnectionError as ReqConnError
 
@@ -1584,6 +1585,242 @@ if TOKENS.get("Tester"):
         ok("POST /dashboard/invalidate-cache (tester) -> denied", str(r.status_code))
     else:
         skip("POST /dashboard/invalidate-cache RBAC", f"got {r.status_code}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 24. SCHEDULE — Power Transformer × 4 TR categories
+# ─────────────────────────────────────────────────────────────────────────────
+section("24. SCHEDULE — Power Transformer × test / inspection / maintenance / repair_cycle")
+
+# We need a fully-approved TR per category so WorkflowDispatch can create
+# MN/IN schedules.  We'll also directly create a schedule on a draft TR to
+# exercise the CRUD endpoints independently.
+
+_SCHED_CATEGORIES = ["test", "inspection", "maintenance", "repair_lifecycle"]
+
+# Use an existing PT equipment from section 22 (NEW_EQUIP_IDS) or fallback
+_sched_equip_id = NEW_EQUIP_IDS.get("north") or PT_EQUIP_ID
+_orig_tok   = TOKENS.get("Originator")
+_assign_tok = TOKENS.get("TestAssigner")
+_tester_tok = TOKENS.get("Tester")
+_tech_tok   = TOKENS.get("TechApprover")
+_admin_h    = auth(TOKENS.get("KptclAdmin", ""))
+
+SCHED_TR_IDS = {}    # category -> TR id
+SCHED_IDS    = {}    # category -> schedule id
+
+for cat in _SCHED_CATEGORIES:
+    if not _sched_equip_id or not _orig_tok:
+        skip(f"Schedule ({cat}): missing equip_id or originator token")
+        continue
+
+    # Create TR
+    r = requests.post(f"{BASE}/testing_requests/", json={
+        "equipment_id": _sched_equip_id,
+        "title": f"[SCHED] PT {cat} test",
+        "request_category": cat,
+        "description": f"Schedule test for Power Transformer ({cat})",
+        "priority": "normal",
+    }, headers=auth(_orig_tok))
+    if r.status_code != 201:
+        skip(f"CREATE TR for schedule ({cat})", f"{r.status_code} {r.text[:80]}")
+        continue
+    tr_id = r.json().get("id")
+    SCHED_TR_IDS[cat] = tr_id
+    ok(f"CREATE TR [{cat}] for schedule", f"id={tr_id}")
+
+    # Submit
+    r = requests.put(f"{BASE}/testing_requests/{tr_id}/submit", headers=auth(_orig_tok))
+    check(f"SUBMIT TR [{cat}] for schedule", r, 200)
+
+    # Attach a schedule directly on this TR (CRUD test)
+    r = requests.post(f"{BASE}/testing_requests/{tr_id}/schedule/", json={
+        "frequency": "yearly",
+        "advance_days": 7,
+    }, headers=auth(TOKENS.get("KptclAdmin", "")))
+    if r.status_code == 201:
+        sched = r.json()
+        sched_id = sched.get("id")
+        SCHED_IDS[cat] = sched_id
+        ok(f"POST /testing_requests/{tr_id}/schedule/ [{cat}]", f"201 id={sched_id} freq={sched.get('frequency')}")
+    else:
+        skip(f"POST schedule [{cat}]", f"{r.status_code} {r.text[:100]}")
+        sched_id = None
+
+    # GET schedule
+    r = requests.get(f"{BASE}/testing_requests/{tr_id}/schedule/", headers=_admin_h)
+    if r.status_code == 200:
+        ok(f"GET schedule [{cat}]", f"freq={r.json().get('frequency')} active={r.json().get('is_active')}")
+    else:
+        skip(f"GET schedule [{cat}]", str(r.status_code))
+
+    # Update schedule → quarterly
+    r = requests.put(f"{BASE}/testing_requests/{tr_id}/schedule/", json={
+        "frequency": "quarterly",
+        "advance_days": 14,
+    }, headers=_admin_h)
+    if r.status_code == 200:
+        ok(f"PUT schedule (update to quarterly) [{cat}]", f"freq={r.json().get('frequency')}")
+    else:
+        skip(f"PUT schedule [{cat}]", str(r.status_code))
+
+    # Pause
+    r = requests.patch(f"{BASE}/testing_requests/{tr_id}/schedule/pause", headers=_admin_h)
+    if r.status_code == 200:
+        ok(f"PATCH /pause [{cat}]", f"is_active={r.json().get('is_active')}")
+    else:
+        skip(f"PATCH /pause [{cat}]", str(r.status_code))
+
+    # Resume
+    r = requests.patch(f"{BASE}/testing_requests/{tr_id}/schedule/resume", headers=_admin_h)
+    if r.status_code == 200:
+        ok(f"PATCH /resume [{cat}]", f"is_active={r.json().get('is_active')}")
+    else:
+        skip(f"PATCH /resume [{cat}]", str(r.status_code))
+
+    # GET logs
+    r = requests.get(f"{BASE}/testing_requests/{tr_id}/schedule/logs", headers=_admin_h)
+    if r.status_code == 200:
+        ok(f"GET schedule/logs [{cat}]", f"count={len(r.json())}")
+    else:
+        skip(f"GET schedule/logs [{cat}]", str(r.status_code))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 25. MULTI-SESSION — Power Transformer, test category
+# ─────────────────────────────────────────────────────────────────────────────
+section("25. MULTI-SESSION — Power Transformer test (3 sessions + readings)")
+
+_ms_equip_id = NEW_EQUIP_IDS.get("north") or PT_EQUIP_ID
+_ms_orig_tok = TOKENS.get("Originator")
+_ms_tester_tok = TOKENS.get("Tester")
+
+MS_TR_ID  = None
+MS_SESSION_IDS = []
+
+if _ms_equip_id and _ms_orig_tok:
+    # Create a TR for multi-session testing
+    r = requests.post(f"{BASE}/testing_requests/", json={
+        "equipment_id": _ms_equip_id,
+        "title": "[MULTI-SESSION] PT Insulation Resistance Test",
+        "request_category": "test",
+        "description": "Multi-session insulation resistance test across 3 days",
+        "priority": "normal",
+    }, headers=auth(_ms_orig_tok))
+    if r.status_code == 201:
+        MS_TR_ID = r.json().get("id")
+        ok("CREATE multi-session TR", f"id={MS_TR_ID}")
+    else:
+        skip("CREATE multi-session TR", f"{r.status_code} {r.text[:80]}")
+
+if MS_TR_ID:
+    # Submit TR
+    r = requests.put(f"{BASE}/testing_requests/{MS_TR_ID}/submit", headers=auth(_ms_orig_tok))
+    check("SUBMIT multi-session TR", r, 200)
+
+    # Assign tester
+    if ASSIGNED_TESTER_ID:
+        r = requests.put(f"{BASE}/testing_requests/{MS_TR_ID}/assign",
+                         json={"tester_id": str(ASSIGNED_TESTER_ID)},
+                         headers=auth(TOKENS.get("TestAssigner", "")))
+        check("ASSIGN multi-session TR", r, 200)
+
+    # Accept + Start
+    if _ms_tester_tok:
+        r = requests.put(f"{BASE}/testing/{MS_TR_ID}/accept", headers=auth(_ms_tester_tok))
+        check("ACCEPT multi-session TR", r, 200)
+        r = requests.put(f"{BASE}/testing/{MS_TR_ID}/start", headers=auth(_ms_tester_tok))
+        check("START multi-session TR", r, 200)
+
+    # Create 3 test sessions
+    now_dt = datetime.now(_tz)
+    for i in range(1, 4):
+        sess_date = (now_dt + _td(days=i-1)).isoformat()
+        r = requests.post(f"{BASE}/testing_requests/{MS_TR_ID}/sessions/", json={
+            "session_number": i,
+            "session_name": f"Day {i} — Insulation Resistance",
+            "session_date": sess_date,
+            "template_key": "test",
+            "notes": f"Session {i} of 3",
+            "weather_conditions": "Clear" if i < 3 else "Humid",
+        }, headers=auth(_ms_tester_tok or TOKENS.get("KptclAdmin", "")))
+        if r.status_code == 201:
+            sid = r.json().get("id")
+            MS_SESSION_IDS.append(sid)
+            ok(f"CREATE session {i}", f"id={sid}")
+        else:
+            skip(f"CREATE session {i}", f"{r.status_code} {r.text[:80]}")
+
+    # List sessions
+    r = requests.get(f"{BASE}/testing_requests/{MS_TR_ID}/sessions/",
+                     headers=auth(_ms_tester_tok or TOKENS.get("KptclAdmin", "")))
+    if r.status_code == 200:
+        ok("GET /sessions/ (list)", f"count={len(r.json())}")
+    else:
+        skip("GET /sessions/", str(r.status_code))
+
+    # For the first session: start it, add 2 readings, complete it
+    if MS_SESSION_IDS:
+        sid0 = MS_SESSION_IDS[0]
+        tok_h = auth(_ms_tester_tok or TOKENS.get("KptclAdmin", ""))
+
+        r = requests.post(f"{BASE}/testing_requests/{MS_TR_ID}/sessions/{sid0}/start", headers=tok_h)
+        if r.status_code == 200:
+            ok(f"START session 1 (id={sid0})", f"status={r.json().get('status')}")
+        else:
+            skip(f"START session 1", str(r.status_code))
+
+        for rdg_num in range(1, 3):
+            r = requests.post(
+                f"{BASE}/testing_requests/{MS_TR_ID}/sessions/{sid0}/readings",
+                json={
+                    "reading_number": rdg_num,
+                    "reading_time": now_dt.isoformat(),
+                    "reading_data": {
+                        "insulation_resistance_mohm": 500 + rdg_num * 50,
+                        "temperature_c": 28,
+                        "humidity_percent": 60,
+                    },
+                    "result_status": "pass",
+                    "remarks": f"Reading {rdg_num} normal",
+                },
+                headers=tok_h,
+            )
+            if r.status_code == 201:
+                ok(f"CREATE reading {rdg_num} (session 1)", f"id={r.json().get('id')}")
+            else:
+                skip(f"CREATE reading {rdg_num}", f"{r.status_code} {r.text[:80]}")
+
+        # List readings
+        r = requests.get(f"{BASE}/testing_requests/{MS_TR_ID}/sessions/{sid0}/readings", headers=tok_h)
+        if r.status_code == 200:
+            ok("GET /readings/ (session 1)", f"count={len(r.json())}")
+        else:
+            skip("GET /readings/", str(r.status_code))
+
+        # Session statistics
+        r = requests.get(f"{BASE}/testing_requests/{MS_TR_ID}/sessions/{sid0}/statistics", headers=tok_h)
+        if r.status_code == 200:
+            ok("GET /statistics (session 1)", f"{r.json()}")
+        else:
+            skip("GET /statistics", str(r.status_code))
+
+        # Complete session 1
+        r = requests.post(f"{BASE}/testing_requests/{MS_TR_ID}/sessions/{sid0}/complete", headers=tok_h)
+        if r.status_code == 200:
+            ok(f"COMPLETE session 1", f"status={r.json().get('status')}")
+        else:
+            skip(f"COMPLETE session 1", str(r.status_code))
+
+    # Auto-generate sessions (idempotent or creates remaining)
+    r = requests.post(f"{BASE}/testing_requests/{MS_TR_ID}/sessions/auto-generate",
+                      headers=auth(_ms_tester_tok or TOKENS.get("KptclAdmin", "")))
+    if r.status_code in (200, 201):
+        ok("POST /sessions/auto-generate", f"generated={len(r.json())} sessions")
+    else:
+        skip("POST /sessions/auto-generate", f"{r.status_code} {r.text[:80]}")
+
+else:
+    skip("Multi-session TR flow", "no equipment_id available")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SUMMARY

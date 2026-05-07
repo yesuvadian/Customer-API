@@ -6566,6 +6566,9 @@ def _dft_get_or_create_user(session, org_id, email,
     if u:
         u.organization_id = org_id
         u.department_id   = dept_id
+        # Always reset to TestDept@123 so hierarchy users (e.g. cee.zone created
+        # earlier by seed_kptcl_organization with admin123) use a consistent pw.
+        u.password_hash = get_password_hash("TestDept@123")
         session.flush()
         return u
     now = datetime.now()
