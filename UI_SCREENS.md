@@ -173,88 +173,140 @@
 ### Section 19 — Failure Registry
 
 **Module**: `failure_registry`  
-**Who**: `originator.north@kptcl.com` · `originator.south@kptcl.com` · `originator.mysuru@kptcl.com`
+**Who**: `originator.north@kptcl.com` · `originator.south@kptcl.com` · `originator.mysuru@kptcl.com`  
+**Template key**: `failure_registry` (fetched from `GET /testing/templates/by-key/failure_registry`)
 
 | Step | API | Notes |
 |---|---|---|
-| Submit | `POST /direct-submissions/` | `request_category: "failure_registry"`, `template_key: "failure_registry_default"` |
+| Submit | `POST /direct-submissions/` | `request_category: "failure_registry"`, `template_key: "failure_registry"` |
 | List | `GET /direct-submissions/?category=failure_registry` | Dept-scoped — each originator sees only their dept |
 | Get single | `GET /direct-submissions/{id}` | Own dept only |
 | Attach file | `POST /direct-submissions/{id}/attach` | Binary file upload |
 | Download file | `GET /direct-submissions/{id}/attachment` | Binary stream download |
 | Dept isolation | North originator must NOT see South/Mysuru records | Verified across all 3 depts |
 
-**Sample payload**:
+**Sample payload** (fields match the `failure_registry` template):
 ```json
 {
   "request_category": "failure_registry",
-  "template_key": "failure_registry_default",
+  "template_key": "failure_registry",
   "title": "FR Test - NORTH dept - Power Transformer",
   "equipment_id": "<pt_equip_id>",
-  "test_data": {
-    "failure_date": "2026-05-01",
-    "failure_mode": "Insulation breakdown",
-    "location": "north substation",
-    "severity": "high"
-  },
   "overall_result": "fail",
   "remarks": "Automated FR test",
-  "priority": "high"
+  "priority": "high",
+  "test_data": {
+    "failure_date": "2026-05-01",
+    "failure_category": "Electrical",
+    "failure_description": "Insulation breakdown at north substation",
+    "root_cause_analysis": "Overload and moisture ingress",
+    "outage_duration_hours": "4",
+    "affected_consumers": "250",
+    "outage_impact": "Supply interrupted to residential sector",
+    "outcome": "Repair"
+  }
 }
 ```
+
+**Initial status**: `submitted` → goes to **Test Assigner** queue for `initial_approve`  
+**No Recommendation created** at submission — Recommendation is created only after the child TR tester submits results.
 
 ---
 
 ### Section 20 — TA&QC Inspections
 
 **Module**: `taqc_inspections`  
-**Who**: `taqc.north@kptcl.com` · `taqc.south@kptcl.com` · `taqc.mysuru@kptcl.com`
+**Who**: `taqc.north@kptcl.com` · `taqc.south@kptcl.com` · `taqc.mysuru@kptcl.com`  
+**Template key**: `taqc_inspection` (fetched from `GET /testing/templates/by-key/taqc_inspection`)
 
 | Step | API | Notes |
 |---|---|---|
-| Submit | `POST /direct-submissions/` | `request_category: "taqc_inspection"`, `template_key: "taqc_inspection_default"` |
+| Submit | `POST /direct-submissions/` | `request_category: "taqc_inspection"`, `template_key: "taqc_inspection"` |
 | List | `GET /direct-submissions/?category=taqc_inspection` | Dept-scoped — each TAQC officer sees only their dept |
 | Get single | `GET /direct-submissions/{id}` | Own dept only |
 | Dept isolation | TAQC north must NOT see South/Mysuru inspection records | Verified across all 3 depts |
 
-**Sample payload**:
+**Sample payload** (fields match the `taqc_inspection` template):
 ```json
 {
   "request_category": "taqc_inspection",
-  "template_key": "taqc_inspection_default",
+  "template_key": "taqc_inspection",
   "title": "TAQC Inspection - NORTH - Power Transformer",
   "equipment_id": "<pt_equip_id>",
-  "test_data": {
-    "inspection_date": "2026-05-06",
-    "inspector_name": "TAQC Officer north",
-    "equipment_condition": "fair",
-    "oil_level": "normal",
-    "bushing_condition": "good",
-    "cooling_system": "ok"
-  },
-  "overall_result": "pass",
+  "overall_result": "advisory",
   "remarks": "Automated TAQC test",
-  "priority": "normal"
+  "priority": "normal",
+  "test_data": {
+    "substation": "North Grid Substation",
+    "inspection_date": "2026-05-06",
+    "inspection_category": "Electrical Safety",
+    "observation_description": "Routine inspection — all parameters nominal.",
+    "severity": "Minor",
+    "target_compliance_date": "2026-06-01"
+  }
 }
 ```
 
+**Initial status**: `under_approval` → goes directly to **TechApprover** queue (no tester assignment step).  
+**Recommendation** is auto-created on submission (unlike FR).
+
 ---
 
-### What happens after Failure Registry / TA&QC submission
+### What happens after FR / TA&QC submission
 
-Both modules **bypass the normal tester-assignment flow**. A single `POST /direct-submissions/` atomically creates 3 records and lands straight in the approval queue:
+FR and TAQC have **different flows** after submission:
+
+---
+
+#### Failure Registry (FR)
 
 ```
-POST /direct-submissions/
-   ├── TestingRequest  (status = under_approval, is_direct_submission = true)
-   ├── TestResult      (test_data saved, tested_by = submitter)
-   └── Recommendation  (approval_status = pending)
-         └── 🔔 Notification sent to approvers
+POST /direct-submissions/   →  TestingRequest (status=submitted)
+                                    ↓
+                           Test Assigner: initial_approve
+                           PUT /approvals/{rec_id}/approve
+                                    ↓
+                           Child TR created (status=submitted → assigned)
+                           Normal tester lifecycle starts
+                                    ↓
+                           Tester submits results → under_approval
+                                    ↓
+                           TechApprover: approve_results
+                           → WorkflowDispatch: next_action → MN/IN/repair_cycle/replacement/none
 ```
 
-**`overall_result` → Recommendation type mapping:**
+> FR submission creates only `TestingRequest` + `TestResult`. No Recommendation yet.
 
-| overall_result | Recommendation type |
+---
+
+#### TA&QC Inspection (TAQC)
+
+```
+POST /direct-submissions/   →  TestingRequest (status=under_approval)
+                            +  TestResult (test_data saved)
+                            +  Recommendation (approval_status=pending)
+                                    ↓
+                           TechApprover: approve_results
+                           PUT /approvals/{rec_id}/approve  (with next_action)
+```
+
+**After TechApprover approval — `next_action` determines outcome:**
+
+| `next_action` | TR Status | Created |
+|---|---|---|
+| `none` | `commissioned` | Equipment record + MN schedule + IN schedule |
+| `maintenance` | `outcome_active` | `TestRequestSchedule` (MN- prefix, recurring) |
+| `inspection` | `outcome_active` | `TestRequestSchedule` (IN- prefix, recurring) |
+| `repair_cycle` | `outcome_active` | `RepairWorkflow` (10-stage) |
+| `replacement` | `finance_pending` | `ProcurementRequest` → Finance Approver queue |
+
+> `none` on TAQC = **commissioning** — Equipment auto-created from E&C form data, MN + IN maintenance schedules auto-created.
+
+---
+
+#### `overall_result` → Recommendation type mapping
+
+| `overall_result` | Recommendation type |
 |---|---|
 | `"fail"` *(FR default)* | `fail` |
 | `"advisory"` *(TAQC default)* | `conditional` |
@@ -262,20 +314,37 @@ POST /direct-submissions/
 | `"retest"` | `retest` |
 | `"conditional_pass"` | `conditional` |
 
-**Next steps after submission (TechApprover / OrgAdmin):**
+---
 
-| Action | API | Result |
+#### Approval APIs (TechApprover / OrgAdmin)
+
+| Action | API | Notes |
 |---|---|---|
 | View pending | `GET /approvals/pending` | Sees the FR or TAQC record |
-| Approve | `PUT /approvals/{rec_id}/approve` | → `approved` |
+| Approve | `PUT /approvals/{rec_id}/approve` | Triggers WorkflowDispatch |
 | Reject | `PUT /approvals/{rec_id}/reject` | → `rejected` |
 
-**Full lifecycle (no tester, no assignment step):**
-```
-Submitter  →  POST /direct-submissions/  →  under_approval
-                                                 ├── Approve  →  approved
-                                                 └── Reject   →  rejected
-```
+---
+
+#### Additional Status Values (new)
+
+| Status | When |
+|---|---|
+| `commissioned` | TAQC approved with `next_action=none` → equipment commissioned |
+| `closed` | Non-TAQC TR approved with `next_action=none` → terminal state |
+| `outcome_active` | Approved with maintenance/inspection/repair_cycle |
+| `finance_pending` | Approved with replacement → awaiting Finance |
+
+---
+
+### Tester Resubmit (under_review → accepted)
+
+When a TechApprover sends results back for revision (`under_review`), the tester can resubmit:
+
+| Action | API | Notes |
+|---|---|---|
+| Resubmit | `PUT /testing/{id}/resubmit` | Status must be `under_review`; only assigned tester can call |
+| Result | → `accepted` | Moves TR back to accepted so tester can update and re-submit |
 
 ---
 

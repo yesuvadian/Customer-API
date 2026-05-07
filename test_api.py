@@ -981,14 +981,18 @@ for dept, email_sfx in [("north", "north"), ("south", "south"), ("mysuru", "mysu
     h = auth(tok)
     payload = {
         "request_category": "failure_registry",
-        "template_key": "failure_registry_default",
+        "template_key": "failure_registry",
         "title": f"FR Test - {dept.upper()} dept - Power Transformer",
         "equipment_id": PT_EQUIP_ID,
         "test_data": {
             "failure_date": "2026-05-01",
-            "failure_mode": "Insulation breakdown",
-            "location": f"{dept} substation",
-            "severity": "high",
+            "failure_category": "Electrical",
+            "failure_description": f"Insulation breakdown at {dept} substation",
+            "root_cause_analysis": "Overload and moisture ingress",
+            "outage_duration_hours": "4",
+            "affected_consumers": "250",
+            "outage_impact": "Supply interrupted to residential sector",
+            "outcome": "Repair",
         },
         "overall_result": "fail",
         "remarks": f"Automated FR test for {dept} dept",
@@ -996,21 +1000,17 @@ for dept, email_sfx in [("north", "north"), ("south", "south"), ("mysuru", "mysu
     }
     r = requests.post(f"{BASE}/direct-submissions/", json=payload, headers=h)
     if r.status_code == 201:
-        fid = r.json().get("id")
+        resp = r.json()
+        fid = resp.get("request_id") or resp.get("id")
         FR_IDS[dept] = fid
-        ok(f"POST /direct-submissions/ failure_registry ({dept})", f"201 id={fid}")
-    elif r.status_code in (400, 422):
-        # try with minimal data / different template key
-        payload["template_key"] = "failure_registry"
-        r2 = requests.post(f"{BASE}/direct-submissions/", json=payload, headers=h)
-        if r2.status_code == 201:
-            fid = r2.json().get("id")
-            FR_IDS[dept] = fid
-            ok(f"POST /direct-submissions/ failure_registry ({dept})", f"201 id={fid}")
+        # FR initial status must be "submitted" (goes to Test Assigner queue)
+        status = resp.get("status", "")
+        if status == "submitted":
+            ok(f"POST /direct-submissions/ failure_registry ({dept})", f"201 id={fid} status={status}")
         else:
-            skip(f"POST /direct-submissions/ failure_registry ({dept})", f"{r.status_code}: {r.text[:120]}")
+            fail(f"FR initial status ({dept})", f"expected 'submitted', got '{status}'")
     else:
-        skip(f"POST /direct-submissions/ failure_registry ({dept})", f"{r.status_code}")
+        skip(f"POST /direct-submissions/ failure_registry ({dept})", f"{r.status_code}: {r.text[:120]}")
 
 # List failure registry — each dept user should see only their own
 for dept, email_sfx in [("north", "north"), ("south", "south"), ("mysuru", "mysuru")]:
@@ -1060,37 +1060,34 @@ for dept, email_sfx in [("north", "north"), ("south", "south"), ("mysuru", "mysu
     h = auth(tok)
     payload = {
         "request_category": "taqc_inspection",
-        "template_key": "taqc_inspection_default",
+        "template_key": "taqc_inspection",
         "title": f"TAQC Inspection - {dept.upper()} - Power Transformer",
         "equipment_id": PT_EQUIP_ID,
         "test_data": {
+            "substation": f"{dept.capitalize()} Grid Substation",
             "inspection_date": "2026-05-06",
-            "inspector_name": f"TAQC Officer {dept}",
-            "equipment_condition": "fair",
-            "oil_level": "normal",
-            "bushing_condition": "good",
-            "cooling_system": "ok",
+            "inspection_category": "Electrical Safety",
+            "observation_description": "Routine inspection — all parameters nominal.",
+            "severity": "Minor",
+            "target_compliance_date": "2026-06-01",
         },
-        "overall_result": "pass",
+        "overall_result": "advisory",
         "remarks": f"Automated TAQC test for {dept} dept",
         "priority": "normal",
     }
     r = requests.post(f"{BASE}/direct-submissions/", json=payload, headers=h)
     if r.status_code == 201:
-        tid = r.json().get("id")
+        resp = r.json()
+        tid = resp.get("request_id") or resp.get("id")
         TAQC_IDS[dept] = tid
-        ok(f"POST /direct-submissions/ taqc_inspection ({dept})", f"201 id={tid}")
-    elif r.status_code in (400, 422):
-        payload["template_key"] = "taqc_inspection"
-        r2 = requests.post(f"{BASE}/direct-submissions/", json=payload, headers=h)
-        if r2.status_code == 201:
-            tid = r2.json().get("id")
-            TAQC_IDS[dept] = tid
-            ok(f"POST /direct-submissions/ taqc_inspection ({dept})", f"201 id={tid}")
+        # TAQC initial status must be "under_approval" (direct to TechApprover queue)
+        status = resp.get("status", "")
+        if status == "under_approval":
+            ok(f"POST /direct-submissions/ taqc_inspection ({dept})", f"201 id={tid} status={status}")
         else:
-            skip(f"POST /direct-submissions/ taqc_inspection ({dept})", f"{r.status_code}: {r.text[:120]}")
+            fail(f"TAQC initial status ({dept})", f"expected 'under_approval', got '{status}'")
     else:
-        skip(f"POST /direct-submissions/ taqc_inspection ({dept})", str(r.status_code))
+        skip(f"POST /direct-submissions/ taqc_inspection ({dept})", f"{r.status_code}: {r.text[:120]}")
 
 # TAQC dept isolation
 for dept in ["north", "south", "mysuru"]:
