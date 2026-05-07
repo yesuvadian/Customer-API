@@ -76,6 +76,7 @@ class TestingRequestStatus(PyEnum):
     finance_pending = "finance_pending" # replacement → waiting Finance Approver
     outcome_active = "outcome_active"   # approved + dispatched (terminal)
     commissioned = "commissioned"       # TAQC approved + equipment created (terminal)
+    closed = "closed"                   # next_action=none terminal state (no downstream action)
 
 class RecommendationType(PyEnum):
     pass_test = "pass"

@@ -1267,7 +1267,7 @@ if _rej_orig_tok and PT_EQUIP_ID:
                 # submit results
                 r = requests.put(
                     f"{BASE}/testing/{_rej_tr_id}/submit_results",
-                    json={"recommendation_type": "replace", "summary": "Failed tests"},
+                    json={"recommendation_type": "fail", "summary": "Failed tests — equipment requires repair"},
                     headers=_t_h,
                 )
                 ok("SUBMIT RESULTS reject-path TR ->under_approval", str(r.status_code)) if r.status_code == 200 else skip("SUBMIT RESULTS reject-path", str(r.status_code))

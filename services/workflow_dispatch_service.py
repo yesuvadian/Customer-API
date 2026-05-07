@@ -73,8 +73,8 @@ class WorkflowDispatchService:
                 result["status"] = "commissioned"
                 self.db.commit()
             else:
-                tr.status = TestingRequestStatus.approved
-                result["status"] = "approved"
+                tr.status = TestingRequestStatus.closed
+                result["status"] = "closed"
                 tr.completed_at = datetime.now(timezone.utc)
                 tr.modified_by = approver_id
                 self.db.commit()

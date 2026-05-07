@@ -5376,6 +5376,105 @@ def migrate_new_status_values(session):
     print("[OK] Status enum migration complete.")
 
 
+def seed_direct_submission_templates(session) -> int:
+    """
+    Seed OrgTestTemplate rows for direct-submission forms:
+      - taqc_inspection  (TA&QC Inspection form)
+      - failure_registry (Equipment Failure Registry form)
+
+    Idempotent — skips existing rows.
+    Returns count of newly inserted rows.
+    """
+    from models import OrgTestTemplate
+
+    TEMPLATES = {
+        "taqc_inspection": {
+            "key": "taqc_inspection",
+            "name": "TA&QC Inspection",
+            "description": "Substation Inspection — record observations and compliance actions.",
+            "sections": [
+                {
+                    "title": "Inspection Details",
+                    "fields": [
+                        {"key": "substation",          "label": "Substation Name / Area",  "type": "text",     "required": True},
+                        {"key": "inspection_date",     "label": "Date of Inspection",       "type": "date",     "required": True},
+                        {"key": "inspection_category", "label": "Inspection Category",      "type": "dropdown", "required": True,
+                         "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    ],
+                },
+                {
+                    "title": "Observation",
+                    "fields": [
+                        {"key": "observation_description", "label": "Description of Observation", "type": "textarea", "required": True},
+                        {"key": "severity",                "label": "Severity",                   "type": "dropdown", "required": True,
+                         "options": ["Major", "Minor", "Advisory"]},
+                    ],
+                },
+                {
+                    "title": "Compliance",
+                    "fields": [
+                        {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date",     "required": False},
+                        {"key": "remarks",                "label": "Remarks",                "type": "textarea", "required": False},
+                    ],
+                },
+            ],
+        },
+        "failure_registry": {
+            "key": "failure_registry",
+            "name": "Equipment Failure Registry",
+            "description": "Record equipment failures for tracking and root-cause analysis.",
+            "sections": [
+                {
+                    "title": "Failure Information",
+                    "fields": [
+                        {"key": "failure_date",        "label": "Date of Failure",       "type": "date",     "required": True},
+                        {"key": "failure_category",    "label": "Failure Category",      "type": "dropdown", "required": True,
+                         "options": ["Electrical", "Mechanical", "Oil", "Protection", "Thermal", "Other"]},
+                        {"key": "failure_description", "label": "Description of Failure","type": "textarea", "required": True},
+                        {"key": "root_cause_analysis", "label": "Root Cause Analysis",   "type": "textarea", "required": False},
+                    ],
+                },
+                {
+                    "title": "Outage Impact",
+                    "fields": [
+                        {"key": "outage_duration_hours", "label": "Outage Duration (hours)",      "type": "number",   "required": False},
+                        {"key": "affected_consumers",    "label": "Affected Consumers (count)",   "type": "number",   "required": False},
+                        {"key": "outage_impact",         "label": "Outage Impact Description",    "type": "textarea", "required": False},
+                    ],
+                },
+                {
+                    "title": "Outcome",
+                    "fields": [
+                        {"key": "outcome", "label": "Outcome / Action Taken", "type": "dropdown", "required": True,
+                         "options": ["Repair", "Replacement", "Under Investigation"]},
+                        {"key": "remarks", "label": "Remarks / Additional Notes", "type": "textarea", "required": False},
+                    ],
+                },
+            ],
+        },
+    }
+
+    count = 0
+    for key, data in TEMPLATES.items():
+        existing = session.query(OrgTestTemplate).filter(
+            OrgTestTemplate.template_key == key,
+            OrgTestTemplate.org_id == None,  # noqa: E711
+        ).first()
+        if existing:
+            continue
+        session.add(OrgTestTemplate(
+            template_key=key,
+            org_id=None,
+            test_type_id=None,
+            template_data=data,
+            is_system=True,
+            version=1,
+        ))
+        count += 1
+    session.commit()
+    return count
+
+
 def seed_tr_workflows(session):
     """
     Seed the IntegratedWorkflowEngine with three workflows:
@@ -5691,6 +5790,8 @@ def run_seed():
         print(f"[OK] Provisioned {n} global test templates.")
         inserted = svc.provision_overall_assessment()
         print(f"[OK] Overall assessment template: {'provisioned' if inserted else 'already exists'}.")
+        n2 = seed_direct_submission_templates(session)
+        print(f"[OK] Direct-submission templates: {n2} seeded.")
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")

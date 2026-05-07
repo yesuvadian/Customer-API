@@ -174,6 +174,14 @@ class DirectSubmissionService:
         dept_id = data.get("department_id")
 
         # ── TestingRequest ────────────────────────────────────────────────────
+        # failure_registry → submitted  (goes to Test Assigner queue for initial_approve)
+        # taqc_inspection  → under_approval (no assignment step; direct to TechApprover)
+        initial_status = (
+            TestingRequestStatus.submitted
+            if category == RequestCategory.failure_registry
+            else TestingRequestStatus.under_approval
+        )
+
         req = TestingRequest(
             request_number=request_number,
             title=data.get("title") or request_number,
@@ -184,7 +192,7 @@ class DirectSubmissionService:
             department_id=dept_id,
             priority=data.get("priority", "normal"),
             notes=data.get("notes"),
-            status=TestingRequestStatus.under_approval,
+            status=initial_status,
             is_direct_submission=True,
             originator_id=submitter.id,
             created_by=submitter.id,
@@ -208,34 +216,40 @@ class DirectSubmissionService:
         self.db.add(result)
         self.db.flush()
 
-        # ── Recommendation (enables approval workflow) ─────────────────────────
-        # Map overall_result → RecommendationType for the approval queue
-        _result_to_rec_type = {
-            "pass":             RecommendationType.pass_test,
-            "conditional_pass": RecommendationType.conditional,
-            "fail":             RecommendationType.fail,
-            "advisory":         RecommendationType.conditional,
-            "retest":           RecommendationType.retest,
-        }
-        rec_type = _result_to_rec_type.get(
-            (data.get("overall_result") or default_result).lower(),
-            RecommendationType.conditional,
-        )
-        rec = Recommendation(
-            testing_request_id=req.id,
-            organization_id=org_id,
-            recommendation_type=rec_type,
-            summary=(
-                f"[Direct Submission] {category.value.replace('_',' ').title()} — "
-                f"{data.get('title', req.request_number)}"
-            ),
-            detailed_notes=data.get("remarks"),
-            approval_status="pending",
-            submitted_by=submitter.id,
-            submitted_at=now,
-            created_by=submitter.id,
-        )
-        self.db.add(rec)
+        # ── Recommendation ─────────────────────────────────────────────────────
+        # failure_registry: NO recommendation yet — it goes to Test Assigner queue
+        #   first (initial_approve), which spawns a child TR. The recommendation
+        #   is only created after the child TR's tester submits results.
+        # taqc_inspection: create recommendation immediately so TechApprover queue
+        #   receives it (no tester assignment step for TAQC).
+        if category != RequestCategory.failure_registry:
+            _result_to_rec_type = {
+                "pass":             RecommendationType.pass_test,
+                "conditional_pass": RecommendationType.conditional,
+                "fail":             RecommendationType.fail,
+                "advisory":         RecommendationType.conditional,
+                "retest":           RecommendationType.retest,
+            }
+            rec_type = _result_to_rec_type.get(
+                (data.get("overall_result") or default_result).lower(),
+                RecommendationType.conditional,
+            )
+            rec = Recommendation(
+                testing_request_id=req.id,
+                organization_id=org_id,
+                recommendation_type=rec_type,
+                summary=(
+                    f"[Direct Submission] {category.value.replace('_',' ').title()} — "
+                    f"{data.get('title', req.request_number)}"
+                ),
+                detailed_notes=data.get("remarks"),
+                approval_status="pending",
+                submitted_by=submitter.id,
+                submitted_at=now,
+                created_by=submitter.id,
+            )
+            self.db.add(rec)
+
         self.db.commit()
         self.db.refresh(req)
         self.db.refresh(result)
