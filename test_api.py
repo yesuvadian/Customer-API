@@ -102,26 +102,35 @@ def auth(token):
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. AUTHENTICATION
 # ─────────────────────────────────────────────────────────────────────────────
-section("1. AUTHENTICATION — all 10 roles (north dept)")
+section("1. AUTHENTICATION — all 10 roles × 3 departments (north / south / mysuru)")
 
-TOKENS = {}
-ROLES = [
-    ("orgadmin.north@kptcl.com",        "OrgAdmin"),
-    ("depthead.north@kptcl.com",         "DeptHead"),
-    ("originator.north@kptcl.com",       "Originator"),
-    ("tester.north@kptcl.com",           "Tester"),
-    ("assigner.north@kptcl.com",         "TestAssigner"),
-    ("techapprover.north@kptcl.com",     "TechApprover"),
-    ("financeapprover.north@kptcl.com",  "FinanceApprover"),
-    ("eetlss.north@kptcl.com",           "EeTlss"),
-    ("taqc.north@kptcl.com",             "TaqcOfficer"),
-    ("sectionhead.north@kptcl.com",      "SectionHead"),
+# Role definitions (email prefix, token key suffix, display name)
+_ROLE_DEFS = [
+    ("orgadmin",        "OrgAdmin"),
+    ("depthead",        "DeptHead"),
+    ("originator",      "Originator"),
+    ("tester",          "Tester"),
+    ("assigner",        "TestAssigner"),
+    ("techapprover",    "TechApprover"),
+    ("financeapprover", "FinanceApprover"),
+    ("eetlss",          "EeTlss"),
+    ("taqc",            "TaqcOfficer"),
+    ("sectionhead",     "SectionHead"),
 ]
 
-for email, role_key in ROLES:
-    t = login(email)
-    if t:
-        TOKENS[role_key] = t
+TOKENS = {}
+
+# Authenticate all 10 roles for all 3 departments
+for dept in ("north", "south", "mysuru"):
+    for prefix, role_key in _ROLE_DEFS:
+        email = f"{prefix}.{dept}@kptcl.com"
+        t = login(email)
+        if t:
+            # North tokens stored under bare role key (used throughout the test)
+            if dept == "north":
+                TOKENS[role_key] = t
+            # All dept tokens also stored under dept-qualified key
+            TOKENS[f"{role_key}_{dept.capitalize()}"] = t
 
 # Also login KPTCL org admin for org-level endpoints
 t = login("orgadmin@kptcl.com", PW_KPTCL)
