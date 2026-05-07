@@ -338,6 +338,61 @@ def decline_assignment(
     return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
 
 
+@router.put("/{request_id}/resubmit")
+def resubmit_for_review(
+    request_id: UUID,
+    body: Optional[dict] = Body(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Tester resubmits after Tech Approver rejection (under_review → accepted).
+
+    Used in the TAQC workflow when the Tech Approver rejects the E&C form data
+    and sends it back for revision. The tester corrects the form and calls this
+    endpoint to re-enter the under_approval queue.
+
+    - Status must be 'under_review'
+    - Only the assigned tester can resubmit
+    - Moves status back to 'accepted' so tester can update structured results
+      and call submit_results again
+    """
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+    if req.assigned_tester_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the assigned tester can resubmit this request")
+    if req.status != TestingRequestStatus.under_review:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only resubmit from 'under_review' status, currently '{req.status.value}'"
+        )
+
+    notes = (body or {}).get("notes", "")
+    req.status = TestingRequestStatus.accepted
+    req.modified_by = current_user.id
+    db.commit()
+
+    try:
+        from services.notification_service import NotificationService
+        NotificationService(db).fire(
+            event_type="tester_resubmitted",
+            context={
+                "request_number": req.request_number,
+                "tester_name": f"{current_user.firstname or ''} {current_user.lastname or ''}".strip() or current_user.email,
+                "notes": notes,
+            },
+            organization_id=req.organization_id,
+            source_id=req.id,
+            source_type="testing_request",
+            severity="info",
+        )
+    except Exception as _n:
+        print(f"[WARN] tester_resubmitted notification failed: {_n}")
+
+    return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
+
+
 # ─── Template & Structured Results ──────────────────────────
 
 @router.get("/templates/by-category/{request_category}")

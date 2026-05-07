@@ -27,6 +27,7 @@ from models import (
     TestingRequest,
     TestingRequestStatus,
     TestRequestSchedule,
+    TestResult,
 )
 
 
@@ -53,16 +54,30 @@ class WorkflowDispatchService:
         result = {"next_action": action.value if action else "none", "created": None}
 
         if action is None or action == NextActionType.none:
-            # TAQC inspections complete as 'commissioned'; all other TRs as 'approved'
+            # TAQC inspections complete as 'commissioned' + auto-create Equipment + MN/IN schedules
             if tr.request_category == RequestCategory.taqc_inspection:
                 tr.status = TestingRequestStatus.commissioned
+                tr.completed_at = datetime.now(timezone.utc)
+                tr.modified_by = approver_id
+                equip_id = self._commission_equipment(tr, rec, approver_id)
+                if equip_id:
+                    tr.equipment_id = equip_id
+                    result["equipment_id"] = str(equip_id)
+                    # Auto-create MN and IN schedules for the newly commissioned equipment
+                    mn_num = self._create_schedule(tr, rec, approver_id, prefix="MN",
+                                                   category=RequestCategory.maintenance)
+                    in_num = self._create_schedule(tr, rec, approver_id, prefix="IN",
+                                                   category=RequestCategory.inspection)
+                    result["mn_schedule"] = mn_num
+                    result["in_schedule"] = in_num
                 result["status"] = "commissioned"
+                self.db.commit()
             else:
                 tr.status = TestingRequestStatus.approved
                 result["status"] = "approved"
-            tr.completed_at = datetime.now(timezone.utc)
-            tr.modified_by = approver_id
-            self.db.commit()
+                tr.completed_at = datetime.now(timezone.utc)
+                tr.modified_by = approver_id
+                self.db.commit()
 
         elif action == NextActionType.maintenance:
             number = self._create_schedule(tr, rec, approver_id, prefix="MN",
@@ -106,6 +121,77 @@ class WorkflowDispatchService:
     # ─────────────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────────────
+
+    def _commission_equipment(
+        self,
+        tr: TestingRequest,
+        rec: Recommendation,
+        approver_id: UUID,
+    ) -> Optional[UUID]:
+        """
+        Auto-create an Equipment record from the E&C form data stored in the
+        latest TestResult.test_data for this TAQC inspection TR.
+
+        Returns the new Equipment.id, or None if creation fails.
+
+        Expected test_data keys (all optional — only what the tester filled):
+          voltage_class, bay_number, manufacturer, model_number,
+          factory_serial_number, year_of_manufacture,
+          + any other nameplate fields (stored as-is in nameplate_data JSONB).
+        """
+        if not tr.equipment_type_id or not tr.organization_id or not tr.department_id:
+            print(
+                f"[Dispatch] WARN: cannot commission equipment for TR {tr.request_number} "
+                f"— missing equipment_type_id / organization_id / department_id"
+            )
+            return None
+
+        # Pull E&C data from the latest test result
+        latest_result = (
+            self.db.query(TestResult)
+            .filter(TestResult.testing_request_id == tr.id)
+            .order_by(TestResult.tested_at.desc())
+            .first()
+        )
+        test_data: dict = (latest_result.test_data or {}) if latest_result else {}
+
+        # Well-known nameplate fields promoted to Equipment columns
+        voltage_class          = test_data.get("voltage_class") or tr.voltage_class if hasattr(tr, "voltage_class") else test_data.get("voltage_class")
+        bay_number             = test_data.get("bay_number")
+        manufacturer           = test_data.get("manufacturer")
+        model_number           = test_data.get("model_number")
+        factory_serial_number  = test_data.get("factory_serial_number") or test_data.get("serial_number")
+        raw_yom                = test_data.get("year_of_manufacture")
+        try:
+            year_of_manufacture = int(raw_yom) if raw_yom else None
+        except (ValueError, TypeError):
+            year_of_manufacture = None
+
+        try:
+            from services.equipment_service import EquipmentService
+            equipment = EquipmentService.create_equipment(
+                db=self.db,
+                organization_id=tr.organization_id,
+                department_id=tr.department_id,
+                equipment_type_id=tr.equipment_type_id,
+                voltage_class=voltage_class,
+                bay_number=bay_number,
+                nameplate_data=test_data,          # full E&C form → JSONB
+                commissioned_date=datetime.now(timezone.utc),
+                manufacturer=manufacturer,
+                model_number=model_number,
+                factory_serial_number=factory_serial_number,
+                year_of_manufacture=year_of_manufacture,
+                created_by=approver_id,
+            )
+            print(
+                f"[Dispatch] Commissioned equipment UEIC={equipment.ueic} "
+                f"id={equipment.id} for TR {tr.request_number}"
+            )
+            return equipment.id
+        except Exception as e:
+            print(f"[Dispatch] WARN: equipment commissioning failed for TR {tr.request_number}: {e}")
+            return None
 
     def _generate_number(self, prefix: str) -> str:
         """Generate ticket number like MN-20260501-0003."""
