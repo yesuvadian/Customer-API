@@ -1,8 +1,13 @@
 import os
 import smtplib
+import logging
+import mimetypes
 from email.message import EmailMessage
+from typing import List, Dict, Optional
 #from config import EMAIL_CONFIG
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 from config import EMAIL_PASS, EMAIL_USER, FROM_EMAIL, SMTP_PORT, SMTP_SERVER
 
@@ -116,29 +121,128 @@ class EmailService:
         filename: str,
         mime_type: str = "application/octet-stream"
     ):
+        """Send email with a single attachment (STARTTLS / Office 365)."""
+        self.send_multi_attachment_email_starttls(
+            to_email=to_email,
+            subject=subject,
+            body_html=body_html,
+            attachments=[
+                {"content": attachment_content, "filename": filename, "mime_type": mime_type}
+            ],
+        )
+
+    def send_multi_attachment_email_starttls(
+        self,
+        to_email: str,
+        subject: str,
+        body_html: str,
+        attachments: Optional[List[Dict]] = None,
+    ):
+        """
+        Send HTML email with zero or more file attachments via STARTTLS (Office 365).
+
+        Each entry in `attachments` is a dict with:
+          - "content"   : bytes  — raw file bytes
+          - "filename"  : str    — attachment filename shown in email client
+          - "mime_type" : str    — e.g. "application/pdf" or "application/vnd.ms-excel"
+                                   defaults to "application/octet-stream"
+
+        Usage for report dispatch:
+          email_svc.send_multi_attachment_email_starttls(
+              to_email="officer@kptcl.com",
+              subject="Monthly MIS Report — May 2026",
+              body_html=rendered_html,
+              attachments=[
+                  {"content": pdf_bytes,  "filename": "MIS_May2026.pdf",  "mime_type": "application/pdf"},
+                  {"content": xlsx_bytes, "filename": "MIS_May2026.xlsx", "mime_type":
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+              ],
+          )
+        """
         msg = EmailMessage()
         msg["Subject"] = subject
-        msg["From"] = self.from_email
-        msg["To"] = to_email
+        msg["From"]    = self.from_email
+        msg["To"]      = to_email
         self._add_cc(msg)
         msg.set_content(body_html, subtype="html")
 
-        maintype, subtype = mime_type.split("/")
-        msg.add_attachment(
-            attachment_content,
-            maintype=maintype,
-            subtype=subtype,
-            filename=filename
-        )
+        for att in (attachments or []):
+            content   = att.get("content")
+            filename  = att.get("filename", "attachment")
+            mime_type = att.get("mime_type", "application/octet-stream")
+
+            if not content:
+                logger.debug(f"[Email] Skipping empty attachment: {filename}")
+                continue
+
+            maintype, subtype = mime_type.split("/", 1)
+            msg.add_attachment(
+                content,
+                maintype=maintype,
+                subtype=subtype,
+                filename=filename,
+            )
 
         server = smtplib.SMTP(self.smtp_server, self.smtp_port)
         try:
             server.ehlo()
             server.starttls()
-            server.set_debuglevel(1)
-
             server.ehlo()
             server.login(self.username, self.password)
             server.send_message(msg)
         finally:
             server.quit()
+
+    @staticmethod
+    def _fetch_attachment(url: str) -> Optional[bytes]:
+        """
+        Download a file from `url` and return its raw bytes.
+        Returns None on any failure (caller skips attachment gracefully).
+        Supports:
+          • http(s)://  — fetches via requests
+          • /local/path — reads from filesystem (for internal storage)
+        """
+        if not url:
+            return None
+        try:
+            if url.startswith(("http://", "https://")):
+                import requests as _req
+                resp = _req.get(url, timeout=30)
+                resp.raise_for_status()
+                return resp.content
+            else:
+                # Treat as local filesystem path
+                with open(url, "rb") as fh:
+                    return fh.read()
+        except Exception as exc:
+            logger.warning(f"[Email] Could not fetch attachment from {url!r}: {exc}")
+            return None
+
+    @staticmethod
+    def _guess_filename(url: str, var_key: str) -> tuple:
+        """
+        Derive a (filename, mime_type) pair from a URL or var_key.
+        Falls back to a safe default.
+        """
+        # Extract filename from URL path
+        from urllib.parse import urlparse
+        path = urlparse(url).path if url.startswith("http") else url
+        basename = os.path.basename(path) or "attachment"
+
+        mime_type, _ = mimetypes.guess_type(basename)
+        if not mime_type:
+            # Guess from var_key convention
+            if "pdf" in var_key.lower():
+                mime_type = "application/pdf"
+                if not basename.endswith(".pdf"):
+                    basename += ".pdf"
+            elif "xls" in var_key.lower():
+                mime_type = (
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                if not basename.endswith(".xlsx"):
+                    basename += ".xlsx"
+            else:
+                mime_type = "application/octet-stream"
+
+        return basename, mime_type

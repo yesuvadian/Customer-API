@@ -25,7 +25,16 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import NotificationTemplate, NotificationVariable, OrgRole, OrgUserRole, User, UserNotification
+from models import (
+    NotificationEventCatalogue,
+    NotificationRoutingRule,
+    NotificationTemplate,
+    NotificationVariable,
+    OrgRole,
+    OrgUserRole,
+    User,
+    UserNotification,
+)
 
 router = APIRouter(
     prefix="/notifications",
@@ -255,14 +264,23 @@ _EVENT_CATALOGUE: List[Dict[str, Any]] = [
                          "request.submitted_by", "equipment.ueic", "equipment.department"],
         "default_roles": ["EE TLSS", "Department Head"],
     },
+    # ── Fixed: was "request_assigned" but service fires "tester_assigned" ──────
     {
-        "event_type": "request_assigned",
-        "label": "Test Request Assigned to Tester",
+        "event_type": "tester_assigned",
+        "label": "Tester Assigned to Request",
         "group": "Test Workflow",
         "description": "Fired when a test request is assigned to a field/lab tester.",
         "context_vars": ["request.number", "request.title", "request.assigned_to",
                          "request.due_date", "equipment.ueic"],
-        "default_roles": ["Field Tester", "Lab Tester"],
+        "default_roles": ["Tester", "AEE Maintenance"],
+    },
+    {
+        "event_type": "tester_declined",
+        "label": "Tester Declined Assignment",
+        "group": "Test Workflow",
+        "description": "Fired when a tester declines an assignment — notifies the Test Assigner.",
+        "context_vars": ["request.number", "tester_name", "reason"],
+        "default_roles": ["TestAssigner", "EE TLSS"],
     },
     {
         "event_type": "test_submitted",
@@ -274,48 +292,75 @@ _EVENT_CATALOGUE: List[Dict[str, Any]] = [
         "default_roles": ["EE TLSS", "Department Head"],
     },
     {
-        "event_type": "request_approved",
-        "label": "Test Request Approved",
+        "event_type": "recommendation_approved",
+        "label": "Recommendation Approved",
         "group": "Test Workflow",
-        "description": "Fired when a test request/result is approved by the reviewer.",
-        "context_vars": ["request.number", "request.title", "request.submitted_by",
-                         "equipment.ueic", "report.retriepdf", "report.retriexls"],
+        "description": "Fired when a technical approver approves a recommendation.",
+        "context_vars": ["request.number", "recommendation_type", "product_count"],
         "default_roles": ["Originator", "AEE Maintenance"],
     },
     {
-        "event_type": "request_rejected",
-        "label": "Test Request Rejected / Returned",
+        "event_type": "recommendation_rejected",
+        "label": "Recommendation Rejected",
         "group": "Test Workflow",
-        "description": "Fired when a test request is rejected or returned for rework.",
-        "context_vars": ["request.number", "request.title", "request.submitted_by",
-                         "equipment.ueic", "reason"],
-        "default_roles": ["Originator", "Field Tester", "Lab Tester"],
+        "description": "Fired when a technical approver rejects a recommendation — notifies the tester.",
+        "context_vars": ["request.number", "reason"],
+        "default_roles": ["Tester", "Originator"],
     },
     # ── Scheduling ────────────────────────────────────────────────────────────
     {
         "event_type": "due_reminder",
-        "label": "Test Due Soon Reminder",
+        "label": "Test Due Soon Reminder (15 days)",
         "group": "Scheduling",
-        "description": "Fired N days before a scheduled test is due.",
-        "context_vars": ["equipment.ueic", "request.title", "request.due_date", "equipment.department"],
+        "description": "Fired 15 days before a scheduled test is due (SRS §8.2 #1).",
+        "context_vars": ["equipment.ueic", "request.title", "request.due_date",
+                         "equipment.department", "days_remaining"],
         "default_roles": ["AEE Maintenance", "EE TLSS"],
     },
     {
-        "event_type": "test_overdue",
+        "event_type": "due_reminder_final",
+        "label": "Test Due Final Reminder (7 days)",
+        "group": "Scheduling",
+        "description": "Final reminder fired 7 days before a scheduled test is due (SRS §8.2 #2).",
+        "context_vars": ["equipment.ueic", "request.title", "request.due_date",
+                         "equipment.department", "days_remaining"],
+        "default_roles": ["AEE Maintenance", "EE TLSS", "Department Head"],
+    },
+    # ── Fixed: was "test_overdue" but service fires "overdue_alert" ───────────
+    {
+        "event_type": "overdue_alert",
         "label": "Test Overdue",
         "group": "Scheduling",
-        "description": "Fired when a scheduled test passes its due date without completion.",
-        "context_vars": ["equipment.ueic", "request.title", "request.due_date", "equipment.department"],
-        "default_roles": ["EE TLSS", "AEE Maintenance"],
+        "description": "Fired when a scheduled test passes its due date without completion (SRS §8.2 #3).",
+        "context_vars": ["equipment.ueic", "request.title", "request.due_date",
+                         "equipment.department"],
+        "default_roles": ["EE TLSS", "AEE Maintenance", "SEE W&M"],
     },
-    # ── Recommendations ───────────────────────────────────────────────────────
     {
-        "event_type": "recommendation_approved",
-        "label": "Recommendation Approved",
+        "event_type": "overdue_escalation",
+        "label": "Test Overdue Escalation (>7 days)",
+        "group": "Scheduling",
+        "description": "Escalation fired when a test is more than 7 days overdue (SRS §8.2 #4).",
+        "context_vars": ["equipment.ueic", "request.title", "request.due_date",
+                         "days_overdue", "equipment.department"],
+        "default_roles": ["SEE W&M", "CEE Transmission Zone"],
+    },
+    # ── Procurement ───────────────────────────────────────────────────────────
+    {
+        "event_type": "procurement_pending",
+        "label": "Procurement Request Raised",
         "group": "Recommendations",
-        "description": "Fired when an equipment recommendation is approved.",
-        "context_vars": ["equipment.ueic", "recommendation_type", "approved_by", "summary"],
-        "default_roles": ["Originator", "AEE Maintenance"],
+        "description": "Fired when a procurement request is created — notifies Finance Approvers.",
+        "context_vars": ["request.number", "pr_number", "title"],
+        "default_roles": ["FinanceApprover", "Department Head"],
+    },
+    {
+        "event_type": "procurement_decision",
+        "label": "Procurement Decision (Approved / Rejected)",
+        "group": "Recommendations",
+        "description": "Fired when Finance approves or rejects a procurement request.",
+        "context_vars": ["request.number", "pr_number", "decision", "notes"],
+        "default_roles": ["Originator", "TechApprover", "EE TLSS"],
     },
 ]
 
@@ -331,6 +376,14 @@ class TemplateOut(BaseModel):
     body_template: str
     recipient_roles: List[str]
     extra_recipient_emails: List[str] = []
+    attachment_vars: List = []
+    """
+    Attachment variable entries for the email channel.
+    Each entry is either a simple string or a typed dict:
+      Simple : "report.retriepdf"
+      Typed  : {"var_key": "report.retriepdf", "type": "pdf"}
+    Supported types: pdf | excel | xlsx | docx | json | csv | txt | zip
+    """
     is_active: bool
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
@@ -350,6 +403,15 @@ class TemplateCreate(BaseModel):
     extra_recipient_emails: List[str] = Field(
         default=[], description="Individual email addresses (outside role membership)"
     )
+    attachment_vars: List = Field(
+        default=[],
+        description=(
+            "Attachment variable entries for email channel. Each entry is either "
+            "a simple string ('report.retriepdf') or a typed dict "
+            "({'var_key': 'report.retriepdf', 'type': 'pdf'}). "
+            "Supported types: pdf | excel | xlsx | docx | json | csv | txt | zip"
+        ),
+    )
     is_active: bool = True
 
 
@@ -358,6 +420,13 @@ class TemplateUpdate(BaseModel):
     body_template: Optional[str] = None
     recipient_roles: Optional[List[str]] = None
     extra_recipient_emails: Optional[List[str]] = None
+    attachment_vars: Optional[List] = Field(
+        default=None,
+        description=(
+            "Attachment variable entries for email channel. Pass [] to clear. "
+            "Each entry: simple string or {'var_key': '...', 'type': 'pdf|excel|docx|json|...'}"
+        ),
+    )
     is_active: Optional[bool] = None
 
 
@@ -393,13 +462,60 @@ def _get_org(user: User) -> UUID:
 
 @router.get("/templates/event-types")
 def list_event_types(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Return the catalogue of all supported event types with their available
-    context variables and default recipient roles — grouped by feature area.
+    Return the merged event-type catalogue for the caller's organisation.
+
+    Resolution (same pattern as templates):
+      1. Start with all global entries (organization_id IS NULL).
+      2. Overlay org-specific entries — they can override labels/descriptions
+         or add entirely new event types custom to this org.
+    Falls back to the hardcoded _EVENT_CATALOGUE if the table is empty.
     """
-    return _EVENT_CATALOGUE
+    org_id = getattr(current_user, "organization_id", None)
+
+    # Fetch global rows
+    global_rows = (
+        db.query(NotificationEventCatalogue)
+        .filter(
+            NotificationEventCatalogue.organization_id.is_(None),
+            NotificationEventCatalogue.is_active.is_(True),
+        )
+        .all()
+    )
+
+    # Fetch org-specific rows (override / extend)
+    org_rows = (
+        db.query(NotificationEventCatalogue)
+        .filter(
+            NotificationEventCatalogue.organization_id == org_id,
+            NotificationEventCatalogue.is_active.is_(True),
+        )
+        .all()
+    ) if org_id else []
+
+    if not global_rows and not org_rows:
+        # Pre-seed fallback
+        return _EVENT_CATALOGUE
+
+    # Merge: org-specific entries override global ones for the same event_type
+    merged: dict = {r.event_type: r for r in global_rows}
+    for r in org_rows:
+        merged[r.event_type] = r   # org-specific wins
+
+    return [
+        {
+            "event_type":    r.event_type,
+            "label":         r.label,
+            "group":         r.group_name,
+            "description":   r.description or "",
+            "context_vars":  r.context_vars or [],
+            "default_roles": r.default_roles or [],
+        }
+        for r in sorted(merged.values(), key=lambda x: (x.group_name, x.label))
+    ]
 
 
 @router.get("/templates/system-variables")
@@ -520,6 +636,7 @@ def create_template(
         body_template=data.body_template,
         recipient_roles=data.recipient_roles,
         extra_recipient_emails=data.extra_recipient_emails,
+        attachment_vars=data.attachment_vars,
         is_active=data.is_active,
     )
     db.add(tmpl)
@@ -559,6 +676,7 @@ def update_template(
             body_template=data.body_template if data.body_template is not None else tmpl.body_template,
             recipient_roles=data.recipient_roles if data.recipient_roles is not None else list(tmpl.recipient_roles or []),
             extra_recipient_emails=data.extra_recipient_emails if data.extra_recipient_emails is not None else list(getattr(tmpl, 'extra_recipient_emails', None) or []),
+            attachment_vars=data.attachment_vars if data.attachment_vars is not None else list(getattr(tmpl, 'attachment_vars', None) or []),
             is_active=data.is_active if data.is_active is not None else tmpl.is_active,
         )
         db.add(override)
@@ -578,6 +696,8 @@ def update_template(
         tmpl.recipient_roles = data.recipient_roles
     if data.extra_recipient_emails is not None:
         tmpl.extra_recipient_emails = data.extra_recipient_emails
+    if data.attachment_vars is not None:
+        tmpl.attachment_vars = data.attachment_vars
     if data.is_active is not None:
         tmpl.is_active = data.is_active
 
@@ -620,6 +740,14 @@ class ChannelConfig(BaseModel):
     enabled: bool = True
     subject_template: Optional[str] = None
     body_template: Optional[str] = None
+    attachment_vars: List = Field(
+        default=[],
+        description=(
+            "Email attachment variable entries. Each entry is either a simple string "
+            "('report.retriepdf') or a typed dict {'var_key': '...', 'type': 'pdf|excel|docx|json'}."
+            " Only meaningful for the email channel."
+        ),
+    )
 
 
 class BulkTemplateUpsert(BaseModel):
@@ -686,6 +814,17 @@ def bulk_upsert_templates(
             if not cfg.subject_template and global_tmpl:
                 cfg.subject_template = global_tmpl.subject_template
 
+        # Carry over attachment_vars from global default if caller didn't supply any
+        effective_attachment_vars = cfg.attachment_vars
+        if not effective_attachment_vars and channel == "email":
+            global_tmpl_av = db.query(NotificationTemplate).filter(
+                NotificationTemplate.event_type == data.event_type,
+                NotificationTemplate.channel == "email",
+                NotificationTemplate.organization_id.is_(None),
+            ).first()
+            if global_tmpl_av:
+                effective_attachment_vars = list(getattr(global_tmpl_av, 'attachment_vars', None) or [])
+
         new_tmpl = NotificationTemplate(
             id=uuid4(),
             organization_id=org_id,
@@ -695,6 +834,7 @@ def bulk_upsert_templates(
             body_template=cfg.body_template or "",
             recipient_roles=data.recipient_roles,
             extra_recipient_emails=data.extra_recipient_emails,
+            attachment_vars=effective_attachment_vars,
             is_active=True,
         )
         db.add(new_tmpl)
@@ -713,6 +853,7 @@ class ChannelConfigOut(BaseModel):
     enabled: bool
     subject_template: Optional[str] = None
     body_template: Optional[str] = None
+    attachment_vars: List = []
     is_global: bool = False   # True if showing global default (no org override)
 
 class EventTemplateGroupOut(BaseModel):
@@ -767,6 +908,7 @@ def get_event_template_group(
             enabled=True,
             subject_template=row.subject_template,
             body_template=row.body_template,
+            attachment_vars=list(getattr(row, 'attachment_vars', None) or []),
             is_global=is_global.get(channel, False),
         )
 
@@ -971,3 +1113,623 @@ def delete_variable(
 
     var.is_active = False
     db.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# D)  ADMIN — Notification Routing Rules
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Routing rules decide: for a given event_type, which CHANNELS are activated
+# depending on the workflow type, equipment type, test category, and status
+# transition of the triggering request.
+#
+# Global rules (organization_id=NULL) are the system defaults seeded by seed.py.
+# Org-specific rules override globals — higher priority value wins.
+#
+# Adding a new workflow (e.g. "preventive_maintenance"):
+#   POST /notifications/routing-rules  { event_type: "...", applicable_workflow_types: ["preventive_maintenance"], ... }
+#   Zero code change required.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Constants exposed for UI dropdowns ────────────────────────────────────────
+
+WORKFLOW_TYPES = [
+    {"value": "direct_test",       "label": "Direct Test"},
+    {"value": "failure_register",  "label": "Failure Register"},
+    {"value": "taqc",              "label": "TA&QC Inspection"},
+    {"value": "multisession",      "label": "Multi-Session Test"},
+    {"value": "schedule",          "label": "Scheduled / Periodic Test"},
+    {"value": "repair_cycle",      "label": "Repair Cycle"},
+]
+
+TEST_TYPES = [
+    {"value": "test",         "label": "Test"},
+    {"value": "inspection",   "label": "Inspection"},
+    {"value": "maintenance",  "label": "Maintenance"},
+    {"value": "life_cycle",   "label": "Life Cycle"},
+]
+
+CHANNELS = ["email", "sms", "inapp"]
+
+
+# ── Schemas ────────────────────────────────────────────────────────────────────
+
+class RoutingRuleOut(BaseModel):
+    id: UUID
+    organization_id: Optional[UUID] = None
+    event_type: str
+    label: Optional[str] = None
+    applicable_workflow_types:  List[str] = []
+    applicable_equipment_types: List[str] = []
+    applicable_test_types:      List[str] = []
+    applicable_status_from: Optional[str] = None
+    applicable_status_to:   Optional[str] = None
+    channels_enabled:           List[str] = []
+    recipient_roles_override:   Optional[List[str]] = None
+    priority:  int = 0
+    is_active: bool
+    is_global: bool = False   # True if organization_id is None
+    cts: Optional[datetime] = None
+    mts: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RoutingRuleCreate(BaseModel):
+    event_type: str
+    label: Optional[str] = None
+    applicable_workflow_types:  List[str] = Field(default=[], description="Empty = all workflows")
+    applicable_equipment_types: List[str] = Field(default=[], description="Empty = all equipment types")
+    applicable_test_types:      List[str] = Field(default=[], description="Empty = all test categories")
+    applicable_status_from: Optional[str] = None
+    applicable_status_to:   Optional[str] = None
+    channels_enabled:    List[str] = Field(default=["email", "sms", "inapp"])
+    recipient_roles_override: Optional[List[str]] = None
+    priority: int = Field(default=10, description="Higher priority wins. Default 10 for org rules.")
+    is_active: bool = True
+
+
+class RoutingRuleUpdate(BaseModel):
+    label: Optional[str] = None
+    applicable_workflow_types:  Optional[List[str]] = None
+    applicable_equipment_types: Optional[List[str]] = None
+    applicable_test_types:      Optional[List[str]] = None
+    applicable_status_from: Optional[str] = None
+    applicable_status_to:   Optional[str] = None
+    channels_enabled:    Optional[List[str]] = None
+    recipient_roles_override: Optional[List[str]] = None
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+# ── Helper: serialise a rule row ──────────────────────────────────────────────
+
+def _rule_out(rule: NotificationRoutingRule) -> dict:
+    return {
+        "id":            rule.id,
+        "organization_id": rule.organization_id,
+        "event_type":    rule.event_type,
+        "label":         rule.label,
+        "applicable_workflow_types":  rule.applicable_workflow_types or [],
+        "applicable_equipment_types": rule.applicable_equipment_types or [],
+        "applicable_test_types":      rule.applicable_test_types or [],
+        "applicable_status_from":     rule.applicable_status_from,
+        "applicable_status_to":       rule.applicable_status_to,
+        "channels_enabled":           rule.channels_enabled or [],
+        "recipient_roles_override":   rule.recipient_roles_override,
+        "priority":  rule.priority,
+        "is_active": rule.is_active,
+        "is_global": rule.organization_id is None,
+        "cts": rule.cts,
+        "mts": rule.mts,
+    }
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.get("/routing-rules/meta")
+def routing_rules_meta():
+    """
+    Return static dropdown values for the routing rules configuration UI.
+    No auth needed — these are constants (workflow types, test types, channels).
+    """
+    return {
+        "workflow_types":    WORKFLOW_TYPES,
+        "test_types":        TEST_TYPES,
+        "channels":          CHANNELS,
+    }
+
+
+@router.get("/routing-rules", response_model=List[RoutingRuleOut])
+def list_routing_rules(
+    event_type: Optional[str] = Query(None),
+    workflow_type: Optional[str] = Query(None),
+    include_global: bool = Query(True, description="Include system-wide global rules"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List routing rules for the caller's org.
+    Returns org-specific rules + (optionally) global defaults merged/labelled.
+    Org admins only.
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    q = db.query(NotificationRoutingRule).filter(
+        (NotificationRoutingRule.organization_id == org_id) |
+        (NotificationRoutingRule.organization_id.is_(None) if include_global else False),
+    )
+    if event_type:
+        q = q.filter(NotificationRoutingRule.event_type == event_type)
+    if workflow_type:
+        from sqlalchemy import cast
+        from sqlalchemy.dialects.postgresql import JSONB
+        q = q.filter(
+            NotificationRoutingRule.applicable_workflow_types.contains([workflow_type])
+        )
+
+    rules = q.order_by(
+        NotificationRoutingRule.organization_id.is_(None).asc(),   # org-specific first
+        NotificationRoutingRule.priority.desc(),
+        NotificationRoutingRule.event_type,
+    ).all()
+
+    return [_rule_out(r) for r in rules]
+
+
+@router.post("/routing-rules", status_code=status.HTTP_201_CREATED)
+def create_routing_rule(
+    data: RoutingRuleCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Create an org-specific routing rule.
+    This overrides any global rule that matches the same scope.
+    Org admins only.
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    rule = NotificationRoutingRule(
+        organization_id=org_id,
+        event_type=data.event_type,
+        label=data.label,
+        applicable_workflow_types=data.applicable_workflow_types,
+        applicable_equipment_types=data.applicable_equipment_types,
+        applicable_test_types=data.applicable_test_types,
+        applicable_status_from=data.applicable_status_from,
+        applicable_status_to=data.applicable_status_to,
+        channels_enabled=data.channels_enabled,
+        recipient_roles_override=data.recipient_roles_override,
+        priority=data.priority,
+        is_active=data.is_active,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return _rule_out(rule)
+
+
+@router.put("/routing-rules/{rule_id}")
+def update_routing_rule(
+    rule_id: UUID,
+    data: RoutingRuleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Update an org-specific routing rule.
+    Global (system) rules cannot be edited — create an org-specific override instead.
+    Org admins only.
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    rule = db.query(NotificationRoutingRule).filter(
+        NotificationRoutingRule.id == rule_id,
+    ).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Routing rule not found.")
+    if rule.organization_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Global system rules cannot be edited. Create an org-specific rule instead.",
+        )
+    if rule.organization_id != org_id:
+        raise HTTPException(status_code=403, detail="Cannot edit another org's routing rule.")
+
+    if data.label is not None:
+        rule.label = data.label
+    if data.applicable_workflow_types is not None:
+        rule.applicable_workflow_types = data.applicable_workflow_types
+    if data.applicable_equipment_types is not None:
+        rule.applicable_equipment_types = data.applicable_equipment_types
+    if data.applicable_test_types is not None:
+        rule.applicable_test_types = data.applicable_test_types
+    if data.applicable_status_from is not None:
+        rule.applicable_status_from = data.applicable_status_from
+    if data.applicable_status_to is not None:
+        rule.applicable_status_to = data.applicable_status_to
+    if data.channels_enabled is not None:
+        rule.channels_enabled = data.channels_enabled
+    if data.recipient_roles_override is not None:
+        rule.recipient_roles_override = data.recipient_roles_override
+    if data.priority is not None:
+        rule.priority = data.priority
+    if data.is_active is not None:
+        rule.is_active = data.is_active
+
+    db.commit()
+    db.refresh(rule)
+    return _rule_out(rule)
+
+
+@router.delete("/routing-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_routing_rule(
+    rule_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Deactivate (soft-delete) an org-specific routing rule.
+    Global rules cannot be deleted.
+    Org admins only.
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    rule = db.query(NotificationRoutingRule).filter(
+        NotificationRoutingRule.id == rule_id,
+        NotificationRoutingRule.organization_id == org_id,
+    ).first()
+    if not rule:
+        raise HTTPException(
+            status_code=404,
+            detail="Rule not found or is a global default (cannot delete global rules).",
+        )
+    rule.is_active = False
+    db.commit()
+
+
+@router.post("/routing-rules/{rule_id}/clone")
+def clone_routing_rule_as_org_override(
+    rule_id: UUID,
+    data: RoutingRuleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Clone a global routing rule as an org-specific override, then apply updates.
+
+    Use this when you want to customise a global default rule:
+    1. GET /routing-rules  → find the global rule id
+    2. POST /routing-rules/{id}/clone  { channels_enabled: ["email"] }
+       → creates org-specific copy with your changes applied, priority=10
+    Org admins only.
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    source = db.query(NotificationRoutingRule).filter(
+        NotificationRoutingRule.id == rule_id,
+    ).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source routing rule not found.")
+
+    clone = NotificationRoutingRule(
+        organization_id=org_id,
+        event_type=source.event_type,
+        label=data.label or (f"[Override] {source.label or source.event_type}"),
+        applicable_workflow_types=data.applicable_workflow_types
+            if data.applicable_workflow_types is not None
+            else list(source.applicable_workflow_types or []),
+        applicable_equipment_types=data.applicable_equipment_types
+            if data.applicable_equipment_types is not None
+            else list(source.applicable_equipment_types or []),
+        applicable_test_types=data.applicable_test_types
+            if data.applicable_test_types is not None
+            else list(source.applicable_test_types or []),
+        applicable_status_from=data.applicable_status_from or source.applicable_status_from,
+        applicable_status_to=data.applicable_status_to or source.applicable_status_to,
+        channels_enabled=data.channels_enabled
+            if data.channels_enabled is not None
+            else list(source.channels_enabled or ["email", "sms", "inapp"]),
+        recipient_roles_override=data.recipient_roles_override or source.recipient_roles_override,
+        priority=data.priority if data.priority is not None else 10,
+        is_active=True,
+    )
+    db.add(clone)
+    db.commit()
+    db.refresh(clone)
+    return _rule_out(clone)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# E)  ADMIN — Notification Schedule Rules  (configurable trigger events)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Schedule rules define WHEN a notification is triggered:
+#   • time-based  : N days before/after a due date
+#   • status-based: when workflow reaches a specific status
+#   • both        : time AND status condition must both be true
+#
+# Org admins can override global defaults (e.g. change 15-day reminder to 10).
+# Global rules (organization_id=NULL) are read-only for org admins.
+# ──────────────────────────────────────────────────────────────────────────────
+
+from models import NotificationScheduleRule as _NSR
+
+TRIGGER_TYPES = [
+    {"value": "due_soon",          "label": "N days before due date"},
+    {"value": "overdue",           "label": "When test is overdue"},
+    {"value": "escalation",        "label": "When overdue > N days"},
+    {"value": "status_transition", "label": "When workflow status changes"},
+    {"value": "both",              "label": "Time-based AND status-based"},
+]
+
+SEVERITY_LEVELS = ["info", "alert", "critical"]
+
+WORKFLOW_STATUSES = [
+    "submitted", "pending_approval", "approved", "assigned", "in_progress",
+    "completed", "rejected", "overdue", "escalated", "cancelled",
+    "pending_review", "pending_dispatch", "dispatched", "result_uploaded",
+    "compliance_pending", "compliance_uploaded",
+    # Repair cycle statuses
+    "dismantling", "inspection_stage", "rewinding", "testing", "reassembly",
+    "oil_filling", "final_test", "dispatched_for_commissioning", "commissioned",
+    "delayed",
+]
+
+
+class ScheduleRuleOut(BaseModel):
+    id:                       str
+    organization_id:          Optional[str]
+    is_global:                bool
+    event_type:               str
+    label:                    str
+    trigger_type:             str
+    offset_days:              int
+    trigger_on_status:        Optional[str]
+    applicable_workflow_types: List[str]
+    applicable_categories:    List[str]
+    advanced_conditions:      Optional[dict]
+    severity:                 str
+    is_active:                bool
+    cts:                      Optional[str]
+    mts:                      Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class ScheduleRuleCreate(BaseModel):
+    event_type:               str
+    label:                    str
+    trigger_type:             str
+    offset_days:              int = 0
+    trigger_on_status:        Optional[str] = None
+    applicable_workflow_types: Optional[List[str]] = None
+    applicable_categories:    Optional[List[str]] = None
+    advanced_conditions:      Optional[dict] = None
+    severity:                 str = "info"
+    is_active:                bool = True
+
+
+class ScheduleRuleUpdate(BaseModel):
+    label:                    Optional[str] = None
+    trigger_type:             Optional[str] = None
+    offset_days:              Optional[int] = None
+    trigger_on_status:        Optional[str] = None
+    applicable_workflow_types: Optional[List[str]] = None
+    applicable_categories:    Optional[List[str]] = None
+    advanced_conditions:      Optional[dict] = None
+    severity:                 Optional[str] = None
+    is_active:                Optional[bool] = None
+
+
+def _srule_out(r: _NSR) -> dict:
+    return {
+        "id":                       str(r.id),
+        "organization_id":          str(r.organization_id) if r.organization_id else None,
+        "is_global":                r.organization_id is None,
+        "event_type":               r.event_type,
+        "label":                    r.label,
+        "trigger_type":             r.trigger_type,
+        "offset_days":              r.offset_days,
+        "trigger_on_status":        r.trigger_on_status,
+        "applicable_workflow_types": list(r.applicable_workflow_types or []),
+        "applicable_categories":    list(r.applicable_categories or []),
+        "advanced_conditions":      r.advanced_conditions,
+        "severity":                 r.severity,
+        "is_active":                r.is_active,
+        "cts":                      r.cts.isoformat() if r.cts else None,
+        "mts":                      r.mts.isoformat() if r.mts else None,
+    }
+
+
+@router.get("/schedule-rules/meta")
+def get_schedule_rule_meta():
+    """
+    Returns dropdown options for the schedule rule editor:
+    trigger_types, severity_levels, workflow_statuses, event_types.
+    No auth needed.
+    """
+    return {
+        "trigger_types":     TRIGGER_TYPES,
+        "severity_levels":   SEVERITY_LEVELS,
+        "workflow_statuses": WORKFLOW_STATUSES,
+        "workflow_types":    WORKFLOW_TYPES,
+    }
+
+
+@router.get("/schedule-rules", response_model=List[ScheduleRuleOut])
+def list_schedule_rules(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns all schedule rules: global defaults + org-specific overrides for
+    the caller's organisation.  Org admins only.
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    rules = db.query(_NSR).filter(
+        _NSR.organization_id.in_([None, org_id]),
+        _NSR.is_active.is_(True),
+    ).order_by(
+        _NSR.organization_id.is_(None).desc(),  # globals first
+        _NSR.event_type,
+    ).all()
+    return [_srule_out(r) for r in rules]
+
+
+@router.post("/schedule-rules", status_code=status.HTTP_201_CREATED)
+def create_schedule_rule(
+    data: ScheduleRuleCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Create a new org-specific schedule rule.
+    Org admins only.
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    rule = _NSR(
+        organization_id=org_id,
+        event_type=data.event_type,
+        label=data.label,
+        trigger_type=data.trigger_type,
+        offset_days=data.offset_days,
+        trigger_on_status=data.trigger_on_status,
+        applicable_workflow_types=data.applicable_workflow_types or [],
+        applicable_categories=data.applicable_categories or [],
+        advanced_conditions=data.advanced_conditions,
+        severity=data.severity,
+        is_active=data.is_active,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return _srule_out(rule)
+
+
+@router.put("/schedule-rules/{rule_id}")
+def update_schedule_rule(
+    rule_id: UUID,
+    data: ScheduleRuleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Update an org-specific schedule rule.
+    Org admins only — cannot edit global defaults.
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    rule = db.query(_NSR).filter(
+        _NSR.id == rule_id,
+        _NSR.organization_id == org_id,
+    ).first()
+    if not rule:
+        raise HTTPException(
+            status_code=404,
+            detail="Rule not found or is a global default (override it using /clone).",
+        )
+
+    if data.label             is not None: rule.label             = data.label
+    if data.trigger_type      is not None: rule.trigger_type      = data.trigger_type
+    if data.offset_days       is not None: rule.offset_days       = data.offset_days
+    if data.trigger_on_status is not None: rule.trigger_on_status = data.trigger_on_status
+    if data.applicable_workflow_types is not None:
+        rule.applicable_workflow_types = data.applicable_workflow_types
+    if data.applicable_categories is not None:
+        rule.applicable_categories = data.applicable_categories
+    if data.advanced_conditions is not None:
+        rule.advanced_conditions = data.advanced_conditions
+    if data.severity          is not None: rule.severity          = data.severity
+    if data.is_active         is not None: rule.is_active         = data.is_active
+
+    db.commit()
+    db.refresh(rule)
+    return _srule_out(rule)
+
+
+@router.delete("/schedule-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_schedule_rule(
+    rule_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Soft-delete (deactivate) an org-specific schedule rule.
+    Global defaults cannot be deleted — clone and deactivate the clone instead.
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    rule = db.query(_NSR).filter(
+        _NSR.id == rule_id,
+        _NSR.organization_id == org_id,
+    ).first()
+    if not rule:
+        raise HTTPException(
+            status_code=404,
+            detail="Rule not found or is a global default (cannot delete global defaults).",
+        )
+    rule.is_active = False
+    db.commit()
+
+
+@router.post("/schedule-rules/{rule_id}/clone")
+def clone_schedule_rule_as_org_override(
+    rule_id: UUID,
+    data: ScheduleRuleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Clone a global schedule rule as an org-specific override.
+
+    Use this to customise the trigger days (e.g. change global 15-day reminder
+    to 10 days for your org):
+      POST /schedule-rules/{global_rule_id}/clone  { "offset_days": 10 }
+    """
+    _require_admin(db, current_user)
+    org_id = _get_org(current_user)
+
+    source = db.query(_NSR).filter(_NSR.id == rule_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source schedule rule not found.")
+
+    clone = _NSR(
+        organization_id=org_id,
+        event_type=source.event_type,
+        label=data.label or f"[Override] {source.label}",
+        trigger_type=data.trigger_type       or source.trigger_type,
+        offset_days=data.offset_days         if data.offset_days is not None else source.offset_days,
+        trigger_on_status=data.trigger_on_status or source.trigger_on_status,
+        applicable_workflow_types=(
+            data.applicable_workflow_types
+            if data.applicable_workflow_types is not None
+            else list(source.applicable_workflow_types or [])
+        ),
+        applicable_categories=(
+            data.applicable_categories
+            if data.applicable_categories is not None
+            else list(source.applicable_categories or [])
+        ),
+        advanced_conditions=data.advanced_conditions or source.advanced_conditions,
+        severity=data.severity or source.severity,
+        is_active=True,
+    )
+    db.add(clone)
+    db.commit()
+    db.refresh(clone)
+    return _srule_out(clone)

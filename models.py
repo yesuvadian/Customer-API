@@ -2573,6 +2573,18 @@ class NotificationTemplate(Base):
     # e.g. ["manager@utility.com", "external-auditor@gov.in"]
     extra_recipient_emails = Column(JSONB, nullable=False, server_default="[]")
 
+    # ── Email attachments ─────────────────────────────────────────────────────
+    # Context variable keys whose resolved values are file URLs to attach.
+    # The dispatcher will fetch each URL and add the file as a MIME attachment.
+    #
+    # Only meaningful for channel="email". Ignored for sms and inapp.
+    #
+    # Examples:
+    #   ["report.retriepdf"]                      → attach the PDF report
+    #   ["report.retriepdf", "report.retriexls"]  → attach both PDF and Excel
+    #
+    attachment_vars = Column(JSONB, nullable=False, server_default="[]")
+
     is_active = Column(Boolean, default=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -2616,6 +2628,12 @@ class NotificationLog(Base):
     # Source object that triggered this notification
     source_id = Column(UUID(as_uuid=True), nullable=True)   # TestResult.id, TestingRequest.id, etc.
     source_type = Column(String(100), nullable=True)        # "test_result", "testing_request", etc.
+
+    # ── Email attachments ─────────────────────────────────────────────────────
+    # Populated by _dispatch_to_user() when the template has attachment_vars set.
+    # Each entry: {"url": "https://...", "var_key": "report.retriepdf"}
+    # EmailDispatcher.send() fetches these and attaches them as MIME parts.
+    attachment_urls = Column(JSONB, nullable=False, server_default="[]")
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -2765,3 +2783,209 @@ class ReportLog(Base):
 
     definition          = relationship("ReportDefinition", back_populates="logs")
     generated_by_user   = relationship("User", foreign_keys=[generated_by])
+
+
+class NotificationEventCatalogue(Base):
+    """
+    Registry of all supported notification event types.
+
+    NULL organization_id = global system event type (seeded, available to all orgs).
+    Non-null organization_id = org-specific custom event type (org adds without code change).
+
+    Resolution order (same pattern as NotificationTemplate):
+      1. Org-specific entries for this org (organization_id = org.id)
+      2. Global entries (organization_id IS NULL)
+    Org-specific entries OVERRIDE global ones with the same event_type,
+    allowing an org to rename/re-describe a global event without touching code.
+
+    event_type   : unique per org+NULL combo, e.g. "eval_critical", "due_reminder_final"
+    label        : human-readable name shown in the Flutter UI
+    group_name   : grouping header in the Flutter UI (e.g. "Scheduling", "Evaluation")
+    description  : one-line explanation shown as subtitle
+    context_vars : JSON array of variable names available in templates for this event
+    default_roles: JSON array of role names pre-selected in the template editor
+    is_active    : hide from UI without deleting
+    """
+    __tablename__ = "notification_event_catalogue"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "event_type", name="uq_notif_event_catalogue_org_type"),
+        {"schema": "public"},
+    )
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,   # NULL = global system event type
+        index=True,
+    )
+    event_type   = Column(String(100), nullable=False, index=True)
+    label        = Column(String(255), nullable=False)
+    group_name   = Column(String(100), nullable=False)
+    description  = Column(Text, nullable=True)
+    context_vars = Column(JSONB, nullable=False, server_default="[]")
+    default_roles= Column(JSONB, nullable=False, server_default="[]")
+    is_active    = Column(Boolean, default=True, nullable=False)
+    cts          = Column(DateTime(timezone=True), server_default=func.now())
+    mts          = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class NotificationScheduleRule(Base):
+    """
+    Config-driven scheduler rules for time-based notifications.
+    Each row defines ONE notification trigger without any code change.
+
+    NULL organization_id = global default rule (applied to all orgs that have no override).
+    Non-null organization_id = org-specific rule that OVERRIDES the global default
+      for that org (e.g. org A wants 30-day reminder instead of the global 15-day rule).
+
+    Resolution: the scheduler loads ALL active rules and evaluates TRs against them.
+    Org-specific rules are matched to TRs by organization_id;
+    global rules (NULL) apply to all orgs that don't have an org-specific rule
+    for the same event_type + trigger_type combination.
+
+    trigger_type:
+      "due_soon"   — fires when due_date is within +offset_days from today
+                     e.g. offset_days=15 → fires 15 days before due_date
+      "overdue"    — fires when due_date < today (request still open)
+                     offset_days=0 → fires on any overdue request
+      "escalation" — fires when due_date < today - offset_days
+                     e.g. offset_days=7 → fires when overdue > 7 days
+
+    applicable_categories: JSON array of RequestCategory values to restrict this
+      rule e.g. ["maintenance", "inspection"]. Empty array [] = all categories.
+    """
+    __tablename__ = "notification_schedule_rules"
+    __table_args__ = (
+        # Drop the old unique constraint name in a migration if the column list changed.
+        # The new natural key is: org + event_type + trigger_type + offset_days + trigger_on_status
+        UniqueConstraint(
+            "organization_id", "event_type", "trigger_type", "offset_days",
+            "trigger_on_status",
+            name="uq_notif_schedule_rule_v2",
+        ),
+        {"schema": "public"},
+    )
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,   # NULL = global default rule
+        index=True,
+    )
+    event_type    = Column(String(100), nullable=False, index=True)
+    label         = Column(String(255), nullable=False)
+
+    # ── Trigger mode ─────────────────────────────────────────────────────────
+    #
+    # trigger_type:
+    #   "due_soon"          — fires when due_date is within offset_days of today
+    #                         e.g. offset_days=15 → 15 days before due date
+    #   "overdue"           — fires when due_date has passed (request still open)
+    #                         offset_days=0 → fire on any overdue request
+    #   "escalation"        — fires when overdue by more than offset_days
+    #                         e.g. offset_days=7 → >7 days overdue
+    #   "status_transition" — fires when the workflow reaches trigger_on_status
+    #                         offset_days is ignored for this type
+    #   "both"              — fires when due_date within offset_days AND
+    #                         the current status matches trigger_on_status
+    #
+    trigger_type      = Column(String(30), nullable=False)
+    offset_days       = Column(Integer, nullable=False, default=0)
+
+    # Status that causes a "status_transition" or "both" trigger to fire.
+    # NULL means any status / not applicable (used for time-based triggers).
+    trigger_on_status = Column(String(100), nullable=True)
+
+    # Applies to specific workflow types; empty = all
+    applicable_workflow_types = Column(JSONB, nullable=False, server_default="[]")
+
+    severity      = Column(String(20), nullable=False, default="info")  # info|alert|critical
+
+    # Restrict to specific request categories; empty = all categories
+    applicable_categories = Column(JSONB, nullable=False, server_default="[]")
+
+    # ── Advanced / future conditions (optional JSON) ─────────────────────────
+    #
+    # Stores an optional structured rule for complex scenarios, e.g.:
+    #   {
+    #     "and": [
+    #       {"type": "due_soon", "offset_days": 10},
+    #       {"type": "status", "on_status": "pending_approval"}
+    #     ]
+    #   }
+    # The scheduler evaluates this only when present (non-null).
+    # Simple triggers use the columns above; this is for advanced OR/AND logic.
+    #
+    advanced_conditions = Column(JSONB, nullable=True)
+
+    is_active     = Column(Boolean, default=True, nullable=False)
+    cts           = Column(DateTime(timezone=True), server_default=func.now())
+    mts           = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class NotificationRoutingRule(Base):
+    """
+    Config-driven routing: controls WHICH channels fire for a given event_type,
+    filtered by workflow type, equipment type, test category, and status transition.
+
+    Design goals
+    ────────────
+    • Zero code change to add/remove routing for a new workflow — just INSERT a row.
+    • Org admins configure via Flutter UI: which events, on which channels, for which
+      workflow types / equipment types / test categories.
+    • Backward-compatible: if NO rule matches a fire() call, ALL channels fire
+      (permissive default keeps existing behaviour for orgs that haven't configured rules).
+
+    NULL organization_id = global default rule (applies to all orgs with no override).
+    Non-null = org-specific rule; org-specific WINS over global for the same event_type
+    + scope combination.
+
+    Scope filter columns (all nullable / empty = "match everything"):
+    ──────────────────────────────────────────────────────────────────
+    applicable_workflow_types   JSONB   ["direct_test","failure_register","taqc",
+                                         "multisession","schedule"]   empty = all
+    applicable_equipment_types  JSONB   ["Power Transformer","CT","CB","…"]   empty = all
+    applicable_test_types       JSONB   ["test","inspection","maintenance","life_cycle"]
+                                        maps to TestingRequest.request_category   empty = all
+    applicable_status_from      TEXT    e.g. "submitted"     NULL = any status
+    applicable_status_to        TEXT    e.g. "under_review"  NULL = any status
+
+    Output columns:
+    ───────────────
+    channels_enabled          JSONB  e.g. ["email","sms","inapp"]
+                                     only templates for these channels are dispatched.
+    recipient_roles_override  JSONB  e.g. ["EE TLSS","Department Head"]
+                                     NULL = use each template's own recipient_roles.
+    priority                  INT    higher priority rule wins when multiple match.
+                                     default 0 (global), org rules typically set to 10.
+    """
+    __tablename__ = "notification_routing_rules"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,   # NULL = global default
+        index=True,
+    )
+    event_type = Column(String(100), nullable=False, index=True)
+    label      = Column(String(255), nullable=True)   # friendly name for UI
+
+    # ── Scope filters (empty JSON array = "match everything") ─────────────────
+    applicable_workflow_types   = Column(JSONB, nullable=False, server_default="[]")
+    applicable_equipment_types  = Column(JSONB, nullable=False, server_default="[]")
+    applicable_test_types       = Column(JSONB, nullable=False, server_default="[]")
+    applicable_status_from      = Column(String(100), nullable=True)
+    applicable_status_to        = Column(String(100), nullable=True)
+
+    # ── Output ────────────────────────────────────────────────────────────────
+    channels_enabled            = Column(JSONB, nullable=False, server_default='["email","sms","inapp"]')
+    recipient_roles_override    = Column(JSONB, nullable=True)   # NULL = use template default
+    priority                    = Column(Integer, nullable=False, default=0)
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    cts       = Column(DateTime(timezone=True), server_default=func.now())
+    mts       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

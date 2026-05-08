@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from models import (
     NotificationLog,
+    NotificationRoutingRule,
     NotificationTemplate,
     NotificationVariable,
     OrgRole,
@@ -40,12 +41,14 @@ from utils.email_service import EmailService
 
 logger = logging.getLogger(__name__)
 
-# ── Constants ────────────────────────────────────────────────────────────────
+# ── Constants (loaded from .env — override without code change) ───────────────
 
-DIGEST_THRESHOLD = 10       # batch if >10 same-type alerts within DIGEST_WINDOW
-DIGEST_WINDOW_MINUTES = 5
-MAX_RETRIES = 3
-RETRY_DELAY_MINUTES = 5
+import os as _os
+
+DIGEST_THRESHOLD      = int(_os.getenv("NOTIF_DIGEST_THRESHOLD",      "10"))
+DIGEST_WINDOW_MINUTES = int(_os.getenv("NOTIF_DIGEST_WINDOW_MINUTES",  "5"))
+MAX_RETRIES           = int(_os.getenv("NOTIF_MAX_RETRIES",            "3"))
+RETRY_DELAY_MINUTES   = int(_os.getenv("NOTIF_RETRY_DELAY_MINUTES",    "5"))
 
 
 # ── Template rendering ────────────────────────────────────────────────────────
@@ -108,6 +111,13 @@ class VariableResolver:
         "report.retriexls":      ["report_xls_url", "xls_url"],
         "org.name":              ["org_name"],
         "org.id":                ["org_id"],
+        # Department / context variables — useful in subject line
+        # e.g. "Subject: [{{dept.name}}] Equipment replaced"
+        "dept.name":             ["currentdeptname", "department_name", "dept_name", "department"],
+        "dept.code":             ["dept_code", "department_code"],
+        "dept.level":            ["dept_level"],
+        "user.name":             ["user_name", "recipient_name"],
+        "user.email":            ["recipient_email", "user_email"],
     }
 
     @staticmethod
@@ -135,19 +145,55 @@ class VariableResolver:
         return ctx
 
 
+# ── Department ancestry helper ────────────────────────────────────────────────
+
+def _ancestor_dept_ids(db: Session, department_id: UUID) -> set:
+    """
+    Return the set of all ancestor department IDs (including department_id itself).
+    Walks up parent_department_id chain — stops at root (parent_department_id IS NULL).
+    Typical KPTCL depth: 3 levels (Zone → Circle → Division).
+    """
+    from models import OrgDepartment
+    ids: set = set()
+    current_id = department_id
+    while current_id is not None:
+        ids.add(current_id)
+        dept = db.query(OrgDepartment).filter(OrgDepartment.id == current_id).first()
+        if not dept:
+            break
+        current_id = dept.parent_department_id
+    return ids
+
+
 # ── Recipient resolution ──────────────────────────────────────────────────────
 
 def _resolve_recipients_by_roles(
     db: Session,
     role_names: List[str],
     organization_id: Optional[UUID],
+    department_id: Optional[UUID] = None,
 ) -> List[User]:
     """
     Return unique active User objects that hold any of the given OrgRole names
-    within the given organisation.
+    within the given organisation, scoped by department when provided.
+
+    Department scoping rules (mirrors testing_request_service.get_user_scope):
+      • OrgUserRole.department_id IS NULL  → org-wide user  → always included
+      • OrgUserRole.department_id == source_dept    → same leaf dept → included
+      • OrgUserRole.department_id is an ANCESTOR of source_dept
+        (circle/zone level above the TR's division)           → included
+      • OrgUserRole.department_id is a sibling / different branch → excluded
+
+    This ensures North-division events don't spam South/Mysuru personnel,
+    but Circle EE and Zone SEE (who sit above the division) still receive them.
     """
     if not role_names or not organization_id:
         return []
+
+    # Build the full ancestor set once (includes source dept itself)
+    ancestor_ids: set = set()
+    if department_id:
+        ancestor_ids = _ancestor_dept_ids(db, department_id)
 
     rows = (
         db.query(OrgUserRole)
@@ -165,50 +211,306 @@ def _resolve_recipients_by_roles(
     seen: set = set()
     users: List[User] = []
     for row in rows:
+        if department_id:
+            row_dept = row.department_id
+            # Exclude users assigned to a dept that is NOT in the ancestor chain
+            # (i.e. a sibling division or unrelated branch).
+            # Org-wide users (dept_id IS NULL) are always included.
+            if row_dept is not None and row_dept not in ancestor_ids:
+                continue
         if row.user_id not in seen:
             seen.add(row.user_id)
             users.append(row.user)
     return users
 
 
-# ── Channel dispatchers ───────────────────────────────────────────────────────
+# ── Full HTML email wrapper ───────────────────────────────────────────────────
 
-def _send_email(
-    db: Session,
-    log: NotificationLog,
-    to_email: str,
-    subject: str,
-    body: str,
-) -> None:
-    try:
-        EmailService().send_email_starttls(to_email, subject, body)
-        log.status = "sent"
+def _wrap_email_html(body_content: str, subject: str = "", org_name: str = "SEACMS") -> str:
+    """
+    Wrap an HTML body fragment in a full, responsive HTML email document.
+
+    Every email channel notification automatically receives:
+      • A branded header  (org_name + SEACMS tagline)
+      • A content area    (body_content injected as-is)
+      • A footer          (auto-generated, copyright year)
+
+    body_content may be any HTML fragment — tables, paragraphs, <h3> headings, etc.
+    """
+    from datetime import date as _d
+    year = _d.today().year
+    return (
+        "<!DOCTYPE html>"
+        '<html lang="en">'
+        "<head>"
+        '<meta charset="UTF-8"/>'
+        '<meta name="viewport" content="width=device-width,initial-scale=1.0"/>'
+        f"<title>{subject}</title>"
+        "</head>"
+        '<body style="margin:0;padding:0;background:#f4f6fb;'
+        'font-family:Arial,Helvetica,sans-serif;">'
+        '<table width="100%" cellpadding="0" cellspacing="0" '
+        'style="background:#f4f6fb;padding:24px 0;">'
+        "<tr><td align=\"center\">"
+        '<table width="600" cellpadding="0" cellspacing="0" '
+        'style="background:#fff;border-radius:8px;overflow:hidden;'
+        'box-shadow:0 2px 8px rgba(0,0,0,.1);">'
+
+        # ── Header ──────────────────────────────────────────────────────
+        "<tr>"
+        '<td style="background:#1E3C72;padding:20px 32px;">'
+        f'<h1 style="margin:0;color:#fff;font-size:20px;letter-spacing:1px;">{org_name}</h1>'
+        '<p style="margin:4px 0 0;color:#a8c4e0;font-size:12px;">'
+        "SEACMS — Smart Equipment Asset Care Management System</p>"
+        "</td>"
+        "</tr>"
+
+        # ── Body ────────────────────────────────────────────────────────
+        "<tr>"
+        '<td style="padding:28px 32px;color:#333;font-size:14px;line-height:1.6;">'
+        f"{body_content}"
+        "</td>"
+        "</tr>"
+
+        # ── Footer ──────────────────────────────────────────────────────
+        "<tr>"
+        '<td style="background:#f0f4fa;padding:16px 32px;border-top:1px solid #dde3ee;">'
+        '<p style="margin:0;font-size:11px;color:#888;text-align:center;">'
+        f"This is an automated notification from <b>SEACMS</b> — {org_name}. "
+        "Please do not reply to this email.<br/>"
+        f"&copy; {year} {org_name}. All rights reserved."
+        "</p>"
+        "</td>"
+        "</tr>"
+
+        "</table>"
+        "</td></tr>"
+        "</table>"
+        "</body>"
+        "</html>"
+    )
+
+
+# ── Channel dispatcher factory ────────────────────────────────────────────────
+#
+# Design (Factory / Registry pattern)
+# ------------------------------------
+#   • ChannelDispatcher  — abstract base; every channel implements .send()
+#   • ChannelDispatcherRegistry — maps channel-name → dispatcher instance
+#
+# Adding a new channel (e.g. WhatsApp) requires ZERO changes to existing code:
+#
+#   class WhatsAppDispatcher(ChannelDispatcher):
+#       channel = "whatsapp"
+#       def send(self, db, log, subject, body): ...
+#
+#   ChannelDispatcherRegistry.register(WhatsAppDispatcher())
+#
+# The NotificationTemplate.channel field drives which dispatcher is invoked.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ChannelDispatcher:
+    """Abstract base for all notification channel dispatchers."""
+
+    channel: str = ""
+
+    def send(
+        self,
+        db: Session,
+        log: "NotificationLog",
+        subject: str,
+        body: str,
+    ) -> None:
+        raise NotImplementedError(f"{self.__class__.__name__}.send() not implemented")
+
+    def prepare_body(self, body: str, subject: str = "", org_name: str = "SEACMS") -> str:
+        """
+        Optional hook: transform body before it is stored in NotificationLog.
+        Override in subclasses that need channel-specific body formatting
+        (e.g. EmailDispatcher wraps in full HTML).
+        """
+        return body
+
+
+class EmailDispatcher(ChannelDispatcher):
+    """
+    Email channel — sends via SMTP / Office 365 STARTTLS.
+    Wraps every body_fragment in a full branded HTML email before sending.
+
+    Attachment support
+    ------------------
+    When log.attachment_urls is non-empty each entry is fetched and attached:
+      [{"url": "https://...", "var_key": "report.retriepdf", "type": "pdf"}, ...]
+
+    The "type" field is optional but recommended for correct MIME detection:
+      "pdf"   → application/pdf
+      "excel" → application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      "docx"  → application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      "json"  → application/json
+    If omitted, the MIME type is auto-detected from the URL / var_key convention.
+    """
+
+    channel = "email"
+
+    # ── Explicit type → MIME map ──────────────────────────────────────────────
+    _MIME_MAP: Dict[str, str] = {
+        "pdf":   "application/pdf",
+        "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsx":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xls":   "application/vnd.ms-excel",
+        "docx":  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "doc":   "application/msword",
+        "json":  "application/json",
+        "csv":   "text/csv",
+        "txt":   "text/plain",
+        "zip":   "application/zip",
+    }
+
+    def prepare_body(self, body: str, subject: str = "", org_name: str = "SEACMS") -> str:
+        return _wrap_email_html(body, subject=subject, org_name=org_name)
+
+    def send(self, db: Session, log: "NotificationLog", subject: str, body: str) -> None:
+        to_email = log.recipient_email
+        if not to_email:
+            log.status = "skipped"
+            log.error_message = "No recipient email address"
+            return
+        try:
+            attachment_entries = log.attachment_urls or []
+            if attachment_entries:
+                # ── Build attachment list — fetch each URL / local path ────────
+                attachments: List[Dict] = []
+                svc = EmailService()
+                for entry in attachment_entries:
+                    url     = entry.get("url", "")
+                    var_key = entry.get("var_key", "")
+                    att_type = (entry.get("type") or "").lower().strip()
+
+                    if not url:
+                        logger.debug(f"[Notif] Attachment entry missing url, skipping: {entry}")
+                        continue
+
+                    content = svc._fetch_attachment(url)
+                    if not content:
+                        logger.warning(f"[Notif] Could not fetch attachment {url!r} for log {log.id}")
+                        continue
+
+                    # Resolve MIME type — explicit type beats auto-detection
+                    if att_type and att_type in self._MIME_MAP:
+                        mime_type = self._MIME_MAP[att_type]
+                        filename, _ = svc._guess_filename(url, var_key)
+                    else:
+                        filename, mime_type = svc._guess_filename(url, var_key)
+
+                    attachments.append({
+                        "content":   content,
+                        "filename":  filename,
+                        "mime_type": mime_type,
+                    })
+
+                if attachments:
+                    svc.send_multi_attachment_email_starttls(to_email, subject, body, attachments)
+                else:
+                    # All fetches failed — fall back to plain email so at least the
+                    # body content is delivered
+                    logger.warning(f"[Notif] All attachment fetches failed for log {log.id}; sending body only")
+                    svc.send_email_starttls(to_email, subject, body)
+            else:
+                EmailService().send_email_starttls(to_email, subject, body)
+
+            log.status = "sent"
+            log.sent_at = datetime.now(timezone.utc)
+            log.error_message = None
+        except Exception as exc:
+            log.status = "failed"
+            log.error_message = str(exc)[:500]
+            log.retry_count += 1
+            if log.retry_count < log.max_retries:
+                log.next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=RETRY_DELAY_MINUTES)
+            logger.warning(f"[Notif] Email to {to_email} failed: {exc}")
+
+
+class SmsDispatcher(ChannelDispatcher):
+    """
+    SMS channel — plain-text, 160-char guideline.
+    Swap the stub body with your real SMS gateway call (Twilio, AWS SNS, Infobip…).
+
+    To add WhatsApp later:
+        class WhatsAppDispatcher(ChannelDispatcher):
+            channel = "whatsapp"
+            def send(self, db, log, subject, body):
+                <call WhatsApp Business API>
+        ChannelDispatcherRegistry.register(WhatsAppDispatcher())
+    """
+
+    channel = "sms"
+
+    def send(self, db: Session, log: "NotificationLog", subject: str, body: str) -> None:
+        phone = log.recipient_phone
+        if not phone:
+            log.status = "skipped"
+            log.error_message = "No phone number"
+            return
+        # ── TODO: Replace stub with real SMS gateway ──────────────────────────
+        # Example (Twilio):
+        #   from twilio.rest import Client
+        #   Client(SID, TOKEN).messages.create(to=phone, from_=FROM_NUMBER, body=body)
+        # ─────────────────────────────────────────────────────────────────────
+        logger.info(f"[Notif] SMS stub — would send to {phone}: {body[:80]}…")
+        log.status = "skipped"   # ← change to "sent"/"failed" when gateway is wired
         log.sent_at = datetime.now(timezone.utc)
-        log.error_message = None
-    except Exception as exc:
-        log.status = "failed"
-        log.error_message = str(exc)[:500]
-        log.retry_count += 1
-        if log.retry_count < log.max_retries:
-            log.next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=RETRY_DELAY_MINUTES)
-        logger.warning(f"[Notif] Email to {to_email} failed: {exc}")
 
 
-def _send_sms(
-    db: Session,
-    log: NotificationLog,
-    phone: str,
-    body: str,
-) -> None:
-    """SMS channel — placeholder for REST gateway integration."""
-    # TODO: Replace with real SMS gateway (e.g. Twilio, AWS SNS, Infobip)
-    # Example stub:
-    #   import requests
-    #   resp = requests.post(SMS_GATEWAY_URL, json={"to": phone, "body": body}, ...)
-    #   if resp.ok: log.status = "sent" else: log.status = "failed"
-    logger.info(f"[Notif] SMS placeholder — would send to {phone}: {body[:80]}...")
-    log.status = "skipped"   # change to "sent"/"failed" when gateway is wired
-    log.sent_at = datetime.now(timezone.utc)
+class InAppDispatcher(ChannelDispatcher):
+    """
+    In-app channel — writes directly to UserNotification table.
+    Handled synchronously in _dispatch_to_user; send() is a no-op here.
+    """
+
+    channel = "inapp"
+
+    def send(self, db: Session, log: "NotificationLog", subject: str, body: str) -> None:
+        # In-app delivery is completed immediately inside _dispatch_to_user.
+        # This method is never called from process_pending_notifications.
+        pass
+
+
+class ChannelDispatcherRegistry:
+    """
+    Central registry that maps channel names to their dispatcher instances.
+
+    Usage
+    -----
+    # Get dispatcher for a channel
+    dispatcher = ChannelDispatcherRegistry.get("email")
+
+    # List all supported channels (useful for template-channel validation)
+    ChannelDispatcherRegistry.channels()  →  ["email", "sms", "inapp"]
+
+    # Register a new channel at startup (no existing code changes needed)
+    ChannelDispatcherRegistry.register(WhatsAppDispatcher())
+    """
+
+    _registry: Dict[str, "ChannelDispatcher"] = {}
+
+    @classmethod
+    def register(cls, dispatcher: "ChannelDispatcher") -> None:
+        cls._registry[dispatcher.channel] = dispatcher
+        logger.debug(f"[Notif] Registered channel dispatcher: {dispatcher.channel!r}")
+
+    @classmethod
+    def get(cls, channel: str) -> Optional["ChannelDispatcher"]:
+        return cls._registry.get(channel)
+
+    @classmethod
+    def channels(cls) -> List[str]:
+        return list(cls._registry.keys())
+
+
+# ── Register built-in dispatchers ─────────────────────────────────────────────
+ChannelDispatcherRegistry.register(EmailDispatcher())
+ChannelDispatcherRegistry.register(SmsDispatcher())
+ChannelDispatcherRegistry.register(InAppDispatcher())
 
 
 def _create_inapp(
@@ -294,6 +596,87 @@ def _collapse_digest(db: Session, event_type: str, organization_id: Optional[UUI
     db.commit()
 
 
+# ── Routing rule resolution ───────────────────────────────────────────────────
+
+def _scope_matches(rule_list: Optional[list], value: Optional[str]) -> bool:
+    """
+    True if rule_list is empty/None (wildcard) OR value is in rule_list.
+    Used for JSONB array scope filters.
+    """
+    if not rule_list:          # empty list or None = matches everything
+        return True
+    if value is None:
+        return False
+    return value in rule_list
+
+
+def _resolve_routing(
+    db: Session,
+    event_type: str,
+    organization_id: Optional[UUID],
+    *,
+    workflow_type: Optional[str] = None,
+    equipment_type: Optional[str] = None,
+    test_type: Optional[str] = None,
+    status_from: Optional[str] = None,
+    status_to: Optional[str] = None,
+) -> Optional["NotificationRoutingRule"]:
+    """
+    Find the best-matching active routing rule for a fire() call.
+
+    Resolution order
+    ────────────────
+    1. Load all active rules for event_type where org_id IN (None, organization_id).
+    2. Filter to rows whose scope filters match the call context.
+    3. Among matched rows, org-specific rules beat global; within same org-tier,
+       highest priority wins.
+    4. Returns the winning rule, or None if no rule matches.
+
+    Caller behaviour on return value
+    ──────────────────────────────────
+    • None  → no routing rule configured → fire ALL channels (permissive default,
+               keeps backward-compat for orgs that haven't set up rules yet).
+    • Rule  → use rule.channels_enabled to filter templates;
+               use rule.recipient_roles_override (if set) instead of template roles.
+    """
+    candidates = (
+        db.query(NotificationRoutingRule)
+        .filter(
+            NotificationRoutingRule.event_type == event_type,
+            NotificationRoutingRule.is_active.is_(True),
+            # load both global and org-specific rows
+            (
+                NotificationRoutingRule.organization_id.is_(None)
+                if organization_id is None
+                else NotificationRoutingRule.organization_id.in_(
+                    [None, organization_id]
+                )
+            ),
+        )
+        .order_by(
+            # org-specific first (NULL org_id last)
+            NotificationRoutingRule.organization_id.is_(None).asc(),
+            NotificationRoutingRule.priority.desc(),
+        )
+        .all()
+    )
+
+    for rule in candidates:
+        if not _scope_matches(rule.applicable_workflow_types,  workflow_type):
+            continue
+        if not _scope_matches(rule.applicable_equipment_types, equipment_type):
+            continue
+        if not _scope_matches(rule.applicable_test_types,      test_type):
+            continue
+        if rule.applicable_status_from and rule.applicable_status_from != status_from:
+            continue
+        if rule.applicable_status_to and rule.applicable_status_to != status_to:
+            continue
+        return rule   # first match wins (already sorted: org > global, high priority first)
+
+    return None   # no rule → permissive default (all channels fire)
+
+
 # ── Core dispatch ─────────────────────────────────────────────────────────────
 
 class NotificationService:
@@ -325,15 +708,35 @@ class NotificationService:
         event_type: str,
         context: Dict[str, Any],
         organization_id: Optional[UUID] = None,
+        department_id: Optional[UUID] = None,
         source_id: Optional[UUID] = None,
         source_type: Optional[str] = None,
         severity: Optional[str] = None,
         extra_recipients: Optional[List[User]] = None,
+        # ── Routing context (used by NotificationRoutingRule matching) ────────
+        workflow_type: Optional[str] = None,    # "direct_test"|"failure_register"|"taqc"|"multisession"|"schedule"
+        equipment_type: Optional[str] = None,   # e.g. "Power Transformer", "CT"
+        test_type: Optional[str] = None,        # "test"|"inspection"|"maintenance"|"life_cycle"
+        status_from: Optional[str] = None,      # e.g. "submitted"
+        status_to: Optional[str] = None,        # e.g. "under_review"
     ) -> None:
         """
-        Resolve templates for event_type, resolve recipients by role, and
-        dispatch via all configured channels.  Never raises — all errors are
-        logged.
+        Resolve routing rules + templates for event_type, resolve recipients by
+        role, and dispatch via the channels allowed by the routing rule.
+
+        Routing rule resolution
+        ───────────────────────
+        NotificationRoutingRule rows are matched against the call's context
+        (workflow_type, equipment_type, test_type, status_from/to).
+        • Matching rule found  → only channels in rule.channels_enabled are sent;
+                                  recipient_roles_override (if set) replaces template roles.
+        • No rule found        → ALL channels fire (permissive default — backward-compat).
+
+        department_id scoping
+        ─────────────────────
+        • Same dept or ancestor dept (circle/zone) → included
+        • Org-wide users (dept IS NULL) → always included
+        • Sibling / unrelated dept → excluded
         """
         try:
             templates = self._get_templates(event_type, organization_id)
@@ -342,15 +745,71 @@ class NotificationService:
                 return
 
             resolved_ctx = VariableResolver.build_context(context)
+
+            # ── Auto-inject org context from DB ──────────────────────────────
+            # Ensures {{org.name}} / {{org_name}} renders "KPTCL" automatically
+            _org_name = "SEACMS"
+            if organization_id and not resolved_ctx.get("org_name"):
+                try:
+                    from models import Organization as _Org
+                    _org = self.db.query(_Org).filter(_Org.id == organization_id).first()
+                    if _org:
+                        _org_name = _org.name
+                        resolved_ctx["org_name"] = _org.name
+                        resolved_ctx["org.name"] = _org.name
+                        resolved_ctx["org_id"]   = str(organization_id)
+                        resolved_ctx["org.id"]   = str(organization_id)
+                except Exception as _org_exc:
+                    logger.debug(f"[Notif] Could not auto-inject org context: {_org_exc}")
+            else:
+                _org_name = resolved_ctx.get("org_name", "SEACMS")
+
+            # ── Routing rule: which channels are allowed for this call? ───────
+            routing = _resolve_routing(
+                self.db, event_type, organization_id,
+                workflow_type=workflow_type,
+                equipment_type=equipment_type,
+                test_type=test_type,
+                status_from=status_from,
+                status_to=status_to,
+            )
+            allowed_channels: Optional[set] = (
+                set(routing.channels_enabled) if routing and routing.channels_enabled
+                else None   # None = all channels allowed (permissive default)
+            )
+            roles_override: Optional[list] = (
+                list(routing.recipient_roles_override)
+                if routing and routing.recipient_roles_override
+                else None
+            )
+            if routing:
+                logger.debug(
+                    f"[Notif] Routing rule {routing.id} matched for "
+                    f"event={event_type!r} workflow={workflow_type!r} "
+                    f"channels={allowed_channels}"
+                )
+
             for tmpl in templates:
+                # ── Channel filter from routing rule ─────────────────────────
+                if allowed_channels is not None and tmpl.channel not in allowed_channels:
+                    logger.debug(
+                        f"[Notif] Skipping channel={tmpl.channel!r} for "
+                        f"event={event_type!r} (routing rule blocked)"
+                    )
+                    continue
+
                 subject = _render(tmpl.subject_template or "", resolved_ctx)
                 body    = _render(tmpl.body_template,            resolved_ctx)
 
-                # ── Role-based recipients ────────────────────────────────────
+                # ── Recipient roles: routing override wins if set ─────────────
+                effective_roles = roles_override or list(tmpl.recipient_roles or [])
+
+                # ── Role-based recipients (dept-scoped) ──────────────────────
                 recipients = _resolve_recipients_by_roles(
                     self.db,
-                    list(tmpl.recipient_roles or []),
+                    effective_roles,
                     organization_id,
+                    department_id=department_id,
                 )
 
                 # ── Caller-supplied extra User objects (e.g. test-fire) ──────
@@ -368,10 +827,11 @@ class NotificationService:
                         tmpl=tmpl, user=user, subject=subject, body=body,
                         event_type=event_type, organization_id=organization_id,
                         source_id=source_id, source_type=source_type, severity=severity,
+                        org_name=_org_name,
+                        resolved_ctx=resolved_ctx,
                     )
 
                 # ── extra_recipient_emails (individual addresses on template) ─
-                # Only for email channel; skip duplicates already sent via roles
                 if tmpl.channel == "email":
                     for addr in (tmpl.extra_recipient_emails or []):
                         if addr and addr not in dispatched_emails:
@@ -395,8 +855,8 @@ class NotificationService:
 
                 if not recipients and not (tmpl.extra_recipient_emails):
                     logger.debug(
-                        f"[Notif] event={event_type!r} template={tmpl.id}: "
-                        f"no recipients for roles {tmpl.recipient_roles}"
+                        f"[Notif] event={event_type!r} channel={tmpl.channel!r}: "
+                        f"no recipients for roles {effective_roles}"
                     )
 
         except Exception as exc:
@@ -425,18 +885,58 @@ class NotificationService:
 
         count = 0
         for log in due:
-            if log.channel == "email" and log.recipient_email:
-                _send_email(self.db, log, log.recipient_email, log.subject or "", log.body or "")
-                count += 1
-            elif log.channel == "sms" and log.recipient_phone:
-                _send_sms(self.db, log, log.recipient_phone, log.body or "")
-                count += 1
+            dispatcher = ChannelDispatcherRegistry.get(log.channel)
+            if not dispatcher:
+                continue
+            # email needs recipient_email; sms needs recipient_phone
+            if log.channel == "email" and not log.recipient_email:
+                continue
+            if log.channel == "sms" and not log.recipient_phone:
+                continue
+            dispatcher.send(self.db, log, log.subject or "", log.body or "")
+            count += 1
 
         if count:
             self.db.commit()
         return count
 
     # ── Convenience trigger methods ───────────────────────────────────────────
+    # All methods extract department_id from the TR and pass it to fire()
+    # so recipient resolution is automatically dept-scoped.
+
+    # ── Context extractors (shortcuts over TestingRequest attributes) ─────────
+
+    def _dept(self, request) -> Optional[UUID]:
+        """Return department_id from a TestingRequest (or None)."""
+        return getattr(request, "department_id", None)
+
+    def _workflow_type(self, request) -> Optional[str]:
+        """
+        Return the workflow type string for routing rule matching.
+        Reads request.workflow_type first; falls back to request.request_type.
+        Expected values: "direct_test" | "failure_register" | "taqc" |
+                         "multisession" | "schedule"
+        """
+        return (
+            getattr(request, "workflow_type", None)
+            or getattr(request, "request_type", None)
+        )
+
+    def _test_type(self, request) -> Optional[str]:
+        """
+        Return the test/category type for routing rule matching.
+        Maps to TestingRequest.request_category.
+        Expected values: "test" | "inspection" | "maintenance" | "life_cycle"
+        """
+        return getattr(request, "request_category", None)
+
+    def _equipment_type(self, request) -> Optional[str]:
+        """Return the equipment type name from a TestingRequest (or None)."""
+        if getattr(request, "equipment_type", None):
+            return getattr(request.equipment_type, "name", None)
+        if getattr(request, "equipment", None):
+            return getattr(getattr(request, "equipment", None), "equipment_type", None)
+        return None
 
     def notify_eval_critical(self, request, result, evaluation_result: dict) -> None:
         """Triggered when evaluation_result.overall == CRITICAL."""
@@ -457,9 +957,13 @@ class NotificationService:
                 "tested_at": str(result.tested_at or ""),
             },
             organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
             source_id=result.id,
             source_type="test_result",
             severity="critical",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
         )
 
     def notify_eval_alert(self, request, result, evaluation_result: dict) -> None:
@@ -479,13 +983,17 @@ class NotificationService:
                 "revised_interval": str(revised) + " days" if revised else "see report",
             },
             organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
             source_id=result.id,
             source_type="test_result",
             severity="alert",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
         )
 
     def notify_request_submitted(self, request) -> None:
-        """Triggered when originator submits testing request."""
+        """Triggered when originator submits a testing request."""
         equipment_label = (
             request.equipment.ueic if request.equipment else
             (request.equipment_type.name if request.equipment_type else "Equipment")
@@ -499,13 +1007,18 @@ class NotificationService:
                 "category": getattr(request, "request_category", "test"),
             },
             organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
             source_id=request.id,
             source_type="testing_request",
             severity="info",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="submitted",
         )
 
     def notify_tester_assigned(self, request) -> None:
-        """Triggered when tester is assigned to a testing request."""
+        """Triggered when a tester is assigned to a testing request."""
         equipment_label = (
             request.equipment.ueic if request.equipment else
             (request.equipment_type.name if request.equipment_type else "Equipment")
@@ -518,9 +1031,14 @@ class NotificationService:
                 "tester": request.assigned_tester.email if request.assigned_tester else "",
             },
             organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
             source_id=request.id,
             source_type="testing_request",
             severity="info",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="assigned",
         )
 
     def notify_test_submitted(self, request) -> None:
@@ -536,13 +1054,18 @@ class NotificationService:
                 "request_number": getattr(request, "request_number", ""),
             },
             organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
             source_id=request.id,
             source_type="testing_request",
             severity="info",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="results_submitted",
         )
 
     def notify_recommendation_approved(self, request, recommendation) -> None:
-        """Triggered when a recommendation with replacement_products is approved."""
+        """Triggered when a recommendation is approved."""
         self.fire(
             event_type="recommendation_approved",
             context={
@@ -553,47 +1076,18 @@ class NotificationService:
                 "product_count": len(recommendation.replacement_products or []),
             },
             organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
             source_id=recommendation.id,
             source_type="recommendation",
             severity="info",
-        )
-
-    def notify_due_reminder(self, request) -> None:
-        """Triggered by scheduler when next_run_date is approaching."""
-        equipment_label = (
-            request.equipment.ueic if request.equipment else
-            (request.equipment_type.name if request.equipment_type else "Equipment")
-        )
-        self.fire(
-            event_type="due_reminder",
-            context={
-                "equipment": equipment_label,
-                "request_number": getattr(request, "request_number", ""),
-                "due_date": str(getattr(request, "due_date", "") or ""),
-            },
-            organization_id=getattr(request, "organization_id", None),
-            source_id=request.id,
-            source_type="testing_request",
-            severity="info",
-        )
-
-    def notify_procurement_pending(self, request, pr_number: str) -> None:
-        """Triggered when a ProcurementRequest is created — notifies Finance Approvers."""
-        self.fire(
-            event_type="procurement_pending",
-            context={
-                "request_number": getattr(request, "request_number", ""),
-                "pr_number": pr_number,
-                "title": getattr(request, "title", ""),
-            },
-            organization_id=getattr(request, "organization_id", None),
-            source_id=request.id,
-            source_type="testing_request",
-            severity="info",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="recommendation_approved",
         )
 
     def notify_recommendation_rejected(self, request, rec) -> None:
-        """Triggered when a Technical Approver rejects a recommendation — notifies tester."""
+        """Triggered when a Technical Approver rejects a recommendation."""
         self.fire(
             event_type="recommendation_rejected",
             context={
@@ -601,25 +1095,14 @@ class NotificationService:
                 "reason": rec.approval_notes or "No reason provided",
             },
             organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
             source_id=request.id,
             source_type="testing_request",
             severity="alert",
-        )
-
-    def notify_procurement_decision(self, request, pr_number: str, decision: str, notes: str = "") -> None:
-        """Triggered when Finance Approver approves or rejects a procurement — notifies originator/tester."""
-        self.fire(
-            event_type="procurement_decision",
-            context={
-                "request_number": getattr(request, "request_number", ""),
-                "pr_number": pr_number,
-                "decision": decision,          # "approved" or "rejected"
-                "notes": notes or "",
-            },
-            organization_id=getattr(request, "organization_id", None),
-            source_id=request.id,
-            source_type="testing_request",
-            severity="info" if decision == "approved" else "alert",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="recommendation_rejected",
         )
 
     def notify_tester_declined(self, request, tester_name: str, reason: str) -> None:
@@ -632,28 +1115,335 @@ class NotificationService:
                 "reason": reason,
             },
             organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
             source_id=request.id,
             source_type="testing_request",
             severity="alert",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="tester_declined",
         )
 
+    def notify_procurement_pending(self, request, pr_number: str) -> None:
+        """Triggered when a ProcurementRequest is created — notifies Finance Approvers."""
+        self.fire(
+            event_type="procurement_pending",
+            context={
+                "request_number": getattr(request, "request_number", ""),
+                "pr_number": pr_number,
+                "title": getattr(request, "title", ""),
+            },
+            organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="info",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="procurement_pending",
+        )
+
+    def notify_procurement_decision(self, request, pr_number: str, decision: str, notes: str = "") -> None:
+        """Triggered when Finance Approver approves or rejects a procurement."""
+        self.fire(
+            event_type="procurement_decision",
+            context={
+                "request_number": getattr(request, "request_number", ""),
+                "pr_number": pr_number,
+                "decision": decision,
+                "notes": notes or "",
+            },
+            organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="info" if decision == "approved" else "alert",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="procurement_decision",
+        )
+
+    def notify_due_reminder(self, request) -> None:
+        """15-day early reminder (SRS §8.2 #1) — fired by scheduler."""
+        self._fire_schedule_notification(request, event_type="due_reminder", severity="info")
+
+    def notify_due_reminder_final(self, request) -> None:
+        """7-day final reminder (SRS §8.2 #2) — fired by scheduler when due within 7 days."""
+        self._fire_schedule_notification(request, event_type="due_reminder_final", severity="alert")
+
     def notify_overdue(self, request) -> None:
-        """Triggered by scheduler when due_date has passed and request is still open."""
+        """Triggered by scheduler when due_date has passed (SRS §8.2 #3)."""
+        self._fire_schedule_notification(request, event_type="overdue_alert", severity="alert")
+
+    def notify_overdue_escalation(self, request) -> None:
+        """Escalation fired when request is more than 7 days overdue (SRS §8.2 #4)."""
+        self._fire_schedule_notification(request, event_type="overdue_escalation", severity="critical")
+
+    def notify_maintenance_due(self, request) -> None:
+        """15-day reminder for maintenance-type requests (SRS Notification Table)."""
+        self._fire_schedule_notification(request, event_type="maintenance_due", severity="info")
+
+    def notify_remedial_action_due(
+        self, request, compliance_due_date: str, days_overdue: int,
+        organization_id=None, department_id=None,
+    ) -> None:
+        """
+        Fired when a remedial action compliance document has not been uploaded
+        by the due date (SRS — Remedial Action Due).
+        """
+        equipment_label = (
+            request.equipment.ueic if getattr(request, "equipment", None)
+            else getattr(request, "equipment_type_name", "Equipment")
+        )
+        self.fire(
+            event_type="remedial_action_due",
+            context={
+                "equipment":           equipment_label,
+                "request_number":      getattr(request, "request_number", ""),
+                "compliance_due_date": compliance_due_date,
+                "days_overdue":        str(days_overdue),
+            },
+            organization_id=organization_id or getattr(request, "organization_id", None),
+            department_id=department_id or self._dept(request),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="alert",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+        )
+
+    def notify_taqc_observation_overdue(
+        self, request, compliance_due_date: str, days_overdue: int,
+        organization_id=None, department_id=None,
+    ) -> None:
+        """
+        Fired when a TA&QC observation compliance upload passes its target date
+        (SRS — TA&QC Observation Overdue).
+        """
+        equipment_label = (
+            request.equipment.ueic if getattr(request, "equipment", None)
+            else getattr(request, "equipment_type_name", "Equipment")
+        )
+        self.fire(
+            event_type="taqc_observation_overdue",
+            context={
+                "equipment":           equipment_label,
+                "request_number":      getattr(request, "request_number", ""),
+                "compliance_due_date": compliance_due_date,
+                "days_overdue":        str(days_overdue),
+            },
+            organization_id=organization_id or getattr(request, "organization_id", None),
+            department_id=department_id or self._dept(request),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="alert",
+            workflow_type="taqc",
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+        )
+
+    def notify_overhaul_recommended(
+        self, equipment, operation_count: int, operation_threshold: int,
+        organization_id=None, department_id=None,
+    ) -> None:
+        """
+        Fired when equipment operation count exceeds overhaul threshold
+        (SRS — Overhaul Recommendation).
+        """
+        from models import Equipment as _Eq
+        ueic     = getattr(equipment, "ueic",         "N/A")
+        eq_type  = getattr(equipment, "equipment_type_name", "Equipment")
+        dept     = getattr(equipment, "department_name", "")
+        self.fire(
+            event_type="overhaul_recommended",
+            context={
+                "equipment":           ueic,
+                "equipment_type":      eq_type,
+                "department":          dept,
+                "operation_count":     str(operation_count),
+                "operation_threshold": str(operation_threshold),
+            },
+            organization_id=organization_id or getattr(equipment, "organization_id", None),
+            department_id=department_id,
+            source_id=getattr(equipment, "id", None),
+            source_type="equipment",
+            severity="alert",
+            workflow_type="repair_cycle",
+            equipment_type=eq_type,
+        )
+
+    def notify_equipment_registered(
+        self, equipment, commissioned_by: str,
+        organization_id=None, department_id=None,
+    ) -> None:
+        """
+        Fired when a new equipment record is created in the Equipment Register
+        (SRS — Equipment Register: New).
+        """
+        ueic    = getattr(equipment, "ueic", "N/A")
+        eq_type = getattr(equipment, "equipment_type_name", "Equipment")
+        dept    = getattr(equipment, "department_name", "")
+        mfr     = getattr(equipment, "manufacturer", "")
+        self.fire(
+            event_type="equipment_registered",
+            context={
+                "equipment":       ueic,
+                "equipment_type":  eq_type,
+                "department":      dept,
+                "manufacturer":    mfr,
+                "commissioned_by": commissioned_by,
+            },
+            organization_id=organization_id or getattr(equipment, "organization_id", None),
+            department_id=department_id,
+            source_id=getattr(equipment, "id", None),
+            source_type="equipment",
+            severity="info",
+        )
+
+    def notify_equipment_retired(
+        self, equipment, retired_by: str, reason: str,
+        organization_id=None, department_id=None,
+    ) -> None:
+        """
+        Fired when equipment is decommissioned/retired from the register
+        (SRS — Equipment Register: Retired).
+        """
+        ueic    = getattr(equipment, "ueic", "N/A")
+        eq_type = getattr(equipment, "equipment_type_name", "Equipment")
+        dept    = getattr(equipment, "department_name", "")
+        self.fire(
+            event_type="equipment_retired",
+            context={
+                "equipment":      ueic,
+                "equipment_type": eq_type,
+                "department":     dept,
+                "reason":         reason,
+                "retired_by":     retired_by,
+            },
+            organization_id=organization_id or getattr(equipment, "organization_id", None),
+            department_id=department_id,
+            source_id=getattr(equipment, "id", None),
+            source_type="equipment",
+            severity="info",
+        )
+
+    def notify_design_problem_alert(
+        self, manufacturer: str, equipment_type: str,
+        problem_description: str, affected_count: int,
+        organization_id=None,
+    ) -> None:
+        """
+        Fired when a systemic design problem is identified for a make/model
+        (SRS — Design Problem Alert). Broadcasts org-wide (no dept scoping).
+        """
+        self.fire(
+            event_type="design_problem_alert",
+            context={
+                "manufacturer":        manufacturer,
+                "equipment_type":      equipment_type,
+                "problem_description": problem_description,
+                "affected_count":      str(affected_count),
+            },
+            organization_id=organization_id,
+            severity="critical",
+            equipment_type=equipment_type,
+        )
+
+    def notify_repair_delay(
+        self, equipment, repair_stage: str, stage_deadline: str, days_delayed: int,
+        organization_id=None, department_id=None,
+    ) -> None:
+        """
+        Fired when a repair stage timeline is exceeded (SRS — Transformer Repair Delay).
+        """
+        ueic    = getattr(equipment, "ueic", "N/A")
+        eq_type = getattr(equipment, "equipment_type_name", "Equipment")
+        dept    = getattr(equipment, "department_name", "")
+        self.fire(
+            event_type="repair_delay",
+            context={
+                "equipment":      ueic,
+                "equipment_type": eq_type,
+                "department":     dept,
+                "repair_stage":   repair_stage,
+                "stage_deadline": stage_deadline,
+                "days_delayed":   str(days_delayed),
+            },
+            organization_id=organization_id or getattr(equipment, "organization_id", None),
+            department_id=department_id,
+            source_id=getattr(equipment, "id", None),
+            source_type="equipment",
+            severity="alert",
+            workflow_type="repair_cycle",
+            equipment_type=eq_type,
+        )
+
+    def notify_monthly_mis_report(
+        self, report_month: str, tests_completed: int,
+        critical_count: int, overdue_count: int,
+        report_pdf_url: str = "", report_xls_url: str = "",
+        organization_id=None,
+    ) -> None:
+        """
+        Fired on the first working day of each month — generates and sends the
+        Monthly MIS Report to senior management (SRS — Monthly MIS Reports).
+        """
+        from datetime import date as _d
+        self.fire(
+            event_type="monthly_mis_report",
+            context={
+                "report_month":     report_month,
+                "tests_completed":  str(tests_completed),
+                "critical_count":   str(critical_count),
+                "overdue_count":    str(overdue_count),
+                "report_pdf_url":   report_pdf_url,
+                "pdf_url":          report_pdf_url,
+                "report_xls_url":   report_xls_url,
+                "xls_url":          report_xls_url,
+                "report_generated_on": str(_d.today()),
+            },
+            organization_id=organization_id,
+            severity="info",
+        )
+
+    def _fire_schedule_notification(self, request, event_type: str, severity: str) -> None:
+        """
+        Shared helper for all scheduler-fired notifications.
+        Builds standard context from the TR's due_date and fires dept + workflow scoped.
+        """
         equipment_label = (
             request.equipment.ueic if request.equipment else
             (request.equipment_type.name if request.equipment_type else "Equipment")
         )
+        from datetime import date as _date
+        due = getattr(request, "due_date", None)
+        today = _date.today()
+        if due:
+            due_date = due.date() if hasattr(due, "date") else due
+            days_diff = (today - due_date).days   # positive = overdue, negative = remaining
+        else:
+            days_diff = 0
         self.fire(
-            event_type="overdue_alert",
+            event_type=event_type,
             context={
                 "equipment": equipment_label,
                 "request_number": getattr(request, "request_number", ""),
-                "due_date": str(getattr(request, "due_date", "") or ""),
+                "due_date": str(due or ""),
+                "days_remaining": str(-days_diff) if days_diff < 0 else "0",
+                "days_overdue":   str(days_diff)  if days_diff > 0 else "0",
             },
             organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
             source_id=request.id,
             source_type="testing_request",
-            severity="alert",
+            severity=severity,
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
         )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
@@ -701,16 +1491,61 @@ class NotificationService:
         source_id: Optional[UUID],
         source_type: Optional[str],
         severity: Optional[str],
+        org_name: str = "SEACMS",
+        resolved_ctx: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        Enqueue a notification for one user on one channel.
+        Enqueue a notification for one user on one channel using the
+        ChannelDispatcherRegistry factory.
 
-        - inapp:       written immediately to UserNotification (DB-only, no network I/O).
-                       Log is marked 'sent' right away.
-        - email / sms: log is written as 'pending' and left for the background
-                       scheduler job (process_pending_notifications) to dispatch.
-                       This keeps the API request fast and decouples sending.
+        Channel behaviour
+        -----------------
+        inapp  — written immediately to UserNotification (DB-only, instant).
+                 Log is marked 'sent' right away.
+        email  — body is wrapped in full HTML email template via EmailDispatcher.
+                 Log written as 'pending'; background scheduler sends.
+                 If tmpl.attachment_vars is set, URLs resolved from context are
+                 stored in log.attachment_urls for the dispatcher to fetch + attach.
+        sms    — plain-text body stored as-is.
+                 Log written as 'pending'; background scheduler sends.
+        <any>  — any future channel (e.g. whatsapp) registered in
+                 ChannelDispatcherRegistry is automatically picked up here
+                 without changes to this method.
+
+        attachment_vars format (per entry — supports both simple and typed):
+          Simple : "report.retriepdf"           — type auto-detected from URL/key
+          Typed  : {"var_key": "report.retriepdf", "type": "pdf"}
+                   Supported types: pdf | excel | xlsx | docx | json | csv | txt | zip
         """
+        dispatcher = ChannelDispatcherRegistry.get(tmpl.channel)
+
+        # ── Channel-specific body transformation (e.g. full HTML wrap for email)
+        final_body = body
+        if dispatcher:
+            final_body = dispatcher.prepare_body(body, subject=subject, org_name=org_name)
+
+        # ── Resolve attachment_vars → attachment_urls (email channel only) ─────
+        resolved_attachment_urls: List[Dict] = []
+        if tmpl.channel == "email" and tmpl.attachment_vars and resolved_ctx:
+            for av in (tmpl.attachment_vars or []):
+                if isinstance(av, dict):
+                    var_key  = av.get("var_key", "")
+                    att_type = av.get("type", "")
+                else:
+                    var_key  = str(av)
+                    att_type = ""
+                url = resolved_ctx.get(var_key, "")
+                if url:
+                    entry: Dict[str, str] = {"url": url, "var_key": var_key}
+                    if att_type:
+                        entry["type"] = att_type
+                    resolved_attachment_urls.append(entry)
+                else:
+                    logger.debug(
+                        f"[Notif] attachment_var {var_key!r} resolved to empty for "
+                        f"event={event_type!r} user={user.id}"
+                    )
+
         log = NotificationLog(
             organization_id=organization_id,
             event_type=event_type,
@@ -719,10 +1554,11 @@ class NotificationService:
             recipient_email=user.email if tmpl.channel == "email" else None,
             recipient_phone=getattr(user, "phone_number", None) if tmpl.channel == "sms" else None,
             subject=subject,
-            body=body,
+            body=final_body,
             status="pending",
             source_id=source_id,
             source_type=source_type,
+            attachment_urls=resolved_attachment_urls if resolved_attachment_urls else [],
         )
         self.db.add(log)
         self.db.flush()  # get log.id
@@ -735,7 +1571,7 @@ class NotificationService:
                 organization_id=organization_id,
                 event_type=event_type,
                 title=subject or event_type.replace("_", " ").title(),
-                body=body,
+                body=body,          # in-app uses plain body (no HTML wrapper)
                 severity=severity,
                 source_id=source_id,
                 source_type=source_type,
@@ -743,16 +1579,16 @@ class NotificationService:
             log.status = "sent"
             log.sent_at = datetime.now(timezone.utc)
 
-        elif tmpl.channel in ("email", "sms"):
-            # Email / SMS: leave as 'pending' — scheduler will pick up and send
-            # Validate we have the required contact info before queuing
+        elif tmpl.channel in ChannelDispatcherRegistry.channels():
+            # Async channels (email, sms, whatsapp, …): leave as 'pending'
+            # Validate contact info; skip immediately if missing
             if tmpl.channel == "email" and not user.email:
                 log.status = "skipped"
                 log.error_message = "User has no email address"
             elif tmpl.channel == "sms" and not getattr(user, "phone_number", None):
                 log.status = "skipped"
                 log.error_message = "User has no phone number"
-            # else: stays 'pending', scheduler will send
+            # else: stays 'pending' — scheduler picks up and calls dispatcher.send()
 
         try:
             self.db.commit()
@@ -784,40 +1620,46 @@ class NotificationService:
         sent = failed = skipped = 0
 
         for log in pending:
+            # ── Digest check (email only) ────────────────────────────────────
             if log.channel == "email":
                 if not log.recipient_email:
                     log.status = "skipped"
                     log.error_message = "No email address on log row"
                     skipped += 1
                     continue
-                # Digest check
                 if _should_digest(self.db, log.event_type, log.organization_id):
                     _collapse_digest(self.db, log.event_type, log.organization_id)
                     skipped += 1
                     continue
-                _send_email(self.db, log, log.recipient_email, log.subject or "", log.body or "")
-                if log.status == "sent":
-                    sent += 1
-                else:
-                    failed += 1
 
             elif log.channel == "sms":
-                phone = log.recipient_phone
-                if not phone:
-                    # Try fetching from user record
-                    if log.recipient_id:
-                        u = self.db.query(User).filter(User.id == log.recipient_id).first()
-                        phone = getattr(u, "phone_number", None) if u else None
-                if not phone:
+                # Backfill phone from user record if missing on log row
+                if not log.recipient_phone and log.recipient_id:
+                    u = self.db.query(User).filter(User.id == log.recipient_id).first()
+                    if u:
+                        log.recipient_phone = getattr(u, "phone_number", None)
+                if not log.recipient_phone:
                     log.status = "skipped"
                     log.error_message = "No phone number found"
                     skipped += 1
                     continue
-                _send_sms(self.db, log, phone, log.body or "")
-                if log.status in ("sent", "skipped"):
-                    sent += 1
-                else:
-                    failed += 1
+
+            # ── Dispatch via registry (works for any registered channel) ─────
+            dispatcher = ChannelDispatcherRegistry.get(log.channel)
+            if not dispatcher:
+                log.status = "skipped"
+                log.error_message = f"No dispatcher registered for channel={log.channel!r}"
+                skipped += 1
+                continue
+
+            dispatcher.send(self.db, log, log.subject or "", log.body or "")
+
+            if log.status == "sent":
+                sent += 1
+            elif log.status in ("skipped",):
+                skipped += 1
+            else:
+                failed += 1
 
         try:
             self.db.commit()
@@ -830,215 +1672,717 @@ class NotificationService:
 
 # ── Global default template seeds ─────────────────────────────────────────────
 
-DEFAULT_TEMPLATES = [
-    # ── eval_critical ────────────────────────────────────────────────────────
-    {
-        "event_type": "eval_critical",
-        "channel": "email",
-        "subject_template": "[CRITICAL] {equipment} — Test Alert",
-        "body_template": (
-            "<h3 style='color:red'>⚠️ Critical Test Result</h3>"
-            "<p><b>Equipment:</b> {equipment}</p>"
-            "<p><b>Request:</b> {request_number}</p>"
-            "<p><b>Test:</b> {test_name}</p>"
-            "<p><b>Finding:</b> {result_summary}</p>"
-            "<p>Please review and take immediate action.</p>"
-        ),
-        "recipient_roles": ["Department Head", "Approver", "Originator"],
-    },
-    {
-        "event_type": "eval_critical",
-        "channel": "inapp",
-        "subject_template": "⚠️ CRITICAL — {equipment}",
-        "body_template": "{result_summary}",
-        "recipient_roles": ["Department Head", "Approver", "Originator"],
-    },
-    # ── eval_alert ───────────────────────────────────────────────────────────
-    {
-        "event_type": "eval_alert",
-        "channel": "email",
-        "subject_template": "[ALERT] {equipment} — Threshold Warning",
-        "body_template": (
-            "<h3 style='color:orange'>⚡ Alert: Threshold Warning</h3>"
-            "<p><b>Equipment:</b> {equipment}</p>"
-            "<p><b>Request:</b> {request_number}</p>"
-            "<p><b>Test:</b> {test_name}</p>"
-            "<p><b>Revised inspection interval:</b> {revised_interval}</p>"
-        ),
-        "recipient_roles": ["Department Head", "Originator"],
-    },
-    {
-        "event_type": "eval_alert",
-        "channel": "inapp",
-        "subject_template": "⚡ Alert — {equipment}",
-        "body_template": "Threshold warning on {test_name}. Revised interval: {revised_interval}.",
-        "recipient_roles": ["Department Head", "Originator"],
-    },
-    # ── test_submitted ───────────────────────────────────────────────────────
-    {
-        "event_type": "test_submitted",
-        "channel": "email",
-        "subject_template": "Test Results Submitted — {equipment}",
-        "body_template": (
-            "<h3>Test Results Ready for Review</h3>"
-            "<p>Tester has submitted results for <b>{equipment}</b> "
-            "(Request: {request_number}).</p>"
-            "<p>Please log in to review and approve.</p>"
-        ),
-        "recipient_roles": ["Approver", "Department Head"],
-    },
-    {
-        "event_type": "test_submitted",
-        "channel": "inapp",
-        "subject_template": "Results submitted — {equipment}",
-        "body_template": "Test results for {equipment} (Req: {request_number}) await your review.",
-        "recipient_roles": ["Approver", "Department Head"],
-    },
-    # ── due_reminder ─────────────────────────────────────────────────────────
-    {
-        "event_type": "due_reminder",
-        "channel": "email",
-        "subject_template": "Upcoming Test Due — {equipment}",
-        "body_template": (
-            "<h3>Test Due Soon</h3>"
-            "<p>A scheduled test for <b>{equipment}</b> is due on <b>{due_date}</b>. "
-            "(Request: {request_number})</p>"
-        ),
-        "recipient_roles": ["Tester", "Department Head"],
-    },
-    {
-        "event_type": "due_reminder",
-        "channel": "inapp",
-        "subject_template": "Test due — {equipment}",
-        "body_template": "Test due on {due_date} for {equipment}.",
-        "recipient_roles": ["Tester", "Department Head"],
-    },
-    # ── overdue_alert ────────────────────────────────────────────────────────
-    {
-        "event_type": "overdue_alert",
-        "channel": "email",
-        "subject_template": "[OVERDUE] Test Overdue — {equipment}",
-        "body_template": (
-            "<h3 style='color:red'>⚠️ Test Overdue</h3>"
-            "<p>The test for <b>{equipment}</b> was due on <b>{due_date}</b> "
-            "and has not been completed. (Request: {request_number})</p>"
-        ),
-        "recipient_roles": ["Department Head", "Originator"],
-    },
-    {
-        "event_type": "overdue_alert",
-        "channel": "inapp",
-        "subject_template": "Overdue — {equipment}",
-        "body_template": "Test overdue since {due_date} for {equipment}.",
-        "recipient_roles": ["Department Head", "Originator"],
-    },
-    # ── request_submitted ────────────────────────────────────────────────────
-    {
-        "event_type": "request_submitted",
-        "channel": "inapp",
-        "subject_template": "New submission — {request_number}",
-        "body_template": "{equipment} submitted for approval by {originator}. Category: {category}.",
-        "recipient_roles": ["Approver", "Department Head", "Super Admin"],
-    },
-    {
-        "event_type": "request_submitted",
-        "channel": "email",
-        "subject_template": "New Submission Pending Approval — {request_number}",
-        "body_template": (
-            "<h3>New Submission Awaiting Approval</h3>"
-            "<p><b>Equipment:</b> {equipment}</p>"
-            "<p><b>Request:</b> {request_number}</p>"
-            "<p><b>Category:</b> {category}</p>"
-            "<p><b>Submitted by:</b> {originator}</p>"
-            "<p>Please log in to review and approve.</p>"
-        ),
-        "recipient_roles": ["Approver", "Department Head"],
-    },
-    # ── fr_approved ───────────────────────────────────────────────────────────
-    {
-        "event_type": "fr_approved",
-        "channel": "inapp",
-        "subject_template": "Failure Report Approved — {fr_number}",
-        "body_template": "Your failure report {fr_number} was approved. Outcome: {outcome}.",
-        "recipient_roles": [],
-    },
-    # ── fr_rejected ───────────────────────────────────────────────────────────
-    {
-        "event_type": "fr_rejected",
-        "channel": "inapp",
-        "subject_template": "Failure Report Rejected — {fr_number}",
-        "body_template": "Your failure report {fr_number} was rejected. Reason: {reason}.",
-        "recipient_roles": [],
-    },
-    # ── recommendation_approved ───────────────────────────────────────────────
-    {
-        "event_type": "recommendation_approved",
-        "channel": "email",
-        "subject_template": "Recommendation Approved — {request_number}",
-        "body_template": (
-            "<h3>Recommendation Approved</h3>"
-            "<p>The <b>{recommendation_type}</b> recommendation for request "
-            "<b>{request_number}</b> has been approved. "
-            "{product_count} replacement product(s) have been flagged for procurement.</p>"
-        ),
-        "recipient_roles": ["Procurement", "Department Head"],
-    },
-    {
-        "event_type": "recommendation_approved",
-        "channel": "inapp",
-        "subject_template": "Recommendation approved — {request_number}",
-        "body_template": "{product_count} product(s) ready for procurement.",
-        "recipient_roles": ["Procurement", "Department Head"],
-    },
-    # ── equipment_replacement (SRS §3.3.1) ───────────────────────────────────
-    # All recipient_roles are configurable via Admin → Notification Templates.
-    # Admins can add/remove roles without any code change.
-    # Default roles follow KPTCL SRS: EE TLSS, SEE W&M, CEE Transmission Zone.
-    {
-        "event_type": "equipment_replacement",
-        "channel": "email",
-        "subject_template": "[REPLACEMENT] {equipment_type} — {old_ueic} → {new_ueic}",
-        "body_template": (
-            "<h3 style='color:#1E3C72'>Equipment Replacement Notification</h3>"
-            "<p>A replacement event has been recorded in SEACMS.</p>"
-            "<table cellpadding='6' cellspacing='0' border='1' "
-            "style='border-collapse:collapse;font-size:13px;width:100%'>"
-            "<tr><td><b>Retired UEIC</b></td><td>{old_ueic}</td></tr>"
-            "<tr><td><b>New UEIC</b></td><td>{new_ueic}</td></tr>"
-            "<tr><td><b>Equipment Type</b></td><td>{equipment_type}</td></tr>"
-            "<tr><td><b>Substation / Bay</b></td><td>{department}</td></tr>"
-            "<tr><td><b>Reason Type</b></td><td>{reason_type}</td></tr>"
-            "<tr><td><b>Reason</b></td><td>{reason}</td></tr>"
-            "<tr><td><b>Replaced By</b></td><td>{replaced_by}</td></tr>"
-            "<tr><td><b>Date</b></td><td>{replaced_on}</td></tr>"
-            "</table>"
-            "<p style='margin-top:12px'>Download the Replacement Report PDF from "
-            "the SEACMS Equipment Register.</p>"
-        ),
-        "recipient_roles": ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "Department Head"],
-    },
-    {
-        "event_type": "equipment_replacement",
-        "channel": "inapp",
-        "subject_template": "Equipment replaced — {old_ueic} → {new_ueic}",
-        "body_template": (
-            "{equipment_type} at {department} replaced by {replaced_by} on {replaced_on}. "
-            "Reason type: {reason_type}."
-        ),
-        "recipient_roles": ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "Department Head"],
-    },
-    {
-        "event_type": "equipment_replacement",
-        "channel": "sms",
-        "subject_template": "",
-        "body_template": (
-            "SEACMS: {equipment_type} at {department} replaced. "
-            "Old: {old_ueic}. New: {new_ueic}. By {replaced_by} on {replaced_on}."
-        ),
-        "recipient_roles": ["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
-    },
-]
+def _e(subject: str, body_html: str, roles: list) -> dict:
+    """Helper: email channel entry."""
+    return {"channel": "email", "subject_template": subject,
+            "body_template": body_html, "recipient_roles": roles,
+            "attachment_vars": []}
 
+def _ea(subject: str, body_html: str, roles: list, attachment_vars: list) -> dict:
+    """
+    Helper: email channel entry WITH attachment variables.
+
+    attachment_vars — list of variable entries whose resolved values are file URLs
+    to attach to the outgoing email.  Each entry is either:
+      • a simple string  : "report.retriepdf"
+                           (MIME type auto-detected from URL / key convention)
+      • a typed dict     : {"var_key": "report.retriepdf", "type": "pdf"}
+                           Supported types: pdf | excel | xlsx | docx | json | csv
+
+    Example:
+        _ea(
+            "Monthly MIS Report — {{report.ref}}",
+            body_html,
+            ["SEE W&M", "CEE Transmission Zone"],
+            [
+                {"var_key": "report.retriepdf",  "type": "pdf"},
+                {"var_key": "report.retriexls",  "type": "excel"},
+            ],
+        )
+    """
+    return {"channel": "email", "subject_template": subject,
+            "body_template": body_html, "recipient_roles": roles,
+            "attachment_vars": attachment_vars}
+
+def _s(body: str, roles: list) -> dict:
+    """Helper: SMS channel entry (160-char guideline)."""
+    return {"channel": "sms", "subject_template": "",
+            "body_template": body, "recipient_roles": roles}
+
+def _i(title: str, body: str, roles: list) -> dict:
+    """Helper: in-app channel entry."""
+    return {"channel": "inapp", "subject_template": title,
+            "body_template": body, "recipient_roles": roles}
+
+def _html(rows: list) -> str:
+    """
+    Build a compact HTML table from [(label, var_key), ...] pairs.
+    var_key is wrapped in {{double_braces}} so the render engine resolves it.
+    Example: _html([("Equipment", "equipment.ueic")]) →
+             <tr>…<td>{{equipment.ueic}}</td>…</tr>
+    """
+    trs = "".join(
+        "<tr>"
+        "<td style='padding:4px 8px;border:1px solid #ddd'><b>" + str(k) + "</b></td>"
+        "<td style='padding:4px 8px;border:1px solid #ddd'>{{" + str(v) + "}}</td>"
+        "</tr>"
+        for k, v in rows
+    )
+    return (
+        "<table cellspacing='0' style='border-collapse:collapse;"
+        "font-size:13px;width:100%'>"
+        + trs
+        + "</table>"
+    )
+
+
+# All 15 catalogue event types — 3 channels each (email + SMS + in-app).
+# subject_template / body_template use {{var_key}} syntax (double-brace).
+# Org admins can override any of these via the Flutter Template Config page.
+DEFAULT_TEMPLATES = []
+
+def _tmpl(event_type: str, *channel_dicts) -> None:
+    for d in channel_dicts:
+        DEFAULT_TEMPLATES.append({"event_type": event_type, **d})
+
+# ── Equipment ─────────────────────────────────────────────────────────────────
+_tmpl("equipment_replacement",
+    _e(
+        "[REPLACEMENT] {{equipment.type}} — {{old_ueic}} → {{new_ueic}}",
+        "<h3 style='color:#1E3C72'>Equipment Replacement Notification</h3>"
+        "<p>A replacement event has been recorded in SEACMS on {{system.date}}.</p>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Retired UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{old_ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>New UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{new_ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Substation / Bay</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{reason_type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{reason}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Replaced By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{replaced_by}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{replaced_on}}</td></tr>"
+        "</table>"
+        "<p>Log in to SEACMS Equipment Register to download the Replacement Report PDF.</p>",
+        ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "Department Head"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] {{equipment.type}} at {{equipment.department}} replaced."
+        " Old:{{old_ueic}} New:{{new_ueic}}. By {{replaced_by}} on {{replaced_on}}.",
+        ["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
+    ),
+    _i(
+        "Equipment replaced — {{old_ueic}} → {{new_ueic}}",
+        "{{equipment.type}} at {{equipment.department}} replaced by {{replaced_by}} on {{replaced_on}}."
+        " Reason: {{reason_type}}.",
+        ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "Department Head"],
+    ),
+)
+
+# ── Evaluation ────────────────────────────────────────────────────────────────
+_tmpl("eval_critical",
+    _ea(
+        "[CRITICAL] {{equipment.ueic}} — {{eval.test_type}} Threshold Exceeded",
+        "<h3 style='color:red'>Critical Test Result — Immediate Action Required</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.test_type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Evaluated At</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.evaluated_at}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Finding</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{result_summary}}</td></tr>"
+        "</table>"
+        "<p>The evaluation report is attached to this email.</p>",
+        ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "AEE Maintenance"],
+        [{"var_key": "report.retriepdf", "type": "pdf"}],
+    ),
+    _s(
+        "[KPTCL-SEACMS] CRITICAL: {{equipment.ueic}} — {{eval.test_type}}."
+        " Req:{{request.number}}. Login SEACMS for details.",
+        ["EE TLSS", "AEE Maintenance"],
+    ),
+    _i(
+        "CRITICAL — {{equipment.ueic}}",
+        "{{eval.test_type}} result CRITICAL for {{equipment.ueic}} ({{request.number}})."
+        " Evaluated: {{eval.evaluated_at}}.",
+        ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "AEE Maintenance"],
+    ),
+)
+
+_tmpl("eval_alert",
+    _e(
+        "[ALERT] {{equipment.ueic}} — {{eval.test_type}} Warning",
+        "<h3 style='color:orange'>Alert: Test Result Warning</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.test_type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Revised Interval</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{revised_interval}}</td></tr>"
+        "</table>"
+        "<p><a href='{{report.retriepdf}}'>Download PDF Report</a></p>",
+        ["EE TLSS", "AEE Maintenance"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] ALERT: {{equipment.ueic}} — {{eval.test_type}}."
+        " Revised interval: {{revised_interval}}. Req:{{request.number}}.",
+        ["EE TLSS", "AEE Maintenance"],
+    ),
+    _i(
+        "Alert — {{equipment.ueic}}",
+        "{{eval.test_type}} threshold warning for {{equipment.ueic}}."
+        " Revised interval: {{revised_interval}}.",
+        ["EE TLSS", "AEE Maintenance"],
+    ),
+)
+
+# ── Test Workflow ─────────────────────────────────────────────────────────────
+_tmpl("request_submitted",
+    _e(
+        "New Test Request Submitted — {{request.number}}",
+        "<h3>New Test Request Awaiting Approval</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Category</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{category}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Priority</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.priority}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Submitted By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.submitted_by}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "</table>"
+        "<p>Log in to SEACMS to review and approve this request.</p>",
+        ["EE TLSS", "Department Head"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] New {{category}} request {{request.number}} submitted"
+        " by {{request.submitted_by}} for {{equipment.ueic}}. Login to approve.",
+        ["EE TLSS"],
+    ),
+    _i(
+        "New submission — {{request.number}}",
+        "{{equipment.ueic}} submitted for {{category}} by {{request.submitted_by}}. Priority: {{request.priority}}.",
+        ["EE TLSS", "Department Head"],
+    ),
+)
+
+_tmpl("tester_assigned",
+    _e(
+        "Test Request Assigned to You — {{request.number}}",
+        "<h3>You Have Been Assigned a Test Request</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Assigned To</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.assigned_to}}</td></tr>"
+        "</table>"
+        "<p>Please log in to SEACMS to accept or decline this assignment.</p>",
+        ["Tester", "AEE Maintenance"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] You are assigned test req {{request.number}}"
+        " for {{equipment.ueic}}. Due: {{request.due_date}}. Login SEACMS.",
+        ["Tester"],
+    ),
+    _i(
+        "Assigned — {{request.number}}",
+        "You have been assigned {{request.number}} for {{equipment.ueic}}. Due: {{request.due_date}}.",
+        ["Tester", "AEE Maintenance"],
+    ),
+)
+
+_tmpl("tester_declined",
+    _e(
+        "Tester Declined Assignment — {{request.number}}",
+        "<h3>Tester Declined — Reassignment Required</h3>"
+        "<p><b>Request:</b> {{request.number}}</p>"
+        "<p><b>Declined by:</b> {{tester_name}}</p>"
+        "<p><b>Reason:</b> {{reason}}</p>"
+        "<p>Please reassign this request in SEACMS.</p>",
+        ["TestAssigner", "EE TLSS"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] {{tester_name}} declined req {{request.number}}."
+        " Reason: {{reason}}. Please reassign.",
+        ["TestAssigner"],
+    ),
+    _i(
+        "Tester declined — {{request.number}}",
+        "{{tester_name}} declined {{request.number}}. Reason: {{reason}}.",
+        ["TestAssigner", "EE TLSS"],
+    ),
+)
+
+_tmpl("test_submitted",
+    _ea(
+        "Test Results Ready for Review — {{request.number}}",
+        "<h3>Test Results Submitted — Awaiting Your Review</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Submitted By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.submitted_by}}</td></tr>"
+        "</table>"
+        "<p>The test report is attached to this email.</p>"
+        "<p>Log in to SEACMS to approve or reject these results.</p>",
+        ["EE TLSS", "Department Head"],
+        [{"var_key": "report.retriepdf", "type": "pdf"}],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Results submitted for {{request.number}} ({{equipment.ueic}})."
+        " Result: {{eval.overall}}. Login SEACMS to review.",
+        ["EE TLSS"],
+    ),
+    _i(
+        "Results submitted — {{request.number}}",
+        "Test results for {{equipment.ueic}} ({{request.number}}) await review. Result: {{eval.overall}}.",
+        ["EE TLSS", "Department Head"],
+    ),
+)
+
+_tmpl("recommendation_approved",
+    _e(
+        "Recommendation Approved — {{request.number}}",
+        "<h3>Equipment Recommendation Approved</h3>"
+        "<p><b>Request:</b> {{request.number}}</p>"
+        "<p><b>Recommendation Type:</b> {{recommendation_type}}</p>"
+        "<p><b>Replacement Products:</b> {{product_count}}</p>"
+        "<p>Log in to SEACMS to proceed with procurement.</p>",
+        ["Originator", "AEE Maintenance"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Recommendation approved for {{request.number}}."
+        " Type: {{recommendation_type}}. Login SEACMS.",
+        ["Originator"],
+    ),
+    _i(
+        "Recommendation approved — {{request.number}}",
+        "{{recommendation_type}} recommendation approved. {{product_count}} product(s) for procurement.",
+        ["Originator", "AEE Maintenance"],
+    ),
+)
+
+_tmpl("recommendation_rejected",
+    _e(
+        "Recommendation Rejected — {{request.number}}",
+        "<h3>Recommendation Rejected — Action Required</h3>"
+        "<p><b>Request:</b> {{request.number}}</p>"
+        "<p><b>Reason:</b> {{reason}}</p>"
+        "<p>Please revise and resubmit your recommendation in SEACMS.</p>",
+        ["Tester", "Originator"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Recommendation for {{request.number}} rejected."
+        " Reason: {{reason}}. Please revise.",
+        ["Tester"],
+    ),
+    _i(
+        "Recommendation rejected — {{request.number}}",
+        "Recommendation rejected. Reason: {{reason}}.",
+        ["Tester", "Originator"],
+    ),
+)
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
+_tmpl("due_reminder",
+    _e(
+        "Test Due in {{days_remaining}} Days — {{equipment.ueic}}",
+        "<h3>Upcoming Test Due — 15-Day Reminder</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Remaining</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_remaining}}</td></tr>"
+        "</table>"
+        "<p>Please ensure the test is scheduled and resources are allocated.</p>",
+        ["AEE Maintenance", "EE TLSS"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Test due in {{days_remaining}} days for {{equipment.ueic}}"
+        " ({{equipment.department}}). Due: {{request.due_date}}.",
+        ["AEE Maintenance"],
+    ),
+    _i(
+        "Test due in {{days_remaining}} days — {{equipment.ueic}}",
+        "Request {{request.number}} for {{equipment.ueic}} is due on {{request.due_date}}.",
+        ["AEE Maintenance", "EE TLSS"],
+    ),
+)
+
+_tmpl("due_reminder_final",
+    _e(
+        "FINAL REMINDER: Test Due in {{days_remaining}} Days — {{equipment.ueic}}",
+        "<h3 style='color:orange'>Final Reminder — Test Due in {{days_remaining}} Days</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+        "</table>"
+        "<p><b>Action required:</b> Test must be completed by {{request.due_date}}.</p>",
+        ["AEE Maintenance", "EE TLSS", "Department Head"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] FINAL REMINDER: Test for {{equipment.ueic}} due {{request.due_date}}"
+        " ({{days_remaining}} days). Dept: {{equipment.department}}.",
+        ["AEE Maintenance", "EE TLSS"],
+    ),
+    _i(
+        "Final reminder — {{equipment.ueic}} due {{request.due_date}}",
+        "Only {{days_remaining}} days left. Request {{request.number}} must be completed by {{request.due_date}}.",
+        ["AEE Maintenance", "EE TLSS", "Department Head"],
+    ),
+)
+
+_tmpl("overdue_alert",
+    _e(
+        "[OVERDUE] Test Not Completed — {{equipment.ueic}} ({{days_overdue}} days)",
+        "<h3 style='color:red'>Test Overdue — Immediate Action Required</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Was Due</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
+        "</table>"
+        "<p>Please take immediate action to complete or reschedule this test.</p>",
+        ["EE TLSS", "AEE Maintenance", "SEE W&M"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] OVERDUE: Test for {{equipment.ueic}} ({{equipment.department}})"
+        " is {{days_overdue}} days overdue. Req: {{request.number}}.",
+        ["EE TLSS", "AEE Maintenance"],
+    ),
+    _i(
+        "Overdue {{days_overdue}} days — {{equipment.ueic}}",
+        "Test {{request.number}} for {{equipment.ueic}} is overdue by {{days_overdue}} days (was due {{request.due_date}}).",
+        ["EE TLSS", "AEE Maintenance", "SEE W&M"],
+    ),
+)
+
+_tmpl("overdue_escalation",
+    _e(
+        "[ESCALATION] Test {{days_overdue}} Days Overdue — {{equipment.ueic}}",
+        "<h3 style='color:darkred'>Escalation: Test Critically Overdue</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "</table>"
+        "<p>This has been escalated to zone/circle management.</p>",
+        ["SEE W&M", "CEE Transmission Zone"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] ESCALATION: {{equipment.ueic}} test {{days_overdue}}d overdue."
+        " Dept: {{equipment.department}}. Req: {{request.number}}.",
+        ["SEE W&M", "CEE Transmission Zone"],
+    ),
+    _i(
+        "Escalation — {{equipment.ueic}} {{days_overdue}}d overdue",
+        "Critical: {{request.number}} for {{equipment.ueic}} is {{days_overdue}} days overdue.",
+        ["SEE W&M", "CEE Transmission Zone"],
+    ),
+)
+
+# ── Procurement ───────────────────────────────────────────────────────────────
+_tmpl("procurement_pending",
+    _e(
+        "Procurement Request Raised — {{pr_number}}",
+        "<h3>New Procurement Request Awaiting Finance Approval</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>PR Number</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{pr_number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Title</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{title}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+        "</table>"
+        "<p>Log in to SEACMS to approve or reject this procurement request.</p>",
+        ["FinanceApprover", "Department Head"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Procurement {{pr_number}} raised for {{request.number}}."
+        " Awaiting your finance approval. Login SEACMS.",
+        ["FinanceApprover"],
+    ),
+    _i(
+        "Procurement raised — {{pr_number}}",
+        "PR {{pr_number}} for test request {{request.number}} is awaiting finance approval.",
+        ["FinanceApprover", "Department Head"],
+    ),
+)
+
+_tmpl("procurement_decision",
+    _e(
+        "Procurement {{decision|upper}} — {{pr_number}}",
+        "<h3>Procurement Decision: {{decision|upper}}</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>PR Number</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{pr_number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Decision</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{decision}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Notes</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{notes}}</td></tr>"
+        "</table>",
+        ["Originator", "TechApprover", "EE TLSS"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Procurement {{pr_number}} {{decision}}."
+        " Req: {{request.number}}. Notes: {{notes}}.",
+        ["Originator"],
+    ),
+    _i(
+        "Procurement {{decision}} — {{pr_number}}",
+        "PR {{pr_number}} ({{request.number}}) has been {{decision}} by Finance. Notes: {{notes}}.",
+        ["Originator", "TechApprover", "EE TLSS"],
+    ),
+)
+
+
+# ── Equipment Lifecycle ───────────────────────────────────────────────────────
+_tmpl("equipment_registered",
+    _e(
+        "[NEW EQUIPMENT] {{equipment.ueic}} Commissioned — {{equipment.type}}",
+        "<h3 style='color:#1E3C72'>New Equipment Registered in SEACMS</h3>"
+        "<p>A new equipment record has been created on {{system.date}}.</p>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Manufacturer</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.manufacturer}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Substation / Bay</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Commissioned By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{commissioned_by}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+        "</table>"
+        "<p>Log in to SEACMS to review the equipment details and configure test schedules.</p>",
+        ["AEE Maintenance", "EE TLSS", "Department Head"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] New equipment registered: {{equipment.ueic}} ({{equipment.type}})"
+        " at {{equipment.department}} on {{system.date}} by {{commissioned_by}}.",
+        ["AEE Maintenance", "EE TLSS"],
+    ),
+    _i(
+        "New equipment — {{equipment.ueic}}",
+        "{{equipment.type}} ({{equipment.ueic}}) commissioned at {{equipment.department}} by {{commissioned_by}}.",
+        ["AEE Maintenance", "EE TLSS", "Department Head"],
+    ),
+)
+
+_tmpl("equipment_retired",
+    _e(
+        "[RETIRED] {{equipment.ueic}} — {{equipment.type}} Decommissioned",
+        "<h3 style='color:#555'>Equipment Retired from Service</h3>"
+        "<p>The following equipment has been decommissioned on {{system.date}}.</p>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Substation / Bay</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{reason}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Retired By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{retired_by}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+        "</table>"
+        "<p>All pending test schedules for this equipment have been cancelled. Log in to SEACMS to confirm.</p>",
+        ["AEE Maintenance", "EE TLSS", "SEE W&M", "Department Head"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Equipment {{equipment.ueic}} ({{equipment.type}}) at"
+        " {{equipment.department}} RETIRED on {{system.date}}. Reason: {{reason}}.",
+        ["AEE Maintenance", "EE TLSS"],
+    ),
+    _i(
+        "Equipment retired — {{equipment.ueic}}",
+        "{{equipment.type}} ({{equipment.ueic}}) at {{equipment.department}} has been decommissioned. Reason: {{reason}}.",
+        ["AEE Maintenance", "EE TLSS", "SEE W&M", "Department Head"],
+    ),
+)
+
+# ── Remedial / Compliance ─────────────────────────────────────────────────────
+_tmpl("remedial_action_due",
+    _e(
+        "[ACTION REQUIRED] Remedial Compliance Not Uploaded — {{request.number}}",
+        "<h3 style='color:red'>Remedial Action Compliance Overdue</h3>"
+        "<p>The remedial action compliance document for the following request has not been uploaded by the due date.</p>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Compliance Due</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{compliance_due_date}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
+        "</table>"
+        "<p>Please upload the compliance proof immediately in SEACMS.</p>",
+        ["Field Officer", "EE TLSS"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Remedial compliance NOT uploaded for {{request.number}}"
+        " ({{equipment.ueic}}). Due: {{compliance_due_date}}. Upload in SEACMS.",
+        ["Field Officer", "EE TLSS"],
+    ),
+    _i(
+        "Remedial compliance overdue — {{request.number}}",
+        "Compliance for {{request.number}} ({{equipment.ueic}}) was due {{compliance_due_date}} and is now {{days_overdue}} day(s) overdue.",
+        ["Field Officer", "EE TLSS"],
+    ),
+)
+
+_tmpl("taqc_observation_overdue",
+    _e(
+        "[TAQC] Observation Compliance Not Uploaded — {{request.number}}",
+        "<h3 style='color:orange'>TA&amp;QC Observation Compliance Overdue</h3>"
+        "<p>The compliance document for a TA&amp;QC observation has not been uploaded by the target date.</p>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Target Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{compliance_due_date}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
+        "</table>"
+        "<p>Please upload the compliance document in SEACMS immediately.</p>",
+        ["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] TA&QC compliance NOT uploaded. Req:{{request.number}}"
+        " ({{equipment.ueic}}). Target: {{compliance_due_date}}. Upload in SEACMS.",
+        ["EE TLSS", "SEE W&M"],
+    ),
+    _i(
+        "TA&QC compliance overdue — {{request.number}}",
+        "Observation compliance for {{request.number}} ({{equipment.ueic}}) is {{days_overdue}} day(s) past target {{compliance_due_date}}.",
+        ["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
+    ),
+)
+
+# ── Maintenance ───────────────────────────────────────────────────────────────
+_tmpl("maintenance_due",
+    _e(
+        "Maintenance Due in {{days_remaining}} Days — {{equipment.ueic}}",
+        "<h3 style='color:#1E3C72'>Upcoming Maintenance Due — 15-Day Reminder</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Remaining</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_remaining}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+        "</table>"
+        "<p>Please ensure maintenance resources and outage window are scheduled.</p>",
+        ["AEE Maintenance", "Nodal Officer"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Maintenance due in {{days_remaining}} days for {{equipment.ueic}}"
+        " at {{equipment.department}}. Due: {{request.due_date}}.",
+        ["AEE Maintenance", "Nodal Officer"],
+    ),
+    _i(
+        "Maintenance due in {{days_remaining}} days — {{equipment.ueic}}",
+        "Request {{request.number}} for {{equipment.ueic}} maintenance is due on {{request.due_date}}.",
+        ["AEE Maintenance", "Nodal Officer"],
+    ),
+)
+
+_tmpl("overhaul_recommended",
+    _e(
+        "[OVERHAUL] Operation Count Threshold Reached — {{equipment.ueic}}",
+        "<h3 style='color:darkorange'>Overhaul Recommendation — Operation Threshold Exceeded</h3>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Operations Count</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{operation_count}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Threshold</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{operation_threshold}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Recommendation Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+        "</table>"
+        "<p>An overhaul is recommended. Please raise a maintenance request in SEACMS.</p>",
+        ["AEE Maintenance", "EE TLSS", "SEE W&M"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] Overhaul needed: {{equipment.ueic}} ({{equipment.type}}) at"
+        " {{equipment.department}}. Operations: {{operation_count}}/{{operation_threshold}}.",
+        ["AEE Maintenance", "EE TLSS"],
+    ),
+    _i(
+        "Overhaul recommended — {{equipment.ueic}}",
+        "{{equipment.type}} ({{equipment.ueic}}) has reached {{operation_count}} operations (threshold: {{operation_threshold}}). Overhaul recommended.",
+        ["AEE Maintenance", "EE TLSS", "SEE W&M"],
+    ),
+)
+
+# ── Design / Systemic Issues ──────────────────────────────────────────────────
+_tmpl("design_problem_alert",
+    _e(
+        "[DESIGN ALERT] Problem Detected on {{equipment.manufacturer}} {{equipment.type}}",
+        "<h3 style='color:darkred'>Design Problem Alert — All Affected Equipment</h3>"
+        "<p>A systemic design problem has been identified linked to a specific make/model.</p>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Manufacturer</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.manufacturer}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Problem Description</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{problem_description}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Affected Count</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{affected_count}} units</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Identified On</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+        "</table>"
+        "<p>Inspect all {{equipment.type}} units of this make immediately. Log in to SEACMS for the affected equipment list.</p>",
+        ["AEE Maintenance", "EE TLSS", "SEE W&M", "Department Head"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] DESIGN ALERT: {{equipment.manufacturer}} {{equipment.type}}."
+        " {{affected_count}} units affected. Problem: {{problem_description}}. Login SEACMS.",
+        ["AEE Maintenance", "EE TLSS"],
+    ),
+    _i(
+        "Design problem — {{equipment.manufacturer}} {{equipment.type}}",
+        "Systemic problem detected on {{equipment.manufacturer}} {{equipment.type}}: {{problem_description}}. {{affected_count}} unit(s) affected.",
+        ["AEE Maintenance", "EE TLSS", "SEE W&M", "Department Head"],
+    ),
+)
+
+# ── Repair Cycle ──────────────────────────────────────────────────────────────
+_tmpl("repair_delay",
+    _e(
+        "[REPAIR DELAY] Stage Timeline Exceeded — {{equipment.ueic}}",
+        "<h3 style='color:darkorange'>Transformer Repair Delay Alert</h3>"
+        "<p>A repair stage has exceeded its scheduled timeline.</p>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Repair Stage</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Stage Deadline</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{stage_deadline}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+        "</table>"
+        "<p>Please review and update the repair timeline in SEACMS.</p>",
+        ["EE TLSS", "CEE Transmission Zone", "CEE RT&R&D"],
+    ),
+    _s(
+        "[KPTCL-SEACMS] REPAIR DELAY: {{equipment.ueic}} stage '{{repair_stage}}'"
+        " is {{days_delayed}} days overdue (deadline: {{stage_deadline}}).",
+        ["EE TLSS", "CEE Transmission Zone"],
+    ),
+    _i(
+        "Repair delay — {{equipment.ueic}} ({{repair_stage}})",
+        "Repair stage '{{repair_stage}}' for {{equipment.ueic}} is {{days_delayed}} day(s) past deadline {{stage_deadline}}.",
+        ["EE TLSS", "CEE Transmission Zone", "CEE RT&R&D"],
+    ),
+)
+
+# ── Reports ───────────────────────────────────────────────────────────────────
+_tmpl("monthly_mis_report",
+    _ea(
+        "[MONTHLY MIS] SEACMS Monthly Report — {{report_month}}",
+        "<h3 style='color:#1E3C72'>Monthly MIS Report — {{report_month}}</h3>"
+        "<p>Your monthly equipment management report is ready for {{report_month}}.</p>"
+        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Report Period</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report_month}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Generated On</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report.generated_on}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Tests Completed</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{tests_completed}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Critical Findings</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{critical_count}}</td></tr>"
+        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overdue Tests</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{overdue_count}}</td></tr>"
+        "</table>"
+        "<p>The PDF and Excel reports are attached to this email.</p>",
+        ["SEE W&M", "CEE Transmission Zone"],
+        [
+            {"var_key": "report.retriepdf", "type": "pdf"},
+            {"var_key": "report.retriexls", "type": "excel"},
+        ],
+    ),
+    _i(
+        "Monthly MIS Report — {{report_month}} ready",
+        "The SEACMS MIS report for {{report_month}} is available. Tests: {{tests_completed}}, Critical: {{critical_count}}, Overdue: {{overdue_count}}.",
+        ["SEE W&M", "CEE Transmission Zone"],
+    ),
+)
 
 # ── Variable registry seed ────────────────────────────────────────────────────
 
@@ -1231,6 +2575,35 @@ DEFAULT_VARIABLES = [
         "sample_value": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
         "is_system": True,
     },
+    # ── Department / Context ──────────────────────────────────────────────────
+    {
+        "var_key": "dept.name", "label": "Department Name",
+        "group_name": "Context", "resolver_key": "currentdeptname",
+        "description": "Name of the department associated with the event (e.g. North Division).",
+        "sample_value": "North Division",
+        "is_system": True,
+    },
+    {
+        "var_key": "dept.code", "label": "Department Code",
+        "group_name": "Context", "resolver_key": "dept_code",
+        "description": "Short code for the department.",
+        "sample_value": "NB-DIV",
+        "is_system": True,
+    },
+    {
+        "var_key": "user.name", "label": "Recipient Name",
+        "group_name": "Context", "resolver_key": "user_name",
+        "description": "Full name of the notification recipient (resolved at dispatch time).",
+        "sample_value": "Jane Smith",
+        "is_system": True,
+    },
+    {
+        "var_key": "user.email", "label": "Recipient Email",
+        "group_name": "Context", "resolver_key": "recipient_email",
+        "description": "Email address of the notification recipient.",
+        "sample_value": "jane.smith@utility.com",
+        "is_system": True,
+    },
     # ── System ────────────────────────────────────────────────────────────────
     {
         "var_key": "system.date", "label": "Today's Date",
@@ -1283,9 +2656,14 @@ def seed_default_variables(db: Session) -> int:
 
 def seed_default_templates(db: Session) -> int:
     """
-    Idempotent seed: insert global default templates (organization_id=NULL)
-    only if they don't already exist.  Call once from startup or migration.
-    Returns count of inserted rows.
+    Idempotent upsert: insert or update global default templates (organization_id=NULL).
+
+    On first run  → inserts all rows.
+    On re-run     → updates subject_template + body_template + recipient_roles
+                    so new DEFAULT_TEMPLATES content is always reflected in the DB.
+    Org-specific overrides (organization_id IS NOT NULL) are never touched.
+
+    Returns count of inserted rows (updates are not counted).
     """
     inserted = 0
     for tpl in DEFAULT_TEMPLATES:
@@ -1298,10 +2676,16 @@ def seed_default_templates(db: Session) -> int:
             )
             .first()
         )
-        if not existing:
+        if existing:
+            # Refresh body/subject/roles/attachment_vars from DEFAULT_TEMPLATES
+            # (org-specific overrides are never touched)
+            existing.subject_template  = tpl.get("subject_template", existing.subject_template)
+            existing.body_template     = tpl["body_template"]
+            existing.recipient_roles   = tpl.get("recipient_roles", existing.recipient_roles)
+            existing.attachment_vars   = tpl.get("attachment_vars", existing.attachment_vars or [])
+        else:
             db.add(NotificationTemplate(**tpl))
             inserted += 1
-    if inserted:
-        db.commit()
-        logger.info(f"[Notif] Seeded {inserted} default notification templates.")
+    db.commit()
+    logger.info(f"[Notif] Seeded/refreshed default notification templates ({inserted} new).")
     return inserted
