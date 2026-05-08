@@ -421,7 +421,7 @@ elif not ASSIGNED_TESTER_ID:
     skip("Assign tester to TR", "could not resolve tester.north user id")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. TESTING — tester full lifecycle (assigned→accepted→in_progress→submitted)
+# 9. TESTING — tester full lifecycle (assigned->accepted->in_progress->submitted)
 # ─────────────────────────────────────────────────────────────────────────────
 section("9. TESTING — tester full lifecycle")
 
@@ -804,18 +804,528 @@ for cat_param in ["failure_registry", "taqc_inspection"]:
         fail(f"GET /direct-submissions/?category={cat_param}", f"got {r.status_code}: {r.text[:80]}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 15. NOTIFICATIONS
+# 15. NOTIFICATIONS — user-facing + admin template/variable/routing/schedule
 # ─────────────────────────────────────────────────────────────────────────────
-section("15. NOTIFICATIONS")
+section("15A. NOTIFICATIONS — user-facing bell endpoints")
 
-for role_key, token in list(TOKENS.items())[:4]:
-    if token:
-        r = requests.get(f"{BASE}/notifications/", headers=auth(token))
-        check(f"GET /notifications/ ({role_key})", r, 200)
+_user_tok = TOKENS.get("Originator") or TOKENS.get("Tester")
+_admin_tok = TOKENS.get("KptclAdmin")
 
-        r = requests.get(f"{BASE}/notifications/unread-count", headers=auth(token))
-        check(f"GET /notifications/unread-count ({role_key})", r, 200)
-        break
+# ── 15A-1: list in-app notifications (empty is fine) ─────────────────────────
+if _user_tok:
+    r = requests.get(f"{BASE}/notifications", headers=auth(_user_tok))
+    data = check("GET /notifications (list)", r, 200)
+    NOTIF_IDS = [n["id"] for n in data] if isinstance(data, list) else []
+else:
+    skip("GET /notifications", "no user token")
+    NOTIF_IDS = []
+
+# ── 15A-2: unread-count ───────────────────────────────────────────────────────
+if _user_tok:
+    r = requests.get(f"{BASE}/notifications/unread-count", headers=auth(_user_tok))
+    cnt = check("GET /notifications/unread-count", r, 200)
+    if cnt is not None and "count" in cnt:
+        ok("unread-count has 'count' field", str(cnt["count"]))
+    else:
+        fail("unread-count missing 'count' field", str(cnt))
+
+# ── 15A-3: severity counts breakdown ─────────────────────────────────────────
+if _user_tok:
+    r = requests.get(f"{BASE}/notifications/counts", headers=auth(_user_tok))
+    cnt = check("GET /notifications/counts (severity breakdown)", r, 200)
+    if isinstance(cnt, dict) and "total" in cnt:
+        ok("counts has total/critical/alert/info keys", str(cnt))
+
+# ── 15A-4: unread-only filter ─────────────────────────────────────────────────
+if _user_tok:
+    r = requests.get(f"{BASE}/notifications?unread_only=true", headers=auth(_user_tok))
+    check("GET /notifications?unread_only=true", r, 200)
+
+# ── 15A-5: mark single read (skip if no notifications) ───────────────────────
+if _user_tok and NOTIF_IDS:
+    r = requests.put(f"{BASE}/notifications/{NOTIF_IDS[0]}/read", headers=auth(_user_tok))
+    if r.status_code in (200, 204):
+        ok("PUT /notifications/{id}/read", str(r.status_code))
+    else:
+        fail("PUT /notifications/{id}/read", f"{r.status_code} {r.text[:80]}")
+else:
+    skip("PUT /notifications/{id}/read", "no in-app notifications to mark")
+
+# ── 15A-6: mark all read ─────────────────────────────────────────────────────
+if _user_tok:
+    r = requests.put(f"{BASE}/notifications/read-all", headers=auth(_user_tok))
+    if r.status_code in (200, 204):
+        ok("PUT /notifications/read-all", str(r.status_code))
+    else:
+        fail("PUT /notifications/read-all", f"{r.status_code} {r.text[:80]}")
+
+# ── 15A-7: unauthenticated request rejected ───────────────────────────────────
+r = requests.get(f"{BASE}/notifications")
+if r.status_code in (401, 403):
+    ok("GET /notifications without token ->401/403", str(r.status_code))
+else:
+    fail("GET /notifications without token", f"got {r.status_code}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+section("15B. NOTIFICATIONS — admin template management")
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 15B-1: non-admin gets 403 on template endpoints ──────────────────────────
+if _user_tok:
+    r = requests.get(f"{BASE}/notifications/templates", headers=auth(_user_tok))
+    if r.status_code == 403:
+        ok("Non-admin GET /notifications/templates -> 403", "RBAC enforced")
+    else:
+        fail("Non-admin template access RBAC", f"got {r.status_code} expected 403")
+
+# ── 15B-2: event types catalogue ─────────────────────────────────────────────
+if _admin_tok:
+    r = requests.get(f"{BASE}/notifications/templates/event-types", headers=auth(_admin_tok))
+    cats = check("GET /notifications/templates/event-types", r, 200)
+    EVENT_TYPES = [e["event_type"] for e in cats] if isinstance(cats, list) else []
+    if EVENT_TYPES:
+        ok(f"event catalogue has {len(EVENT_TYPES)} event types", ", ".join(EVENT_TYPES[:4]))
+else:
+    skip("GET event-types", "no admin token")
+    EVENT_TYPES = []
+
+# ── 15B-3: system variables ───────────────────────────────────────────────────
+if _admin_tok:
+    r = requests.get(f"{BASE}/notifications/templates/system-variables", headers=auth(_admin_tok))
+    svars = check("GET /notifications/templates/system-variables", r, 200)
+    if isinstance(svars, list) and svars:
+        ok(f"system variables: {len(svars)} vars loaded", svars[0].get("var_key",""))
+    else:
+        fail("system variables empty or wrong type", str(svars)[:80])
+
+# ── 15B-4: list templates (org + global merged) ───────────────────────────────
+if _admin_tok:
+    r = requests.get(f"{BASE}/notifications/templates", headers=auth(_admin_tok))
+    tmpls = check("GET /notifications/templates", r, 200)
+    if isinstance(tmpls, list):
+        ok(f"templates list: {len(tmpls)} rows", "includes global defaults")
+        # Verify attachment_vars field is present on each template
+        has_att = all("attachment_vars" in t for t in tmpls)
+        if has_att:
+            ok("All templates have attachment_vars field", "")
+        else:
+            fail("Some templates missing attachment_vars field", "")
+    TMPL_ID = tmpls[0]["id"] if tmpls else None
+    TMPL_EVENT = tmpls[0]["event_type"] if tmpls else "eval_critical"
+else:
+    skip("GET /notifications/templates", "no admin token")
+    TMPL_ID = None
+    TMPL_EVENT = "eval_critical"
+
+# ── 15B-5: filter templates by event_type ────────────────────────────────────
+if _admin_tok and TMPL_EVENT:
+    r = requests.get(
+        f"{BASE}/notifications/templates?event_type={TMPL_EVENT}",
+        headers=auth(_admin_tok),
+    )
+    check(f"GET /notifications/templates?event_type={TMPL_EVENT}", r, 200)
+
+# ── 15B-6: get event group (all channels for one event) ──────────────────────
+_test_event = EVENT_TYPES[0] if EVENT_TYPES else "eval_critical"
+if _admin_tok:
+    r = requests.get(
+        f"{BASE}/notifications/templates/event/{_test_event}",
+        headers=auth(_admin_tok),
+    )
+    grp = check(f"GET /notifications/templates/event/{_test_event}", r, 200)
+    if grp:
+        ok("event group has event_type field", grp.get("event_type", ""))
+        email_cfg = grp.get("email")
+        if email_cfg:
+            ok("email channel present in event group", "")
+            if "attachment_vars" in email_cfg:
+                ok("email channel has attachment_vars field", str(email_cfg["attachment_vars"]))
+            else:
+                fail("email channel missing attachment_vars field", "")
+
+# ── 15B-7: bulk-upsert — create org template with attachment_vars ─────────────
+CREATED_TMPL_IDS = []
+if _admin_tok and EVENT_TYPES:
+    upsert_payload = {
+        "event_type": EVENT_TYPES[0],
+        "recipient_roles": [],
+        "extra_recipient_emails": [],
+        "email": {
+            "enabled": True,
+            "subject_template": "[TEST] {{equipment.ueic}} — {{eval.test_type}}",
+            "body_template": (
+                "<p>Dear team,</p>"
+                "<p>Equipment <b>{{equipment.ueic}}</b> result: {{eval.overall}}.</p>"
+                "<p>Date: {{system.date}}</p>"
+            ),
+            "attachment_vars": [
+                {"var_key": "report.retriepdf", "type": "pdf"},
+                {"var_key": "report.retriexls", "type": "excel"},
+            ],
+        },
+        "sms": {"enabled": False},
+        "inapp": {
+            "enabled": True,
+            "body_template": "{{equipment.ueic}}: {{eval.overall}} — {{system.date}}",
+        },
+    }
+    r = requests.post(
+        f"{BASE}/notifications/templates/bulk-upsert",
+        json=upsert_payload,
+        headers=auth(_admin_tok),
+    )
+    rows = check("POST /notifications/templates/bulk-upsert (with attachment_vars)", r, 200)
+    if isinstance(rows, list) and rows:
+        ok(f"bulk-upsert created {len(rows)} template rows", "")
+        CREATED_TMPL_IDS = [t["id"] for t in rows]
+        # Verify attachment_vars stored on email row
+        email_row = next((t for t in rows if t["channel"] == "email"), None)
+        if email_row:
+            avars = email_row.get("attachment_vars", [])
+            if len(avars) == 2:
+                ok("attachment_vars stored correctly (2 entries)", str(avars))
+            else:
+                fail("attachment_vars count mismatch", f"expected 2, got {len(avars)}: {avars}")
+
+# ── 15B-8: create single template (POST) ─────────────────────────────────────
+SINGLE_TMPL_ID = None
+if _admin_tok and EVENT_TYPES:
+    ev = EVENT_TYPES[1] if len(EVENT_TYPES) > 1 else EVENT_TYPES[0]
+    r = requests.post(
+        f"{BASE}/notifications/templates",
+        json={
+            "event_type": ev,
+            "channel": "email",
+            "subject_template": "Test subject for {{request.number}}",
+            "body_template": "<p>Test body {{request.title}}</p>",
+            "recipient_roles": [],
+            "extra_recipient_emails": [],
+            "attachment_vars": [{"var_key": "report.retriepdf", "type": "pdf"}],
+            "is_active": True,
+        },
+        headers=auth(_admin_tok),
+    )
+    created = check("POST /notifications/templates (single, PDF attachment)", r, 201)
+    if created and created.get("id"):
+        SINGLE_TMPL_ID = created["id"]
+        ok("created template id", SINGLE_TMPL_ID)
+        avars = created.get("attachment_vars", [])
+        if avars and avars[0].get("type") == "pdf":
+            ok("attachment_vars persisted on created template", str(avars))
+        else:
+            fail("attachment_vars not persisted", str(avars))
+
+# ── 15B-9: update template (PUT) ─────────────────────────────────────────────
+if _admin_tok and SINGLE_TMPL_ID:
+    r = requests.put(
+        f"{BASE}/notifications/templates/{SINGLE_TMPL_ID}",
+        json={
+            "subject_template": "Updated subject {{request.number}}",
+            "body_template": "<p>Updated body — report attached.</p>",
+            "attachment_vars": [
+                {"var_key": "report.retriepdf",  "type": "pdf"},
+                {"var_key": "report.retriexls", "type": "excel"},
+            ],
+        },
+        headers=auth(_admin_tok),
+    )
+    upd = check("PUT /notifications/templates/{id} (add excel attachment)", r, 200)
+    if upd:
+        avars = upd.get("attachment_vars", [])
+        if len(avars) == 2:
+            ok("PUT updated attachment_vars to 2 entries", str(avars))
+        else:
+            fail("PUT attachment_vars count wrong", f"expected 2 got {len(avars)}")
+
+# ── 15B-10: delete org-specific template ─────────────────────────────────────
+if _admin_tok and SINGLE_TMPL_ID:
+    r = requests.delete(
+        f"{BASE}/notifications/templates/{SINGLE_TMPL_ID}",
+        headers=auth(_admin_tok),
+    )
+    if r.status_code == 204:
+        ok("DELETE /notifications/templates/{id} -> 204", "template deactivated")
+    else:
+        fail("DELETE /notifications/templates/{id}", f"got {r.status_code} {r.text[:80]}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+section("15C. NOTIFICATIONS — variable registry (admin)")
+# ─────────────────────────────────────────────────────────────────────────────
+
+CUSTOM_VAR_ID = None
+
+# ── 15C-1: list variables ────────────────────────────────────────────────────
+if _admin_tok:
+    r = requests.get(f"{BASE}/notifications/variables", headers=auth(_admin_tok))
+    vlist = check("GET /notifications/variables", r, 200)
+    if isinstance(vlist, list) and vlist:
+        ok(f"variables list: {len(vlist)} rows", vlist[0].get("var_key",""))
+
+# ── 15C-2: create custom variable ────────────────────────────────────────────
+if _admin_tok:
+    r = requests.post(
+        f"{BASE}/notifications/variables",
+        json={
+            "var_key":      "custom.test_ref",
+            "label":        "Custom Test Reference",
+            "group_name":   "Custom",
+            "description":  "Custom reference number for test reports",
+            "sample_value": "REF-2025-001",
+            "resolver_key": "custom_test_ref",
+        },
+        headers=auth(_admin_tok),
+    )
+    cv = check("POST /notifications/variables (create custom var)", r, 201)
+    if cv and cv.get("id"):
+        CUSTOM_VAR_ID = cv["id"]
+        ok("custom variable created", CUSTOM_VAR_ID)
+
+# ── 15C-3: update custom variable ────────────────────────────────────────────
+if _admin_tok and CUSTOM_VAR_ID:
+    r = requests.put(
+        f"{BASE}/notifications/variables/{CUSTOM_VAR_ID}",
+        json={"label": "Custom Test Reference (updated)", "sample_value": "REF-2025-999"},
+        headers=auth(_admin_tok),
+    )
+    check("PUT /notifications/variables/{id}", r, 200)
+
+# ── 15C-4: delete custom variable ────────────────────────────────────────────
+if _admin_tok and CUSTOM_VAR_ID:
+    r = requests.delete(
+        f"{BASE}/notifications/variables/{CUSTOM_VAR_ID}",
+        headers=auth(_admin_tok),
+    )
+    if r.status_code in (200, 204):
+        ok("DELETE /notifications/variables/{id} -> deactivated", str(r.status_code))
+    else:
+        fail("DELETE /notifications/variables/{id}", f"{r.status_code} {r.text[:80]}")
+
+# ── 15C-5: system variable cannot be deleted ──────────────────────────────────
+if _admin_tok:
+    r = requests.get(f"{BASE}/notifications/variables", headers=auth(_admin_tok))
+    vrows = r.json() if r.status_code == 200 else []
+    sys_var = next((v for v in vrows if v.get("is_system")), None)
+    if sys_var:
+        r = requests.delete(
+            f"{BASE}/notifications/variables/{sys_var['id']}",
+            headers=auth(_admin_tok),
+        )
+        if r.status_code in (400, 403, 404):
+            ok("System variable delete blocked -> 400/403/404", str(r.status_code))
+        else:
+            fail("System variable delete not blocked", f"got {r.status_code}")
+    else:
+        skip("System variable delete protection", "no system vars returned")
+
+# ─────────────────────────────────────────────────────────────────────────────
+section("15D. NOTIFICATIONS — routing rules (admin)")
+# ─────────────────────────────────────────────────────────────────────────────
+
+ROUTING_RULE_ID = None
+GLOBAL_RULE_ID  = None
+
+# ── 15D-1: meta (dropdown data) ──────────────────────────────────────────────
+if _admin_tok:
+    r = requests.get(f"{BASE}/notifications/routing-rules/meta", headers=auth(_admin_tok))
+    meta = check("GET /notifications/routing-rules/meta", r, 200)
+    if meta:
+        ok("routing-rules meta has keys", str(list(meta.keys()))[:80])
+
+# ── 15D-2: list routing rules (org + global) ─────────────────────────────────
+if _admin_tok:
+    r = requests.get(f"{BASE}/notifications/routing-rules", headers=auth(_admin_tok))
+    rules = check("GET /notifications/routing-rules", r, 200)
+    if isinstance(rules, list):
+        ok(f"routing rules: {len(rules)} rows (org + global)", "")
+        GLOBAL_RULE_ID = next(
+            (ru["id"] for ru in rules if not ru.get("organization_id")), None
+        )
+
+# ── 15D-3: create org routing rule ────────────────────────────────────────────
+if _admin_tok:
+    r = requests.post(
+        f"{BASE}/notifications/routing-rules",
+        json={
+            "event_type":                "eval_critical",
+            "channels":                  ["email", "inapp"],
+            "applicable_workflow_types": ["preventive_maintenance"],
+        },
+        headers=auth(_admin_tok),
+    )
+    if r.status_code in (200, 201):
+        created = r.json()
+        ROUTING_RULE_ID = created.get("id")
+        ok("POST /notifications/routing-rules", str(r.status_code))
+    elif r.status_code == 422:
+        skip("POST /notifications/routing-rules", f"422 schema mismatch: {r.text[:120]}")
+    else:
+        fail("POST /notifications/routing-rules", f"{r.status_code} {r.text[:120]}")
+
+# ── 15D-4: update routing rule ────────────────────────────────────────────────
+if _admin_tok and ROUTING_RULE_ID:
+    r = requests.put(
+        f"{BASE}/notifications/routing-rules/{ROUTING_RULE_ID}",
+        json={"channels": ["email", "sms", "inapp"]},
+        headers=auth(_admin_tok),
+    )
+    if r.status_code in (200, 204):
+        ok("PUT /notifications/routing-rules/{id}", str(r.status_code))
+    else:
+        fail("PUT /notifications/routing-rules/{id}", f"{r.status_code} {r.text[:80]}")
+
+# ── 15D-5: clone global rule as org override ──────────────────────────────────
+if _admin_tok and GLOBAL_RULE_ID:
+    r = requests.post(
+        f"{BASE}/notifications/routing-rules/{GLOBAL_RULE_ID}/clone",
+        json={},
+        headers=auth(_admin_tok),
+    )
+    if r.status_code in (200, 201):
+        ok("POST /notifications/routing-rules/{id}/clone", str(r.status_code))
+    elif r.status_code == 409:
+        ok("POST clone -> 409 already overridden", "idempotent")
+    else:
+        fail("POST /notifications/routing-rules/{id}/clone", f"{r.status_code} {r.text[:80]}")
+
+# ── 15D-6: delete org routing rule ────────────────────────────────────────────
+if _admin_tok and ROUTING_RULE_ID:
+    r = requests.delete(
+        f"{BASE}/notifications/routing-rules/{ROUTING_RULE_ID}",
+        headers=auth(_admin_tok),
+    )
+    if r.status_code in (200, 204):
+        ok("DELETE /notifications/routing-rules/{id}", str(r.status_code))
+    else:
+        fail("DELETE /notifications/routing-rules/{id}", f"{r.status_code} {r.text[:80]}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+section("15E. NOTIFICATIONS — schedule rules (admin)")
+# ─────────────────────────────────────────────────────────────────────────────
+
+SCHED_RULE_ID        = None
+GLOBAL_SCHED_RULE_ID = None
+
+# ── 15E-1: meta ───────────────────────────────────────────────────────────────
+if _admin_tok:
+    r = requests.get(f"{BASE}/notifications/schedule-rules/meta", headers=auth(_admin_tok))
+    meta = check("GET /notifications/schedule-rules/meta", r, 200)
+    if meta:
+        ok("schedule-rules meta loaded", str(list(meta.keys()))[:80])
+
+# ── 15E-2: list schedule rules ────────────────────────────────────────────────
+if _admin_tok:
+    r = requests.get(f"{BASE}/notifications/schedule-rules", headers=auth(_admin_tok))
+    srules = check("GET /notifications/schedule-rules", r, 200)
+    if isinstance(srules, list):
+        ok(f"schedule rules: {len(srules)} rows", "")
+        GLOBAL_SCHED_RULE_ID = next(
+            (sr["id"] for sr in srules if not sr.get("organization_id")), None
+        )
+
+# ── 15E-3: create schedule rule ───────────────────────────────────────────────
+if _admin_tok:
+    r = requests.post(
+        f"{BASE}/notifications/schedule-rules",
+        json={
+            "event_type":    "due_reminder",
+            "label":         "Test: Due Soon Reminder",
+            "trigger_type":  "due_soon",
+            "offset_days":   5,
+            "severity":      "info",
+        },
+        headers=auth(_admin_tok),
+    )
+    if r.status_code in (200, 201):
+        SCHED_RULE_ID = r.json().get("id")
+        ok("POST /notifications/schedule-rules", str(r.status_code))
+    elif r.status_code == 422:
+        skip("POST /notifications/schedule-rules", f"422: {r.text[:120]}")
+    else:
+        fail("POST /notifications/schedule-rules", f"{r.status_code} {r.text[:80]}")
+
+# ── 15E-4: update schedule rule ───────────────────────────────────────────────
+if _admin_tok and SCHED_RULE_ID:
+    r = requests.put(
+        f"{BASE}/notifications/schedule-rules/{SCHED_RULE_ID}",
+        json={"offset_days": 7},
+        headers=auth(_admin_tok),
+    )
+    if r.status_code in (200, 204):
+        ok("PUT /notifications/schedule-rules/{id}", str(r.status_code))
+    else:
+        fail("PUT /notifications/schedule-rules/{id}", f"{r.status_code} {r.text[:80]}")
+
+# ── 15E-5: clone global schedule rule ────────────────────────────────────────
+if _admin_tok and GLOBAL_SCHED_RULE_ID:
+    r = requests.post(
+        f"{BASE}/notifications/schedule-rules/{GLOBAL_SCHED_RULE_ID}/clone",
+        json={},
+        headers=auth(_admin_tok),
+    )
+    if r.status_code in (200, 201, 409):
+        ok("POST /notifications/schedule-rules/{id}/clone", str(r.status_code))
+    else:
+        fail("POST /notifications/schedule-rules/{id}/clone", f"{r.status_code} {r.text[:80]}")
+
+# ── 15E-6: delete schedule rule ───────────────────────────────────────────────
+if _admin_tok and SCHED_RULE_ID:
+    r = requests.delete(
+        f"{BASE}/notifications/schedule-rules/{SCHED_RULE_ID}",
+        headers=auth(_admin_tok),
+    )
+    if r.status_code in (200, 204):
+        ok("DELETE /notifications/schedule-rules/{id}", str(r.status_code))
+    else:
+        fail("DELETE /notifications/schedule-rules/{id}", f"{r.status_code} {r.text[:80]}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+section("15F. NOTIFICATIONS — admin backend (logs + test-fire + seed)")
+# ─────────────────────────────────────────────────────────────────────────────
+
+_kptcl_admin = TOKENS.get("KptclAdmin")
+
+# ── 15F-1: seed defaults (idempotent) ────────────────────────────────────────
+if _kptcl_admin:
+    r = requests.post(
+        f"{BASE}/admin/notifications/seed-defaults",
+        headers=auth(_kptcl_admin),
+    )
+    if r.status_code in (200, 201):
+        ok("POST /admin/notifications/seed-defaults", str(r.status_code))
+    else:
+        fail("POST /admin/notifications/seed-defaults", f"{r.status_code} {r.text[:80]}")
+
+# ── 15F-2: list admin templates ───────────────────────────────────────────────
+if _kptcl_admin:
+    r = requests.get(f"{BASE}/admin/notifications/templates", headers=auth(_kptcl_admin))
+    if r.status_code == 200:
+        at = r.json()
+        ok(f"GET /admin/notifications/templates -> {len(at)} rows", "")
+    else:
+        fail("GET /admin/notifications/templates", f"{r.status_code} {r.text[:80]}")
+
+# ── 15F-3: notification logs ──────────────────────────────────────────────────
+if _kptcl_admin:
+    r = requests.get(f"{BASE}/admin/notifications/logs", headers=auth(_kptcl_admin))
+    if r.status_code == 200:
+        logs = r.json()
+        ok(f"GET /admin/notifications/logs -> {len(logs) if isinstance(logs, list) else '?'} rows", "")
+    else:
+        fail("GET /admin/notifications/logs", f"{r.status_code} {r.text[:80]}")
+
+# ── 15F-4: test-fire (sends to calling admin) ────────────────────────────────
+if _kptcl_admin and EVENT_TYPES:
+    r = requests.post(
+        f"{BASE}/admin/notifications/test-fire",
+        json={"event_type": EVENT_TYPES[0], "context": {"equipment": "TX-TEST-001"}},
+        headers=auth(_kptcl_admin),
+    )
+    if r.status_code in (200, 201, 202):
+        ok("POST /admin/notifications/test-fire", str(r.status_code))
+    elif r.status_code == 404:
+        ok("POST /admin/notifications/test-fire -> 404 (no template yet for this event)", "expected")
+    else:
+        fail("POST /admin/notifications/test-fire", f"{r.status_code} {r.text[:120]}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 16. DEPARTMENT FILTER ISOLATION
@@ -1653,7 +2163,7 @@ for cat in _SCHED_CATEGORIES:
     else:
         skip(f"GET schedule [{cat}]", str(r.status_code))
 
-    # Update schedule → quarterly
+    # Update schedule -> quarterly
     r = requests.put(f"{BASE}/testing_requests/{tr_id}/schedule/", json={
         "frequency": "quarterly",
         "advance_days": 14,

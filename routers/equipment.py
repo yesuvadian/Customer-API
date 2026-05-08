@@ -199,6 +199,18 @@ def create_equipment(
         # Non-fatal: commissioning failure must not block equipment creation
         print(f"[WARN] Test Register commissioning failed for {equipment.id}: {exc}")
 
+    try:
+        from services.notification_service import NotificationService
+        commissioned_by = f"{current_user.firstname or ''} {current_user.lastname or ''}".strip() or current_user.email
+        NotificationService(db).notify_equipment_registered(
+            equipment,
+            commissioned_by=commissioned_by,
+            organization_id=org_id,
+            department_id=equipment.department_id,
+        )
+    except Exception as _n:
+        print(f"[WARN] equipment_registered notification failed: {_n}")
+
     return _to_response(equipment)
 
 
@@ -407,6 +419,20 @@ def retire_equipment(
     )
     db.commit()
     db.refresh(equipment)
+
+    try:
+        from services.notification_service import NotificationService
+        retired_by = f"{current_user.firstname or ''} {current_user.lastname or ''}".strip() or current_user.email
+        NotificationService(db).notify_equipment_retired(
+            equipment,
+            retired_by=retired_by,
+            reason=data.reason or "",
+            organization_id=org_id,
+            department_id=equipment.department_id,
+        )
+    except Exception as _n:
+        print(f"[WARN] equipment_retired notification failed: {_n}")
+
     return _to_response(equipment)
 
 

@@ -76,6 +76,192 @@ def _render(template: str, context: Dict[str, Any]) -> str:
     return result
 
 
+# ── Source-record context enrichment ─────────────────────────────────────────
+
+def _enrich_context_from_source(
+    db: Session,
+    source_type: Optional[str],
+    source_id: Optional[UUID],
+    ctx: Dict[str, Any],
+) -> None:
+    """
+    Load the triggering record from DB and add its fields to ctx so templates
+    can use {{tr.id}}, {{tr.status}}, {{tr.category}}, {{equipment.ueic}},
+    {{equipment.name}}, {{dept.name}}, etc. without the caller having to
+    pass every field manually.
+
+    CategoryDetails is used to resolve display names for category IDs.
+    """
+    if not source_type or not source_id:
+        return
+    try:
+        if source_type == "testing_request":
+            from models import TestingRequest, OrgDepartment, CategoryDetails, CategoryMaster
+            tr = db.query(TestingRequest).filter(TestingRequest.id == source_id).first()
+            if not tr:
+                return
+            ctx.setdefault("tr.id",          str(tr.id))
+            ctx.setdefault("tr.status",       str(tr.status.value) if tr.status else "")
+            ctx.setdefault("tr.submitted_at", str(tr.created_at)[:19] if tr.created_at else "")
+            ctx.setdefault("tr.category",     str(tr.request_category.value) if tr.request_category else "")
+            ctx.setdefault("request.number",  tr.request_number or str(tr.id)[:8])
+            ctx.setdefault("request.status",  str(tr.status.value) if tr.status else "")
+            ctx.setdefault("request.title",   tr.title or "")
+            ctx.setdefault("request.priority", tr.priority or "normal")
+            if tr.due_date:
+                ctx.setdefault("request.due_date", str(tr.due_date)[:10])
+            # CategoryDetails → test type display name (e.g. "Routine Test")
+            if tr.test_type_id:
+                cat = db.query(CategoryDetails).filter(
+                    CategoryDetails.id == tr.test_type_id
+                ).first()
+                if cat:
+                    ctx.setdefault("eval.test_type",   cat.name or "")
+                    ctx.setdefault("tr.test_type",     cat.name or "")
+                    ctx.setdefault("tr.category_type", cat.category_type or "")
+            # CategoryMaster → equipment type display name (e.g. "Power Transformer")
+            if tr.equipment_type_id:
+                eq_type = db.query(CategoryMaster).filter(
+                    CategoryMaster.id == tr.equipment_type_id
+                ).first()
+                if eq_type:
+                    ctx.setdefault("equipment.type", eq_type.name or "")
+            # Department context from TR
+            if tr.department_id:
+                dept = db.query(OrgDepartment).filter(
+                    OrgDepartment.id == tr.department_id
+                ).first()
+                if dept:
+                    ctx.setdefault("dept.name", dept.name or "")
+                    ctx.setdefault("dept.code", dept.code or "")
+            # Equipment (asset register) context
+            if tr.equipment_id:
+                from models import Equipment
+                eq = db.query(Equipment).filter(Equipment.id == tr.equipment_id).first()
+                if eq:
+                    ctx.setdefault("equipment.ueic", getattr(eq, "ueic", "") or "")
+                    ctx.setdefault("equipment.name", getattr(eq, "name", "") or "")
+
+        elif source_type == "test_result":
+            from models import TestResult, TestingRequest, OrgDepartment
+            tr_res = db.query(TestResult).filter(TestResult.id == source_id).first()
+            if not tr_res:
+                return
+            ctx.setdefault("eval.overall",     tr_res.overall_result or "")
+            ctx.setdefault("eval.evaluated_at", str(tr_res.created_at)[:19] if tr_res.created_at else "")
+            if tr_res.testing_request_id:
+                tr = db.query(TestingRequest).filter(
+                    TestingRequest.id == tr_res.testing_request_id
+                ).first()
+                if tr:
+                    ctx.setdefault("request.number", tr.request_number or str(tr.id)[:8])
+                    ctx.setdefault("tr.status",       tr.status or "")
+                    if tr.department_id:
+                        dept = db.query(OrgDepartment).filter(
+                            OrgDepartment.id == tr.department_id
+                        ).first()
+                        if dept:
+                            ctx.setdefault("dept.name", dept.name or "")
+                            ctx.setdefault("dept.code", dept.code or "")
+
+        elif source_type == "recommendation":
+            from models import Recommendation
+            rec = db.query(Recommendation).filter(Recommendation.id == source_id).first()
+            if rec:
+                ctx.setdefault("recommendation.id",     str(rec.id))
+                ctx.setdefault("recommendation.status", rec.status or "")
+
+    except Exception as _exc:
+        logger.debug(f"[Notif] _enrich_context_from_source({source_type}): {_exc}")
+
+
+def _load_org_variables(db: Session, organization_id: Optional[UUID]) -> Dict[str, str]:
+    """
+    Load active custom org variables from notification_variables table.
+    Returns {var_key: sample_value} for injection into the render context.
+    System variables (is_system=True) are registered here for the UI picker
+    but resolved by VariableResolver._ALIASES — skip them to avoid overwriting.
+    """
+    if not organization_id:
+        return {}
+    try:
+        rows = (
+            db.query(NotificationVariable)
+            .filter(
+                NotificationVariable.organization_id == organization_id,
+                NotificationVariable.is_system.is_(False),
+                NotificationVariable.is_active.is_(True),
+            )
+            .all()
+        )
+        return {r.var_key: (r.sample_value or "") for r in rows}
+    except Exception as _exc:
+        logger.debug(f"[Notif] _load_org_variables: {_exc}")
+        return {}
+
+
+def _generate_attachment_bytes(
+    db: Session,
+    source_type: Optional[str],
+    source_id: Optional[UUID],
+    att_type: str,
+) -> Optional[bytes]:
+    """
+    Generate a report in-memory and return its raw bytes, or None on failure.
+
+    source_type → PDF service mapping:
+      testing_request     → TestingRequestPDFService.generate_pdf(id)
+      test_result         → TestResultPDFService.generate_pdf(id)
+      recommendation      → RecommendationPDFService.generate_pdf(id)
+      equipment_replacement → EquipmentReplacementPDFService.generate_pdf(old_id, new_id)
+
+    Excel: reserved for future ReportingService integration.
+    """
+    if not source_type or not source_id:
+        return None
+    try:
+        att_type = att_type.lower().strip()
+
+        if att_type == "pdf":
+            if source_type == "testing_request":
+                from services.testing_request_pdf_service import TestingRequestPDFService
+                svc = TestingRequestPDFService(db)
+                bio = svc.generate_pdf(str(source_id))
+                return bio.getvalue() if bio else None
+
+            elif source_type == "test_result":
+                from services.test_result_pdf_service import TestResultPDFService
+                svc = TestResultPDFService(db)
+                bio = svc.generate_pdf(source_id)
+                return bio.getvalue() if bio else None
+
+            elif source_type == "recommendation":
+                from services.recommendation_pdf_service import RecommendationPDFService
+                svc = RecommendationPDFService(db)
+                bio = svc.generate_pdf(str(source_id))
+                return bio.getvalue() if bio else None
+
+            elif source_type == "equipment_replacement":
+                from services.equipment_replacement_pdf_service import EquipmentReplacementPDFService
+                svc = EquipmentReplacementPDFService(db)
+                bio = svc.generate_pdf(source_id, source_id)
+                return bio.getvalue() if bio else None
+
+        elif att_type in ("excel", "xlsx"):
+            # Excel generation requires a ReportDefinition — not yet wired for
+            # on-demand notification attachments. Return None so the email is sent
+            # without the Excel file rather than blocking delivery.
+            logger.info(
+                f"[Notif] Excel attachment for {source_type}/{source_id} skipped "
+                f"(no on-demand Excel service configured)"
+            )
+            return None
+
+    except Exception as _exc:
+        logger.warning(f"[Notif] _generate_attachment_bytes({source_type}, {att_type}): {_exc}")
+    return None
+
+
 # ── Variable context resolver ─────────────────────────────────────────────────
 
 class VariableResolver:
@@ -378,29 +564,64 @@ class EmailDispatcher(ChannelDispatcher):
         try:
             attachment_entries = log.attachment_urls or []
             if attachment_entries:
-                # ── Build attachment list — fetch each URL / local path ────────
+                # ── Build attachment list ──────────────────────────────────────
+                # Strategy:
+                #   1. If entry has "url" → fetch bytes from URL (legacy path).
+                #   2. If no URL but type=pdf/excel → generate in-memory from
+                #      log.source_type + log.source_id using the PDF/Excel service.
                 attachments: List[Dict] = []
                 svc = EmailService()
                 for entry in attachment_entries:
-                    url     = entry.get("url", "")
-                    var_key = entry.get("var_key", "")
+                    url      = entry.get("url", "")
+                    var_key  = entry.get("var_key", "")
                     att_type = (entry.get("type") or "").lower().strip()
 
-                    if not url:
-                        logger.debug(f"[Notif] Attachment entry missing url, skipping: {entry}")
-                        continue
+                    content: Optional[bytes] = None
+                    filename: str = ""
+                    mime_type: str = "application/octet-stream"
 
-                    content = svc._fetch_attachment(url)
-                    if not content:
-                        logger.warning(f"[Notif] Could not fetch attachment {url!r} for log {log.id}")
-                        continue
+                    if url:
+                        # Path 1: fetch from URL
+                        content = svc._fetch_attachment(url)
+                        if not content:
+                            logger.warning(
+                                f"[Notif] Could not fetch attachment {url!r} for log {log.id}"
+                            )
+                            continue
+                        if att_type and att_type in self._MIME_MAP:
+                            mime_type = self._MIME_MAP[att_type]
+                            filename, _ = svc._guess_filename(url, var_key)
+                        else:
+                            filename, mime_type = svc._guess_filename(url, var_key)
 
-                    # Resolve MIME type — explicit type beats auto-detection
-                    if att_type and att_type in self._MIME_MAP:
-                        mime_type = self._MIME_MAP[att_type]
-                        filename, _ = svc._guess_filename(url, var_key)
+                    elif att_type in ("pdf", "excel", "xlsx"):
+                        # Path 2: generate in-memory from the triggering record.
+                        # Use source_type/source_id from the entry if present (set by
+                        # _dispatch_to_user), otherwise fall back to the log's own fields.
+                        _src_type = entry.get("source_type") or log.source_type
+                        _src_id   = entry.get("source_id")
+                        _src_uuid = UUID(_src_id) if _src_id else log.source_id
+                        content = _generate_attachment_bytes(
+                            db, _src_type, _src_uuid, att_type
+                        )
+                        if not content:
+                            logger.warning(
+                                f"[Notif] Could not generate {att_type} attachment for "
+                                f"source={log.source_type}/{log.source_id} log={log.id}"
+                            )
+                            continue
+                        mime_type = self._MIME_MAP.get(att_type, "application/octet-stream")
+                        ext = "pdf" if att_type == "pdf" else "xlsx"
+                        src_label = (log.source_type or "report").replace("_", "-")
+                        src_short = str(log.source_id)[:8] if log.source_id else "report"
+                        filename  = f"{src_label}-{src_short}.{ext}"
+
                     else:
-                        filename, mime_type = svc._guess_filename(url, var_key)
+                        logger.debug(
+                            f"[Notif] Attachment entry has no url and no generatable type, "
+                            f"skipping: {entry}"
+                        )
+                        continue
 
                     attachments.append({
                         "content":   content,
@@ -411,9 +632,9 @@ class EmailDispatcher(ChannelDispatcher):
                 if attachments:
                     svc.send_multi_attachment_email_starttls(to_email, subject, body, attachments)
                 else:
-                    # All fetches failed — fall back to plain email so at least the
-                    # body content is delivered
-                    logger.warning(f"[Notif] All attachment fetches failed for log {log.id}; sending body only")
+                    logger.warning(
+                        f"[Notif] All attachments failed for log {log.id}; sending body only"
+                    )
                     svc.send_email_starttls(to_email, subject, body)
             else:
                 EmailService().send_email_starttls(to_email, subject, body)
@@ -747,7 +968,6 @@ class NotificationService:
             resolved_ctx = VariableResolver.build_context(context)
 
             # ── Auto-inject org context from DB ──────────────────────────────
-            # Ensures {{org.name}} / {{org_name}} renders "KPTCL" automatically
             _org_name = "SEACMS"
             if organization_id and not resolved_ctx.get("org_name"):
                 try:
@@ -763,6 +983,17 @@ class NotificationService:
                     logger.debug(f"[Notif] Could not auto-inject org context: {_org_exc}")
             else:
                 _org_name = resolved_ctx.get("org_name", "SEACMS")
+
+            # ── Enrich context from the triggering source record (DB lookup) ──
+            # Resolves {{tr.category}}, {{equipment.ueic}}, {{dept.name}}, etc.
+            # Uses CategoryDetails for category display names.
+            _enrich_context_from_source(self.db, source_type, source_id, resolved_ctx)
+
+            # ── Load custom org variables from notification_variables table ───
+            # Injects {{custom.var_key}} values defined by the org admin.
+            _org_vars = _load_org_variables(self.db, organization_id)
+            for _k, _v in _org_vars.items():
+                resolved_ctx.setdefault(_k, _v)
 
             # ── Routing rule: which channels are allowed for this call? ───────
             routing = _resolve_routing(
@@ -798,9 +1029,6 @@ class NotificationService:
                     )
                     continue
 
-                subject = _render(tmpl.subject_template or "", resolved_ctx)
-                body    = _render(tmpl.body_template,            resolved_ctx)
-
                 # ── Recipient roles: routing override wins if set ─────────────
                 effective_roles = roles_override or list(tmpl.recipient_roles or [])
 
@@ -823,12 +1051,43 @@ class NotificationService:
                 dispatched_emails: set = {u.email for u in recipients if u.email}
 
                 for user in recipients:
+                    # ── Per-recipient context: personalise {{user.*}} vars ────
+                    user_ctx = dict(resolved_ctx)
+                    _fname = (user.firstname or "").strip()
+                    _lname = (user.lastname or "").strip()
+                    user_ctx["user.name"]  = f"{_fname} {_lname}".strip() or user.email or ""
+                    user_ctx["user.email"] = user.email or ""
+                    # Inject dept context from the user's active role assignment
+                    try:
+                        from models import OrgDepartment
+                        _uur = (
+                            self.db.query(OrgUserRole)
+                            .filter(
+                                OrgUserRole.user_id == user.id,
+                                OrgUserRole.is_active.is_(True),
+                                OrgUserRole.department_id.isnot(None),
+                            )
+                            .first()
+                        )
+                        if _uur and _uur.department_id and not user_ctx.get("dept.name"):
+                            _udept = self.db.query(OrgDepartment).filter(
+                                OrgDepartment.id == _uur.department_id
+                            ).first()
+                            if _udept:
+                                user_ctx["dept.name"] = _udept.name or ""
+                                user_ctx["dept.code"] = _udept.code or ""
+                    except Exception:
+                        pass
+
+                    subject = _render(tmpl.subject_template or "", user_ctx)
+                    body    = _render(tmpl.body_template,            user_ctx)
+
                     self._dispatch_to_user(
                         tmpl=tmpl, user=user, subject=subject, body=body,
                         event_type=event_type, organization_id=organization_id,
                         source_id=source_id, source_type=source_type, severity=severity,
                         org_name=_org_name,
-                        resolved_ctx=resolved_ctx,
+                        resolved_ctx=user_ctx,
                     )
 
                 # ── extra_recipient_emails (individual addresses on template) ─
@@ -910,25 +1169,41 @@ class NotificationService:
         """Return department_id from a TestingRequest (or None)."""
         return getattr(request, "department_id", None)
 
-    def _workflow_type(self, request) -> Optional[str]:
-        """
-        Return the workflow type string for routing rule matching.
-        Reads request.workflow_type first; falls back to request.request_type.
-        Expected values: "direct_test" | "failure_register" | "taqc" |
-                         "multisession" | "schedule"
-        """
-        return (
-            getattr(request, "workflow_type", None)
-            or getattr(request, "request_type", None)
-        )
-
     def _test_type(self, request) -> Optional[str]:
         """
-        Return the test/category type for routing rule matching.
-        Maps to TestingRequest.request_category.
-        Expected values: "test" | "inspection" | "maintenance" | "life_cycle"
+        Return the test category type for routing rule matching.
+        Reads CategoryDetails.category_type via the test_type relationship first
+        (most specific), then falls back to request_category enum value.
+        Values: "test" | "maintenance" | "inspection" | "repair_lifecycle"
         """
-        return getattr(request, "request_category", None)
+        tt = getattr(request, "test_type", None)
+        if tt is not None:
+            cat = getattr(tt, "category_type", None)
+            if cat:
+                return cat
+        rc = getattr(request, "request_category", None)
+        if rc is None:
+            return None
+        return rc.value if hasattr(rc, "value") else str(rc)
+
+    def _workflow_type(self, request) -> Optional[str]:
+        """
+        Derive the workflow type from the test category — no extra column needed.
+        test / maintenance / inspection → "testing_request"
+        repair_lifecycle               → "repair_lifecycle"
+        failure_registry               → "failure_registry"
+        taqc_inspection                → "taqc_inspection"
+        """
+        cat = self._test_type(request)
+        return {
+            "test":             "testing_request",
+            "maintenance":      "testing_request",
+            "inspection":       "testing_request",
+            "nameplate":        "testing_request",
+            "repair_lifecycle": "repair_lifecycle",
+            "failure_registry": "failure_registry",
+            "taqc_inspection":  "taqc_inspection",
+        }.get(cat or "")
 
     def _equipment_type(self, request) -> Optional[str]:
         """Return the equipment type name from a TestingRequest (or None)."""
@@ -1525,12 +1800,16 @@ class NotificationService:
             final_body = dispatcher.prepare_body(body, subject=subject, org_name=org_name)
 
         # ── Resolve attachment_vars → attachment_urls (email channel only) ─────
+        # Strategy:
+        #   • If var_key resolves to a URL in context → store {url, type}  (legacy)
+        #   • If no URL but type=pdf/excel → store {type, source_type, source_id}
+        #     so the EmailDispatcher scheduler generates the file in-memory at send time.
         resolved_attachment_urls: List[Dict] = []
         if tmpl.channel == "email" and tmpl.attachment_vars and resolved_ctx:
             for av in (tmpl.attachment_vars or []):
                 if isinstance(av, dict):
                     var_key  = av.get("var_key", "")
-                    att_type = av.get("type", "")
+                    att_type = (av.get("type") or "").lower()
                 else:
                     var_key  = str(av)
                     att_type = ""
@@ -1540,6 +1819,14 @@ class NotificationService:
                     if att_type:
                         entry["type"] = att_type
                     resolved_attachment_urls.append(entry)
+                elif att_type in ("pdf", "excel", "xlsx") and source_type and source_id:
+                    # No URL — schedule in-memory generation at send time
+                    resolved_attachment_urls.append({
+                        "type":        att_type,
+                        "var_key":     var_key,
+                        "source_type": str(source_type),
+                        "source_id":   str(source_id),
+                    })
                 else:
                     logger.debug(
                         f"[Notif] attachment_var {var_key!r} resolved to empty for "

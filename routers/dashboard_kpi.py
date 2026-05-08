@@ -397,40 +397,44 @@ def invalidate_cache(
 @router.get("/aee")
 def get_aee_dashboard(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """AEE Dashboard - Field-level maintenance supervisor view."""
-    return _svc(db, current_user, org_id).aee_dashboard()
+    return _svc(db, current_user, org_id, dept_id).aee_dashboard()
 
 
 @router.get("/ee-tlss")
 def get_ee_tlss_dashboard(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """EE TLSS Dashboard - Condition monitoring & operational oversight."""
-    return _svc(db, current_user, org_id).ee_tlss_dashboard()
+    return _svc(db, current_user, org_id, dept_id).ee_tlss_dashboard()
 
 
 @router.get("/see")
 def get_see_dashboard(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """SEE Dashboard - Circle-level supervision."""
-    return _svc(db, current_user, org_id).see_dashboard()
+    return _svc(db, current_user, org_id, dept_id).see_dashboard()
 
 
 @router.get("/cee")
 def get_cee_dashboard(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """CEE Dashboard - Zone-level executive management."""
-    return _svc(db, current_user, org_id).cee_dashboard()
+    return _svc(db, current_user, org_id, dept_id).cee_dashboard()
 
 

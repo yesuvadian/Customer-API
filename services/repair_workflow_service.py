@@ -671,6 +671,20 @@ class RepairWorkflowService:
 
             self.db.commit()
             self._log_audit(workflow_id, current_stage_id, "completed", user_id, "Workflow completed")
+
+            try:
+                from services.notification_service import NotificationService
+                if equipment:
+                    NotificationService(self.db).notify_overhaul_recommended(
+                        equipment,
+                        operation_count=workflow.progress,
+                        operation_threshold=100,
+                        organization_id=equipment.organization_id,
+                        department_id=equipment.department_id,
+                    )
+            except Exception as _n:
+                print(f"[WARN] overhaul_recommended notification failed: {_n}")
+
             return {"message": "Workflow completed", "status": "completed", "progress": 100}
 
         # Advance to next stage
@@ -697,6 +711,28 @@ class RepairWorkflowService:
             RepairStageDefinition.id == next_stage_id
         ).first()
         self._log_audit(workflow_id, next_stage_id, "started", user_id, "Moved to next stage")
+
+        try:
+            from services.notification_service import NotificationService
+            equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+            if equipment:
+                NotificationService(self.db).fire(
+                    event_type="repair_stage_changed",
+                    context={
+                        "equipment": equipment.ueic or str(equipment.id),
+                        "equipment_type": equipment.equipment_type.name if equipment.equipment_type else "Equipment",
+                        "stage": next_stage.name if next_stage else "Next Stage",
+                        "progress": str(workflow.progress),
+                    },
+                    organization_id=equipment.organization_id,
+                    department_id=equipment.department_id,
+                    source_id=workflow.id,
+                    source_type="repair_workflow",
+                    severity="info",
+                    workflow_type="repair_lifecycle",
+                )
+        except Exception as _n:
+            print(f"[WARN] repair_stage_changed notification failed: {_n}")
 
         return {
             "message": "Stage advanced",
@@ -785,6 +821,24 @@ class RepairWorkflowService:
         prev_stage = self.db.query(RepairStageDefinition).filter(
             RepairStageDefinition.id == prev_stage_id
         ).first()
+
+        try:
+            from services.notification_service import NotificationService
+            equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+            rejected_stage = self.db.query(RepairStageDefinition).filter(
+                RepairStageDefinition.id == current_stage_id
+            ).first()
+            if equipment:
+                NotificationService(self.db).notify_repair_delay(
+                    equipment,
+                    repair_stage=rejected_stage.name if rejected_stage else "Unknown Stage",
+                    stage_deadline="-",
+                    days_delayed=0,
+                    organization_id=equipment.organization_id,
+                    department_id=equipment.department_id,
+                )
+        except Exception as _n:
+            print(f"[WARN] repair_delay notification failed: {_n}")
 
         return {
             "message": "Stage rejected — returned to previous stage",

@@ -58,26 +58,71 @@ APScheduler — fire_overdue_reminders (daily 08:00)
 
 Templates support `{{double.brace}}` and `{single.brace}` syntax. The renderer normalises both before resolving.
 
+### Injection pipeline (order of resolution)
+
+```
+fire(event_type, context, source_type, source_id, ...)
+  |
+  +-- 1. VariableResolver.build_context(context)
+  |       Copies caller context + aliases (equipment.ueic from "equipment" key)
+  |       Injects system.date / system.time / system.app_name
+  |
+  +-- 2. Auto-inject org context from DB
+  |       org.name / org.id  →  queried from Organization table
+  |
+  +-- 3. _enrich_context_from_source(db, source_type, source_id, ctx)
+  |       Queries the triggering record (TestingRequest / TestResult / Recommendation)
+  |       Resolves tr.category / tr.test_type via CategoryDetails lookup
+  |       Resolves equipment.ueic / equipment.name / dept.name from FKs
+  |
+  +-- 4. _load_org_variables(db, org_id)
+  |       Loads active custom org variables from notification_variables table
+  |       Injected as {{var_key}} values (sample_value used as fallback)
+  |
+  +-- 5. Per-recipient render (inside user loop)
+          user_ctx = { ...shared_ctx, user.name, user.email, dept.name from OrgUserRole }
+          subject = _render(subject_template, user_ctx)
+          body    = _render(body_template,    user_ctx)
+```
+
 ### Built-in system variables (33 total — partial list)
 
 | Variable | Resolves to |
 |---|---|
-| `{{dept.code}}` | Department code (e.g. RT_NORTH) |
+| `{{dept.code}}` | Department code (e.g. RT_NORTH) — from TR dept or user's dept |
 | `{{dept.name}}` | Department display name |
-| `{{user.name}}` | Recipient's full name |
-| `{{user.email}}` | Recipient's email |
+| `{{user.name}}` | **Per-recipient** full name (firstname + lastname) |
+| `{{user.email}}` | **Per-recipient** email address |
 | `{{tr.id}}` | Testing Request UUID |
 | `{{tr.status}}` | Current TR status |
-| `{{tr.category}}` | Request category (test/inspection/maintenance…) |
+| `{{tr.category}}` | Request category enum (test/inspection/maintenance/repair_lifecycle) |
+| `{{tr.test_type}}` | Test type display name from CategoryDetails (e.g. "Routine Test") |
 | `{{tr.submitted_at}}` | Submission timestamp |
+| `{{request.number}}` | TR request number (e.g. TR-2025-001) |
+| `{{request.title}}` | TR title |
+| `{{request.priority}}` | Priority (normal/high/critical) |
+| `{{request.due_date}}` | Due date YYYY-MM-DD |
 | `{{equipment.ueic}}` | Equipment unique ID (e.g. ZO-1A-066-01-PT-01) |
 | `{{equipment.name}}` | Equipment display name |
+| `{{equipment.type}}` | Equipment type from CategoryMaster (e.g. "Power Transformer") |
+| `{{eval.overall}}` | Test result overall verdict |
+| `{{eval.test_type}}` | Test type name (same as tr.test_type) |
 | `{{org.name}}` | Organisation name |
 | `{{org.code}}` | Organisation code |
+| `{{system.date}}` | Today's date (UTC) |
+| `{{system.time}}` | Current time (UTC) |
+| `{{system.app_name}}` | Application name |
+
+### CategoryMaster / CategoryDetails usage
+
+| TR field | CategoryMaster / CategoryDetails | Resolved as |
+|---|---|---|
+| `equipment_type_id` | CategoryMaster (e.g. "Power Transformer") | `{{equipment.type}}` |
+| `test_type_id` | CategoryDetails (e.g. "Routine Test") | `{{tr.test_type}}` / `{{eval.test_type}}` |
 
 ### Custom org variables
 
-Created via `POST /notifications/variables`. Use `{{var_key}}` in any template body or subject.
+Created via `POST /notifications/variables`. Use `{{var_key}}` in any template body or subject. Values are loaded from the `notification_variables` table at fire time and injected into the render context automatically.
 
 ---
 
@@ -146,7 +191,14 @@ NotificationTemplateConfigPage
 
 ## 4. Attachment Pipeline (PDF / Excel)
 
-When `attachment_vars` is configured on a template's email channel the service generates and attaches reports in-memory at send time — no URLs, no pre-stored files.
+When `attachment_vars` is configured on a template's email channel the service generates and attaches reports **in-memory at send time** — no URLs, no pre-stored files.
+
+### UI configuration (Flutter)
+
+In the template editor, the **EMAIL ATTACHMENTS** section lets you:
+1. Click "Add Attachment" → pick a variable from the variable picker
+2. Choose the attachment type: PDF / Excel / Word / JSON / CSV
+3. The entry `{"var_key": "report.retriepdf", "type": "pdf"}` is stored in `attachment_vars`
 
 ### attachment_vars format (stored on NotificationTemplate + copied to NotificationLog)
 
@@ -157,17 +209,40 @@ When `attachment_vars` is configured on a template's email channel the service g
 ]
 ```
 
+### Generation pipeline
+
+```
+_dispatch_to_user()
+  |
+  +-- For each attachment_var entry:
+  |     If var_key resolves to a URL in context → store {url, type}   (legacy)
+  |     If type=pdf/excel and no URL           → store {type, source_type, source_id}
+  |
+  v
+NotificationLog.attachment_urls = [{"type": "pdf", "source_type": "...", "source_id": "..."}]
+
+APScheduler picks up pending log
+  |
+  v
+EmailDispatcher.send(db, log, subject, body)
+  |
+  +-- For each attachment_urls entry:
+  |     If entry has "url"  → fetch bytes from URL
+  |     If type=pdf         → _generate_attachment_bytes(db, source_type, source_id, "pdf")
+  |     If type=excel       → (reserved — no-op until direct Excel service added)
+  |
+  v
+EmailService.send_multi_attachment_email_starttls(to, subject, body, attachments)
+```
+
 ### Source type to report service mapping
 
-| `source_type` | PDF generator | Excel generator |
+| `source_type` | PDF generator | Excel |
 |---|---|---|
-| `test_result` | `TestResultPDFService` | `ReportingService(query_key="test_result_report")` |
-| `testing_request` | `TestingRequestPDFService` | `ReportingService(query_key="testing_request_report")` |
-| `recommendation` | `RecommendationPDFService` | `ReportingService(query_key="recommendation_report")` |
-| `equipment_replacement` | `EquipmentReplacementPDFService` | — |
-| `approval` | `ReportService.generate_approval_report()` | — |
-
-Attachments are sent via `EmailService.send_multi_attachment_email_starttls(attachments=[...])`.
+| `testing_request` | `TestingRequestPDFService.generate_pdf(id)` | (reserved) |
+| `test_result` | `TestResultPDFService.generate_pdf(id)` | (reserved) |
+| `recommendation` | `RecommendationPDFService.generate_pdf(id)` | (reserved) |
+| `equipment_replacement` | `EquipmentReplacementPDFService.generate_pdf(old, new)` | — |
 
 ---
 

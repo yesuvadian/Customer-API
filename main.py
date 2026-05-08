@@ -202,62 +202,251 @@ scheduler.add_job(
 
 
 # Overdue & due-reminder check (runs daily at 07:00 UTC)
-def _check_overdue_and_due_reminders():
+def _check_schedule_notifications():
     """
-    Scan open testing requests:
-    • due_date passed → notify_overdue
-    • due_date within 3 days → notify_due_reminder
+    Fully config-driven scheduler job.
+
+    Reads every active NotificationScheduleRule row and evaluates each open TR.
+
+    Supported trigger_type values (SRS §8.x):
+      "due_soon"          — fires when due_date is within offset_days of today
+      "overdue"           — fires when due_date < today
+      "escalation"        — fires when due_date < today - offset_days
+      "status_transition" — fires when req.status == rule.trigger_on_status
+      "both"              — fires when BOTH time condition AND status condition match
+                           (e.g. overdue by 5 days AND status still 'in_progress')
+
+    If rule.advanced_conditions (JSONB) is set, it is evaluated as a JSON rule
+    with AND/OR logic, overriding the simple column-based matching.
+
+    applicable_categories  : restrict to matching request_category values; [] = all
+    applicable_workflow_types: restrict to matching workflow/request_type values; [] = all
+
+    Adding a new scheduler-based notification = INSERT a row into notification_schedule_rules.
+    Zero code change required.
     """
     from datetime import date, timedelta
     db = SessionLocal()
     try:
-        from models import TestingRequest, TestingRequestStatus
+        from models import (
+            NotificationScheduleRule,
+            TestingRequest,
+            TestingRequestStatus,
+        )
         from services.notification_service import NotificationService
         nsvc = NotificationService(db)
         today = date.today()
-        reminder_cutoff = today + timedelta(days=3)
 
+        # Load all active rules
+        all_rules = (
+            db.query(NotificationScheduleRule)
+            .filter(NotificationScheduleRule.is_active.is_(True))
+            .all()
+        )
+        if not all_rules:
+            logger.debug("[Notif] No active NotificationScheduleRules — skipping")
+            return
+
+        # Build per-org rule map; org-specific overrides global for same key
+        from collections import defaultdict
+        org_rules: dict = defaultdict(dict)   # org_id → {rule_key → rule}
+        global_rules: dict = {}               # rule_key → rule
+
+        for rule in all_rules:
+            # Key includes offset_days and trigger_on_status so identical
+            # event_type+trigger_type combos with different parameters coexist.
+            key = (rule.event_type, rule.trigger_type,
+                   rule.offset_days, rule.trigger_on_status)
+            if rule.organization_id is None:
+                global_rules[key] = rule
+            else:
+                org_rules[rule.organization_id][key] = rule
+
+        # All statuses that represent an "open" test request
         open_statuses = (
             TestingRequestStatus.submitted,
             TestingRequestStatus.assigned,
             TestingRequestStatus.accepted,
             TestingRequestStatus.in_progress,
         )
+
+        # Load all open TRs (with and without due_date for status_transition rules)
         requests = (
             db.query(TestingRequest)
-            .filter(
-                TestingRequest.status.in_(open_statuses),
-                TestingRequest.due_date.isnot(None),
-            )
+            .filter(TestingRequest.status.in_(open_statuses))
             .all()
         )
-        overdue = 0
-        reminded = 0
+
+        fired_total = 0
+
+        def _evaluate_simple(rule, due, req_status_str: str) -> bool:
+            """
+            Evaluate simple column-based trigger conditions.
+            Returns True if the rule matches this TR.
+            """
+            tt = rule.trigger_type
+            off = rule.offset_days or 0
+
+            if tt == "due_soon":
+                if due is None:
+                    return False
+                window_end = today + timedelta(days=off)
+                return today <= due <= window_end
+
+            elif tt == "overdue":
+                if due is None:
+                    return False
+                return due < today
+
+            elif tt == "escalation":
+                if due is None:
+                    return False
+                cutoff = today - timedelta(days=off)
+                return due < cutoff
+
+            elif tt == "status_transition":
+                on_status = rule.trigger_on_status
+                return bool(on_status and req_status_str == on_status)
+
+            elif tt == "both":
+                # BOTH time condition AND status condition must be true
+                # Time condition: overdue by at least offset_days
+                time_ok = False
+                if due is not None:
+                    cutoff = today - timedelta(days=off)
+                    time_ok = due < cutoff if off > 0 else due < today
+
+                on_status = rule.trigger_on_status
+                status_ok = bool(on_status and req_status_str == on_status)
+                return time_ok and status_ok
+
+            return False
+
+        def _evaluate_advanced(cond: dict, due, req_status_str: str) -> bool:
+            """
+            Evaluate advanced_conditions JSON rule.
+
+            Supported format:
+              { "and": [ <condition>, ... ] }
+              { "or":  [ <condition>, ... ] }
+              { "type": "due_soon",   "offset_days": N }
+              { "type": "overdue",    "min_days": N }
+              { "type": "status",     "on_status": "..." }
+            """
+            if "and" in cond:
+                return all(
+                    _evaluate_advanced(c, due, req_status_str)
+                    for c in cond["and"]
+                )
+            if "or" in cond:
+                return any(
+                    _evaluate_advanced(c, due, req_status_str)
+                    for c in cond["or"]
+                )
+            t = cond.get("type", "")
+            if t == "due_soon":
+                if due is None:
+                    return False
+                off = int(cond.get("offset_days", 15))
+                return today <= due <= today + timedelta(days=off)
+            if t in ("overdue", "overdue_by"):
+                if due is None:
+                    return False
+                min_days = int(cond.get("min_days", cond.get("offset_days", 0)))
+                return due < today - timedelta(days=min_days)
+            if t == "status":
+                return req_status_str == cond.get("on_status", "")
+            return False
+
         for req in requests:
+            req_org = req.organization_id
+            req_status_str = (
+                req.status.value
+                if hasattr(req.status, "value")
+                else str(req.status or "")
+            )
             try:
-                due = req.due_date.date() if hasattr(req.due_date, "date") else req.due_date
-                if due < today:
-                    nsvc.notify_overdue(req)
-                    overdue += 1
-                elif due <= reminder_cutoff:
-                    nsvc.notify_due_reminder(req)
-                    reminded += 1
-            except Exception as _e:
-                logger.warning(f"[Notif] Overdue check failed for req {req.id}: {_e}")
-        if overdue or reminded:
-            logger.info(f"[Notif] Overdue alerts: {overdue}, Due reminders: {reminded}")
+                due = (
+                    req.due_date.date()
+                    if req.due_date and hasattr(req.due_date, "date")
+                    else req.due_date
+                )
+            except Exception:
+                due = None
+
+            # Category value
+            req_cat = getattr(req.request_category, "value",
+                              str(req.request_category or ""))
+            # Workflow type — derive the same way notification_service does
+            req_wf = nsvc._workflow_type(req) or ""
+
+            # Merge global + org rules
+            effective: dict = dict(global_rules)
+            if req_org and req_org in org_rules:
+                effective.update(org_rules[req_org])
+
+            for key, rule in effective.items():
+                event_type = key[0]
+                try:
+                    # ── Category filter ────────────────────────────────────
+                    if rule.applicable_categories:
+                        if req_cat not in rule.applicable_categories:
+                            continue
+
+                    # ── Workflow type filter ───────────────────────────────
+                    wf_types = list(getattr(rule, "applicable_workflow_types", None) or [])
+                    if wf_types and req_wf and req_wf not in wf_types:
+                        continue
+
+                    # ── Evaluate trigger ───────────────────────────────────
+                    adv = getattr(rule, "advanced_conditions", None)
+                    if adv:
+                        matches = _evaluate_advanced(adv, due, req_status_str)
+                    else:
+                        matches = _evaluate_simple(rule, due, req_status_str)
+
+                    if matches:
+                        # Dedup: skip if already fired for this TR+event today
+                        from models import NotificationLog
+                        from datetime import datetime as _dt
+                        already = (
+                            db.query(NotificationLog.id)
+                            .filter(
+                                NotificationLog.source_id == req.id,
+                                NotificationLog.event_type == event_type,
+                                NotificationLog.cts >= _dt.combine(today, _dt.min.time()),
+                            )
+                            .first()
+                        )
+                        if already:
+                            continue
+                        nsvc._fire_schedule_notification(
+                            req,
+                            event_type=event_type,
+                            severity=rule.severity,
+                        )
+                        fired_total += 1
+
+                except Exception as _e:
+                    logger.warning(
+                        f"[Notif] Rule {event_type} failed for req {req.id}: {_e}"
+                    )
+
+        if fired_total:
+            logger.info(f"[Notif] Schedule job total fired={fired_total}")
+
     except Exception as e:
-        logger.error(f"[Notif] Overdue check job error: {e}")
+        logger.error(f"[Notif] Schedule notification job error: {e}")
     finally:
         db.close()
 
 
 scheduler.add_job(
-    _check_overdue_and_due_reminders,
+    _check_schedule_notifications,
     trigger="cron",
     hour=7,
     minute=0,
-    id="overdue_due_reminder_job",
+    id="schedule_notification_job",
 )
 
 

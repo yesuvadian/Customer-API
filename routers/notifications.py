@@ -31,7 +31,9 @@ from models import (
     NotificationTemplate,
     NotificationVariable,
     OrgRole,
+    OrgRolePermission,
     OrgUserRole,
+    Module,
     User,
     UserNotification,
 )
@@ -433,23 +435,45 @@ class TemplateUpdate(BaseModel):
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def _require_admin(db: Session, user: User) -> None:
-    """Raise 403 unless the user is an org admin."""
-    from models import OrgRole, OrgUserRole
-    is_admin = (
+    """Raise 403 unless the user's role has can_view on any notification module
+    OR the role carries is_org_admin / is_dept_admin — no hardcoded flag required.
+    """
+    # Check module-permission: any of the three notification admin modules
+    _NOTIF_MODULE_PATHS = [
+        "org_notification_templates",
+        "org_notification_routing",
+        "org_notification_schedules",
+    ]
+    has_perm = (
         db.query(OrgUserRole)
-        .join(OrgRole)
+        .join(OrgRole, OrgRole.id == OrgUserRole.org_role_id)
+        .join(OrgRolePermission, OrgRolePermission.org_role_id == OrgRole.id)
+        .join(Module, Module.id == OrgRolePermission.module_id)
         .filter(
             OrgUserRole.user_id == user.id,
-            OrgRole.is_org_admin.is_(True),
             OrgUserRole.is_active.is_(True),
+            OrgRolePermission.can_view.is_(True),
+            Module.path.in_(_NOTIF_MODULE_PATHS),
         )
         .first()
     )
-    if not is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only org admins can manage notification templates.",
+    if not has_perm:
+        # Fallback: accept is_org_admin or is_dept_admin role flags
+        has_role_flag = (
+            db.query(OrgUserRole)
+            .join(OrgRole, OrgRole.id == OrgUserRole.org_role_id)
+            .filter(
+                OrgUserRole.user_id == user.id,
+                OrgUserRole.is_active.is_(True),
+                (OrgRole.is_org_admin.is_(True) | OrgRole.is_dept_admin.is_(True)),
+            )
+            .first()
         )
+        if not has_role_flag:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: insufficient permissions for notification management.",
+            )
 
 
 def _get_org(user: User) -> UUID:
@@ -1142,12 +1166,37 @@ WORKFLOW_TYPES = [
     {"value": "repair_cycle",      "label": "Repair Cycle"},
 ]
 
-TEST_TYPES = [
-    {"value": "test",         "label": "Test"},
-    {"value": "inspection",   "label": "Inspection"},
-    {"value": "maintenance",  "label": "Maintenance"},
-    {"value": "life_cycle",   "label": "Life Cycle"},
-]
+def _get_test_types(db: Session = None) -> list:
+    """
+    Return distinct test category types from CategoryDetails — the real source of truth.
+    Falls back to a hardcoded list if db is not provided.
+    """
+    _LABELS = {
+        "test":             "Test",
+        "maintenance":      "Maintenance",
+        "inspection":       "Inspection",
+        "repair_lifecycle": "Repair Cycle",
+        "nameplate":        "Nameplate",
+    }
+    if db is not None:
+        from models import CategoryDetails
+        from sqlalchemy import distinct as sa_distinct
+        rows = (
+            db.query(sa_distinct(CategoryDetails.category_type))
+            .filter(
+                CategoryDetails.category_type.isnot(None),
+                CategoryDetails.is_active.is_(True),
+            )
+            .all()
+        )
+        return [
+            {"value": r[0], "label": _LABELS.get(r[0], r[0].replace("_", " ").title())}
+            for r in rows if r[0]
+        ]
+    # static fallback (used at module load time for TEST_TYPES constant)
+    return [{"value": k, "label": v} for k, v in _LABELS.items()]
+
+TEST_TYPES = _get_test_types()
 
 CHANNELS = ["email", "sms", "inapp"]
 
@@ -1228,16 +1277,100 @@ def _rule_out(rule: NotificationRoutingRule) -> dict:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.get("/routing-rules/meta")
-def routing_rules_meta():
+def _get_stages_by_workflow(db: Session) -> dict:
     """
-    Return static dropdown values for the routing rules configuration UI.
-    No auth needed — these are constants (workflow types, test types, channels).
+    Return {workflow_type: [{value, label}]} for use in status_from/status_to dropdowns.
+    - Workflow-based types share the testing_request status lifecycle.
+    - repair_lifecycle uses RepairStageDefinition names from DB.
+    - Equipment and standalone types get their own fixed event stages.
     """
+    from models import RepairStageDefinition
+
+    tr_statuses = [
+        {"value": "submitted",       "label": "Submitted"},
+        {"value": "assigned",        "label": "Assigned"},
+        {"value": "accepted",        "label": "Accepted"},
+        {"value": "in_progress",     "label": "In Progress"},
+        {"value": "under_review",    "label": "Under Review"},
+        {"value": "test_submitted",  "label": "Test Submitted"},
+        {"value": "under_approval",  "label": "Under Approval"},
+        {"value": "approved",        "label": "Approved"},
+        {"value": "rejected",        "label": "Rejected"},
+        {"value": "completed",       "label": "Completed"},
+    ]
+
+    repair_stages = [
+        {"value": s.name, "label": s.name}
+        for s in db.query(RepairStageDefinition)
+            .filter(RepairStageDefinition.is_active.is_(True))
+            .order_by(RepairStageDefinition.sequence)
+            .all()
+    ]
+    if not repair_stages:
+        repair_stages = [{"value": f"S{i}", "label": f"Stage {i}"} for i in range(1, 11)]
+
+    equipment_stages = [
+        {"value": "registered",  "label": "Registered"},
+        {"value": "retired",     "label": "Retired"},
+        {"value": "replaced",    "label": "Replaced"},
+    ]
+
     return {
-        "workflow_types":    WORKFLOW_TYPES,
-        "test_types":        TEST_TYPES,
-        "channels":          CHANNELS,
+        "testing_request":   tr_statuses,
+        "taqc_inspection":   tr_statuses,
+        "failure_registry":  [
+            {"value": "submitted",       "label": "Submitted"},
+            {"value": "under_approval",  "label": "Under Approval"},
+            {"value": "approved",        "label": "Approved"},
+            {"value": "rejected",        "label": "Rejected"},
+        ],
+        "repair_lifecycle":  repair_stages,
+        "equipment":         equipment_stages,
+    }
+
+
+def _get_org_roles(db: Session, organization_id=None) -> list:
+    """Return [{value, label}] of active OrgRole names for the org (or all global roles)."""
+    q = db.query(OrgRole.name).filter(OrgRole.is_active.is_(True))
+    if organization_id:
+        q = q.filter(OrgRole.organization_id == organization_id)
+    rows = q.order_by(OrgRole.name).distinct().all()
+    return [{"value": r[0], "label": r[0]} for r in rows]
+
+
+def _get_equipment_types(db: Session) -> list:
+    """Return [{value, label}] of active equipment categories from CategoryMaster."""
+    from models import CategoryMaster
+    rows = (
+        db.query(CategoryMaster.name)
+        .filter(CategoryMaster.is_active.is_(True))
+        .order_by(CategoryMaster.name)
+        .all()
+    )
+    return [{"value": r[0], "label": r[0]} for r in rows]
+
+
+@router.get("/routing-rules/meta")
+def routing_rules_meta(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return dropdown values for the routing rules configuration UI.
+    Includes workflow types, test types, channels, stages per workflow,
+    org roles, and equipment types.
+    """
+    from models import Workflow as WorkflowModel
+    org_id = _get_org(current_user)
+    wf_rows = db.query(WorkflowModel.workflow_type, WorkflowModel.name).distinct().order_by(WorkflowModel.name).all()
+    workflow_types = [{"value": r.workflow_type, "label": r.name} for r in wf_rows] or WORKFLOW_TYPES
+    return {
+        "workflow_types":      workflow_types,
+        "test_types":          _get_test_types(db),
+        "channels":            CHANNELS,
+        "stages_by_workflow":  _get_stages_by_workflow(db),
+        "org_roles":           _get_org_roles(db, org_id),
+        "equipment_types":     _get_equipment_types(db),
     }
 
 
@@ -1551,17 +1684,27 @@ def _srule_out(r: _NSR) -> dict:
 
 
 @router.get("/schedule-rules/meta")
-def get_schedule_rule_meta():
+def get_schedule_rule_meta(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
-    Returns dropdown options for the schedule rule editor:
-    trigger_types, severity_levels, workflow_statuses, event_types.
-    No auth needed.
+    Returns dropdown options for the schedule rule editor.
+    Workflow types from the Workflow table; test categories from RequestCategory enum.
     """
+    from models import Workflow as WorkflowModel
+    org_id = _get_org(current_user)
+    wf_rows = db.query(WorkflowModel.workflow_type, WorkflowModel.name).distinct().order_by(WorkflowModel.name).all()
+    workflow_types = [{"value": r.workflow_type, "label": r.name} for r in wf_rows] or WORKFLOW_TYPES
     return {
-        "trigger_types":     TRIGGER_TYPES,
-        "severity_levels":   SEVERITY_LEVELS,
-        "workflow_statuses": WORKFLOW_STATUSES,
-        "workflow_types":    WORKFLOW_TYPES,
+        "trigger_types":      TRIGGER_TYPES,
+        "severity_levels":    SEVERITY_LEVELS,
+        "workflow_statuses":  WORKFLOW_STATUSES,
+        "workflow_types":     workflow_types,
+        "test_types":         _get_test_types(db),
+        "stages_by_workflow": _get_stages_by_workflow(db),
+        "org_roles":          _get_org_roles(db, org_id),
+        "equipment_types":    _get_equipment_types(db),
     }
 
 
@@ -1578,7 +1721,7 @@ def list_schedule_rules(
     org_id = _get_org(current_user)
 
     rules = db.query(_NSR).filter(
-        _NSR.organization_id.in_([None, org_id]),
+        (_NSR.organization_id.is_(None)) | (_NSR.organization_id == org_id),
         _NSR.is_active.is_(True),
     ).order_by(
         _NSR.organization_id.is_(None).desc(),  # globals first

@@ -448,6 +448,8 @@ class ApprovalService:
                             source_type="testing_request",
                             severity="alert",
                             extra_recipients=[submitter],
+                            workflow_type="failure_registry",
+                            test_type="failure_registry",
                         )
                 else:
                     # Standard TR rejection — notify the assigned tester to revise

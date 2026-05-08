@@ -18,6 +18,8 @@ from models import (
     # Repair Workflow
     RepairStageDefinition, RepairStageTemplate, RepairStageRole,
     RepairStageTransition, OrgTestTemplate,
+    # Notification config tables
+    NotificationEventCatalogue, NotificationRoutingRule, NotificationScheduleRule,
 )
 from security_utils import get_password_hash  # password hashing utils
 
@@ -1345,6 +1347,9 @@ def seed_modules(session):
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
+{"name": "Notification Templates", "description": "Configure email/SMS/in-app notification templates per event type", "path": "org_notification_templates", "group_name": "Organization"},
+{"name": "Notification Routing",   "description": "Configure routing rules — which roles receive which notifications", "path": "org_notification_routing",   "group_name": "Organization"},
+{"name": "Notification Schedules", "description": "Configure scheduled notification rules (due-date reminders, digests)", "path": "org_notification_schedules", "group_name": "Organization"},
 # ✅ REPORTING SUITE MODULE
 {"name": "Reports", "description": "Generic report engine — 14 SRS operational reports with Excel/PDF export", "path": "reports", "group_name": "Testing"},
 # ✅ DIRECT SUBMISSION MODULES (Stage 2 & Stage 10 — no tester assignment)
@@ -4037,6 +4042,24 @@ def seed_kptcl_organization(session):
                 "role_name": "CEE RT&R&D",
                 "employee_id": "KPTCL-CEE-RTRD-001",
             },
+            {
+                "email": "field.tester@kptcl.com",
+                "password": "Tester123!",
+                "firstname": "Field",
+                "lastname": "Tester",
+                "phone": "+91-9900000017",
+                "role_name": "Field Tester",
+                "employee_id": "KPTCL-FT-001",
+            },
+            {
+                "email": "lab.tester@kptcl.com",
+                "password": "Tester123!",
+                "firstname": "Lab",
+                "lastname": "Tester",
+                "phone": "+91-9900000018",
+                "role_name": "Lab Tester",
+                "employee_id": "KPTCL-LT-001",
+            },
         ]
 
         created_users = 0
@@ -4622,26 +4645,30 @@ def seed_notifications_module_and_permissions(session):
         raise Exception("Org Admin role not found for KPTCL")
 
     # ─────────────────────────────────────────────────────────────
-    # 6. Assign permission (ORG-SCOPED)
+    # 6. Assign permissions (ORG-SCOPED)
+    #    Grant: Notifications + My Organization to Org Admin role
     # ─────────────────────────────────────────────────────────────
-    existing_perm = session.query(OrgRolePermission).filter_by(
-        org_role_id=org_admin_role.id,
-        module_id=notifications_module.id
-    ).first()
+    notif_template_mod  = session.query(Module).filter_by(path="org_notification_templates").first()
+    notif_routing_mod   = session.query(Module).filter_by(path="org_notification_routing").first()
+    notif_schedule_mod  = session.query(Module).filter_by(path="org_notification_schedules").first()
 
-    if not existing_perm:
-        session.add(
-            OrgRolePermission(
-                org_role_id=org_admin_role.id,
-                module_id=notifications_module.id,
-                can_view=True,
-                can_add=False,
-                can_edit=False,
-                can_delete=False
-                # 🔥 Add this IF your model has it:
-                # organization_id=kptcl_org.id
+    for mod in filter(None, [notifications_module, notif_template_mod,
+                              notif_routing_mod, notif_schedule_mod]):
+        existing_perm = session.query(OrgRolePermission).filter_by(
+            org_role_id=org_admin_role.id,
+            module_id=mod.id
+        ).first()
+        if not existing_perm:
+            session.add(
+                OrgRolePermission(
+                    org_role_id=org_admin_role.id,
+                    module_id=mod.id,
+                    can_view=True,
+                    can_add=True,
+                    can_edit=True,
+                    can_delete=False,
+                )
             )
-        )
 
     session.commit()
 
@@ -5744,6 +5771,632 @@ def seed_tr_workflows(session):
     print("[OK] TR / FR / TAQC workflow seeding complete.")
 
 
+def _seed_notification_event_catalogue(session) -> int:
+    """
+    Idempotent seed for NotificationEventCatalogue.
+    Matches on event_type — upserts label/description/context_vars/default_roles
+    so re-running the seed refreshes descriptions without duplicating rows.
+
+    To add a new notification event type:
+      1. Add an entry to _CATALOGUE below (or INSERT directly into the DB).
+      2. No code change to any router or service is needed.
+    """
+    from models import NotificationEventCatalogue
+
+    _CATALOGUE = [
+        # ── Equipment ─────────────────────────────────────────────────────────
+        dict(
+            event_type="equipment_replacement",
+            label="Equipment Replacement",
+            group_name="Equipment",
+            description="Fired when equipment is retired and a replacement unit is commissioned.",
+            context_vars=["old_ueic", "new_ueic", "equipment_type", "department",
+                          "reason_type", "reason", "replaced_by", "replaced_on"],
+            default_roles=["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
+        ),
+        # ── Evaluation ────────────────────────────────────────────────────────
+        dict(
+            event_type="eval_critical",
+            label="Critical Test Result",
+            group_name="Evaluation",
+            description="Fired when a test evaluation result is CRITICAL (per test template thresholds).",
+            context_vars=["equipment", "ueic", "test_type", "result", "dept",
+                          "eval.overall", "eval.evaluated_at", "report.retriepdf"],
+            default_roles=["EE TLSS", "SEE W&M", "CEE Transmission Zone", "AEE Maintenance"],
+        ),
+        dict(
+            event_type="eval_alert",
+            label="Alert Test Result",
+            group_name="Evaluation",
+            description="Fired when a test evaluation result is ALERT (per test template thresholds).",
+            context_vars=["equipment", "ueic", "test_type", "result", "dept",
+                          "eval.overall", "eval.evaluated_at", "report.retriepdf"],
+            default_roles=["EE TLSS", "AEE Maintenance"],
+        ),
+        # ── Test Workflow ─────────────────────────────────────────────────────
+        dict(
+            event_type="request_submitted",
+            label="Test Request Submitted",
+            group_name="Test Workflow",
+            description="Fired when an originator submits a new test request.",
+            context_vars=["request.number", "request.title", "request.priority",
+                          "request.submitted_by", "equipment.ueic", "equipment.department"],
+            default_roles=["EE TLSS", "Department Head"],
+        ),
+        dict(
+            event_type="tester_assigned",
+            label="Tester Assigned to Request",
+            group_name="Test Workflow",
+            description="Fired when a test request is assigned to a field/lab tester.",
+            context_vars=["request.number", "request.title", "request.assigned_to",
+                          "request.due_date", "equipment.ueic"],
+            default_roles=["Tester", "AEE Maintenance"],
+        ),
+        dict(
+            event_type="tester_declined",
+            label="Tester Declined Assignment",
+            group_name="Test Workflow",
+            description="Fired when a tester declines an assignment — notifies the Test Assigner.",
+            context_vars=["request.number", "tester_name", "reason"],
+            default_roles=["TestAssigner", "EE TLSS"],
+        ),
+        dict(
+            event_type="test_submitted",
+            label="Test Results Submitted",
+            group_name="Test Workflow",
+            description="Fired when a tester submits test results for review.",
+            context_vars=["request.number", "request.title", "request.submitted_by",
+                          "equipment.ueic", "eval.overall", "report.retriepdf"],
+            default_roles=["EE TLSS", "Department Head"],
+        ),
+        dict(
+            event_type="recommendation_approved",
+            label="Recommendation Approved",
+            group_name="Test Workflow",
+            description="Fired when a technical approver approves a recommendation.",
+            context_vars=["request.number", "recommendation_type", "product_count"],
+            default_roles=["Originator", "AEE Maintenance"],
+        ),
+        dict(
+            event_type="recommendation_rejected",
+            label="Recommendation Rejected",
+            group_name="Test Workflow",
+            description="Fired when a technical approver rejects a recommendation.",
+            context_vars=["request.number", "reason"],
+            default_roles=["Tester", "Originator"],
+        ),
+        # ── Scheduling ────────────────────────────────────────────────────────
+        dict(
+            event_type="due_reminder",
+            label="Test Due Soon Reminder (15 days)",
+            group_name="Scheduling",
+            description="Fired 15 days before a scheduled test is due (SRS §8.2 #1).",
+            context_vars=["equipment.ueic", "request.title", "request.due_date",
+                          "equipment.department", "days_remaining"],
+            default_roles=["AEE Maintenance", "EE TLSS"],
+        ),
+        dict(
+            event_type="due_reminder_final",
+            label="Test Due Final Reminder (7 days)",
+            group_name="Scheduling",
+            description="Final reminder fired 7 days before a scheduled test is due (SRS §8.2 #2).",
+            context_vars=["equipment.ueic", "request.title", "request.due_date",
+                          "equipment.department", "days_remaining"],
+            default_roles=["AEE Maintenance", "EE TLSS", "Department Head"],
+        ),
+        dict(
+            event_type="overdue_alert",
+            label="Test Overdue",
+            group_name="Scheduling",
+            description="Fired when a scheduled test passes its due date without completion (SRS §8.2 #3).",
+            context_vars=["equipment.ueic", "request.title", "request.due_date",
+                          "equipment.department", "days_overdue"],
+            default_roles=["EE TLSS", "AEE Maintenance", "SEE W&M"],
+        ),
+        dict(
+            event_type="overdue_escalation",
+            label="Test Overdue Escalation (>7 days)",
+            group_name="Scheduling",
+            description="Escalation fired when a test is more than 7 days overdue (SRS §8.2 #4).",
+            context_vars=["equipment.ueic", "request.title", "request.due_date",
+                          "days_overdue", "equipment.department"],
+            default_roles=["SEE W&M", "CEE Transmission Zone"],
+        ),
+        # ── Recommendations / Procurement ─────────────────────────────────────
+        dict(
+            event_type="procurement_pending",
+            label="Procurement Request Raised",
+            group_name="Recommendations",
+            description="Fired when a procurement request is created — notifies Finance Approvers.",
+            context_vars=["request.number", "pr_number", "title"],
+            default_roles=["FinanceApprover", "Department Head"],
+        ),
+        dict(
+            event_type="procurement_decision",
+            label="Procurement Decision (Approved / Rejected)",
+            group_name="Recommendations",
+            description="Fired when Finance approves or rejects a procurement request.",
+            context_vars=["request.number", "pr_number", "decision", "notes"],
+            default_roles=["Originator", "TechApprover", "EE TLSS"],
+        ),
+        # ── Equipment ─────────────────────────────────────────────────────────
+        dict(
+            event_type="equipment_registered",
+            label="Equipment Registered",
+            group_name="Equipment",
+            description="Fired when a new equipment unit is commissioned into the register.",
+            context_vars=["equipment", "equipment_type", "department", "manufacturer", "commissioned_by"],
+            default_roles=["AEE Maintenance", "EE TLSS"],
+        ),
+        dict(
+            event_type="equipment_retired",
+            label="Equipment Retired",
+            group_name="Equipment",
+            description="Fired when an equipment unit is decommissioned / retired.",
+            context_vars=["equipment", "equipment_type", "department", "reason", "retired_by"],
+            default_roles=["AEE Maintenance", "EE TLSS", "Department Head"],
+        ),
+        dict(
+            event_type="design_problem_alert",
+            label="Design Problem Alert",
+            group_name="Equipment",
+            description="Fired when a systemic design problem is identified for a make/model.",
+            context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
+            default_roles=["CEE Transmission Zone", "EE TLSS", "Department Head"],
+        ),
+        # ── Repair Lifecycle ──────────────────────────────────────────────────
+        dict(
+            event_type="repair_stage_changed",
+            label="Repair Stage Advanced",
+            group_name="Repair",
+            description="Fired each time the repair workflow advances to the next stage.",
+            context_vars=["equipment", "equipment_type", "stage", "progress"],
+            default_roles=["AEE Maintenance", "TRC Member"],
+        ),
+        dict(
+            event_type="repair_delay",
+            label="Repair Stage Delayed",
+            group_name="Repair",
+            description="Fired when a repair stage is rejected / sent back — indicating a delay.",
+            context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
+            default_roles=["AEE Maintenance", "CEE Transmission Zone"],
+        ),
+        dict(
+            event_type="overhaul_recommended",
+            label="Overhaul Recommended",
+            group_name="Repair",
+            description="Fired when the repair workflow reaches completion — overhaul is done.",
+            context_vars=["equipment", "equipment_type", "department", "operation_count", "operation_threshold"],
+            default_roles=["AEE Maintenance", "CEE Transmission Zone", "Department Head"],
+        ),
+        # ── Failure Registry ──────────────────────────────────────────────────
+        dict(
+            event_type="fr_rejected",
+            label="Failure Registry Rejected",
+            group_name="Failure Registry",
+            description="Fired when a Failure Registry submission is rejected by an approver.",
+            context_vars=["fr_number", "reason"],
+            default_roles=["Originator"],
+        ),
+        # ── Reports ───────────────────────────────────────────────────────────
+        dict(
+            event_type="monthly_mis_report",
+            label="Monthly MIS Report",
+            group_name="Reports",
+            description="Fired on the first working day of the month — distributes the monthly MIS report.",
+            context_vars=["report_month", "tests_completed", "critical_count", "overdue_count",
+                          "report_pdf_url", "report_xls_url"],
+            default_roles=["SEE W&M", "CEE Transmission Zone", "Department Head"],
+        ),
+    ]
+
+    inserted = 0
+    for entry in _CATALOGUE:
+        existing = (
+            session.query(NotificationEventCatalogue)
+            .filter(NotificationEventCatalogue.event_type == entry["event_type"])
+            .first()
+        )
+        if existing:
+            # Upsert: refresh mutable fields without changing PK
+            existing.label         = entry["label"]
+            existing.group_name    = entry["group_name"]
+            existing.description   = entry.get("description", "")
+            existing.context_vars  = entry.get("context_vars", [])
+            existing.default_roles = entry.get("default_roles", [])
+        else:
+            session.add(NotificationEventCatalogue(**entry))
+            inserted += 1
+    session.commit()
+    return inserted
+
+
+def _seed_notification_schedule_rules(session) -> int:
+    """
+    Idempotent seed for NotificationScheduleRule rows.
+    Matches on event_type + trigger_type + offset_days — won't duplicate on re-run.
+
+    To add a new scheduler-based notification:
+      1. Insert a row here (or directly in the DB).
+      2. Ensure a NotificationTemplate exists for the event_type.
+      Zero code change to main.py or notification_service.py is needed.
+    """
+    from models import NotificationScheduleRule
+
+    _DEFAULT_RULES = [
+        # SRS §8.2 #1 — 15-day early reminder
+        dict(
+            event_type="due_reminder",
+            label="Test Due Reminder — 15 days before",
+            trigger_type="due_soon",
+            offset_days=15,
+            severity="info",
+            applicable_categories=[],
+        ),
+        # SRS §8.2 #2 — 7-day final reminder
+        dict(
+            event_type="due_reminder_final",
+            label="Test Due Final Reminder — 7 days before",
+            trigger_type="due_soon",
+            offset_days=7,
+            severity="alert",
+            applicable_categories=[],
+        ),
+        # SRS §8.2 #3 — overdue alert (any day past due)
+        dict(
+            event_type="overdue_alert",
+            label="Test Overdue",
+            trigger_type="overdue",
+            offset_days=0,
+            severity="alert",
+            applicable_categories=[],
+        ),
+        # SRS §8.2 #4 — escalation after 7 days overdue
+        dict(
+            event_type="overdue_escalation",
+            label="Test Overdue Escalation (>7 days)",
+            trigger_type="escalation",
+            offset_days=7,
+            severity="critical",
+            applicable_categories=[],
+        ),
+        # Maintenance-specific 15-day due reminder (separate from test due_reminder)
+        dict(
+            event_type="due_reminder",
+            label="Maintenance Due Reminder — 15 days before",
+            trigger_type="due_soon",
+            offset_days=15,
+            severity="info",
+            applicable_categories=["maintenance"],
+        ),
+        # Maintenance due event (separate event type for routing rule separation)
+        dict(
+            event_type="maintenance_due",
+            label="Maintenance Due — 15 days before",
+            trigger_type="due_soon",
+            offset_days=15,
+            severity="info",
+            applicable_categories=["maintenance"],
+        ),
+        # Status-based: fire when request reaches "compliance_pending" status
+        dict(
+            event_type="remedial_action_due",
+            label="Remedial Action — when status is compliance_pending",
+            trigger_type="status_transition",
+            offset_days=0,
+            trigger_on_status="compliance_pending",
+            severity="alert",
+            applicable_categories=[],
+        ),
+        # TAQC observation overdue — status_transition trigger
+        dict(
+            event_type="taqc_observation_overdue",
+            label="TA&QC Observation — when status is compliance_pending",
+            trigger_type="status_transition",
+            offset_days=0,
+            trigger_on_status="compliance_pending",
+            severity="alert",
+            applicable_categories=[],
+        ),
+        # "Both" example: tester still in_progress but due date passed 5 days ago
+        # → catches testers who started but never uploaded results
+        dict(
+            event_type="overdue_alert",
+            label="Overdue — in_progress 5 days after due date",
+            trigger_type="both",
+            offset_days=5,
+            trigger_on_status="in_progress",
+            severity="alert",
+            applicable_categories=[],
+            advanced_conditions={
+                "and": [
+                    {"type": "overdue_by", "min_days": 5},
+                    {"type": "status",     "on_status": "in_progress"},
+                ]
+            },
+        ),
+    ]
+
+    inserted = 0
+    for rule_def in _DEFAULT_RULES:
+        # Match on the new natural key: event_type + trigger_type + offset_days + trigger_on_status
+        existing = (
+            session.query(NotificationScheduleRule)
+            .filter(
+                NotificationScheduleRule.organization_id.is_(None),
+                NotificationScheduleRule.event_type    == rule_def["event_type"],
+                NotificationScheduleRule.trigger_type  == rule_def["trigger_type"],
+                NotificationScheduleRule.offset_days   == rule_def.get("offset_days", 0),
+                (
+                    NotificationScheduleRule.trigger_on_status == rule_def["trigger_on_status"]
+                    if "trigger_on_status" in rule_def
+                    else NotificationScheduleRule.trigger_on_status.is_(None)
+                ),
+            )
+            .first()
+        )
+        if not existing:
+            # Build kwargs — only pass fields that exist on the model
+            kwargs = {
+                "event_type":               rule_def["event_type"],
+                "label":                    rule_def["label"],
+                "trigger_type":             rule_def["trigger_type"],
+                "offset_days":              rule_def.get("offset_days", 0),
+                "trigger_on_status":        rule_def.get("trigger_on_status"),
+                "applicable_categories":    rule_def.get("applicable_categories", []),
+                "applicable_workflow_types": rule_def.get("applicable_workflow_types", []),
+                "advanced_conditions":      rule_def.get("advanced_conditions"),
+                "severity":                 rule_def.get("severity", "info"),
+                "is_active":                rule_def.get("is_active", True),
+            }
+            session.add(NotificationScheduleRule(**kwargs))
+            inserted += 1
+    session.commit()
+    return inserted
+
+
+def _seed_notification_routing_rules(session) -> int:
+    """
+    Idempotent seed for NotificationRoutingRule global defaults (organization_id=NULL).
+
+    Design
+    ──────
+    Each row defines: for a given event_type, which channels are enabled when
+    the call originates from a specific workflow_type / test_type combination.
+
+    Scope filter semantics (all JSONB arrays):
+      • empty []  = "match everything" (wildcard)
+      • non-empty = "only match if the call's value is in this list"
+
+    Adding a new workflow or changing channel rules = INSERT / UPDATE rows here
+    (or directly in the DB via Flutter Admin UI). Zero code change.
+
+    Matching priority (higher wins):
+      0  = global defaults (seeded here)
+      10 = org-specific overrides (set by org admin via API)
+    """
+    from models import NotificationRoutingRule
+
+    # Workflow type values match Workflow.workflow_type in DB exactly
+    _ALL_TEST_TYPES = ["test", "inspection", "maintenance", "repair_lifecycle"]
+
+    # ── Global default rules ──────────────────────────────────────────────────
+    # Format: (event_type, workflow_types[], test_types[], channels[], label)
+    # workflow_types=[] means "all workflows"; test_types=[] means "all categories"
+    # Workflow type values: "testing_request" | "taqc_inspection" |
+    #                       "failure_registry" | "repair_lifecycle"
+    # Test type values = CategoryDetails.category_type:
+    #   "test" | "maintenance" | "inspection" | "repair_lifecycle"
+    # ─────────────────────────────────────────────────────────────────────────
+    _RULES = [
+
+        # ── Equipment Register ────────────────────────────────────────────────
+        ("equipment_replacement",
+         [], [],
+         ["email", "sms", "inapp"],
+         "Equipment Replacement — Email + SMS + in-app"),
+
+        ("equipment_registered",
+         [], [],
+         ["email", "sms", "inapp"],
+         "Equipment Registered — Email + SMS + in-app"),
+
+        ("equipment_retired",
+         [], [],
+         ["email", "sms", "inapp"],
+         "Equipment Retired — Email + SMS + in-app"),
+
+        # ── Evaluation results ────────────────────────────────────────────────
+        ("eval_critical",
+         ["testing_request", "taqc_inspection"], [],
+         ["email", "sms", "inapp"],
+         "Critical Evaluation — all channels"),
+
+        ("eval_alert",
+         ["testing_request", "taqc_inspection"], [],
+         ["email", "sms", "inapp"],
+         "Alert Evaluation — Email + SMS + Dashboard"),
+
+        # ── Test lifecycle — testing_request workflow (test/maintenance/inspection) ──
+        ("request_submitted",
+         ["testing_request"], [],
+         ["email", "inapp"],
+         "Test Request Submitted"),
+
+        ("request_submitted",
+         ["testing_request"], ["maintenance"],
+         ["email", "sms", "inapp"],
+         "Maintenance Request Submitted — Email + SMS"),
+
+        ("request_submitted",
+         ["failure_registry"], [],
+         ["email", "inapp"],
+         "Failure Registry Submitted"),
+
+        ("request_submitted",
+         ["taqc_inspection"], [],
+         ["inapp"],
+         "TAQC Inspection Submitted — in-app only"),
+
+        # ── Tester workflow ───────────────────────────────────────────────────
+        ("tester_assigned",
+         ["testing_request"], [],
+         ["email", "sms", "inapp"],
+         "Tester Assigned — all channels"),
+
+        ("tester_assigned",
+         ["taqc_inspection"], [],
+         ["email", "inapp"],
+         "TAQC Inspector Assigned"),
+
+        ("tester_declined",
+         [], [],
+         ["email", "inapp"],
+         "Tester Declined — all workflows"),
+
+        ("test_submitted",
+         ["testing_request", "taqc_inspection"], [],
+         ["email", "inapp"],
+         "Test Results Submitted"),
+
+        # ── Recommendations ───────────────────────────────────────────────────
+        ("recommendation_approved",
+         [], [],
+         ["email", "inapp"],
+         "Recommendation Approved — all workflows"),
+
+        ("recommendation_rejected",
+         [], [],
+         ["email", "inapp"],
+         "Recommendation Rejected — all workflows"),
+
+        # ── Failure Registry ──────────────────────────────────────────────────
+        ("fr_rejected",
+         ["failure_registry"], [],
+         ["email", "inapp"],
+         "Failure Registry Rejected"),
+
+        # ── Scheduling / Reminders ────────────────────────────────────────────
+        ("due_reminder",
+         ["testing_request"], _ALL_TEST_TYPES,
+         ["email", "sms", "inapp"],
+         "15-Day Test Due Reminder — Email + SMS"),
+
+        ("due_reminder_final",
+         ["testing_request"], _ALL_TEST_TYPES,
+         ["email", "sms", "inapp"],
+         "7-Day Final Reminder — Email + SMS"),
+
+        ("overdue_alert",
+         [], _ALL_TEST_TYPES,
+         ["email", "sms", "inapp"],
+         "Test Overdue — Email + SMS + Dashboard"),
+
+        ("overdue_escalation",
+         [], [],
+         ["email", "sms", "inapp"],
+         "Overdue Escalation — Email + SMS"),
+
+        # Maintenance-specific: higher urgency
+        ("maintenance_due",
+         ["testing_request"], ["maintenance"],
+         ["email", "sms", "inapp"],
+         "Maintenance Due (15 days) — Email + SMS"),
+
+        # Inspection reminders: lower urgency
+        ("due_reminder",
+         ["testing_request"], ["inspection"],
+         ["email", "inapp"],
+         "Due Reminder — Inspection: email + in-app"),
+
+        # ── Compliance / Remedial ─────────────────────────────────────────────
+        ("remedial_action_due",
+         [], [],
+         ["email", "sms"],
+         "Remedial Action Compliance Due — Email + SMS"),
+
+        ("taqc_observation_overdue",
+         ["taqc_inspection"], [],
+         ["email", "sms"],
+         "TA&QC Observation Compliance Overdue — Email + SMS"),
+
+        # ── Repair Lifecycle ──────────────────────────────────────────────────
+        ("repair_stage_changed",
+         ["repair_lifecycle"], [],
+         ["inapp"],
+         "Repair Stage Advanced — in-app only"),
+
+        ("overhaul_recommended",
+         ["repair_lifecycle"], [],
+         ["email", "sms"],
+         "Overhaul Recommended — Email + SMS"),
+
+        ("repair_delay",
+         ["repair_lifecycle"], [],
+         ["email", "sms"],
+         "Repair Stage Delay — Email + SMS"),
+
+        # ── Design / Systemic ─────────────────────────────────────────────────
+        ("design_problem_alert",
+         [], [],
+         ["email", "sms"],
+         "Design Problem Alert — Email + SMS"),
+
+        # ── Reports ───────────────────────────────────────────────────────────
+        ("monthly_mis_report",
+         [], [],
+         ["email"],
+         "Monthly MIS Report — Email only"),
+
+        # ── Procurement ───────────────────────────────────────────────────────
+        ("procurement_pending",
+         [], [],
+         ["email", "inapp"],
+         "Procurement Raised — email + in-app"),
+
+        ("procurement_decision",
+         [], [],
+         ["email", "inapp"],
+         "Procurement Decision — email + in-app"),
+    ]
+
+    inserted = 0
+    for (event_type, wf_types, test_types, channels, label) in _RULES:
+        # Match on event_type + workflow_types + test_types to avoid duplicates
+        import json as _json
+        existing = (
+            session.query(NotificationRoutingRule)
+            .filter(
+                NotificationRoutingRule.event_type == event_type,
+                NotificationRoutingRule.organization_id.is_(None),
+                NotificationRoutingRule.applicable_workflow_types.cast(
+                    __import__("sqlalchemy.dialects.postgresql", fromlist=["JSONB"]).JSONB
+                ) == _json.dumps(wf_types),
+                NotificationRoutingRule.applicable_test_types.cast(
+                    __import__("sqlalchemy.dialects.postgresql", fromlist=["JSONB"]).JSONB
+                ) == _json.dumps(test_types),
+            )
+            .first()
+        )
+        if not existing:
+            session.add(NotificationRoutingRule(
+                event_type=event_type,
+                label=label,
+                applicable_workflow_types=wf_types,
+                applicable_equipment_types=[],
+                applicable_test_types=test_types,
+                applicable_status_from=None,
+                applicable_status_to=None,
+                channels_enabled=channels,
+                recipient_roles_override=None,
+                priority=0,
+                is_active=True,
+            ))
+            inserted += 1
+    session.commit()
+    return inserted
+
+
 def run_seed():
     # ── Create ALL SQLAlchemy tables (idempotent — safe on existing DB) ──────
     print("[INIT] Creating database schema via Base.metadata.create_all …")
@@ -5840,6 +6493,30 @@ def run_seed():
             print(f"[OK] Notification variables : {seeded_v} inserted (0 = already seeded)")
         except Exception as _e:
             print(f"[WARN] Notification seed failed (non-fatal): {_e}")
+
+        # Notification event catalogue (config-driven event types — idempotent)
+        print("\n--- Notification Event Catalogue Seeding ---")
+        try:
+            seeded_c = _seed_notification_event_catalogue(session)
+            print(f"[OK] Notification event catalogue : {seeded_c} inserted (0 = already seeded)")
+        except Exception as _e:
+            print(f"[WARN] Notification event catalogue seed failed (non-fatal): {_e}")
+
+        # Notification schedule rules (config-driven scheduler — idempotent)
+        print("\n--- Notification Schedule Rules Seeding ---")
+        try:
+            seeded_r = _seed_notification_schedule_rules(session)
+            print(f"[OK] Notification schedule rules : {seeded_r} inserted (0 = already seeded)")
+        except Exception as _e:
+            print(f"[WARN] Notification schedule rules seed failed (non-fatal): {_e}")
+
+        # Notification routing rules (workflow/equipment/test-type channel scoping — idempotent)
+        print("\n--- Notification Routing Rules Seeding ---")
+        try:
+            seeded_rr = _seed_notification_routing_rules(session)
+            print(f"[OK] Notification routing rules : {seeded_rr} inserted (0 = already seeded)")
+        except Exception as _e:
+            print(f"[WARN] Notification routing rules seed failed (non-fatal): {_e}")
 
         # Repair Workflow — stages, templates, roles, transitions
         print("\n--- Repair Workflow Seeding ---")
@@ -6379,16 +7056,25 @@ def seed_workflow(session):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _DFT_ROLES = [
-    ("Org Admin",           True,  False),
-    ("Dept Head",           False, True),
-    ("Originator",          False, False),
-    ("Tester",              False, False),
-    ("Test Assigner",       False, False),
-    ("Technical Approver",  False, False),
-    ("Finance Approver",    False, False),
-    ("EE TLSS",             False, False),
-    ("TA&QC Officer",       False, False),
-    ("Section Head",        False, True),
+    ("Org Admin",              False, True),
+    ("Dept Head",              False, True),
+    ("Originator",             False, False),
+    ("Tester",                 False, False),
+    ("Test Assigner",          False, False),
+    ("Technical Approver",     False, False),
+    ("Finance Approver",       False, False),
+    ("EE TLSS",                False, False),
+    ("TA&QC Officer",          False, False),
+    ("Section Head",           False, True),
+    ("AEE Maintenance",        False, False),
+    ("SEE W&M",                False, False),
+    ("EE RT",                  False, False),
+    ("SEE RT",                 False, False),
+    ("CEE Transmission Zone",  False, False),
+    ("CEE RT&R&D",             False, False),
+    ("Purchaser",              False, False),
+    ("Field Tester",           False, False),
+    ("Lab Tester",             False, False),
 ]
 
 _DFT_DEPTS = [
@@ -6398,62 +7084,107 @@ _DFT_DEPTS = [
 ]
 
 _DFT_ROLE_EMAIL = {
-    "Org Admin":           "orgadmin",
-    "Dept Head":           "depthead",
-    "Originator":          "originator",
-    "Tester":              "tester",
-    "Test Assigner":       "assigner",
-    "Technical Approver":  "techapprover",
-    "Finance Approver":    "financeapprover",
-    "EE TLSS":             "eetlss",
-    "TA&QC Officer":       "taqc",
-    "Section Head":        "sectionhead",
+    "Org Admin":              "orgadmin",
+    "Dept Head":              "depthead",
+    "Originator":             "originator",
+    "Tester":                 "tester",
+    "Test Assigner":          "assigner",
+    "Technical Approver":     "techapprover",
+    "Finance Approver":       "financeapprover",
+    "EE TLSS":                "eetlss",
+    "TA&QC Officer":          "taqc",
+    "Section Head":           "sectionhead",
+    "AEE Maintenance":        "aeemaint",
+    "SEE W&M":                "seewm",
+    "EE RT":                  "eert",
+    "SEE RT":                 "seert",
+    "CEE Transmission Zone":  "ceezone",
+    "CEE RT&R&D":             "ceertrd",
+    "Purchaser":              "purchaser",
+    "Field Tester":           "fieldtester",
+    "Lab Tester":             "labtester",
 }
 
 _DFT_ROLE_FNAME = {
-    "Org Admin":           "Admin",
-    "Dept Head":           "DeptHead",
-    "Originator":          "Originator",
-    "Tester":              "Tester",
-    "Test Assigner":       "Assigner",
-    "Technical Approver":  "TechApprover",
-    "Finance Approver":    "FinApprover",
-    "EE TLSS":             "EETLSS",
-    "TA&QC Officer":       "TAQC",
-    "Section Head":        "SectionHead",
+    "Org Admin":              "Admin",
+    "Dept Head":              "DeptHead",
+    "Originator":             "Originator",
+    "Tester":                 "Tester",
+    "Test Assigner":          "Assigner",
+    "Technical Approver":     "TechApprover",
+    "Finance Approver":       "FinApprover",
+    "EE TLSS":                "EETLSS",
+    "TA&QC Officer":          "TAQC",
+    "Section Head":           "SectionHead",
+    "AEE Maintenance":        "AEE",
+    "SEE W&M":                "SEE",
+    "EE RT":                  "EERT",
+    "SEE RT":                 "SEERT",
+    "CEE Transmission Zone":  "CEEZone",
+    "CEE RT&R&D":             "CEERTRD",
+    "Purchaser":              "Purchaser",
+    "Field Tester":           "FieldTester",
+    "Lab Tester":             "LabTester",
 }
 
 _DFT_PHONE = {
-    ("north",  "Org Admin"):           "9900001001",
-    ("north",  "Dept Head"):           "9900001002",
-    ("north",  "Originator"):          "9900001003",
-    ("north",  "Tester"):              "9900001004",
-    ("north",  "Test Assigner"):       "9900001005",
-    ("north",  "Technical Approver"):  "9900001006",
-    ("north",  "Finance Approver"):    "9900001007",
-    ("north",  "EE TLSS"):             "9900001008",
-    ("north",  "TA&QC Officer"):       "9900001009",
-    ("north",  "Section Head"):        "9900001010",
-    ("south",  "Org Admin"):           "9900002001",
-    ("south",  "Dept Head"):           "9900002002",
-    ("south",  "Originator"):          "9900002003",
-    ("south",  "Tester"):              "9900002004",
-    ("south",  "Test Assigner"):       "9900002005",
-    ("south",  "Technical Approver"):  "9900002006",
-    ("south",  "Finance Approver"):    "9900002007",
-    ("south",  "EE TLSS"):             "9900002008",
-    ("south",  "TA&QC Officer"):       "9900002009",
-    ("south",  "Section Head"):        "9900002010",
-    ("mysuru", "Org Admin"):           "9900003001",
-    ("mysuru", "Dept Head"):           "9900003002",
-    ("mysuru", "Originator"):          "9900003003",
-    ("mysuru", "Tester"):              "9900003004",
-    ("mysuru", "Test Assigner"):       "9900003005",
-    ("mysuru", "Technical Approver"):  "9900003006",
-    ("mysuru", "Finance Approver"):    "9900003007",
-    ("mysuru", "EE TLSS"):             "9900003008",
-    ("mysuru", "TA&QC Officer"):       "9900003009",
-    ("mysuru", "Section Head"):        "9900003010",
+    ("north",  "Org Admin"):              "9900001001",
+    ("north",  "Dept Head"):              "9900001002",
+    ("north",  "Originator"):             "9900001003",
+    ("north",  "Tester"):                 "9900001004",
+    ("north",  "Test Assigner"):          "9900001005",
+    ("north",  "Technical Approver"):     "9900001006",
+    ("north",  "Finance Approver"):       "9900001007",
+    ("north",  "EE TLSS"):                "9900001008",
+    ("north",  "TA&QC Officer"):          "9900001009",
+    ("north",  "Section Head"):           "9900001010",
+    ("north",  "AEE Maintenance"):        "9900001011",
+    ("north",  "SEE W&M"):                "9900001012",
+    ("north",  "EE RT"):                  "9900001013",
+    ("north",  "SEE RT"):                 "9900001014",
+    ("north",  "CEE Transmission Zone"):  "9900001015",
+    ("north",  "CEE RT&R&D"):             "9900001016",
+    ("north",  "Purchaser"):              "9900001017",
+    ("north",  "Field Tester"):           "9900001018",
+    ("north",  "Lab Tester"):             "9900001019",
+    ("south",  "Org Admin"):              "9900002001",
+    ("south",  "Dept Head"):              "9900002002",
+    ("south",  "Originator"):             "9900002003",
+    ("south",  "Tester"):                 "9900002004",
+    ("south",  "Test Assigner"):          "9900002005",
+    ("south",  "Technical Approver"):     "9900002006",
+    ("south",  "Finance Approver"):       "9900002007",
+    ("south",  "EE TLSS"):                "9900002008",
+    ("south",  "TA&QC Officer"):          "9900002009",
+    ("south",  "Section Head"):           "9900002010",
+    ("south",  "AEE Maintenance"):        "9900002011",
+    ("south",  "SEE W&M"):                "9900002012",
+    ("south",  "EE RT"):                  "9900002013",
+    ("south",  "SEE RT"):                 "9900002014",
+    ("south",  "CEE Transmission Zone"):  "9900002015",
+    ("south",  "CEE RT&R&D"):             "9900002016",
+    ("south",  "Purchaser"):              "9900002017",
+    ("south",  "Field Tester"):           "9900002018",
+    ("south",  "Lab Tester"):             "9900002019",
+    ("mysuru", "Org Admin"):              "9900003001",
+    ("mysuru", "Dept Head"):              "9900003002",
+    ("mysuru", "Originator"):             "9900003003",
+    ("mysuru", "Tester"):                 "9900003004",
+    ("mysuru", "Test Assigner"):          "9900003005",
+    ("mysuru", "Technical Approver"):     "9900003006",
+    ("mysuru", "Finance Approver"):       "9900003007",
+    ("mysuru", "EE TLSS"):                "9900003008",
+    ("mysuru", "TA&QC Officer"):          "9900003009",
+    ("mysuru", "Section Head"):           "9900003010",
+    ("mysuru", "AEE Maintenance"):        "9900003011",
+    ("mysuru", "SEE W&M"):                "9900003012",
+    ("mysuru", "EE RT"):                  "9900003013",
+    ("mysuru", "SEE RT"):                 "9900003014",
+    ("mysuru", "CEE Transmission Zone"):  "9900003015",
+    ("mysuru", "CEE RT&R&D"):             "9900003016",
+    ("mysuru", "Purchaser"):              "9900003017",
+    ("mysuru", "Field Tester"):           "9900003018",
+    ("mysuru", "Lab Tester"):             "9900003019",
 }
 
 
@@ -6506,16 +7237,25 @@ def _dft_get_or_create_dept(session, org_id, name, code,
 # Maps dept-filter role names to their default dashboard module path.
 # Must match the Module.path values seeded in seed_modules().
 _DFT_ROLE_MODULE_PATH = {
-    "Org Admin":           "admin_dashboard",
-    "Dept Head":           "see_dashboard",
-    "Section Head":        "see_dashboard",
-    "Technical Approver":  "see_dashboard",
-    "Finance Approver":    "see_dashboard",
-    "EE TLSS":             "ee_tlss_dashboard",
-    "TA&QC Officer":       "ee_tlss_dashboard",
-    "Originator":          "aee_dashboard",
-    "Tester":              "aee_dashboard",
-    "Test Assigner":       "aee_dashboard",
+    "Org Admin":              "admin_dashboard",
+    "Dept Head":              "see_dashboard",
+    "Section Head":           "see_dashboard",
+    "Technical Approver":     "see_dashboard",
+    "Finance Approver":       "see_dashboard",
+    "SEE W&M":                "see_dashboard",
+    "SEE RT":                 "see_dashboard",
+    "CEE Transmission Zone":  "cee_dashboard",
+    "CEE RT&R&D":             "cee_dashboard",
+    "EE TLSS":                "ee_tlss_dashboard",
+    "EE RT":                  "ee_tlss_dashboard",
+    "TA&QC Officer":          "ee_tlss_dashboard",
+    "Originator":             "aee_dashboard",
+    "Tester":                 "aee_dashboard",
+    "Test Assigner":          "aee_dashboard",
+    "AEE Maintenance":        "aee_dashboard",
+    "Field Tester":           "aee_dashboard",
+    "Lab Tester":             "aee_dashboard",
+    "Purchaser":              "aee_dashboard",
 }
 
 
@@ -6525,14 +7265,23 @@ def _dft_get_or_create_role(session, org_id, name,
         organization_id=org_id, name=name
     ).first()
     if r:
-        # Backfill default_module_id if not already set
+        # Sync flags so re-seeding always fixes stale DB state
+        updated = False
+        if r.is_org_admin != is_org_admin:
+            r.is_org_admin = is_org_admin
+            updated = True
+        if r.is_dept_admin != is_dept_admin:
+            r.is_dept_admin = is_dept_admin
+            updated = True
         if not r.default_module_id:
             module_path = _DFT_ROLE_MODULE_PATH.get(name)
             if module_path:
                 mod = session.query(Module).filter_by(path=module_path).first()
                 if mod:
                     r.default_module_id = mod.id
-                    session.flush()
+                    updated = True
+        if updated:
+            session.flush()
         return r
     now = datetime.now()
 
@@ -6621,7 +7370,7 @@ def seed_dept_filter_users(session, org=None):
     Password:   TestDept@123
     """
     print("\n" + "=" * 72)
-    print("  DEPT FILTER TEST SEED  —  3 depts × 10 roles = 30 users")
+    print("  DEPT FILTER TEST SEED  —  3 depts × 19 roles = 57 users")
     print("=" * 72)
 
     # 1. Organisation — reuse the already-seeded KPTCL org (default org)
@@ -6713,7 +7462,7 @@ def seed_dept_filter_users(session, org=None):
     session.commit()
 
     print("\n" + "=" * 72)
-    print("  SEED COMPLETE -- 34 users created / updated  (30 leaf + 4 top-level)")
+    print("  SEED COMPLETE -- 61 users created / updated  (57 leaf + 4 top-level)")
     print("=" * 72)
     print("""
 Department-filter validation matrix:

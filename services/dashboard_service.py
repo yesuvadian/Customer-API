@@ -21,7 +21,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, true
 from sqlalchemy.orm import Session
 
 from models import (
@@ -972,28 +972,36 @@ class DashboardService:
         """AEE / field-supervisor dashboard data — all DB access centralised here."""
         org_id = self.org_id
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        dept_id = self.dept_id
+        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
+        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
 
         pending_approvals = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status.in_(["submitted", "pending_approval"]))
             .scalar() or 0
         )
         assigned_tests = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status.in_(["in_progress", "assigned"]))
             .scalar() or 0
         )
         equipment_count = (
             self.db.query(func.count(Equipment.id))
-            .filter(Equipment.organization_id == org_id, Equipment.status == "active")
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "active")
             .scalar() or 0
         )
         # Equipment that had a maintenance TR in the last 30 days
         recently_maintained_sq = (
             self.db.query(func.distinct(TestingRequest.equipment_id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.equipment_id.isnot(None),
                     TestingRequest.request_category == "maintenance",
                     TestingRequest.cts >= thirty_days_ago)
@@ -1002,6 +1010,7 @@ class DashboardService:
         maintenance_due = (
             self.db.query(func.count(Equipment.id))
             .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
                     Equipment.status == "active",
                     ~Equipment.id.in_(self.db.query(recently_maintained_sq)))
             .scalar() or 0
@@ -1009,6 +1018,7 @@ class DashboardService:
         fr_pending = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.request_category == "failure_registry",
                     TestingRequest.status == "under_approval")
             .scalar() or 0
@@ -1016,6 +1026,7 @@ class DashboardService:
         alert_count = (
             self.db.query(func.count(Equipment.id))
             .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
                     Equipment.status == "under_repair")
             .scalar() or 0
         )
@@ -1023,6 +1034,7 @@ class DashboardService:
         raw_assignments = (
             self.db.query(TestingRequest)
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status.in_(
                         ["submitted", "pending_approval", "in_progress", "assigned"]))
             .order_by(TestingRequest.due_date.asc().nullslast())
@@ -1085,16 +1097,22 @@ class DashboardService:
         """EE TLSS condition-monitoring dashboard."""
         org_id = self.org_id
         ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
+        dept_id = self.dept_id
+        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
+        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
 
         total_equipment = (
             self.db.query(func.count(Equipment.id))
-            .filter(Equipment.organization_id == org_id, Equipment.status == "active")
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "active")
             .scalar() or 0
         )
         tested_equipment = (
             self.db.query(func.count(func.distinct(TestingRequest.equipment_id)))
             .join(TestSession, TestSession.testing_request_id == TestingRequest.id)
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.equipment_id.isnot(None),
                     TestSession.session_date >= ninety_days_ago)
             .scalar() or 0
@@ -1104,6 +1122,7 @@ class DashboardService:
         overdue_tests = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status.in_(
                         ["submitted", "pending_approval", "assigned", "scheduled"]),
                     TestingRequest.due_date < datetime.now())
@@ -1112,6 +1131,7 @@ class DashboardService:
         alert_critical = (
             self.db.query(func.count(Equipment.id))
             .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
                     Equipment.status == "under_repair")
             .scalar() or 0
         )
@@ -1122,6 +1142,7 @@ class DashboardService:
                     Recommendation.testing_request_id.in_(
                         self.db.query(TestingRequest.id)
                         .filter(TestingRequest.organization_id == org_id,
+                                dept_cond_tr,
                                 TestingRequest.status != "completed")
                     ))
             .scalar() or 0
@@ -1129,6 +1150,7 @@ class DashboardService:
         maintenance_compliant = (
             self.db.query(func.count(func.distinct(TestingRequest.equipment_id)))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.equipment_id.isnot(None),
                     TestingRequest.request_category == "maintenance",
                     TestingRequest.completed_at >= ninety_days_ago)
@@ -1140,12 +1162,14 @@ class DashboardService:
         total_tests = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.cts >= ninety_days_ago)
             .scalar() or 0
         )
         approved_tests = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status == "approved",
                     TestingRequest.cts >= ninety_days_ago)
             .scalar() or 0
@@ -1154,6 +1178,7 @@ class DashboardService:
         fr_pending = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.request_category == "failure_registry",
                     TestingRequest.status == "under_approval")
             .scalar() or 0
@@ -1161,6 +1186,7 @@ class DashboardService:
         overdue_requests = (
             self.db.query(TestingRequest)
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status.in_(
                         ["submitted", "pending_approval", "assigned", "scheduled"]),
                     TestingRequest.due_date < datetime.now())
@@ -1186,6 +1212,7 @@ class DashboardService:
         alert_equipment = (
             self.db.query(Equipment)
             .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
                     Equipment.status.in_(["under_repair", "active"]))
             .limit(10).all()
         )
@@ -1219,21 +1246,28 @@ class DashboardService:
         """SEE circle-level supervision dashboard."""
         org_id = self.org_id
         ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
+        dept_id = self.dept_id
+        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
+        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
 
         total_equipment = (
             self.db.query(func.count(Equipment.id))
-            .filter(Equipment.organization_id == org_id, Equipment.status == "active")
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "active")
             .scalar() or 0
         )
         total_requests = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.cts >= ninety_days_ago)
             .scalar() or 0
         )
         completed_requests = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status == "completed",
                     TestingRequest.cts >= ninety_days_ago)
             .scalar() or 0
@@ -1242,18 +1276,21 @@ class DashboardService:
         pending_approvals = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status.in_(["submitted", "pending_approval"]))
             .scalar() or 0
         )
         critical_issues = (
             self.db.query(func.count(Equipment.id))
             .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
                     Equipment.status == "under_repair")
             .scalar() or 0
         )
         fr_pending = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.request_category == "failure_registry",
                     TestingRequest.status == "under_approval")
             .scalar() or 0
@@ -1261,6 +1298,7 @@ class DashboardService:
         pending_trs = (
             self.db.query(TestingRequest)
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status.in_(["submitted", "pending_approval"]))
             .order_by(TestingRequest.cts.desc()).limit(10).all()
         )
@@ -1288,10 +1326,15 @@ class DashboardService:
     def cee_dashboard(self) -> Dict:
         """CEE zone-level executive dashboard."""
         org_id = self.org_id
+        dept_id = self.dept_id
+        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
+        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
 
         zone_equipment = (
             self.db.query(func.count(Equipment.id))
-            .filter(Equipment.organization_id == org_id, Equipment.status == "active")
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "active")
             .scalar() or 0
         )
         zone_reliability = round(
@@ -1300,12 +1343,14 @@ class DashboardService:
         major_decisions = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status.in_(["submitted", "pending_approval"]))
             .scalar() or 0
         )
         fr_pending = (
             self.db.query(func.count(TestingRequest.id))
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.request_category == "failure_registry",
                     TestingRequest.status == "under_approval")
             .scalar() or 0
@@ -1313,6 +1358,7 @@ class DashboardService:
         strategic_trs = (
             self.db.query(TestingRequest)
             .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
                     TestingRequest.status.in_(["submitted", "pending_approval"]))
             .order_by(TestingRequest.cts.desc()).limit(10).all()
         )
