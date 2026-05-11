@@ -1365,6 +1365,10 @@ def seed_modules(session):
                 "Accessible to: TA&QC Officer.",
  "path": "taqc_inspections",
  "group_name": "Field Operations"},
+{"name": "Annual Audits",
+ "description": "Independent annual audit observation tickets with stage-wise assignment, compliance, review and closure.",
+ "path": "annual_audits",
+ "group_name": "Field Operations"},
 {"name": "Procurement Approvals",
  "description": "Finance Approver queue — review and approve / reject replacement procurement "
                 "requests created after Technical Approver approves a 'replacement' recommendation. "
@@ -5565,6 +5569,203 @@ def seed_direct_submission_templates(session) -> int:
     return count
 
 
+def seed_annual_audit_templates(session) -> int:
+    """
+    Seed Annual Audit categories and category-specific OrgTestTemplate rows.
+
+    Annual Audit is separate from taqc_inspection commissioning. Templates are
+    linked to CategoryDetails.id through OrgTestTemplate.test_type_id.
+    """
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.name == "Annual Audit Categories"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Annual Audit Categories",
+            description="Annual Substation Audit Observation Categories",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+
+    template_specs = [
+        (
+            "Electrical Safety",
+            "audit_electrical_safety",
+            "Electrical Safety Audit",
+            [
+                {
+                    "title": "Earthing System",
+                    "fields": [
+                        {"key": "earthing_condition", "label": "Earthing Condition", "type": "dropdown", "required": True, "options": ["Good", "Damaged", "Corroded"]},
+                        {"key": "earthing_resistance", "label": "Earthing Resistance", "type": "number", "unit": "ohms", "required": False},
+                        {"key": "earthing_photo", "label": "Earthing Photograph", "type": "file", "required": False},
+                    ],
+                },
+                {
+                    "title": "Safety Protection",
+                    "fields": [
+                        {"key": "danger_board_available", "label": "Danger Board Available", "type": "boolean", "required": False},
+                        {"key": "shock_hazard_observed", "label": "Shock Hazard Observed", "type": "boolean", "required": False},
+                        {"key": "safety_remarks", "label": "Safety Remarks", "type": "textarea", "required": False},
+                    ],
+                },
+            ],
+        ),
+        (
+            "Civil",
+            "audit_civil",
+            "Civil Audit",
+            [
+                {
+                    "title": "Civil Condition",
+                    "fields": [
+                        {"key": "foundation_condition", "label": "Foundation Condition", "type": "dropdown", "required": True, "options": ["Good", "Cracked", "Settled", "Damaged"]},
+                        {"key": "yard_drainage_status", "label": "Yard Drainage Status", "type": "dropdown", "required": False, "options": ["Clear", "Blocked", "Water Logging"]},
+                        {"key": "fencing_condition", "label": "Fencing / Compound Condition", "type": "dropdown", "required": False, "options": ["Good", "Damaged", "Missing"]},
+                        {"key": "civil_photo", "label": "Civil Observation Photo", "type": "file", "required": False},
+                    ],
+                },
+            ],
+        ),
+        (
+            "Fire Safety",
+            "audit_fire_safety",
+            "Fire Safety Audit",
+            [
+                {
+                    "title": "Fire Safety Equipment",
+                    "fields": [
+                        {"key": "fire_extinguisher_available", "label": "Fire Extinguisher Available", "type": "boolean", "required": False},
+                        {"key": "fire_extinguisher_expiry", "label": "Fire Extinguisher Expiry", "type": "date", "required": False},
+                        {"key": "fire_alarm_operational", "label": "Fire Alarm Operational", "type": "boolean", "required": False},
+                        {"key": "oil_leakage_present", "label": "Oil Leakage Present", "type": "boolean", "required": False},
+                        {"key": "fire_safety_photo", "label": "Fire Safety Photograph", "type": "file", "required": False},
+                    ],
+                },
+            ],
+        ),
+        (
+            "Documentation",
+            "audit_documentation",
+            "Documentation Audit",
+            [
+                {
+                    "title": "Records Verification",
+                    "fields": [
+                        {"key": "maintenance_register_updated", "label": "Maintenance Register Updated", "type": "boolean", "required": False},
+                        {"key": "test_records_available", "label": "Test Records Available", "type": "boolean", "required": False},
+                        {"key": "single_line_diagram_available", "label": "Single Line Diagram Available", "type": "boolean", "required": False},
+                        {"key": "document_gap_details", "label": "Documentation Gap Details", "type": "textarea", "required": False},
+                    ],
+                },
+            ],
+        ),
+        (
+            "Environmental",
+            "audit_environmental",
+            "Environmental Audit",
+            [
+                {
+                    "title": "Environmental Checks",
+                    "fields": [
+                        {"key": "oil_spillage_observed", "label": "Oil Spillage Observed", "type": "boolean", "required": False},
+                        {"key": "waste_disposal_status", "label": "Waste Disposal Status", "type": "dropdown", "required": False, "options": ["Compliant", "Non-Compliant", "Not Applicable"]},
+                        {"key": "vegetation_clearance_status", "label": "Vegetation Clearance Status", "type": "dropdown", "required": False, "options": ["Clear", "Needs Trimming", "Unsafe"]},
+                        {"key": "environmental_photo", "label": "Environmental Observation Photo", "type": "file", "required": False},
+                    ],
+                },
+            ],
+        ),
+        (
+            "General Maintenance",
+            "audit_general_maintenance",
+            "General Maintenance Audit",
+            [
+                {
+                    "title": "General Maintenance",
+                    "fields": [
+                        {"key": "cleanliness_status", "label": "Cleanliness Status", "type": "dropdown", "required": False, "options": ["Good", "Average", "Poor"]},
+                        {"key": "illumination_status", "label": "Illumination Status", "type": "dropdown", "required": False, "options": ["Adequate", "Inadequate", "Not Working"]},
+                        {"key": "access_path_condition", "label": "Access Path Condition", "type": "dropdown", "required": False, "options": ["Good", "Obstructed", "Damaged"]},
+                        {"key": "maintenance_remarks", "label": "Maintenance Remarks", "type": "textarea", "required": False},
+                    ],
+                },
+            ],
+        ),
+    ]
+
+    count = 0
+    for category_name, template_key, template_name, category_sections in template_specs:
+        detail = session.query(CategoryDetails).filter(
+            CategoryDetails.category_master_id == master.id,
+            CategoryDetails.name == category_name,
+        ).first()
+        if not detail:
+            detail = CategoryDetails(
+                category_master_id=master.id,
+                name=category_name,
+                description=f"{category_name} annual audit observations",
+                category_type="annual_audit",
+                is_active=True,
+            )
+            session.add(detail)
+            session.flush()
+        else:
+            detail.category_type = "annual_audit"
+
+        template_data = {
+            "key": template_key,
+            "name": template_name,
+            "description": f"{category_name} annual audit observation template",
+            "template_type": "annual_audit",
+            "sections": category_sections + [
+                {
+                    "title": "Observation Assessment",
+                    "fields": [
+                        {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": True},
+                        {"key": "severity", "label": "Severity", "type": "dropdown", "required": True, "options": ["Major", "Minor", "Advisory"]},
+                        {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": True},
+                        {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Conditional"]},
+                    ],
+                },
+                {
+                    "title": "Compliance Action",
+                    "fields": [
+                        {"key": "corrective_action", "label": "Corrective Action", "type": "textarea", "required": False},
+                        {"key": "compliance_evidence", "label": "Compliance Evidence", "type": "file", "required": False},
+                        {"key": "date_of_compliance", "label": "Date of Compliance", "type": "date", "required": False},
+                        {"key": "review_remarks", "label": "Review Remarks", "type": "textarea", "required": False},
+                    ],
+                },
+            ],
+        }
+
+        existing = session.query(OrgTestTemplate).filter(
+            OrgTestTemplate.template_key == template_key,
+            OrgTestTemplate.org_id == None,  # noqa: E711
+        ).first()
+        if existing:
+            existing.test_type_id = detail.id
+            existing.template_data = template_data
+            existing.is_system = True
+        else:
+            session.add(OrgTestTemplate(
+                template_key=template_key,
+                org_id=None,
+                test_type_id=detail.id,
+                template_data=template_data,
+                is_system=True,
+                version=1,
+            ))
+            count += 1
+
+    session.commit()
+    return count
+
+
 def seed_tr_workflows(session):
     """
     Seed the IntegratedWorkflowEngine with three workflows:
@@ -6464,7 +6665,7 @@ def run_seed():
     # ── Drop ALL tables then recreate from scratch ────────────────────────────
     print("[INIT] Dropping all tables (Base.metadata.drop_all) …")
     import models  # noqa: F401  — ensures all model classes register with Base
-    Base.metadata.drop_all(bind=vendor_engine)
+    #Base.metadata.drop_all(bind=vendor_engine)
     print("[OK]   All tables dropped.")
     print("[INIT] Creating database schema via Base.metadata.create_all …")
     Base.metadata.create_all(bind=vendor_engine)
@@ -6511,6 +6712,8 @@ def run_seed():
         print(f"[OK] Overall assessment template: {'provisioned' if inserted else 'already exists'}.")
         n2 = seed_direct_submission_templates(session)
         print(f"[OK] Direct-submission templates: {n2} seeded.")
+        n3 = seed_annual_audit_templates(session)
+        print(f"[OK] Annual Audit templates: {n3} seeded.")
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")

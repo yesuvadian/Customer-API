@@ -4,14 +4,14 @@ from sqlalchemy import Enum
 
 import uuid
 from sqlalchemy import (
-    Column, Float, LargeBinary, Numeric, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
+    Column, Float, LargeBinary, Numeric, String, Boolean, Date, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
 )
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB, ARRAY
 from sqlalchemy.orm import relationship
 from database import Base
 from utils.common_service import UTCDateTimeMixin
 import uuid
-from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, DateTime, func
+from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, Date, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -210,6 +210,10 @@ class RepairWorkflow(Base):
         index=True,
     )
 
+    workflow_code = Column(String(100), nullable=True, index=True)
+    entity_type = Column(String(100), nullable=True, index=True)
+    entity_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+
     equipment_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.equipment.id", ondelete="CASCADE"),
@@ -225,7 +229,11 @@ class RepairWorkflow(Base):
 
     current_stage_instance_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("repair_stage_instances.id"),
+        ForeignKey(
+            "repair_stage_instances.id",
+            name="fk_workflow_current_stage_instance",
+            use_alter=True,
+        ),
         nullable=True,
     )
 
@@ -628,6 +636,65 @@ class RepairAssignmentQueue(Base):
     )
 
 
+class TAQCAnnualInspection(Base):
+    __tablename__ = "taqc_annual_inspections"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    inspection_number = Column(String(50), unique=True, nullable=False, index=True)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=False)
+    substation_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=False)
+    inspection_date = Column(Date, nullable=False)
+    inspected_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    remarks = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    substation = relationship("Equipment", foreign_keys=[substation_id])
+    inspector = relationship("User", foreign_keys=[inspected_by])
+    observations = relationship(
+        "TAQCObservation",
+        back_populates="inspection",
+        cascade="all, delete-orphan",
+    )
+
+
+class TAQCObservation(Base):
+    __tablename__ = "taqc_observations"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    inspection_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.taqc_annual_inspections.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    observation_number = Column(String(50), unique=True, nullable=False, index=True)
+    category_detail_id = Column(Integer, ForeignKey("public.CategoryDetails.id"), nullable=False)
+    template_id = Column(UUID(as_uuid=True), ForeignKey("public.org_test_templates.id"), nullable=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id"), nullable=True, index=True)
+    severity = Column(String(20), nullable=True)
+    target_compliance_date = Column(Date, nullable=True)
+    observation_description = Column(Text, nullable=True)
+    current_stage_code = Column(String(100), nullable=True, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    assigned_to = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    reviewer_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    is_overdue = Column(Boolean, default=False)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    inspection = relationship("TAQCAnnualInspection", back_populates="observations")
+    category = relationship("CategoryDetails", foreign_keys=[category_detail_id])
+    template = relationship("OrgTestTemplate", foreign_keys=[template_id])
+    workflow = relationship("RepairWorkflow", foreign_keys=[workflow_id])
+    assignee = relationship("User", foreign_keys=[assigned_to])
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
+
+
 class RequestCategory(PyEnum):
     test = "test"
     maintenance = "maintenance"
@@ -650,7 +717,14 @@ class Plan(Base):
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    created_by = Column(
+    UUID(as_uuid=True),
+    ForeignKey(
+        "public.users.id",
+        name="fk_plans_created_by",
+    ),
+    nullable=True,
+)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
 
     # ✅ Relationship: one plan can have many users
@@ -702,7 +776,14 @@ class Organization(Base):
 
     settings = Column(JSONB, default={})
 
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    created_by = Column(
+    UUID(as_uuid=True),
+    ForeignKey(
+        "public.users.id",
+        name="fk_organizations_created_by",
+    ),
+    nullable=True,
+)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -1091,10 +1172,25 @@ class User(Base):
     plan_id = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
 
     # ✅ Organization Multi-Tenancy Columns
-    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=True)
+    organization_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey(
+        "public.organizations.id",
+        name="fk_users_organization_id",
+        ondelete="CASCADE",
+    ),
+    nullable=True,
+)
     employee_id = Column(String(50), nullable=True)
-    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
-
+    department_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey(
+        "public.org_departments.id",
+        name="fk_users_department_id",
+        ondelete="SET NULL",
+    ),
+    nullable=True,
+)
     # ✅ Relationship: Plan → Users
     plan = relationship(
         "Plan",
@@ -2974,7 +3070,13 @@ class NotificationLog(Base):
     __table_args__ = {"schema": "public"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id = Column(UUID(as_uuid=True), nullable=True)
+    organization_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey(
+        "public.organizations.id",
+        name="fk_users_organization_id"
+    )
+)
 
     event_type = Column(String(100), nullable=False, index=True)
     channel = Column(String(20), nullable=False)            # "email" | "sms" | "inapp"
@@ -3030,7 +3132,13 @@ class UserNotification(Base):
         nullable=False,
         index=True,
     )
-    organization_id = Column(UUID(as_uuid=True), nullable=True)
+    organization_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey(
+        "public.organizations.id",
+        name="fk_users_organization_id"
+    )
+)
 
     event_type = Column(String(100), nullable=False)
     title = Column(String(500), nullable=False)
@@ -3138,7 +3246,11 @@ class ReportLog(Base):
     definition_id   = Column(UUID(as_uuid=True),
                              ForeignKey("public.report_definitions.id", ondelete="CASCADE"),
                              nullable=False, index=True)
-    organization_id = Column(UUID(as_uuid=True), nullable=True)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", name="fk_report_logs_organization_id"),
+        nullable=True
+    )
     generated_by    = Column(UUID(as_uuid=True),
                              ForeignKey("public.users.id", ondelete="SET NULL"),
                              nullable=True)
