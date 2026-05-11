@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import uuid
 import pandas as pd
 from typing import Dict, Optional
+from requests import session
 from sqlalchemy import text
 from database import VendorSessionLocal, Base, vendor_engine
 from models import (
@@ -2925,6 +2926,7 @@ def seed_role_templates(session):
     recommendations_module   = [mid for mid in [modules_by_name.get("Recommendations")] if mid]
     approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
     workflows_module         = [mid for mid in [modules_by_name.get("Workflows")] if mid]
+    repair_workflows_module  = [mid for mid in [modules_by_name.get("Repair Workflows")] if mid]
 
     dashboard_module = [mid for mid in [modules_by_name.get("Dashboard")] if mid]
 
@@ -2989,10 +2991,10 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": _full(org_modules),
         },
-        # ── 3. Originator — procurement + testing requests + equipment ────────
+        # ── 3. Originator — procurement + testing requests + equipment + repair ─
         {
             "name": "Originator",
-            "description": "Creates testing requests and raises procurement. Access to dashboard, all procurement modules, testing requests, and equipment register.",
+            "description": "Creates testing requests and raises procurement. Can start repair workflows.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3000,7 +3002,8 @@ def seed_role_templates(session):
                 _readwrite(dashboard_module) +
                 _readwrite(procurement_modules) +
                 _readwrite(testing_requests_module) +
-                _readwrite(equipment_module)
+                _readwrite(equipment_module) +
+                _readwrite(repair_workflows_module)
             ),
         },
         # ── 4. Test Assigner (Approver) — testing request approvals + equipment view
@@ -3015,55 +3018,59 @@ def seed_role_templates(session):
                 _readonly(equipment_module)
             ),
         },
-        # ── 5. Field Tester ───────────────────────────────────────────────────
+        # ── 5. Field Tester — testing + repair stage execution ────────────────
         {
             "name": "Field Tester",
-            "description": "Performs on-site transformer testing and uploads results. View testing requests; full access to testing module; view equipment register.",
+            "description": "Performs on-site transformer testing and repair stage execution.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readonly(testing_requests_module) +
                 _readwrite(testing_module) +
-                _readonly(equipment_module)
+                _readonly(equipment_module) +
+                _readwrite(repair_workflows_module)
             ),
         },
-        # ── 6. Lab Tester ─────────────────────────────────────────────────────
+        # ── 6. Lab Tester — lab testing + repair stage execution ──────────────
         {
             "name": "Lab Tester",
-            "description": "Performs laboratory testing and uploads results. View testing requests; full access to testing module; view equipment register.",
+            "description": "Performs laboratory testing and repair stage execution.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readonly(testing_requests_module) +
                 _readwrite(testing_module) +
-                _readonly(equipment_module)
+                _readonly(equipment_module) +
+                _readwrite(repair_workflows_module)
             ),
         },
-        # ── 7. Department Head — recommendations & approvals + equipment view
+        # ── 7. Department Head — recommendations + approvals + repair approve ─
         {
             "name": "Department Head",
-            "description": "Reviews and approves recommendations from testers. Access to Recommendations, Approvals modules, and view equipment register.",
+            "description": "Reviews and approves recommendations from testers. Can approve repair workflow stages.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
             "permissions_template": (
                 _approve(recommendations_module) +
                 _approve(approvals_module) +
-                _readonly(equipment_module)
+                _readonly(equipment_module) +
+                _approve(repair_workflows_module)
             ),
         },
-        # ── 8. Purchaser — dashboard + procurement ────────────────────────────
+        # ── 8. Purchaser — procurement + repair view ───────────────────────────
         {
             "name": "Purchaser",
-            "description": "Manages procurement activities. Access to dashboard and all procurement modules.",
+            "description": "Manages procurement activities. Read-only access to repair workflows (procurement stage).",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readwrite(dashboard_module) +
-                _readwrite(procurement_modules)
+                _readwrite(procurement_modules) +
+                _readwrite(repair_workflows_module)
             ),
         },
 
@@ -3081,10 +3088,10 @@ def seed_role_templates(session):
         # SRS-SPECIFIED DESIGNATION ROLES (SEACMS-AI v1.3 Section 2.3)
         # ═══════════════════════════════════════════════════════════════════════════
 
-        # ── 10. AEE Maintenance — Field supervisor ────────────────────────────
+        # ── 10. AEE Maintenance — Field supervisor + repair stage executor ─────
         {
             "name": "AEE Maintenance",
-            "description": "Assistant Executive Engineer - Field-level maintenance responsible officer",
+            "description": "Assistant Executive Engineer - Field-level maintenance responsible officer. Key repair workflow actor.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3093,14 +3100,15 @@ def seed_role_templates(session):
                 _readonly(dashboard_module) +
                 _readonly(testing_requests_module) +
                 _approve(approvals_module) +
-                _readonly(recommendations_module)
+                _readonly(recommendations_module) +
+                _readwrite(repair_workflows_module)
             ),
         },
 
-        # ── 11. EE TLSS — Primary reviewer (CRITICAL ROLE) ────────────────────
+        # ── 11. EE TLSS — Primary reviewer + repair stage approver ───────────
         {
             "name": "EE TLSS",
-            "description": "Executive Engineer - Transmission Line & Substation primary reviewer",
+            "description": "Executive Engineer - Transmission Line & Substation primary reviewer. Approves repair workflow stages.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3111,14 +3119,15 @@ def seed_role_templates(session):
                 _approve(testing_request_approvals_module) +
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
-                _readonly(procurement_modules)
+                _readonly(procurement_modules) +
+                _approve(repair_workflows_module)
             ),
         },
 
-        # ── 12. SEE W&M — Circle supervisor (CRITICAL ROLE) ───────────────────
+        # ── 12. SEE W&M — Circle supervisor + repair stage approver ──────────
         {
             "name": "SEE W&M",
-            "description": "Superintending Engineer - Works & Maintenance circle supervisor",
+            "description": "Superintending Engineer - Works & Maintenance circle supervisor. Approves repair workflow stages.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3128,14 +3137,15 @@ def seed_role_templates(session):
                 _approve(approvals_module) +
                 _readonly(vendor_documents_module) +
                 _readonly(recommendations_module) +
-                _readonly(testing_requests_module)
+                _readonly(testing_requests_module) +
+                _approve(repair_workflows_module)
             ),
         },
 
-        # ── 13. EE RT — R&D engineer ──────────────────────────────────────────
+        # ── 13. EE RT — R&D engineer + repair stage executor ─────────────────
         {
             "name": "EE RT",
-            "description": "Executive Engineer - Research & Testing",
+            "description": "Executive Engineer - Research & Testing. Executes repair workflow testing stages.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3144,14 +3154,15 @@ def seed_role_templates(session):
                 _readonly(dashboard_module) +
                 _readwrite(testing_requests_module) +
                 _readwrite(testing_module) +
-                _readonly(equipment_module)
+                _readonly(equipment_module) +
+                _readwrite(repair_workflows_module)
             ),
         },
 
-        # ── 14. SEE RT — Senior R&D ───────────────────────────────────────────
+        # ── 14. SEE RT — Senior R&D + repair stage approver ──────────────────
         {
             "name": "SEE RT",
-            "description": "Superintending Engineer - Research & Testing",
+            "description": "Superintending Engineer - Research & Testing. Approves repair workflow testing stages.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3164,14 +3175,15 @@ def seed_role_templates(session):
                 _readwrite(testing_module) +
                 _approve(testing_request_approvals_module) +
                 _readonly(vendor_documents_module) +
-                _readonly(equipment_module)
+                _readonly(equipment_module) +
+                _approve(repair_workflows_module)
             ),
         },
 
-        # ── 15. CEE Transmission Zone — Zone management ───────────────────────
+        # ── 15. CEE Transmission Zone — Zone management + repair final approver
         {
             "name": "CEE Transmission Zone",
-            "description": "Chief Engineer Executive - Transmission zone management",
+            "description": "Chief Engineer Executive - Transmission zone management. Final approver for repair workflows.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
@@ -3183,14 +3195,15 @@ def seed_role_templates(session):
                 _readonly(testing_requests_module) +
                 _readonly(procurement_modules) +
                 _readonly(vendor_documents_module) +
-                _readonly(equipment_module)
+                _readonly(equipment_module) +
+                _approve(repair_workflows_module)
             ),
         },
 
-        # ── 16. CEE RT&R&D — R&D chief ────────────────────────────────────────
+        # ── 16. CEE RT&R&D — R&D chief + repair final approver ───────────────
         {
             "name": "CEE RT&R&D",
-            "description": "Chief Engineer Executive - Research Testing & R&D",
+            "description": "Chief Engineer Executive - Research Testing & R&D. Final approver for repair workflow R&D stages.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
@@ -3200,7 +3213,23 @@ def seed_role_templates(session):
                 _full(testing_module) +
                 _readwrite(equipment_module) +
                 _readonly(testing_requests_module) +
-                _readonly(recommendations_module)
+                _readonly(recommendations_module) +
+                _approve(repair_workflows_module)
+            ),
+        },
+
+        # ── 17. Workflow Coordinator — assigns users to repair workflow stages ──
+        {
+            "name": "Workflow Coordinator",
+            "description": "Assigns users to transformer repair workflow stages and manages the assignment queue",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": ee_tlss_dashboard_module_id,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _readwrite(repair_workflows_module) +
+                _readonly(testing_requests_module)
             ),
         },
     ]
@@ -4060,6 +4089,15 @@ def seed_kptcl_organization(session):
                 "role_name": "Lab Tester",
                 "employee_id": "KPTCL-LT-001",
             },
+            {
+                "email": "wf.coordinator@kptcl.com",
+                "password": "Coord123!",
+                "firstname": "Workflow",
+                "lastname": "Coordinator",
+                "phone": "+91-9900000019",
+                "role_name": "Workflow Coordinator",
+                "employee_id": "KPTCL-WFC-001",
+            },
         ]
 
         created_users = 0
@@ -4095,19 +4133,37 @@ def seed_kptcl_organization(session):
                 continue
 
             existing_role = session.query(OrgUserRole).filter_by(
-                user_id=user.id, org_role_id=role.id, is_active=True
-            ).first()
-            if not existing_role:
-                session.add(OrgUserRole(
-                    id=uuid.uuid4(),
-                    user_id=user.id,
-                    org_role_id=role.id,
-                    department_id=None,
-                    is_active=True,
-                    assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-                    assigned_by=None
-                ))
+            user_id=user.id,
+            org_role_id=role.id,
+        ).first()
 
+        if existing_role:
+            # UPDATE existing mapping
+            existing_role.department_id = user_data.get("department_id")
+            existing_role.is_active = True
+            existing_role.assigned_at = datetime.now(datetime.now().astimezone().tzinfo)
+
+            print(
+                f"[UPDATED ROLE] "
+                f"{user.email} -> {user_data.get('department_id')}"
+            )
+
+        else:
+            # CREATE new mapping
+            session.add(OrgUserRole(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                department_id=user_data.get("department_id"),
+                is_active=True,
+                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                assigned_by=None
+            ))
+
+        print(
+            f"[CREATED ROLE] "
+            f"{user.email} -> {user_data.get('department_id')}"
+        )
         session.commit()
         print(f"[OK] Created {created_users} new SRS designation users for KPTCL")
         return existing_org
@@ -4409,15 +4465,22 @@ def seed_kptcl_organization(session):
         existing_role = session.query(OrgUserRole).filter_by(
             user_id=user.id, org_role_id=role.id, is_active=True
         ).first()
-        if not existing_role:
+        if existing_role:
+            existing_role.department_id = user_data.get("department_id")
+            existing_role.is_active = True
+            existing_role.assigned_at = datetime.now(
+            datetime.now().astimezone().tzinfo
+    )
+
+        else:
             session.add(OrgUserRole(
-                id=uuid.uuid4(),
-                user_id=user.id,
-                org_role_id=role.id,
-                department_id=None,
-                is_active=True,
-                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-                assigned_by=None
+            id=uuid.uuid4(),
+            user_id=user.id,
+            org_role_id=role.id,
+            department_id=user_data.get("department_id"),
+            is_active=True,
+            assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+            assigned_by=None
             ))
 
     session.commit()
@@ -6398,9 +6461,12 @@ def _seed_notification_routing_rules(session) -> int:
 
 
 def run_seed():
-    # ── Create ALL SQLAlchemy tables (idempotent — safe on existing DB) ──────
-    print("[INIT] Creating database schema via Base.metadata.create_all …")
+    # ── Drop ALL tables then recreate from scratch ────────────────────────────
+    print("[INIT] Dropping all tables (Base.metadata.drop_all) …")
     import models  # noqa: F401  — ensures all model classes register with Base
+    Base.metadata.drop_all(bind=vendor_engine)
+    print("[OK]   All tables dropped.")
+    print("[INIT] Creating database schema via Base.metadata.create_all …")
     Base.metadata.create_all(bind=vendor_engine)
     print("[OK]   Schema ready.")
 
@@ -6834,8 +6900,9 @@ def seed_workflow(db):
 
     # -------------------------------
     # 4. STAGE → ROLE
-    # repair_stage_roles.json: [{stage_code, roles: [role_name, ...]}, ...]
-    # Match stage by code column; match role by name column.
+    # repair_stage_roles.json: [{stage_code, roles, assignment_role}, ...]
+    # roles[]         → can_edit=True, can_approve=True, can_assign=False
+    # assignment_role → can_edit=False, can_approve=False, can_assign=True
     # -------------------------------
     for entry in stage_role_list:
         stage_code = entry.get("stage_code")
@@ -6845,6 +6912,7 @@ def seed_workflow(db):
             print(f"  [WARN] seed_workflow: stage_code '{stage_code}' not found — skipping roles")
             continue
 
+        # Stage actor roles (can_edit + can_approve)
         for role_name in entry.get("roles", []):
             role = db.query(OrgRole).filter_by(name=role_name).first()
             if not role:
@@ -6862,8 +6930,30 @@ def seed_workflow(db):
                     stage_id=stage_id,
                     role_id=role.id,
                     can_edit=True,
-                    can_approve=False,
+                    can_approve=True,
+                    can_assign=False,
                 ))
+
+        # Assignment role (can_assign only — driven from JSON, not hardcoded)
+        assign_role_name = entry.get("assignment_role")
+        if assign_role_name:
+            assign_role = db.query(OrgRole).filter_by(name=assign_role_name).first()
+            if assign_role:
+                exists = db.query(RepairStageRole).filter_by(
+                    stage_id=stage_id,
+                    role_id=assign_role.id
+                ).first()
+                if not exists:
+                    db.add(RepairStageRole(
+                        id=uuid.uuid4(),
+                        stage_id=stage_id,
+                        role_id=assign_role.id,
+                        can_edit=False,
+                        can_approve=False,
+                        can_assign=True,
+                    ))
+                elif not exists.can_assign:
+                    exists.can_assign = True
 
     # -------------------------------
     # 5. TRANSITIONS
@@ -6998,15 +7088,19 @@ def seed_workflow(session):
             session.add(RepairStageTemplate(stage_id=stage_id, template_id=template_id))
 
     # ── 4. Stage → Role mapping ───────────────────────────────────────────────
+    # repair_stage_roles.json: [{stage_code, roles, assignment_role}, ...]
+    # roles[]         → can_edit=True, can_approve=True, can_assign=False
+    # assignment_role → can_edit=False, can_approve=False, can_assign=True  (from JSON — not hardcoded)
     # Query ALL org roles with the same name (one per org) so that RBAC works
-    # for users in ANY organization (e.g. KPTCL and SAMPLEORG both have
-    # "AEE Maintenance" — both must be seeded into repair_stage_roles).
+    # for users in ANY organization.
     for entry in roles_raw:
         stage_code = entry.get("stage_code") or entry.get("code")
         stage_id   = code_map.get(stage_code)
         if not stage_id:
             print(f"[WARN] Stage code not found: {stage_code}")
             continue
+
+        # Stage actor roles
         for role_name in entry.get("roles", []):
             matched_roles = session.query(OrgRole).filter(OrgRole.name == role_name).all()
             if not matched_roles:
@@ -7022,8 +7116,29 @@ def seed_workflow(session):
                         stage_id=stage_id,
                         role_id=role.id,
                         can_edit=True,
-                        can_approve=True,   # same role fills AND approves the stage
+                        can_approve=True,
+                        can_assign=False,
                     ))
+
+        # Assignment role — read from JSON field, not hardcoded
+        assign_role_name = entry.get("assignment_role")
+        if assign_role_name:
+            matched_assign_roles = session.query(OrgRole).filter(OrgRole.name == assign_role_name).all()
+            for role in matched_assign_roles:
+                exists = session.query(RepairStageRole).filter_by(
+                    stage_id=stage_id, role_id=role.id
+                ).first()
+                if not exists:
+                    session.add(RepairStageRole(
+                        id=uuid.uuid4(),
+                        stage_id=stage_id,
+                        role_id=role.id,
+                        can_edit=False,
+                        can_approve=False,
+                        can_assign=True,
+                    ))
+                elif not exists.can_assign:
+                    exists.can_assign = True
 
     # ── 5. Transitions ────────────────────────────────────────────────────────
     for t in transitions_raw:
@@ -7075,6 +7190,7 @@ _DFT_ROLES = [
     ("Purchaser",              False, False),
     ("Field Tester",           False, False),
     ("Lab Tester",             False, False),
+    ("Workflow Coordinator",   False, False),
 ]
 
 _DFT_DEPTS = [
@@ -7103,6 +7219,7 @@ _DFT_ROLE_EMAIL = {
     "Purchaser":              "purchaser",
     "Field Tester":           "fieldtester",
     "Lab Tester":             "labtester",
+    "Workflow Coordinator":   "wfcoordinator",
 }
 
 _DFT_ROLE_FNAME = {
@@ -7125,6 +7242,7 @@ _DFT_ROLE_FNAME = {
     "Purchaser":              "Purchaser",
     "Field Tester":           "FieldTester",
     "Lab Tester":             "LabTester",
+    "Workflow Coordinator":   "WFCoord",
 }
 
 _DFT_PHONE = {
@@ -7147,6 +7265,7 @@ _DFT_PHONE = {
     ("north",  "Purchaser"):              "9900001017",
     ("north",  "Field Tester"):           "9900001018",
     ("north",  "Lab Tester"):             "9900001019",
+    ("north",  "Workflow Coordinator"):   "9900001020",
     ("south",  "Org Admin"):              "9900002001",
     ("south",  "Dept Head"):              "9900002002",
     ("south",  "Originator"):             "9900002003",
@@ -7166,6 +7285,7 @@ _DFT_PHONE = {
     ("south",  "Purchaser"):              "9900002017",
     ("south",  "Field Tester"):           "9900002018",
     ("south",  "Lab Tester"):             "9900002019",
+    ("south",  "Workflow Coordinator"):   "9900002020",
     ("mysuru", "Org Admin"):              "9900003001",
     ("mysuru", "Dept Head"):              "9900003002",
     ("mysuru", "Originator"):             "9900003003",
@@ -7185,6 +7305,7 @@ _DFT_PHONE = {
     ("mysuru", "Purchaser"):              "9900003017",
     ("mysuru", "Field Tester"):           "9900003018",
     ("mysuru", "Lab Tester"):             "9900003019",
+    ("mysuru", "Workflow Coordinator"):   "9900003020",
 }
 
 
@@ -7256,6 +7377,7 @@ _DFT_ROLE_MODULE_PATH = {
     "Field Tester":           "aee_dashboard",
     "Lab Tester":             "aee_dashboard",
     "Purchaser":              "aee_dashboard",
+    "Workflow Coordinator":   "ee_tlss_dashboard",
 }
 
 
@@ -7370,7 +7492,7 @@ def seed_dept_filter_users(session, org=None):
     Password:   TestDept@123
     """
     print("\n" + "=" * 72)
-    print("  DEPT FILTER TEST SEED  —  3 depts × 19 roles = 57 users")
+    print("  DEPT FILTER TEST SEED  —  3 depts × 20 roles = 60 users")
     print("=" * 72)
 
     # 1. Organisation — reuse the already-seeded KPTCL org (default org)
@@ -7462,7 +7584,7 @@ def seed_dept_filter_users(session, org=None):
     session.commit()
 
     print("\n" + "=" * 72)
-    print("  SEED COMPLETE -- 61 users created / updated  (57 leaf + 4 top-level)")
+    print("  SEED COMPLETE -- 64 users created / updated  (60 leaf + 4 top-level)")
     print("=" * 72)
     print("""
 Department-filter validation matrix:

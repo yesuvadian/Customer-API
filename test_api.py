@@ -86,6 +86,13 @@ def check(label, resp, expected_status, key=None):
         fail(label, f"got {resp.status_code} expected {expected_status} — {detail}")
         return None
 
+def check_neg(label, resp, expected_statuses):
+    """Assert that a request is correctly rejected (negative test)."""
+    if resp.status_code in expected_statuses:
+        ok(f"[NEG] {label}", f"correctly rejected {resp.status_code}")
+    else:
+        fail(f"[NEG] {label}", f"got {resp.status_code} expected one of {expected_statuses} — {resp.text[:100]}")
+
 # ── Auth helper ───────────────────────────────────────────────────────────────
 
 def login(email, password=PW_DEPT):
@@ -105,7 +112,7 @@ def auth(token):
 # ─────────────────────────────────────────────────────────────────────────────
 section("1. AUTHENTICATION — all 10 roles × 3 departments (north / south / mysuru)")
 
-# Role definitions (email prefix, token key suffix, display name)
+# Role definitions (email prefix, token key suffix)
 _ROLE_DEFS = [
     ("orgadmin",        "OrgAdmin"),
     ("depthead",        "DeptHead"),
@@ -117,6 +124,16 @@ _ROLE_DEFS = [
     ("eetlss",          "EeTlss"),
     ("taqc",            "TaqcOfficer"),
     ("sectionhead",     "SectionHead"),
+    ("aeemaint",        "AeeMaint"),
+    ("seewm",           "SeeWm"),
+    ("eert",            "EeRt"),
+    ("seert",           "SeeRt"),
+    ("ceezone",         "CeeZone"),
+    ("ceertrd",         "CeeRtrd"),
+    ("purchaser",       "Purchaser"),
+    ("fieldtester",     "FieldTester"),
+    ("labtester",       "LabTester"),
+    ("wfcoordinator",   "WfCoordinator"),
 ]
 
 TOKENS = {}
@@ -141,6 +158,7 @@ if t:
 t = login("originator@kptcl.com", PW_KPTCL)
 if t:
     TOKENS["KptclOriginator"] = t
+
 
 # Bad password
 r = requests.post(f"{BASE}/auth/login", json={"email": "orgadmin.north@kptcl.com", "password": "wrong"})
@@ -644,146 +662,444 @@ if prs:
             fail(f"PUT /validation_requests/{pr2}/finance-reject", str(r.status_code))
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 13. REPAIR WORKFLOWS
+# 13. REPAIR WORKFLOWS — full 3-actor lifecycle across all 10 stages
+#   Actor 1: Workflow Coordinator  — assigns a user to each pending stage
+#   Actor 2: Stage Actor           — fills form data, submits
+#   Actor 3: Approver              — advances to next stage (same role, can_approve=True)
+#
+# Stage → primary actor token mapping (from repair_stage_roles.json):
+#   FAILURE_REPORT    EE TLSS
+#   COMMITTEE_REVIEW  CEE RT&R&D
+#   VENDOR_ASSIGNMENT CEE RT&R&D
+#   LIFTING           EE RT
+#   JOINT_INSPECTION  EE RT
+#   ESTIMATE          SEE W&M
+#   QA                Lab Tester
+#   FINAL_INSPECTION  EE RT
+#   DISPATCH          EE RT
+#   COMMISSIONING     EE TLSS
 # ─────────────────────────────────────────────────────────────────────────────
 section("13. REPAIR WORKFLOWS")
 
-RW_ID = None
-EE_H = auth(TOKENS.get("EeTlss", TOKENS.get("KptclAdmin", "")))
+COORD_H = auth(TOKENS.get("WfCoordinator", ""))
+ADMIN_H = auth(TOKENS.get("KptclAdmin", ""))
 
-# Config
-r = requests.get(f"{BASE}/repair-workflows/config/stages", headers=EE_H)
+# Map stage code → token key for the primary actor
+_STAGE_ACTOR = {
+    "FAILURE_REPORT":    "EeTlss",
+    "COMMITTEE_REVIEW":  "CeeRtrd",
+    "VENDOR_ASSIGNMENT": "CeeRtrd",
+    "LIFTING":           "EeRt",
+    "JOINT_INSPECTION":  "EeRt",
+    "ESTIMATE":          "SeeWm",
+    "QA":                "LabTester",
+    "FINAL_INSPECTION":  "EeRt",
+    "DISPATCH":          "EeRt",
+    "COMMISSIONING":     "EeTlss",
+}
+
+# Generic form data covers every stage template's common fields
+_FORM_DATA = {
+    "failure_date": "2026-05-07",
+    "failure_description": "Automated test — insulation degradation during routine inspection",
+    "failure_mode": "Insulation breakdown",
+    "failure_location": "HV winding",
+    "severity": "high",
+    "visual_inspection": "Completed",
+    "condition": "poor",
+    "recommendation": "Proceed to next repair stage",
+    "remarks": "Filled by automated test",
+    "inspection_date": "2026-05-07",
+    "inspection_findings": "Automated inspection findings",
+    "committee_decision": "Approved for repair",
+    "vendor_name": "Test Vendor Pvt Ltd",
+    "vendor_contact": "9876543210",
+    "estimate_amount": 150000,
+    "lifting_date": "2026-05-08",
+    "dispatch_date": "2026-05-09",
+    "commissioning_date": "2026-05-10",
+    "test_result": "Pass",
+    "qa_result": "Pass",
+    "final_inspection_result": "Pass",
+}
+
+# ── 13-1. Config ──────────────────────────────────────────────────────────────
+r = requests.get(f"{BASE}/repair-workflows/config/stages", headers=auth(TOKENS.get("EeTlss", "")))
 check("GET /repair-workflows/config/stages", r, 200)
 
-r = requests.get(f"{BASE}/repair-workflows/config/transitions", headers=EE_H)
+r = requests.get(f"{BASE}/repair-workflows/config/transitions", headers=auth(TOKENS.get("EeTlss", "")))
 check("GET /repair-workflows/config/transitions", r, 200)
 
-# List workflows
-r = requests.get(f"{BASE}/repair-workflows", headers=EE_H)
-rws = check("GET /repair-workflows", r, 200)
-if rws:
-    items = rws if isinstance(rws, list) else rws.get("items", [])
-    if items:
-        RW_ID = items[0].get("id")
-        ok(f"First repair workflow id={RW_ID}")
+# ── 13-2. Pending assignments — initially empty ───────────────────────────────
+r = requests.get(f"{BASE}/repair-workflows/pending-assignments", headers=COORD_H)
+check("GET /repair-workflows/pending-assignments (initial)", r, 200)
+
+# ── 13-3. Start a new workflow ────────────────────────────────────────────────
+RW_ID = None
+_rw_equip = PT_EQUIP_ID or EQUIP_ID
+if _rw_equip:
+    r = requests.post(
+        f"{BASE}/repair-workflows/start",
+        json={"equipment_id": _rw_equip},
+        headers=auth(TOKENS.get("EeTlss", "")),
+    )
+    if r.status_code in (200, 201):
+        RW_ID = r.json().get("workflow_id") or r.json().get("id")
+        ok("POST /repair-workflows/start", f"id={RW_ID}")
+    elif r.status_code in (400, 409):
+        # already active — grab existing
+        r2 = requests.get(f"{BASE}/repair-workflows", headers=auth(TOKENS.get("EeTlss", "")))
+        if r2.status_code == 200:
+            items = r2.json() if isinstance(r2.json(), list) else r2.json().get("items", [])
+            RW_ID = items[0].get("id") if items else None
+        skip("POST /repair-workflows/start", f"already active — using existing id={RW_ID}")
+    else:
+        fail("POST /repair-workflows/start", f"{r.status_code}: {r.text[:120]}")
+else:
+    skip("POST /repair-workflows/start", "no equipment_id available")
+
+# ── 13-4. Read-only endpoints ─────────────────────────────────────────────────
+if RW_ID:
+    r = requests.get(f"{BASE}/repair-workflows/{RW_ID}", headers=auth(TOKENS.get("EeTlss", "")))
+    check("GET /repair-workflows/{id}", r, 200)
+
+    r = requests.get(f"{BASE}/repair-workflows/{RW_ID}/progress", headers=auth(TOKENS.get("EeTlss", "")))
+    check("GET /repair-workflows/{id}/progress", r, 200)
+
+    r = requests.get(f"{BASE}/repair-workflows/{RW_ID}/timeline", headers=auth(TOKENS.get("EeTlss", "")))
+    check("GET /repair-workflows/{id}/timeline", r, 200)
+
+    r = requests.get(f"{BASE}/repair-workflows/{RW_ID}/assignment-queue", headers=COORD_H)
+    check("GET /repair-workflows/{id}/assignment-queue", r, 200)
+
+# ── 13-5. Walk all 10 stages — POSITIVE + NEGATIVE scenarios per stage ─────────
+#
+# 3-step flow per stage:
+#   NEG-1  Non-coordinator (actor) tries to assign           → 400/403/422
+#   NEG-2  Wrong-role user saves before assignment           → 400/403/422
+#   NEG-3  Actor submits before being assigned               → 400/422
+#   NEG-4  Wrong-role user calls /advance                    → 400/403/422
+#   POS-1  Coordinator gets eligible users                   → 200
+#   POS-2  Coordinator assigns correct user                  → 200
+#   NEG-5  Coordinator tries to assign again (duplicate)     → 400/422
+#   POS-3  GET available-transitions                         → 200
+#   POS-4  Stage actor saves form data                       → 200
+#   NEG-7  Wrong-role user tries to submit                   → 400/403/422
+#   POS-5  Stage actor submits                               → 200 (status → submitted)
+#   POS-6  Stage actor approves (/advance)                   → 200 (→ next stage pending)
+#   NEG-8  Double submit (stage already completed/advanced)  → 400/422
+# ──────────────────────────────────────────────────────────────────────────────
+
+# A role that has NO repair-workflow stage access (not in repair_stage_roles.json)
+_WRONG_ROLE_H = auth(TOKENS.get("Tester", ""))
 
 if RW_ID:
-    r = requests.get(f"{BASE}/repair-workflows/{RW_ID}", headers=EE_H)
-    check(f"GET /repair-workflows/{RW_ID}", r, 200)
+    for _stage_num in range(1, 11):
+        # ── Fetch current workflow state ──────────────────────────────────────
+        r = requests.get(f"{BASE}/repair-workflows/{RW_ID}", headers=ADMIN_H)
+        if r.status_code != 200:
+            fail(f"Stage {_stage_num}: GET workflow detail", f"{r.status_code}")
+            break
+        wf = r.json()
+        if wf.get("status") == "completed":
+            ok(f"Workflow completed after stage {_stage_num - 1}", "all 10 stages done")
+            break
 
-    r = requests.get(f"{BASE}/repair-workflows/{RW_ID}/timeline", headers=EE_H)
-    if r.status_code in (200, 404):
-        ok(f"GET /repair-workflows/{RW_ID}/timeline", str(r.status_code))
-    else:
-        fail(f"GET /repair-workflows/{RW_ID}/timeline", str(r.status_code))
-
-    r = requests.get(f"{BASE}/repair-workflows/{RW_ID}/progress", headers=EE_H)
-    if r.status_code in (200, 404):
-        ok(f"GET /repair-workflows/{RW_ID}/progress", str(r.status_code))
-    else:
-        fail(f"GET /repair-workflows/{RW_ID}/progress", str(r.status_code))
-
-# Start a new workflow for PT equipment (use PT_EQUIP_ID for specificity)
-NEW_RW_ID = None
-_rw_start_equip = PT_EQUIP_ID or EQUIP_ID
-if _rw_start_equip:
-    r = requests.post(
-        f"{BASE}/repair-workflows/start",
-        json={"equipment_id": _rw_start_equip, "remarks": "Started by automated test"},
-        headers=EE_H,
-    )
-    if r.status_code in (200, 201):
-        NEW_RW_ID = r.json().get("workflow_id") or r.json().get("id")
-        ok(f"POST /repair-workflows/start ->active", f"{r.status_code} id={NEW_RW_ID}")
-    elif r.status_code in (400, 409):
-        # Already active for this equipment — use existing RW_ID
-        NEW_RW_ID = RW_ID
-        skip(f"POST /repair-workflows/start", f"{r.status_code} — using existing RW_ID={RW_ID}")
-    else:
-        fail(f"POST /repair-workflows/start", f"{r.status_code}: {r.text[:120]}")
-
-# ── Repair workflow lifecycle: get form ->save data ->advance ────────────────
-_rw = NEW_RW_ID or RW_ID
-if _rw:
-    # Get current stage form
-    r = requests.get(f"{BASE}/repair-workflows/{_rw}/current-form", headers=EE_H)
-    if r.status_code == 200:
-        ok(f"GET /repair-workflows/{_rw}/current-form", "200")
-        form_data = r.json()
-        current_stage_id = form_data.get("stage_id")
-    elif r.status_code == 404:
-        # Already at terminal stage
-        ok(f"GET current-form ->workflow completed/terminal", "404")
-        current_stage_id = None
-    else:
-        fail(f"GET /repair-workflows/{_rw}/current-form", str(r.status_code))
-        current_stage_id = None
-
-    # Save stage form data — provide common fields that most repair stage templates need
-    if current_stage_id:
-        r = requests.post(
-            f"{BASE}/repair-workflows/{_rw}/stages/{current_stage_id}/save",
-            json={"form_data": {
-                "failure_date": "2026-05-07",
-                "failure_description": "Automated test — insulation degradation",
-                "failure_mode": "Insulation breakdown",
-                "failure_location": "HV winding",
-                "severity": "high",
-                "remarks": "Stage data saved by automated test",
-                "condition": "fair",
-                "visual_inspection": "Completed",
-                "recommendation": "Send for repair",
-            }},
-            headers=EE_H,
+        _pending_st = next(
+            (s for s in wf.get("stages", []) if s.get("status") == "pending"), None
         )
-        if r.status_code in (200, 201):
-            ok(f"POST /stages/{current_stage_id}/save", str(r.status_code))
-        else:
-            skip(f"POST /stages/{current_stage_id}/save", f"{r.status_code}: {r.text[:80]}")
+        if not _pending_st:
+            _pending_st = next(
+                (s for s in wf.get("stages", []) if s.get("status") == "assigned"), None
+            )
+        if not _pending_st:
+            skip(f"Stage {_stage_num}: no pending/assigned stage found", "stopping loop")
+            break
 
-    # Advance stage (active ->next stage or completed)
-    r = requests.post(
-        f"{BASE}/repair-workflows/{_rw}/advance",
-        json={"remarks": "Advanced by automated test"},
-        headers=EE_H,
-    )
-    if r.status_code == 200:
-        new_status = r.json().get("status", "?")
-        ok(f"POST /repair-workflows/{_rw}/advance ->{new_status}", "200")
-    elif r.status_code in (400, 422):
-        skip(f"Advance skipped", f"{r.status_code}: {r.text[:80]}")
-    else:
-        fail(f"POST /repair-workflows/{_rw}/advance", f"{r.status_code}: {r.text[:80]}")
+        _sid       = _pending_st.get("stage_id")
+        _scode     = _pending_st.get("stage_code", f"STAGE_{_stage_num}")
+        _actor_key = _STAGE_ACTOR.get(_scode, "EeTlss")
+        _actor_h   = auth(TOKENS.get(_actor_key, TOKENS.get("EeTlss", "")))
+        _is_pending = _pending_st.get("status") == "pending"
 
-# ── Reject path — start a SECOND workflow for the same equipment and reject it ─
-# Use a different equipment to avoid conflict with the workflow above
-_rw_reject_equip = EQUIP_ID  # use the generic first equipment
-if _rw_reject_equip and _rw_reject_equip != _rw_start_equip:
-    r = requests.post(
-        f"{BASE}/repair-workflows/start",
-        json={"equipment_id": _rw_reject_equip, "remarks": "Reject-path test"},
-        headers=EE_H,
-    )
-    _reject_rw_id = None
-    if r.status_code in (200, 201):
-        _reject_rw_id = r.json().get("workflow_id") or r.json().get("id")
-        ok(f"POST /repair-workflows/start (reject path)", f"id={_reject_rw_id}")
-    elif r.status_code in (400, 409):
-        # Reuse existing but only if different from _rw
-        skip("Reject-path start skipped — equipment already has active workflow")
+        print(f"\n  ====== Stage {_stage_num}/10: {_scode}  actor={_actor_key} ======")
 
-    if _reject_rw_id:
+        # ── NEG-1: non-coordinator tries to assign ─────────────────────────────
         r = requests.post(
-            f"{BASE}/repair-workflows/{_reject_rw_id}/reject",
-            json={"remarks": "Rejected by automated test — equipment not accessible"},
-            headers=EE_H,
+            f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/assign",
+            json={"assign_to_user_id": "00000000-0000-0000-0000-000000000001"},
+            headers=_actor_h,
+        )
+        check_neg(f"[{_scode}] NEG-1 non-coordinator assign", r, [400, 403, 422])
+
+        # ── NEG-2: wrong-role user saves before assignment ─────────────────────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/save",
+            json={"form_data": _FORM_DATA},
+            headers=_WRONG_ROLE_H,
+        )
+        check_neg(f"[{_scode}] NEG-2 wrong-role save (before assign)", r, [400, 403, 422])
+
+        # ── NEG-3: actor submits before being assigned ─────────────────────────
+        if _is_pending:
+            r = requests.post(
+                f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/submit",
+                json={"remarks": "should fail — not yet assigned"},
+                headers=_actor_h,
+            )
+            check_neg(f"[{_scode}] NEG-3 submit before assignment", r, [400, 422])
+
+        # ── NEG-4: wrong-role user calls /advance (no can_approve for this stage) ───
+        r = requests.post(
+            f"{BASE}/repair-workflows/{RW_ID}/advance",
+            json={"remarks": "should fail — wrong role, no can_approve"},
+            headers=_WRONG_ROLE_H,
+        )
+        check_neg(f"[{_scode}] NEG-4 wrong-role /advance", r, [400, 403, 422])
+
+        # ── POS-1: coordinator gets eligible users ─────────────────────────────
+        _eligible_uid = None
+        if _is_pending:
+            r = requests.get(
+                f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/eligible-users",
+                headers=COORD_H,
+            )
+            if r.status_code == 200:
+                _users = r.json() if isinstance(r.json(), list) else []
+                ok(f"[{_scode}] POS-1 GET eligible-users", f"count={len(_users)}")
+                _eligible_uid = _users[0].get("id") if _users else None
+            else:
+                skip(f"[{_scode}] POS-1 GET eligible-users", f"{r.status_code}: {r.text[:60]}")
+
+            # ── POS-2: coordinator assigns ─────────────────────────────────────
+            if _eligible_uid:
+                r = requests.post(
+                    f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/assign",
+                    json={"assign_to_user_id": _eligible_uid},
+                    headers=COORD_H,
+                )
+                if r.status_code == 200:
+                    ok(f"[{_scode}] POS-2 POST assign", "200")
+                else:
+                    fail(f"[{_scode}] POS-2 POST assign", f"{r.status_code}: {r.text[:80]}")
+            else:
+                skip(f"[{_scode}] POS-2 POST assign", "no eligible user returned")
+
+            # ── NEG-5: duplicate assign (stage already assigned) ───────────────
+            if _eligible_uid:
+                r = requests.post(
+                    f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/assign",
+                    json={"assign_to_user_id": _eligible_uid},
+                    headers=COORD_H,
+                )
+                check_neg(f"[{_scode}] NEG-5 duplicate assign", r, [400, 422])
+
+        # ── POS-3: available transitions ───────────────────────────────────────
+        r = requests.get(
+            f"{BASE}/repair-workflows/{RW_ID}/available-transitions",
+            headers=_actor_h,
         )
         if r.status_code == 200:
-            ok(f"POST /repair-workflows/{_reject_rw_id}/reject ->rejected", "200")
-        elif r.status_code in (400, 422):
-            skip(f"Reject skipped", f"{r.status_code}: {r.text[:80]}")
+            ok(f"[{_scode}] POS-3 GET available-transitions", str(r.json()))
         else:
-            fail(f"POST /repair-workflows/{_reject_rw_id}/reject", f"{r.status_code}: {r.text[:80]}")
+            skip(f"[{_scode}] POS-3 GET available-transitions", f"{r.status_code}")
+
+        # ── POS-4: stage actor saves form data ─────────────────────────────────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/save",
+            json={"form_data": _FORM_DATA},
+            headers=_actor_h,
+        )
+        if r.status_code in (200, 201):
+            ok(f"[{_scode}] POS-4 POST save", str(r.status_code))
+        else:
+            skip(f"[{_scode}] POS-4 POST save", f"{r.status_code}: {r.text[:80]}")
+
+        # ── NEG-7: wrong-role user tries to submit ─────────────────────────────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/submit",
+            json={"remarks": "wrong role submit — should fail"},
+            headers=_WRONG_ROLE_H,
+        )
+        check_neg(f"[{_scode}] NEG-7 wrong-role submit", r, [400, 403, 422])
+
+        # ── POS-5: stage actor submits (stage → submitted, awaiting approval) ────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/submit",
+            json={"remarks": f"{_scode} submitted by automated test"},
+            headers=_actor_h,
+        )
+        if r.status_code == 200:
+            ok(f"[{_scode}] POS-5 POST submit", f"status=submitted, msg={r.json().get('message','')[:40]}")
+        else:
+            fail(f"[{_scode}] POS-5 POST submit", f"{r.status_code}: {r.text[:80]}")
+            break
+
+        # ── POS-6: stage actor approves (/advance) → stage completed, next pending ──
+        r = requests.post(
+            f"{BASE}/repair-workflows/{RW_ID}/advance",
+            json={"remarks": f"{_scode} approved by automated test"},
+            headers=_actor_h,
+        )
+        if r.status_code == 200:
+            _resp = r.json()
+            _next = _resp.get("current_stage") or _resp.get("status", "?")
+            ok(f"[{_scode}] POS-6 POST /advance (approve)", f"-> {_next}")
+            # Terminal stage: workflow completed — break before NEG-8
+            if _resp.get("status") == "completed" or _resp.get("message", "").startswith("Workflow completed"):
+                ok("Workflow completed on final stage approval", "all 10 stages done")
+                break
+        else:
+            fail(f"[{_scode}] POS-6 POST /advance", f"{r.status_code}: {r.text[:80]}")
+            break
+
+        # ── NEG-8: double submit (stage already completed and advanced) ────────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{RW_ID}/stages/{_sid}/submit",
+            json={"remarks": "should fail — stage already completed and advanced"},
+            headers=_actor_h,
+        )
+        check_neg(f"[{_scode}] NEG-8 double submit after advance", r, [400, 422])
+
+    else:
+        fail("Repair workflow 10-stage loop", "did not complete within 10 iterations")
+
+    # ── Final state ────────────────────────────────────────────────────────────
+    r = requests.get(f"{BASE}/repair-workflows/{RW_ID}", headers=ADMIN_H)
+    if r.status_code == 200:
+        _fs = r.json().get("status", "?")
+        ok("Workflow final status", f"{_fs} [DONE]") if _fs == "completed" else ok("Workflow final status", _fs)
+
+    r = requests.get(f"{BASE}/repair-workflows/{RW_ID}/timeline", headers=ADMIN_H)
+    if r.status_code == 200:
+        ok("GET /timeline (post-completion)", f"{len(r.json())} audit entries")
+
+# ── 13B. REJECT PATH — second workflow, first stage; negative before reject ────
+section("13B. REPAIR WORKFLOW — reject path with negative scenarios")
+
+_reject_rw_id = None
+_reject_equip = EQUIP_ID if EQUIP_ID and EQUIP_ID != _rw_equip else None
+
+if _reject_equip:
+    r = requests.post(
+        f"{BASE}/repair-workflows/start",
+        json={"equipment_id": _reject_equip},
+        headers=auth(TOKENS.get("EeTlss", "")),
+    )
+    if r.status_code in (200, 201):
+        _reject_rw_id = r.json().get("workflow_id") or r.json().get("id")
+        ok("POST /start (reject-path workflow)", f"id={_reject_rw_id}")
+    elif r.status_code in (400, 409):
+        skip("POST /start (reject path)", f"{r.status_code} already active")
+    else:
+        fail("POST /start (reject path)", f"{r.status_code}: {r.text[:80]}")
+else:
+    skip("13B reject-path start", "no distinct equipment available for second workflow")
+
+if _reject_rw_id:
+    r = requests.get(f"{BASE}/repair-workflows/{_reject_rw_id}", headers=ADMIN_H)
+    _rj_stage = next((s for s in r.json().get("stages", []) if s.get("status") == "pending"), None) if r.status_code == 200 else None
+    _rj_sid   = _rj_stage.get("stage_id") if _rj_stage else None
+    _rj_scode = _rj_stage.get("stage_code", "FAILURE_REPORT") if _rj_stage else "FAILURE_REPORT"
+    _rj_h     = auth(TOKENS.get(_STAGE_ACTOR.get(_rj_scode, "EeTlss"), ""))
+
+    if _rj_sid:
+        # ── POSITIVE: coordinator assigns ──────────────────────────────────────
+        r = requests.get(
+            f"{BASE}/repair-workflows/{_reject_rw_id}/stages/{_rj_sid}/eligible-users",
+            headers=COORD_H,
+        )
+        _rj_uid = (r.json()[0].get("id") if r.status_code == 200 and r.json() else None)
+        if _rj_uid:
+            r = requests.post(
+                f"{BASE}/repair-workflows/{_reject_rw_id}/stages/{_rj_sid}/assign",
+                json={"assign_to_user_id": _rj_uid},
+                headers=COORD_H,
+            )
+            ok("Reject path: assign", str(r.status_code)) if r.status_code == 200 else skip("Reject path: assign", str(r.status_code))
+
+        # ── NEG: reject when stage is 'assigned' (not yet submitted) ───────────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{_reject_rw_id}/reject",
+            json={"remarks": "should fail — stage not yet submitted"},
+            headers=_rj_h,
+        )
+        check_neg(f"[{_rj_scode}] NEG reject before submission (stage=assigned)", r, [400, 422])
+
+        # ── POSITIVE: stage actor submits (reach 'submitted' state) ───────────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{_reject_rw_id}/stages/{_rj_sid}/save",
+            json={"form_data": _FORM_DATA},
+            headers=_rj_h,
+        )
+        # save may fail if no can_edit; that's fine — submit is what matters
+        r = requests.post(
+            f"{BASE}/repair-workflows/{_reject_rw_id}/stages/{_rj_sid}/submit",
+            json={"remarks": "submitting for reject-path test"},
+            headers=_rj_h,
+        )
+        ok("Reject path: submit", str(r.status_code)) if r.status_code == 200 else skip("Reject path: submit", f"{r.status_code}: {r.text[:60]}")
+
+        # ── NEG: completely unauthorized role tries to reject ──────────────────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{_reject_rw_id}/reject",
+            json={"remarks": "unauthorized reject — should fail"},
+            headers=_WRONG_ROLE_H,
+        )
+        check_neg(f"[{_rj_scode}] NEG unauthorized reject", r, [400, 403, 422])
+
+        # ── NEG: coordinator (can_assign, no can_approve) tries to reject ──────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{_reject_rw_id}/reject",
+            json={"remarks": "coordinator reject — should fail (no can_approve)"},
+            headers=COORD_H,
+        )
+        check_neg(f"[{_rj_scode}] NEG coordinator reject (no can_approve)", r, [400, 403, 422])
+
+        # ── POSITIVE: stage actor (can_approve) rejects the submitted stage ────
+        r = requests.post(
+            f"{BASE}/repair-workflows/{_reject_rw_id}/reject",
+            json={"remarks": "Rejected by stage actor — stage rolls back"},
+            headers=_rj_h,
+        )
+        if r.status_code == 200:
+            ok("POST /reject (actor rejects submitted stage)", str(r.json().get("current_stage", "?")))
+        elif r.status_code in (400, 422):
+            skip("POST /reject", f"{r.status_code}: {r.text[:80]}")
+        else:
+            fail("POST /reject", f"{r.status_code}: {r.text[:80]}")
+
+# ── 13-7. Cancel workflow — negative + positive ────────────────────────────────
+_cancel_id = _reject_rw_id
+if _cancel_id:
+    # ── NEG: wrong-role user tries to cancel ──────────────────────────────────
+    r = requests.post(
+        f"{BASE}/repair-workflows/{_cancel_id}/cancel",
+        json={"reason": "wrong role cancel attempt"},
+        headers=_WRONG_ROLE_H,
+    )
+    check_neg("Cancel: wrong-role cancel attempt", r, [400, 403, 422])
+
+    # ── POSITIVE: workflow creator cancels ────────────────────────────────────
+    r = requests.post(
+        f"{BASE}/repair-workflows/{_cancel_id}/cancel",
+        json={"reason": "Cancelled by automated test"},
+        headers=auth(TOKENS.get("EeTlss", "")),
+    )
+    if r.status_code == 200:
+        ok("POST /cancel (creator cancels)", "200")
+    elif r.status_code in (400, 422):
+        skip("POST /cancel", f"{r.status_code}: {r.text[:80]}")
+    else:
+        fail("POST /cancel", f"{r.status_code}: {r.text[:80]}")
+
+    # ── NEG: try to cancel already-cancelled workflow ─────────────────────────
+    r = requests.post(
+        f"{BASE}/repair-workflows/{_cancel_id}/cancel",
+        json={"reason": "should fail — already cancelled"},
+        headers=auth(TOKENS.get("EeTlss", "")),
+    )
+    check_neg("Cancel: cancel already-cancelled workflow", r, [400, 422])
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 14. DIRECT SUBMISSIONS

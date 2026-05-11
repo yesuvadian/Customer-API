@@ -11,7 +11,10 @@ from schemas import (
     RepairWorkflowStartRequest,
     RepairWorkflowResponse,
     RepairAdvanceRequest,
+    RepairAssignRequest,
+    RepairCancelRequest,
     RepairSaveDataRequest,
+    RepairSubmitRequest,
     RepairStageCreate,
     RepairStageUpdate,
     RepairRoleAssignment,
@@ -160,9 +163,22 @@ def start_workflow(
 ):
     """Start a new repair workflow for a piece of equipment."""
     try:
-        return RepairWorkflowService(db).start_workflow(payload.equipment_id, user.id)
+        return RepairWorkflowService(db).start_workflow(
+    equipment_id=payload.equipment_id,
+    user_id=user.id,
+    source_failure_id=payload.source_failure_id,
+)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.get("/pending-assignments")
+def pending_assignments(db: Session = Depends(get_db)):
+    """
+    All active workflows awaiting Workflow Coordinator assignment.
+    Used by the coordinator's assignment queue page.
+    """
+    return RepairWorkflowService(db).list_pending_assignments()
 
 
 @router.get("")
@@ -299,8 +315,8 @@ def advance(
 ):
     """
     Approve current stage and advance to the next.
-    - Requires can_approve on this stage.
-    - Uses RepairStageTransition table; falls back to sequential order.
+    - Stage must be SUBMITTED. Requires can_approve on this stage.
+    - Uses RepairStageTransition table only — no sequential fallback.
     - On final stage completion, sets equipment.status back to 'active'.
     """
     try:
@@ -317,11 +333,118 @@ def reject(
     user=Depends(get_current_user),
 ):
     """
-    Reject current stage and move back to the previous.
+    Reject current stage. Stage must be SUBMITTED. Uses RepairStageTransition table only.
     - Requires can_approve on this stage.
-    - Uses RepairStageTransition table; falls back to sequential reverse.
     """
     try:
         return RepairWorkflowService(db).reject_stage(workflow_id, payload.remarks, user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/assign")
+def assign_stage_user(
+    workflow_id: UUID,
+    stage_id: UUID,
+    payload: RepairAssignRequest,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    WORKFLOW_COORDINATOR assigns a user to the current pending stage.
+    Transitions stage: pending → assigned.
+    """
+    try:
+        return RepairWorkflowService(db).assign_stage_user(
+            workflow_id, stage_id, payload.assign_to_user_id, user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/submit")
+def submit_stage(
+    workflow_id: UUID,
+    stage_id: UUID,
+    payload: RepairSubmitRequest = RepairSubmitRequest(),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Assigned user submits the stage after filling the form.
+    Transitions stage: assigned → submitted.
+    """
+    try:
+        return RepairWorkflowService(db).submit_stage(
+            workflow_id, stage_id, payload.remarks, user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/{workflow_id}/assignment-queue")
+def get_assignment_queue(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Returns all assignment queue entries for a workflow.
+    Workflow Coordinator uses this to see pending assignments.
+    """
+    try:
+        return RepairWorkflowService(db).get_assignment_queue(workflow_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.get("/{workflow_id}/stages/{stage_id}/eligible-users")
+def get_eligible_users(
+    workflow_id: UUID,
+    stage_id: UUID,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """
+    Returns users whose org role is authorised (can_edit) for this stage.
+    Workflow Coordinator uses this to populate the assignment dialog.
+    """
+    try:
+        return RepairWorkflowService(db).get_eligible_users(
+    workflow_id,
+    stage_id,
+    current_user,
+)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.get("/{workflow_id}/available-transitions")
+def available_transitions(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Returns the set of actions the calling user can take on this workflow right now.
+    Response: {can_assign, can_submit, can_approve, can_reject, can_cancel}
+    """
+    try:
+        return RepairWorkflowService(db).get_available_transitions(workflow_id, user.id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/{workflow_id}/cancel")
+def cancel_workflow(
+    workflow_id: UUID,
+    payload: RepairCancelRequest = RepairCancelRequest(),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Cancel an active workflow. Only the workflow creator or an org-admin can cancel.
+    """
+    try:
+        return RepairWorkflowService(db).cancel_workflow(workflow_id, user.id, payload.reason)
     except ValueError as e:
         raise HTTPException(400, str(e))

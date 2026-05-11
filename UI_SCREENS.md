@@ -22,6 +22,14 @@ All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{de
 | Section Head | `sectionhead` | `sectionhead.north@kptcl.com` | `sectionhead.south@kptcl.com` | `sectionhead.mysuru@kptcl.com` | `Section Head` |
 
 > **30 users total** — 10 roles × 3 departments. Seeded by `seed_dept_filter_users()` in `seed.py`.
+>
+> **Repair workflow UI test logins**:
+> - `eetlss.north@kptcl.com` / `TestDept@123` — EE TLSS user, should see `Repair Workflows`
+> - `eetlss.south@kptcl.com` / `TestDept@123` — EE TLSS user, should see `Repair Workflows`
+> - `eetlss.mysuru@kptcl.com` / `TestDept@123` — EE TLSS user, should see `Repair Workflows`
+> - `orgadmin.north@kptcl.com` / `TestDept@123` — Org Admin user, full org-wide menu scope
+> - `assigner.north@kptcl.com` / `TestDept@123` — Test Assigner, should see `Approvals` and assignment queues
+> - `financeapprover.north@kptcl.com` / `TestDept@123` — Finance Approver, should see `Procurement Approvals`
 
 ### Hierarchy Users (password: `TestDept@123`)
 
@@ -169,6 +177,33 @@ All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{de
 | Reject workflow | `POST /repair-workflows/{id}/reject` | EE TLSS | Terminates workflow |
 | View timeline | `GET /repair-workflows/{id}/timeline` | EE TLSS | Stage history |
 | View progress | `GET /repair-workflows/{id}/progress` | EE TLSS | Completion % |
+
+---
+
+### Section 13a — Repair Workflow Stage Testing (UI)
+
+| Scenario | Login | Screen / Action | Expected UI Behavior |
+|---|---|---|---|
+| Open Repair Workflows module | `eetlss.north@kptcl.com` / `TestDept@123` | Navigate to `repair-workflows` | Workflow cards load; current stage, progress, status, and assignment badge are visible |
+| Identify pending assignment | `eetlss.north@kptcl.com` / `TestDept@123` | Repair workflows list | Workflow card shows `ASSIGN` badge when `assignment_pending=true` |
+| Open workflow detail sheet | `eetlss.north@kptcl.com` / `TestDept@123` | Tap workflow card | Detail sheet opens with current stage, progress header, stage list, and available actions; current stage form fields are loaded dynamically from the backend template |
+| Verify stage role summary in detail | `eetlss.north@kptcl.com` / `TestDept@123` | Workflow detail sheet | Each stage line shows assigned user, current role, and role summary pills for Assign / Approve / Edit |
+| Assign a user to pending stage | `eetlss.north@kptcl.com` / `TestDept@123` | Tap `Assign User` | Dialog shows eligible users and allows manual user ID entry; assignment succeeds and UI refreshes |
+| Assigned user sees submit action | assigned stage user | Workflow detail sheet | When stage is `assigned` or `in_progress`, `Submit for Review` button appears |
+| Submit stage from UI | assigned stage user | Tap `Submit for Review` | Confirmation dialog appears; on submit, stage status updates to `submitted` and approve/reject becomes available |
+| Approver sees approve/reject buttons | approver role user | Workflow detail sheet | For `submitted` stage, `Approve` and `Reject` buttons are visible; `Submit` is hidden if role is approval-only |
+| Approve submitted stage | approver role user | Tap `Approve` | Approve dialog shown; after success, stage moves to completed and next stage becomes active |
+| Reject submitted stage | approver role user | Tap `Reject` | Reject dialog shown; after success, stage shows `rejected` status and workflow updates accordingly |
+| Confirm timeline entries | any repair workflow user | Timeline tab or section | Timeline includes `assign`, `submit`, `approve`, `reject`, and `cancel` actions with performer names |
+| Confirm progress increment | any repair workflow user | Workflow detail header | Percent progress increases after stage completion and current stage updates in header |
+| Verify multiple roles per stage | any repair workflow user | Stage list | Stage can show multiple role labels in the role summary area |
+| Verify approval-only role behavior | `financeapprover.north@kptcl.com` / `TestDept@123` | Workflow detail sheet | Only `Approve` / `Reject` actions are visible; no `Submit` or `Assign` if user is only approver |
+| Verify assignment-only role behavior | `assigner.north@kptcl.com` / `TestDept@123` | Workflow detail sheet | Only `Assign User` action is visible on pending assignment stages |
+
+> Notes:
+> - Use the department login variants for `eetlss.north`, `eetlss.south`, `eetlss.mysuru`, `orgadmin.north` to verify scope and role-based UI visibility.
+> - The UI should never show an action button the logged-in user is not permitted to use.
+> - If a stage is pending assignment, the stage detail should clearly indicate that coordinator assignment is required before form filling.
 
 ---
 

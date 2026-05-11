@@ -1094,7 +1094,17 @@ class TestingRequestResponse(BaseModel):
     total_sessions_planned: Optional[int] = None
     session_interval_days: Optional[int] = None
     session_count: int = 0  # Computed field
+        # ─────────────────────────────────────────────
+    # Repair Workflow Projection
+    # ─────────────────────────────────────────────
 
+    repair_workflow_id: Optional[str] = None
+
+    repair_current_stage: Optional[str] = None
+
+    repair_status: Optional[str] = None
+
+    repair_progress: Optional[int] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
@@ -2327,8 +2337,9 @@ class RepairStageUpdate(BaseModel):
 
 class RepairRoleAssignment(BaseModel):
     role_id: UUID
-    can_edit: bool = True
-    can_approve: bool = True   # default True so stage actors can also approve
+    can_edit: bool = False
+    can_approve: bool = False
+    can_assign: bool = False
 
 
 class RepairTransitionUpsert(BaseModel):
@@ -2339,6 +2350,7 @@ class RepairTransitionUpsert(BaseModel):
 
 class RepairWorkflowStartRequest(BaseModel):
     equipment_id: UUID
+    source_failure_id: Optional[UUID] = None
 
 
 class RepairWorkflowResponse(BaseModel):
@@ -2360,6 +2372,18 @@ class RepairAdvanceRequest(BaseModel):
 
 class RepairSaveDataRequest(BaseModel):
     form_data: dict
+
+
+class RepairAssignRequest(BaseModel):
+    assign_to_user_id: UUID
+
+
+class RepairSubmitRequest(BaseModel):
+    remarks: Optional[str] = None
+
+
+class RepairCancelRequest(BaseModel):
+    reason: Optional[str] = None
 
 
 class RepairStageDefResponse(BaseModel):

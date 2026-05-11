@@ -1,12 +1,12 @@
 [
-  {"stage_code": "FAILURE_REPORT",    "roles": ["AEE Maintenance", "EE TLSS", "Originator"]},
-  {"stage_code": "COMMITTEE_REVIEW",  "roles": ["CEE RT&R&D", "Department Head"]},
-  {"stage_code": "VENDOR_ASSIGNMENT", "roles": ["CEE RT&R&D", "CEE Transmission Zone"]},
-  {"stage_code": "LIFTING",           "roles": ["EE RT", "AEE Maintenance"]},
-  {"stage_code": "JOINT_INSPECTION",  "roles": ["EE RT", "Field Tester"]},
-  {"stage_code": "ESTIMATE",          "roles": ["SEE W&M", "Purchaser"]},
-  {"stage_code": "QA",                "roles": ["Lab Tester", "Field Tester"]},
-  {"stage_code": "FINAL_INSPECTION",  "roles": ["EE RT", "SEE RT"]},
-  {"stage_code": "DISPATCH",          "roles": ["EE RT", "AEE Maintenance"]},
-  {"stage_code": "COMMISSIONING",     "roles": ["EE TLSS", "CEE RT&R&D"]}
+  {"stage_code": "FAILURE_REPORT",    "roles": ["AEE Maintenance", "EE TLSS", "Originator"],         "assignment_role": "Workflow Coordinator"},
+  {"stage_code": "COMMITTEE_REVIEW",  "roles": ["CEE RT&R&D", "Department Head"],                    "assignment_role": "Workflow Coordinator"},
+  {"stage_code": "VENDOR_ASSIGNMENT", "roles": ["CEE RT&R&D", "CEE Transmission Zone"],              "assignment_role": "Workflow Coordinator"},
+  {"stage_code": "LIFTING",           "roles": ["EE RT", "AEE Maintenance"],                         "assignment_role": "Workflow Coordinator"},
+  {"stage_code": "JOINT_INSPECTION",  "roles": ["EE RT", "Field Tester"],                            "assignment_role": "Workflow Coordinator"},
+  {"stage_code": "ESTIMATE",          "roles": ["SEE W&M", "Purchaser"],                             "assignment_role": "Workflow Coordinator"},
+  {"stage_code": "QA",                "roles": ["Lab Tester", "Field Tester"],                       "assignment_role": "Workflow Coordinator"},
+  {"stage_code": "FINAL_INSPECTION",  "roles": ["EE RT", "SEE RT"],                                  "assignment_role": "Workflow Coordinator"},
+  {"stage_code": "DISPATCH",          "roles": ["EE RT", "AEE Maintenance"],                         "assignment_role": "Workflow Coordinator"},
+  {"stage_code": "COMMISSIONING",     "roles": ["EE TLSS", "CEE RT&R&D"],                            "assignment_role": "Workflow Coordinator"}
 ]

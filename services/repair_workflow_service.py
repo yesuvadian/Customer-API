@@ -3,11 +3,13 @@ repair_workflow_service.py
 ──────────────────────────
 Business logic for the 10-stage transformer repair lifecycle workflow.
 
-Two-layer access control:
-  1. Module-level  — handled by global middleware (path /repair-workflows → Module)
-  2. Stage-level   — handled here via RepairStageRole (can_edit / can_approve)
+Status lifecycle per stage instance:
+  not_started → pending → assigned → submitted → completed / rejected
 
-Config mutations (create/update/reorder stages, transitions) require org-admin.
+Three actors:
+  WORKFLOW_COORDINATOR  assigns users to stages (manages assignment queue)
+  ASSIGNED USER         fills form, submits stage
+  APPROVER              holds can_approve on the stage, advances or rejects
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from models import (
     EquipmentStatus,
     OrgRole,
     OrgUserRole,
+    RepairAssignmentQueue,
     RepairStageAuditLog,
     RepairStageData,
     RepairStageDefinition,
@@ -36,6 +39,7 @@ from models import (
     RepairStageTransition,
     RepairWorkflow,
     OrgTestTemplate,
+    User,
 )
 
 UPLOAD_DIR = os.path.join("uploads", "repair")
@@ -54,19 +58,19 @@ class RepairWorkflowService:
         return datetime.now(timezone.utc)
 
     def _user_org_role_ids(self, user_id: UUID) -> list:
-        """Return list of OrgRole IDs the user holds."""
         rows = (
             self.db.query(OrgUserRole.org_role_id)
-            .filter(OrgUserRole.user_id == user_id)
+            .filter(OrgUserRole.user_id == user_id, OrgUserRole.is_active.is_(True))
             .all()
         )
         return [r[0] for r in rows]
 
     def _check_stage_rbac(self, stage_id: UUID, user_id: UUID) -> None:
-        """Raise 403 if the user does not have can_edit on this stage."""
         role_ids = self._user_org_role_ids(user_id)
         if not role_ids:
-            return  # no org roles → skip (global admin path)
+            raise ValueError(
+                "User has no active organization role."
+            )
         allowed = (
             self.db.query(RepairStageRole)
             .filter(
@@ -80,10 +84,9 @@ class RepairWorkflowService:
             raise ValueError("You do not have edit permission for this stage.")
 
     def _check_can_approve(self, stage_id: UUID, user_id: UUID) -> None:
-        """Raise ValueError if the user does not have can_approve on this stage."""
         role_ids = self._user_org_role_ids(user_id)
         if not role_ids:
-            return  # global admin bypass
+            return
         allowed = (
             self.db.query(RepairStageRole)
             .filter(
@@ -97,20 +100,48 @@ class RepairWorkflowService:
             raise ValueError("You do not have approval permission for this stage.")
 
     def _check_is_org_admin(self, user_id: UUID) -> None:
-        """Raise ValueError if the user is not an org-admin."""
         role_ids = self._user_org_role_ids(user_id)
         if not role_ids:
-            return  # global admin
+            return
         admin_role = (
             self.db.query(OrgRole)
-            .filter(
-                OrgRole.id.in_(role_ids),
-                OrgRole.is_org_admin.is_(True),
-            )
+            .filter(OrgRole.id.in_(role_ids), OrgRole.is_org_admin.is_(True))
             .first()
         )
         if not admin_role:
             raise ValueError("Only org-admin users can perform this configuration action.")
+
+    def _check_can_assign_stage(self, user_id: UUID, stage_id: UUID) -> None:
+        """Check caller has can_assign=True for this stage in repair_stage_roles."""
+        role_ids = self._user_org_role_ids(user_id)
+        if not role_ids:
+            return  # global admin bypass
+        allowed = (
+            self.db.query(RepairStageRole)
+            .filter(
+                RepairStageRole.stage_id == stage_id,
+                RepairStageRole.role_id.in_(role_ids),
+                RepairStageRole.can_assign.is_(True),
+            )
+            .first()
+        )
+        if not allowed:
+            raise ValueError("Not authorized to assign users to this stage.")
+
+    def _can_assign_stage(self, user_id: UUID, stage_id: UUID) -> bool:
+        """Return True if caller has can_assign=True for this stage."""
+        role_ids = self._user_org_role_ids(user_id)
+        if not role_ids:
+            return True
+        return (
+            self.db.query(RepairStageRole)
+            .filter(
+                RepairStageRole.stage_id == stage_id,
+                RepairStageRole.role_id.in_(role_ids),
+                RepairStageRole.can_assign.is_(True),
+            )
+            .first()
+        ) is not None
 
     # =========================================================================
     # Config — Stage Definitions
@@ -144,11 +175,7 @@ class RepairWorkflowService:
                 "is_mandatory": s.is_mandatory,
                 "template_id": str(tmpl.template_id) if tmpl and tmpl.template_id else None,
                 "roles": [
-                    {
-                        "role_id": str(r.role_id),
-                        "can_edit": r.can_edit,
-                        "can_approve": r.can_approve,
-                    }
+                    {"role_id": str(r.role_id), "can_edit": r.can_edit, "can_approve": r.can_approve, "can_assign": r.can_assign}
                     for r in roles
                 ],
             })
@@ -196,7 +223,6 @@ class RepairWorkflowService:
         self.db.commit()
 
     def reorder_stages(self, items: list, user_id: UUID) -> None:
-        """items: [{id, sequence}, ...]"""
         self._check_is_org_admin(user_id)
         for item in items:
             stage = self.db.query(RepairStageDefinition).filter(
@@ -226,20 +252,18 @@ class RepairWorkflowService:
         self.db.commit()
 
     def set_stage_roles(self, stage_id: UUID, roles: list, user_id: UUID) -> None:
-        """Replace all role assignments for a stage."""
         self._check_is_org_admin(user_id)
         stage = self.db.query(RepairStageDefinition).filter(RepairStageDefinition.id == stage_id).first()
         if not stage:
             raise ValueError("Stage not found.")
-        # Delete existing
         self.db.query(RepairStageRole).filter(RepairStageRole.stage_id == stage_id).delete()
-        # Insert new
         for r in roles:
             self.db.add(RepairStageRole(
                 stage_id=stage_id,
                 role_id=UUID(str(r["role_id"])),
-                can_edit=r.get("can_edit", True),
-                can_approve=r.get("can_approve", True),
+                can_edit=r.get("can_edit", False),
+                can_approve=r.get("can_approve", False),
+                can_assign=r.get("can_assign", False),
             ))
         self.db.commit()
 
@@ -260,7 +284,6 @@ class RepairWorkflowService:
         ]
 
     def upsert_transitions(self, transitions: list, user_id: UUID) -> None:
-        """Bulk upsert. Each item: {from_stage_id, action, to_stage_id}."""
         self._check_is_org_admin(user_id)
         for t in transitions:
             existing = (
@@ -286,18 +309,60 @@ class RepairWorkflowService:
     # Workflow Execution
     # =========================================================================
 
-    def start_workflow(self, equipment_id: UUID, user_id: UUID) -> dict:
+    from datetime import datetime
+
+    def generate_workflow_number(self):
+
+        today = datetime.utcnow().strftime("%Y%m%d")
+
+        prefix = f"RW-REP-{today}-"
+
+        last_workflow = (
+            self.db.query(RepairWorkflow)
+            .filter(
+                RepairWorkflow.workflow_number.like(f"{prefix}%")
+            )
+            .order_by(RepairWorkflow.workflow_number.desc())
+            .first()
+        )
+
+        if last_workflow and last_workflow.workflow_number:
+
+            try:
+                last_seq = int(
+                    last_workflow.workflow_number.split("-")[-1]
+                )
+            except Exception:
+                last_seq = 0
+
+        else:
+            last_seq = 0
+
+        next_seq = last_seq + 1
+
+        return f"{prefix}{next_seq:04d}"
+
+
+    def start_workflow(
+        self,
+        equipment_id: UUID,
+        user_id: UUID,
+        source_failure_id: Optional[UUID] = None
+    ) -> dict:
         """
-        Start a new repair workflow for a piece of equipment.
-        - Sets equipment.status = under_repair
-        - Creates RepairWorkflow + one RepairStageInstance per active stage
-        - Current stage = first stage (lowest sequence)
+        Start a new repair workflow.
+        First stage is set to PENDING — awaiting coordinator assignment.
         """
-        equipment = self.db.query(Equipment).filter(Equipment.id == equipment_id).first()
+
+        equipment = (
+            self.db.query(Equipment)
+            .filter(Equipment.id == equipment_id)
+            .first()
+        )
+
         if not equipment:
             raise ValueError("Equipment not found.")
 
-        # Check no active workflow already exists
         existing = (
             self.db.query(RepairWorkflow)
             .filter(
@@ -306,8 +371,11 @@ class RepairWorkflowService:
             )
             .first()
         )
+
         if existing:
-            raise ValueError("An active repair workflow already exists for this equipment.")
+            raise ValueError(
+                "An active repair workflow already exists for this equipment."
+            )
 
         stages = (
             self.db.query(RepairStageDefinition)
@@ -315,40 +383,491 @@ class RepairWorkflowService:
             .order_by(RepairStageDefinition.sequence)
             .all()
         )
+
         if not stages:
-            raise ValueError("No active stage definitions found. Configure stages first.")
+            raise ValueError(
+                "No active stage definitions found. Configure stages first."
+            )
 
         first_stage = stages[0]
 
+        # GENERATE NUMBER
+        workflow_number = self.generate_workflow_number()
+
         workflow = RepairWorkflow(
+            workflow_number=workflow_number,
             equipment_id=equipment_id,
+            source_failure_id=source_failure_id,
             current_stage_id=first_stage.id,
             status="active",
+            assignment_pending=True,
             progress=0,
+            priority="normal",
+            created_by=user_id,
         )
+
         self.db.add(workflow)
         self.db.flush()
 
-        # Create stage instances for every active stage
+        first_stage_instance = None
+
+        # Create stage instances
         for s in stages:
-            inst_status = "in_progress" if s.id == first_stage.id else "not_started"
-            self.db.add(RepairStageInstance(
+
+            is_first = s.id == first_stage.id
+
+            instance = RepairStageInstance(
                 workflow_id=workflow.id,
                 stage_id=s.id,
-                status=inst_status,
-                started_at=self._utc_now() if s.id == first_stage.id else None,
-            ))
+                status="pending" if is_first else "not_started",
+                assignment_pending=is_first,
+                started_at=self._utc_now() if is_first else None,
+                created_by=user_id,
+            )
 
-        # Mark equipment as under_repair
+            self.db.add(instance)
+            self.db.flush()
+
+            if is_first:
+                first_stage_instance = instance
+
+        # SET CURRENT STAGE INSTANCE
+        workflow.current_stage_instance_id = (
+            first_stage_instance.id
+            if first_stage_instance
+            else None
+        )
+
+        # Assignment queue
+        self.db.add(
+            RepairAssignmentQueue(
+                workflow_id=workflow.id,
+                stage_id=first_stage.id,
+                status="pending",
+            )
+        )
+
+        # Equipment status update
         equipment.status = EquipmentStatus.under_repair
 
         self.db.commit()
         self.db.refresh(workflow)
 
-        # Audit log
-        self._log_audit(workflow.id, first_stage.id, "started", user_id, "Workflow started")
+        self._log_audit(
+            workflow.id,
+            first_stage.id,
+            "created",
+            user_id,
+            "Workflow started — awaiting coordinator assignment"
+        )
 
         return self._workflow_to_dict(workflow)
+        
+    def assign_stage_user(
+        self,
+        workflow_id: UUID,
+        stage_id: UUID,
+        assign_to_user_id: UUID,
+        coordinator_id: UUID,
+    ) -> dict:
+        """
+        WORKFLOW_COORDINATOR assigns a user to the current (pending) stage.
+        Transitions stage: pending → assigned
+        """
+        workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+        if not workflow:
+            raise ValueError("Workflow not found.")
+        if workflow.status != "active":
+            raise ValueError("Workflow is not active.")
+        if str(workflow.current_stage_id) != str(stage_id):
+            raise ValueError("Can only assign the current active stage.")
+
+        self._check_can_assign_stage(coordinator_id, stage_id)
+
+        instance = self._get_instance(workflow_id, stage_id)
+        if instance.status not in ("pending", "not_started"):
+            raise ValueError(f"Stage is already '{instance.status}' — cannot reassign.")
+
+        # Resolve assignee's role name for display
+        assignee_role = (
+            self.db.query(OrgRole)
+            .join(OrgUserRole, OrgRole.id == OrgUserRole.org_role_id)
+            .filter(
+                OrgUserRole.user_id == assign_to_user_id,
+                OrgUserRole.is_active.is_(True),
+            )
+            .first()
+        )
+        role_name = assignee_role.name if assignee_role else None
+
+        instance.status = "assigned"
+        instance.assigned_user_id = assign_to_user_id
+        instance.current_role = role_name
+        instance.assignment_pending = False
+
+        workflow.assignment_pending = False
+
+        # Update assignment queue
+        queue_entry = (
+            self.db.query(RepairAssignmentQueue)
+            .filter(
+                RepairAssignmentQueue.workflow_id == workflow_id,
+                RepairAssignmentQueue.stage_id == stage_id,
+                RepairAssignmentQueue.status == "pending",
+            )
+            .first()
+        )
+        if queue_entry:
+            queue_entry.status = "assigned"
+            queue_entry.assigned_to_user_id = assign_to_user_id
+            queue_entry.assigned_at = self._utc_now()
+
+        self.db.commit()
+
+        assignee = self.db.query(User).filter(User.id == assign_to_user_id).first()
+        self._log_audit(
+            workflow_id, stage_id, "assign", coordinator_id,
+            f"Assigned to {assignee.firstname} {assignee.lastname} ({role_name})" if assignee else "Assigned"
+        )
+
+        stage = self.db.query(RepairStageDefinition).filter(RepairStageDefinition.id == stage_id).first()
+        return {
+            "message": "User assigned successfully",
+            "stage": stage.name if stage else str(stage_id),
+            "assigned_to": str(assign_to_user_id),
+            "role": role_name,
+        }
+
+    def submit_stage(
+        self,
+        workflow_id: UUID,
+        stage_id: UUID,
+        remarks: Optional[str],
+        user_id: UUID,
+    ) -> dict:
+        """
+        Stage actor submits the stage after filling the form.
+        Status flow: assigned → submitted.
+        Requires can_edit permission. Same role then calls /advance to approve.
+        """
+        workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+        if not workflow:
+            raise ValueError("Workflow not found.")
+        if workflow.status != "active":
+            raise ValueError("Workflow is not active.")
+        if str(workflow.current_stage_id) != str(stage_id):
+            raise ValueError("Can only submit the current active stage.")
+
+        instance = self._get_instance(workflow_id, stage_id)
+
+        if instance.status not in ("assigned", "in_progress"):
+            raise ValueError(
+                f"Stage must be in 'assigned' state to submit (currently '{instance.status}')."
+            )
+
+        # Submitter must be the assigned user OR have can_edit for this stage
+        if instance.assigned_user_id and str(instance.assigned_user_id) != str(user_id):
+            self._check_stage_rbac(stage_id, user_id)
+
+        instance.status = "submitted"
+        if remarks:
+            instance.remarks = remarks
+
+        self.db.commit()
+        self._log_audit(workflow_id, stage_id, "submit", user_id, remarks or "Stage submitted for approval")
+
+        stage = self.db.query(RepairStageDefinition).filter(RepairStageDefinition.id == stage_id).first()
+        return {
+            "message": "Stage submitted — awaiting approval",
+            "stage": stage.name if stage else str(stage_id),
+        }
+
+    def advance_stage(self, workflow_id: UUID, remarks: Optional[str], user_id: UUID) -> dict:
+        """
+        Stage actor approves and advances to the next stage.
+        Status flow: submitted → completed → next stage pending.
+        Requires can_approve permission (same role as can_edit).
+        """
+
+        workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+        if not workflow:
+            raise ValueError("Workflow not found.")
+        if workflow.status != "active":
+            raise ValueError("Workflow is not active.")
+
+        current_stage_id = workflow.current_stage_id
+        instance = self._get_instance(workflow_id, current_stage_id)
+
+        # RBAC: caller must have can_approve for the current stage
+        self._check_can_approve(current_stage_id, user_id)
+
+        # Stage must be submitted before it can be approved
+        if instance.status != "submitted":
+            raise ValueError(
+                f"Stage must be in 'submitted' state to approve (currently '{instance.status}')."
+            )
+        instance.remarks = remarks
+        instance.status = "completed"
+        instance.completed_at = self._utc_now()
+        instance.completed_by = user_id
+
+        self._log_audit(workflow_id, current_stage_id, "approve", user_id, remarks)
+
+        transition = (
+            self.db.query(RepairStageTransition)
+            .filter(
+                RepairStageTransition.from_stage_id == current_stage_id,
+                RepairStageTransition.action == "approve",
+            )
+            .first()
+        )
+        next_stage_id = transition.to_stage_id if transition else None
+
+        if not next_stage_id:
+            workflow.status = "completed"
+            workflow.current_stage_id = None
+            workflow.assignment_pending = False
+            workflow.progress = 100
+            self._complete_queue_entry(workflow_id, current_stage_id)
+            equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+            if equipment:
+                equipment.status = EquipmentStatus.active
+            self.db.commit()
+            return {"message": "Workflow completed", "status": "completed", "progress": 100}
+
+        workflow.current_stage_id = next_stage_id
+       
+        workflow.assignment_pending = True
+        self._complete_queue_entry(workflow_id, current_stage_id)
+
+        next_inst = self._get_instance(workflow_id, next_stage_id)
+        if next_inst:
+            next_inst.status = "pending"
+            next_inst.assignment_pending = True
+            next_inst.started_at = self._utc_now()
+            next_inst.assigned_user_id = None
+            next_inst.current_role = None
+        if next_inst:
+            workflow.current_stage_instance_id = next_inst.id
+        self.db.add(RepairAssignmentQueue(workflow_id=workflow_id, stage_id=next_stage_id, status="pending"))
+        self._recalculate_progress(workflow)
+        self.db.commit()
+        next_stage = self.db.query(RepairStageDefinition).filter(RepairStageDefinition.id == next_stage_id).first()
+      
+        self._fire_notification_safe(
+            "repair_stage_changed",
+            workflow,
+            next_stage,
+            user_id,
+        )
+        if not next_stage_id:
+            workflow.status = "completed"
+            workflow.current_stage_id = None
+            workflow.current_stage_instance_id = None
+            workflow.assignment_pending = False
+            workflow.progress = 100
+        return {
+            "message": "Stage approved and advanced",
+            "current_stage": next_stage.name if next_stage else None,
+            "progress": workflow.progress,
+        }
+
+    def reject_stage(self, workflow_id: UUID, remarks: Optional[str], user_id: UUID) -> dict:
+        """
+        Reject current stage and move back per the transition table.
+        Stage must be SUBMITTED. No sequential fallback.
+        """
+        workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+        if not workflow:
+            raise ValueError("Workflow not found.")
+        if workflow.status != "active":
+            raise ValueError("Workflow is not active.")
+
+        current_stage_id = workflow.current_stage_id
+        self._check_can_approve(current_stage_id, user_id)
+
+        instance = self._get_instance(workflow_id, current_stage_id)
+        if instance.status != "submitted":
+            raise ValueError(
+                f"Stage must be in 'submitted' state to reject (currently '{instance.status}')."
+            )
+
+        instance.status = "rejected"
+        self._log_audit(workflow_id, current_stage_id, "reject", user_id, remarks)
+
+        # Find target stage via transition table only
+        transition = (
+            self.db.query(RepairStageTransition)
+            .filter(
+                RepairStageTransition.from_stage_id == current_stage_id,
+                RepairStageTransition.action == "reject",
+            )
+            .first()
+        )
+        prev_stage_id = transition.to_stage_id if transition else None
+
+        if not prev_stage_id:
+            # No reject transition defined — stay at current (notify coordinator to re-assign)
+            workflow.assignment_pending = True
+            instance.status = "pending"
+            instance.assignment_pending = True
+            instance.assigned_user_id = None
+            instance.current_role = None
+
+            # Re-queue for coordinator
+            existing_q = (
+                self.db.query(RepairAssignmentQueue)
+                .filter(
+                    RepairAssignmentQueue.workflow_id == workflow_id,
+                    RepairAssignmentQueue.stage_id == current_stage_id,
+                    RepairAssignmentQueue.status.in_(["assigned", "completed"]),
+                )
+                .first()
+            )
+            if existing_q:
+                existing_q.status = "pending"
+                existing_q.assigned_to_user_id = None
+                existing_q.assigned_at = None
+            else:
+                self.db.add(RepairAssignmentQueue(
+                    workflow_id=workflow_id,
+                    stage_id=current_stage_id,
+                    status="pending",
+                ))
+
+            self.db.commit()
+            stage = self.db.query(RepairStageDefinition).filter(
+                RepairStageDefinition.id == current_stage_id
+            ).first()
+            return {
+                "message": "Stage rejected — re-queued for coordinator assignment",
+                "current_stage": stage.name if stage else None,
+                "progress": workflow.progress,
+            }
+
+        # Reset target stage to PENDING for re-assignment
+        prev_inst = self._get_instance(workflow_id, prev_stage_id)
+        if prev_inst:
+            prev_inst.status = "pending"
+            prev_inst.assignment_pending = True
+            prev_inst.completed_at = None
+            prev_inst.assigned_user_id = None
+            prev_inst.current_role = None
+
+        workflow.current_stage_id = prev_stage_id
+        workflow.assignment_pending = True
+
+        # Queue for coordinator
+        self.db.add(RepairAssignmentQueue(
+            workflow_id=workflow_id,
+            stage_id=prev_stage_id,
+            status="pending",
+        ))
+
+        self._recalculate_progress(workflow)
+        self.db.commit()
+
+        prev_stage = self.db.query(RepairStageDefinition).filter(
+            RepairStageDefinition.id == prev_stage_id
+        ).first()
+        self._fire_notification_safe("repair_delay", workflow, prev_stage, user_id)
+
+        return {
+            "message": "Stage rejected — returned stage pending coordinator assignment",
+            "current_stage": prev_stage.name if prev_stage else None,
+            "progress": workflow.progress,
+        }
+
+    def cancel_workflow(self, workflow_id: UUID, user_id: UUID, reason: Optional[str] = None) -> dict:
+        """Cancel an active workflow. Only org-admin or workflow creator."""
+        workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+        if not workflow:
+            raise ValueError("Workflow not found.")
+        if workflow.status != "active":
+            raise ValueError("Only active workflows can be cancelled.")
+
+        # Allow creator or org-admin
+        if str(workflow.created_by) != str(user_id):
+            self._check_is_org_admin(user_id)
+
+        workflow.status = "cancelled"
+        workflow.completed_at = self._utc_now()
+        workflow.assignment_pending = False
+
+        # Mark all pending queue entries as skipped
+        self.db.query(RepairAssignmentQueue).filter(
+            RepairAssignmentQueue.workflow_id == workflow_id,
+            RepairAssignmentQueue.status == "pending",
+        ).update({"status": "skipped"})
+
+        # Restore equipment status
+        equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+        if equipment:
+            equipment.status = EquipmentStatus.active
+
+        self.db.commit()
+        self._log_audit(workflow_id, workflow.current_stage_id, "cancel", user_id, reason or "Workflow cancelled")
+
+        return {"message": "Workflow cancelled", "workflow_id": str(workflow_id)}
+
+    def list_pending_assignments(self) -> list:
+        """
+        All active workflows where assignment_pending=True.
+        Used by the Workflow Coordinator's assignment queue page.
+        Returns each workflow with the pending stage details.
+        """
+        workflows = (
+            self.db.query(RepairWorkflow)
+            .filter(
+                RepairWorkflow.status == "active",
+                RepairWorkflow.assignment_pending.is_(True),
+            )
+            .order_by(RepairWorkflow.created_at.asc())
+            .all()
+        )
+        result = []
+        for wf in workflows:
+            equipment = self.db.query(Equipment).filter(Equipment.id == wf.equipment_id).first()
+            pending_stage = None
+            if wf.current_stage_id:
+                inst = self._get_instance(wf.id, wf.current_stage_id)
+                stage = self.db.query(RepairStageDefinition).filter(
+                    RepairStageDefinition.id == wf.current_stage_id
+                ).first()
+                if inst and stage:
+                    pending_stage = {
+                        "stage_id": str(stage.id),
+                        "stage_name": stage.name,
+                        "stage_code": stage.code,
+                        "sequence": stage.sequence,
+                        "instance_status": inst.status,
+                    }
+
+            # Eligible roles for this stage
+            eligible_roles: list[str] = []
+            if wf.current_stage_id:
+                role_rows = (
+                    self.db.query(RepairStageRole, OrgRole)
+                    .join(OrgRole, OrgRole.id == RepairStageRole.role_id)
+                    .filter(RepairStageRole.stage_id == wf.current_stage_id)
+                    .all()
+                )
+                seen: set[str] = set()
+                for _, role in role_rows:
+                    if role.name not in seen:
+                        eligible_roles.append(role.name)
+                        seen.add(role.name)
+
+            result.append({
+                "workflow_id": str(wf.id),
+                "equipment_id": str(wf.equipment_id),
+                "equipment_ueic": equipment.ueic if equipment else None,
+                "progress": wf.progress,
+                "pending_stage": pending_stage,
+                "eligible_roles": eligible_roles,
+                "created_at": wf.created_at.isoformat() if wf.created_at else None,
+            })
+        return result
 
     def list_workflows(
         self,
@@ -371,7 +890,6 @@ class RepairWorkflowService:
             raise ValueError("Workflow not found.")
         result = self._workflow_to_dict(workflow)
 
-        # Enrich with stage instances
         instances = (
             self.db.query(RepairStageInstance)
             .filter(RepairStageInstance.workflow_id == workflow_id)
@@ -388,6 +906,44 @@ class RepairWorkflowService:
                 .order_by(RepairStageData.created_at.desc())
                 .first()
             )
+            assignee = None
+            if inst.assigned_user_id:
+                u = self.db.query(User).filter(User.id == inst.assigned_user_id).first()
+                if u:
+                    assignee = {
+                        "id": str(u.id),
+                        "name": f"{u.firstname} {u.lastname}",
+                        "email": u.email,
+                    }
+
+            stage_roles = []
+            approval_roles = []
+            assignment_roles = []
+            edit_roles = []
+            role_rows = (
+                self.db.query(RepairStageRole, OrgRole)
+                .join(OrgRole, RepairStageRole.role_id == OrgRole.id)
+                .filter(RepairStageRole.stage_id == inst.stage_id)
+                .all()
+            )
+            for stage_role, org_role in role_rows:
+                role_name = org_role.name if org_role else None
+                if not role_name:
+                    continue
+                stage_roles.append({
+                    "role_id": str(org_role.id),
+                    "role_name": role_name,
+                    "can_edit": stage_role.can_edit,
+                    "can_approve": stage_role.can_approve,
+                    "can_assign": stage_role.can_assign,
+                })
+                if stage_role.can_approve:
+                    approval_roles.append(role_name)
+                if stage_role.can_assign:
+                    assignment_roles.append(role_name)
+                if stage_role.can_edit:
+                    edit_roles.append(role_name)
+
             stage_details.append({
                 "instance_id": str(inst.id),
                 "stage_id": str(inst.stage_id),
@@ -395,12 +951,228 @@ class RepairWorkflowService:
                 "stage_code": stage.code if stage else None,
                 "sequence": stage.sequence if stage else None,
                 "status": inst.status,
+                "assignment_pending": inst.assignment_pending,
+                "assigned_user": assignee,
+                "current_role": inst.current_role,
+                "stage_roles": stage_roles,
+                "approval_roles": approval_roles,
+                "assignment_roles": assignment_roles,
+                "edit_roles": edit_roles,
                 "started_at": inst.started_at.isoformat() if inst.started_at else None,
                 "completed_at": inst.completed_at.isoformat() if inst.completed_at else None,
                 "form_data": data_row.form_data if data_row else {},
             })
         stage_details.sort(key=lambda x: x["sequence"] or 0)
         result["stages"] = stage_details
+        return result
+
+    def get_assignment_queue(self, workflow_id: UUID) -> list:
+        """Return all pending assignment queue entries for a workflow."""
+        entries = (
+            self.db.query(RepairAssignmentQueue)
+            .filter(RepairAssignmentQueue.workflow_id == workflow_id)
+            .order_by(RepairAssignmentQueue.created_at.desc())
+            .all()
+        )
+        result = []
+        for e in entries:
+            stage = self.db.query(RepairStageDefinition).filter(
+                RepairStageDefinition.id == e.stage_id
+            ).first()
+            assignee = None
+            if e.assigned_to_user_id:
+                u = self.db.query(User).filter(User.id == e.assigned_to_user_id).first()
+                if u:
+                    assignee = {"id": str(u.id), "name": f"{u.firstname} {u.lastname}"}
+            result.append({
+                "id": str(e.id),
+                "stage_id": str(e.stage_id),
+                "stage_name": stage.name if stage else None,
+                "stage_code": stage.code if stage else None,
+                "status": e.status,
+                "assigned_to": assignee,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "assigned_at": e.assigned_at.isoformat() if e.assigned_at else None,
+            })
+        return result
+
+    def get_eligible_users(
+    self,
+    workflow_id: UUID,
+    stage_id: UUID,
+    current_user: User,
+) -> list:
+        """
+        Returns users authorised for assignment
+        for the given workflow stage.
+        """
+
+        # Validate workflow
+        workflow = (
+            self.db.query(RepairWorkflow)
+            .filter(
+                RepairWorkflow.id == workflow_id
+            )
+            .first()
+        )
+
+        if not workflow:
+            raise ValueError("Workflow not found")
+
+        # Multi-tenant security
+        equipment = (
+            self.db.query(Equipment)
+            .filter(
+                Equipment.id == workflow.equipment_id
+            )
+            .first()
+        )
+
+        if not equipment:
+            raise ValueError(
+                "Equipment not found"
+            )
+
+        if (
+            str(equipment.organization_id)
+            != str(current_user.organization_id)
+        ):
+            raise ValueError(
+                "Unauthorized workflow access"
+            )
+
+        # Validate stage
+        stage_def = (
+            self.db.query(RepairStageDefinition)
+            .filter(
+                RepairStageDefinition.id == stage_id
+            )
+            .first()
+        )
+
+        if not stage_def:
+            raise ValueError("Stage not found")
+
+        # Roles allowed to receive assignments
+        role_ids = [
+            r.role_id
+            for r in (
+                self.db.query(RepairStageRole)
+                .filter(
+                    RepairStageRole.stage_id == stage_id,
+                    RepairStageRole.can_edit.is_(True),
+                )
+                .all()
+            )
+        ]
+
+        if not role_ids:
+            raise ValueError(
+                "No assignable roles configured for this stage."
+            )
+
+        # Fetch users in same organization
+        users = (
+            self.db.query(User)
+            .join(
+                OrgUserRole,
+                OrgUserRole.user_id == User.id,
+            )
+            .filter(
+                OrgUserRole.org_role_id.in_(role_ids),
+                OrgUserRole.is_active.is_(True),
+                User.isactive.is_(True),
+                User.organization_id
+                == current_user.organization_id,
+            )
+            .distinct()
+            .all()
+        )
+
+        result = []
+
+        for u in users:
+
+            role = (
+                self.db.query(OrgRole)
+                .join(
+                    OrgUserRole,
+                    OrgUserRole.org_role_id == OrgRole.id,
+                )
+                .filter(
+                    OrgUserRole.user_id == u.id,
+                    OrgRole.id.in_(role_ids),
+                )
+                .first()
+            )
+
+            result.append({
+                "id": str(u.id),
+                "firstname": u.firstname,
+                "lastname": u.lastname,
+                "email": u.email,
+                "role": role.name if role else None,
+            })
+
+        return result
+
+    def get_available_transitions(self, workflow_id: UUID, user_id: UUID) -> dict:
+        """
+        Returns what actions the calling user can take on this workflow right now.
+        """
+        workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+        if not workflow:
+            raise ValueError("Workflow not found.")
+
+        result = {
+            "can_assign": False,
+            "can_submit": False,
+            "can_approve": False,
+            "can_reject": False,
+            "can_cancel": False,
+        }
+
+        if workflow.status != "active":
+            return result
+
+        current_stage_id = workflow.current_stage_id
+        if not current_stage_id:
+            return result
+
+        instance = self._get_instance(workflow_id, current_stage_id)
+        if not instance:
+            return result
+
+        stage_status = instance.status
+
+        # can_assign: coordinator (can_assign=True) when stage is pending
+        if self._can_assign_stage(user_id, instance.stage_id):
+            if stage_status == "pending":
+                result["can_assign"] = True
+
+        # can_submit: stage actor (can_edit=True) when assigned
+        if stage_status in ("assigned", "in_progress"):
+            is_assignee = instance.assigned_user_id and str(instance.assigned_user_id) == str(user_id)
+            has_edit = self._has_stage_edit(current_stage_id, user_id)
+            if is_assignee or has_edit:
+                result["can_submit"] = True
+
+        # can_approve / can_reject: stage actor (can_approve=True) when submitted
+        if stage_status == "submitted":
+            if self._has_stage_approve(current_stage_id, user_id):
+                result["can_approve"] = True
+                result["can_reject"] = True
+
+        # can_cancel: creator or org-admin
+        if str(workflow.created_by) == str(user_id):
+            result["can_cancel"] = True
+        else:
+            try:
+                self._check_is_org_admin(user_id)
+                result["can_cancel"] = True
+            except ValueError:
+                pass
+
         return result
 
     def get_current_form(self, workflow_id: UUID) -> dict:
@@ -414,7 +1186,6 @@ class RepairWorkflowService:
             RepairStageDefinition.id == workflow.current_stage_id
         ).first()
 
-        # Get the template for this stage
         tmpl_link = (
             self.db.query(RepairStageTemplate)
             .filter(RepairStageTemplate.stage_id == workflow.current_stage_id)
@@ -428,15 +1199,7 @@ class RepairWorkflowService:
             if tmpl:
                 template_data = tmpl.template_data
 
-        # Get any previously saved form data
-        instance = (
-            self.db.query(RepairStageInstance)
-            .filter(
-                RepairStageInstance.workflow_id == workflow_id,
-                RepairStageInstance.stage_id == workflow.current_stage_id,
-            )
-            .first()
-        )
+        instance = self._get_instance(workflow_id, workflow.current_stage_id)
         saved_data = {}
         if instance:
             data_row = (
@@ -453,28 +1216,21 @@ class RepairWorkflowService:
             "stage_id": str(workflow.current_stage_id),
             "stage_name": stage.name if stage else None,
             "stage_code": stage.code if stage else None,
+            "stage_status": instance.status if instance else None,
+            "assignment_pending": workflow.assignment_pending,
             "template_data": template_data,
             "saved_form_data": saved_data,
         }
 
-    def save_stage_data(
-        self,
-        workflow_id: UUID,
-        stage_id: UUID,
-        form_data: dict,
-        user_id: UUID,
-    ) -> dict:
-        """Save form data for a stage (validated against template)."""
+    def save_stage_data(self, workflow_id: UUID, stage_id: UUID, form_data: dict, user_id: UUID) -> dict:
         workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
         if not workflow:
             raise ValueError("Workflow not found.")
         if str(workflow.current_stage_id) != str(stage_id):
             raise ValueError("Cannot save data for a stage that is not currently active.")
 
-        # RBAC check
         self._check_stage_rbac(stage_id, user_id)
 
-        # Template validation
         tmpl_link = (
             self.db.query(RepairStageTemplate)
             .filter(RepairStageTemplate.stage_id == stage_id)
@@ -483,26 +1239,16 @@ class RepairWorkflowService:
         if tmpl_link and tmpl_link.template_id:
             self._validate_form_data(tmpl_link.template_id, form_data)
 
-        # Get or create stage instance
-        instance = (
-            self.db.query(RepairStageInstance)
-            .filter(
-                RepairStageInstance.workflow_id == workflow_id,
-                RepairStageInstance.stage_id == stage_id,
-            )
-            .first()
-        )
+        instance = self._get_instance(workflow_id, stage_id)
         if not instance:
             raise ValueError("Stage instance not found.")
 
-        # Upsert form data
         data_row = (
             self.db.query(RepairStageData)
             .filter(RepairStageData.stage_instance_id == instance.id)
             .first()
         )
         if data_row:
-            # Merge: existing data + new data (new overwrites existing keys)
             merged = {**(data_row.form_data or {}), **form_data}
             data_row.form_data = merged
         else:
@@ -515,7 +1261,6 @@ class RepairWorkflowService:
 
         self.db.commit()
         self._log_audit(workflow_id, stage_id, "saved", user_id, "Form data saved")
-
         return {"message": "Stage data saved successfully", "stage_id": str(stage_id)}
 
     def upload_stage_file(
@@ -528,25 +1273,16 @@ class RepairWorkflowService:
         mime_type: str,
         user_id: UUID,
     ) -> dict:
-        """Upload a file for a specific field in a stage."""
         workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
         if not workflow:
             raise ValueError("Workflow not found.")
 
         self._check_stage_rbac(stage_id, user_id)
 
-        instance = (
-            self.db.query(RepairStageInstance)
-            .filter(
-                RepairStageInstance.workflow_id == workflow_id,
-                RepairStageInstance.stage_id == stage_id,
-            )
-            .first()
-        )
+        instance = self._get_instance(workflow_id, stage_id)
         if not instance:
             raise ValueError("Stage instance not found.")
 
-        # Save file to disk
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         unique_name = f"{uuid.uuid4()}_{file_name}"
         rel_path = os.path.join(UPLOAD_DIR, unique_name)
@@ -554,7 +1290,6 @@ class RepairWorkflowService:
         with open(abs_path, "wb") as f:
             f.write(file_bytes)
 
-        # Create document record
         doc = RepairStageDocument(
             stage_instance_id=instance.id,
             field_key=field_key,
@@ -562,22 +1297,22 @@ class RepairWorkflowService:
             file_path=rel_path,
             mime_type=mime_type,
             size_bytes=len(file_bytes),
+            uploaded_by=user_id,
         )
         self.db.add(doc)
         self.db.flush()
 
-        # Patch form_data with document reference
-        data_row = (
-            self.db.query(RepairStageData)
-            .filter(RepairStageData.stage_instance_id == instance.id)
-            .first()
-        )
         doc_ref = {
             "document_id": str(doc.id),
             "file_name": file_name,
             "mime_type": mime_type,
             "size_bytes": len(file_bytes),
         }
+        data_row = (
+            self.db.query(RepairStageData)
+            .filter(RepairStageData.stage_instance_id == instance.id)
+            .first()
+        )
         if data_row:
             merged = {**(data_row.form_data or {}), field_key: doc_ref}
             data_row.form_data = merged
@@ -591,259 +1326,11 @@ class RepairWorkflowService:
 
         self.db.commit()
         self._log_audit(workflow_id, stage_id, "file_uploaded", user_id, f"File uploaded: {file_name}")
-
         return {
             "document_id": str(doc.id),
             "field_key": field_key,
             "file_name": file_name,
             "size_bytes": len(file_bytes),
-        }
-
-    def advance_stage(self, workflow_id: UUID, remarks: Optional[str], user_id: UUID) -> dict:
-        """
-        Approve current stage and advance to the next.
-        Uses RepairStageTransition table; falls back to sequential order.
-        On final stage, sets equipment.status back to active.
-        """
-        workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
-        if not workflow:
-            raise ValueError("Workflow not found.")
-        if workflow.status != "active":
-            raise ValueError("Workflow is not active.")
-
-        current_stage_id = workflow.current_stage_id
-        self._check_can_approve(current_stage_id, user_id)
-
-        # Mark current instance as completed
-        current_inst = (
-            self.db.query(RepairStageInstance)
-            .filter(
-                RepairStageInstance.workflow_id == workflow_id,
-                RepairStageInstance.stage_id == current_stage_id,
-            )
-            .first()
-        )
-        if current_inst:
-            current_inst.status = "completed"
-            current_inst.completed_at = self._utc_now()
-
-        self._log_audit(workflow_id, current_stage_id, "approve", user_id, remarks)
-
-        # Find next stage via transition table
-        transition = (
-            self.db.query(RepairStageTransition)
-            .filter(
-                RepairStageTransition.from_stage_id == current_stage_id,
-                RepairStageTransition.action == "approve",
-            )
-            .first()
-        )
-
-        next_stage_id = transition.to_stage_id if transition else None
-
-        if not next_stage_id:
-            # Fallback: sequential order — find next stage after current
-            current_stage = self.db.query(RepairStageDefinition).filter(
-                RepairStageDefinition.id == current_stage_id
-            ).first()
-            if current_stage:
-                next_stage = (
-                    self.db.query(RepairStageDefinition)
-                    .filter(
-                        RepairStageDefinition.is_active.is_(True),
-                        RepairStageDefinition.sequence > current_stage.sequence,
-                    )
-                    .order_by(RepairStageDefinition.sequence)
-                    .first()
-                )
-                if next_stage:
-                    next_stage_id = next_stage.id
-
-        if not next_stage_id:
-            # Terminal — workflow complete
-            workflow.status = "completed"
-            workflow.current_stage_id = None
-            workflow.progress = 100
-
-            equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
-            if equipment:
-                equipment.status = EquipmentStatus.active
-
-            self.db.commit()
-            self._log_audit(workflow_id, current_stage_id, "completed", user_id, "Workflow completed")
-
-            try:
-                from services.notification_service import NotificationService
-                if equipment:
-                    NotificationService(self.db).notify_overhaul_recommended(
-                        equipment,
-                        operation_count=workflow.progress,
-                        operation_threshold=100,
-                        organization_id=equipment.organization_id,
-                        department_id=equipment.department_id,
-                    )
-            except Exception as _n:
-                print(f"[WARN] overhaul_recommended notification failed: {_n}")
-
-            return {"message": "Workflow completed", "status": "completed", "progress": 100}
-
-        # Advance to next stage
-        workflow.current_stage_id = next_stage_id
-
-        # Mark next instance as in_progress
-        next_inst = (
-            self.db.query(RepairStageInstance)
-            .filter(
-                RepairStageInstance.workflow_id == workflow_id,
-                RepairStageInstance.stage_id == next_stage_id,
-            )
-            .first()
-        )
-        if next_inst:
-            next_inst.status = "in_progress"
-            next_inst.started_at = self._utc_now()
-
-        # Recalculate progress
-        self._recalculate_progress(workflow)
-        self.db.commit()
-
-        next_stage = self.db.query(RepairStageDefinition).filter(
-            RepairStageDefinition.id == next_stage_id
-        ).first()
-        self._log_audit(workflow_id, next_stage_id, "started", user_id, "Moved to next stage")
-
-        try:
-            from services.notification_service import NotificationService
-            equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
-            if equipment:
-                NotificationService(self.db).fire(
-                    event_type="repair_stage_changed",
-                    context={
-                        "equipment": equipment.ueic or str(equipment.id),
-                        "equipment_type": equipment.equipment_type.name if equipment.equipment_type else "Equipment",
-                        "stage": next_stage.name if next_stage else "Next Stage",
-                        "progress": str(workflow.progress),
-                    },
-                    organization_id=equipment.organization_id,
-                    department_id=equipment.department_id,
-                    source_id=workflow.id,
-                    source_type="repair_workflow",
-                    severity="info",
-                    workflow_type="repair_lifecycle",
-                )
-        except Exception as _n:
-            print(f"[WARN] repair_stage_changed notification failed: {_n}")
-
-        return {
-            "message": "Stage advanced",
-            "current_stage": next_stage.name if next_stage else None,
-            "progress": workflow.progress,
-        }
-
-    def reject_stage(self, workflow_id: UUID, remarks: Optional[str], user_id: UUID) -> dict:
-        """
-        Reject current stage and move back to the previous.
-        Uses RepairStageTransition table; falls back to sequential reverse.
-        """
-        workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
-        if not workflow:
-            raise ValueError("Workflow not found.")
-        if workflow.status != "active":
-            raise ValueError("Workflow is not active.")
-
-        current_stage_id = workflow.current_stage_id
-        self._check_can_approve(current_stage_id, user_id)
-
-        # Mark current instance as rejected
-        current_inst = (
-            self.db.query(RepairStageInstance)
-            .filter(
-                RepairStageInstance.workflow_id == workflow_id,
-                RepairStageInstance.stage_id == current_stage_id,
-            )
-            .first()
-        )
-        if current_inst:
-            current_inst.status = "rejected"
-
-        self._log_audit(workflow_id, current_stage_id, "reject", user_id, remarks)
-
-        # Find previous stage via transition table
-        transition = (
-            self.db.query(RepairStageTransition)
-            .filter(
-                RepairStageTransition.from_stage_id == current_stage_id,
-                RepairStageTransition.action == "reject",
-            )
-            .first()
-        )
-
-        prev_stage_id = transition.to_stage_id if transition else None
-
-        if not prev_stage_id:
-            # Fallback: sequential reverse
-            current_stage = self.db.query(RepairStageDefinition).filter(
-                RepairStageDefinition.id == current_stage_id
-            ).first()
-            if current_stage:
-                prev_stage = (
-                    self.db.query(RepairStageDefinition)
-                    .filter(
-                        RepairStageDefinition.is_active.is_(True),
-                        RepairStageDefinition.sequence < current_stage.sequence,
-                    )
-                    .order_by(RepairStageDefinition.sequence.desc())
-                    .first()
-                )
-                if prev_stage:
-                    prev_stage_id = prev_stage.id
-
-        if not prev_stage_id:
-            raise ValueError("Cannot reject — already at the first stage.")
-
-        # Revert previous instance to in_progress
-        prev_inst = (
-            self.db.query(RepairStageInstance)
-            .filter(
-                RepairStageInstance.workflow_id == workflow_id,
-                RepairStageInstance.stage_id == prev_stage_id,
-            )
-            .first()
-        )
-        if prev_inst:
-            prev_inst.status = "in_progress"
-            prev_inst.completed_at = None
-
-        workflow.current_stage_id = prev_stage_id
-        self._recalculate_progress(workflow)
-        self.db.commit()
-
-        prev_stage = self.db.query(RepairStageDefinition).filter(
-            RepairStageDefinition.id == prev_stage_id
-        ).first()
-
-        try:
-            from services.notification_service import NotificationService
-            equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
-            rejected_stage = self.db.query(RepairStageDefinition).filter(
-                RepairStageDefinition.id == current_stage_id
-            ).first()
-            if equipment:
-                NotificationService(self.db).notify_repair_delay(
-                    equipment,
-                    repair_stage=rejected_stage.name if rejected_stage else "Unknown Stage",
-                    stage_deadline="-",
-                    days_delayed=0,
-                    organization_id=equipment.organization_id,
-                    department_id=equipment.department_id,
-                )
-        except Exception as _n:
-            print(f"[WARN] repair_delay notification failed: {_n}")
-
-        return {
-            "message": "Stage rejected — returned to previous stage",
-            "current_stage": prev_stage.name if prev_stage else None,
-            "progress": workflow.progress,
         }
 
     # =========================================================================
@@ -866,6 +1353,7 @@ class RepairWorkflowService:
         return {
             "workflow_id": str(workflow_id),
             "status": workflow.status,
+            "assignment_pending": workflow.assignment_pending,
             "progress": workflow.progress,
             "current_stage": current_stage,
         }
@@ -882,11 +1370,13 @@ class RepairWorkflowService:
             stage = self.db.query(RepairStageDefinition).filter(
                 RepairStageDefinition.id == log.stage_id
             ).first()
+            performer = self.db.query(User).filter(User.id == log.performed_by).first()
             result.append({
                 "id": str(log.id),
                 "action": log.action,
                 "stage_name": stage.name if stage else None,
                 "performed_by": str(log.performed_by) if log.performed_by else None,
+                "performed_by_name": f"{performer.firstname} {performer.lastname}" if performer else None,
                 "note": log.note,
                 "performed_at": log.performed_at.isoformat() if log.performed_at else None,
             })
@@ -897,14 +1387,7 @@ class RepairWorkflowService:
     # =========================================================================
 
     def list_stage_documents(self, workflow_id: UUID, stage_id: UUID) -> list:
-        instance = (
-            self.db.query(RepairStageInstance)
-            .filter(
-                RepairStageInstance.workflow_id == workflow_id,
-                RepairStageInstance.stage_id == stage_id,
-            )
-            .first()
-        )
+        instance = self._get_instance(workflow_id, stage_id)
         if not instance:
             raise ValueError("Stage instance not found.")
 
@@ -925,7 +1408,6 @@ class RepairWorkflowService:
         ]
 
     def get_document_file(self, doc_id: UUID):
-        """Returns (abs_path, file_name, mime_type)."""
         doc = self.db.query(RepairStageDocument).filter(RepairStageDocument.id == doc_id).first()
         if not doc:
             raise ValueError("Document not found.")
@@ -938,8 +1420,59 @@ class RepairWorkflowService:
     # Internal helpers
     # =========================================================================
 
+    def _get_instance(self, workflow_id: UUID, stage_id: UUID) -> Optional[RepairStageInstance]:
+        return (
+            self.db.query(RepairStageInstance)
+            .filter(
+                RepairStageInstance.workflow_id == workflow_id,
+                RepairStageInstance.stage_id == stage_id,
+            )
+            .first()
+        )
+
+    def _has_stage_edit(self, stage_id: UUID, user_id: UUID) -> bool:
+        role_ids = self._user_org_role_ids(user_id)
+        if not role_ids:
+            return True
+        return bool(
+            self.db.query(RepairStageRole)
+            .filter(
+                RepairStageRole.stage_id == stage_id,
+                RepairStageRole.role_id.in_(role_ids),
+                RepairStageRole.can_edit.is_(True),
+            )
+            .first()
+        )
+
+    def _has_stage_approve(self, stage_id: UUID, user_id: UUID) -> bool:
+        role_ids = self._user_org_role_ids(user_id)
+        if not role_ids:
+            return True
+        return bool(
+            self.db.query(RepairStageRole)
+            .filter(
+                RepairStageRole.stage_id == stage_id,
+                RepairStageRole.role_id.in_(role_ids),
+                RepairStageRole.can_approve.is_(True),
+            )
+            .first()
+        )
+
+    def _complete_queue_entry(self, workflow_id: UUID, stage_id: UUID) -> None:
+        entry = (
+            self.db.query(RepairAssignmentQueue)
+            .filter(
+                RepairAssignmentQueue.workflow_id == workflow_id,
+                RepairAssignmentQueue.stage_id == stage_id,
+                RepairAssignmentQueue.status.in_(["pending", "assigned"]),
+            )
+            .first()
+        )
+        if entry:
+            entry.status = "completed"
+            entry.completed_at = self._utc_now()
+
     def _recalculate_progress(self, workflow: RepairWorkflow) -> None:
-        """Weight-based progress: completed_weight / total_active_weight * 100."""
         stages = (
             self.db.query(RepairStageDefinition)
             .filter(RepairStageDefinition.is_active.is_(True))
@@ -971,16 +1504,14 @@ class RepairWorkflowService:
         performed_by: UUID,
         note: Optional[str] = None,
     ) -> None:
-        log = RepairStageAuditLog(
+        self.db.add(RepairStageAuditLog(
             workflow_id=workflow_id,
             stage_id=stage_id,
             action=action,
             performed_by=performed_by,
             note=note,
             performed_at=self._utc_now(),
-        )
-        self.db.add(log)
-        # Don't commit here — caller commits after all changes
+        ))
 
     def _workflow_to_dict(self, workflow: RepairWorkflow) -> dict:
         equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
@@ -1002,16 +1533,16 @@ class RepairWorkflowService:
             "equipment_ueic": equipment.ueic if equipment else None,
             "source_failure_id": str(workflow.source_failure_id) if workflow.source_failure_id else None,
             "status": workflow.status,
+            "assignment_pending": workflow.assignment_pending,
             "progress": workflow.progress,
             "current_stage": current_stage,
             "created_at": workflow.created_at.isoformat() if workflow.created_at else None,
         }
 
     def _validate_form_data(self, template_id: UUID, form_data: dict) -> None:
-        """Validate required fields from template. Raises ValueError if invalid."""
         template = self.db.query(OrgTestTemplate).filter(OrgTestTemplate.id == template_id).first()
         if not template or not template.template_data:
-            return  # No template to validate against
+            return
 
         sections = template.template_data.get("sections", [])
         errors = []
@@ -1026,7 +1557,6 @@ class RepairWorkflowService:
                     continue
 
                 val = form_data.get(key)
-                # File fields are stored as dict references
                 if field_type == "file":
                     if not val or not isinstance(val, dict):
                         errors.append(f"{label} (file upload) is required.")
@@ -1035,3 +1565,38 @@ class RepairWorkflowService:
 
         if errors:
             raise ValueError("; ".join(errors))
+
+    def _fire_notification_safe(self, event_type: str, workflow: RepairWorkflow, stage, user_id: UUID) -> None:
+        try:
+            from services.notification_service import NotificationService
+            equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+            if not equipment:
+                return
+            svc = NotificationService(self.db)
+            if event_type == "repair_stage_changed":
+                svc.fire(
+                    event_type="repair_stage_changed",
+                    context={
+                        "equipment": equipment.ueic or str(equipment.id),
+                        "equipment_type": equipment.equipment_type.name if equipment.equipment_type else "Equipment",
+                        "stage": stage.name if stage else "Completed",
+                        "progress": str(workflow.progress),
+                    },
+                    organization_id=equipment.organization_id,
+                    department_id=equipment.department_id,
+                    source_id=workflow.id,
+                    source_type="repair_workflow",
+                    severity="info",
+                    workflow_type="repair_lifecycle",
+                )
+            elif event_type == "repair_delay":
+                svc.notify_repair_delay(
+                    equipment,
+                    repair_stage=stage.name if stage else "Unknown Stage",
+                    stage_deadline="-",
+                    days_delayed=0,
+                    organization_id=equipment.organization_id,
+                    department_id=equipment.department_id,
+                )
+        except Exception as _n:
+            print(f"[WARN] notification failed ({event_type}): {_n}")

@@ -352,7 +352,10 @@ def login_user(db: Session, email: str, password: str):
         # Step 7: Privileges (uses shared helper)
         # -------------------------------------------------------
         filtered_privileges = build_user_privileges(db, user.id)
+        primary_department_id = None
 
+        if org_user_roles:
+            primary_department_id = org_user_roles[0].department_id
         # Step 8: Plan info
         plan = None
         if user.plan_id:
@@ -380,7 +383,7 @@ def login_user(db: Session, email: str, password: str):
                 "phone_confirmed": user.phone_confirmed,
                 "usertype": user.usertype,
                 "organization_id": str(user.organization_id) if user.organization_id else None,
-                "department_id": str(user.department_id) if (user.department_id and user.department and user.department.parent_department_id is not None) else None,
+                "department_id": str(primary_department_id) if primary_department_id else None,
                 "cts": UTCDateTimeMixin._make_aware(user.cts),
                 "mts": UTCDateTimeMixin._make_aware(user.mts),
                 "roles": role_names,

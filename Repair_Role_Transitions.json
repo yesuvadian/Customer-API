@@ -1,9 +1,31 @@
- [
-    {"from": "Failure Reporting", "action": "approve", "to": "Committee Review"},
-    {"from": "Committee Review", "action": "approve", "to": "Vendor Assignment"},
-    {"from": "Committee Review", "action": "reject", "to": "Failure Reporting"},
-    {"from": "Vendor Assignment", "action": "approve", "to": "Lifting"},
-    {"from": "Joint Inspection", "action": "reject", "to": "Lifting"},
-    {"from": "Final Inspection", "action": "reject", "to": "Repair QA"},
-    {"from": "Dispatch", "action": "approve", "to": "Commissioning"}
+[
+    {"from": "Failure Reporting",    "action": "approve", "to": "Committee Review"},
+    {"from": "Failure Reporting",    "action": "reject",  "to": null},
+
+    {"from": "Committee Review",     "action": "approve", "to": "Vendor Assignment"},
+    {"from": "Committee Review",     "action": "reject",  "to": "Failure Reporting"},
+
+    {"from": "Vendor Assignment",    "action": "approve", "to": "Lifting"},
+    {"from": "Vendor Assignment",    "action": "reject",  "to": "Committee Review"},
+
+    {"from": "Lifting",              "action": "approve", "to": "Joint Inspection"},
+    {"from": "Lifting",              "action": "reject",  "to": "Vendor Assignment"},
+
+    {"from": "Joint Inspection",     "action": "approve", "to": "Estimate & Work Award"},
+    {"from": "Joint Inspection",     "action": "reject",  "to": "Lifting"},
+
+    {"from": "Estimate & Work Award","action": "approve", "to": "Repair QA"},
+    {"from": "Estimate & Work Award","action": "reject",  "to": "Joint Inspection"},
+
+    {"from": "Repair QA",            "action": "approve", "to": "Final Inspection"},
+    {"from": "Repair QA",            "action": "reject",  "to": "Estimate & Work Award"},
+
+    {"from": "Final Inspection",     "action": "approve", "to": "Dispatch"},
+    {"from": "Final Inspection",     "action": "reject",  "to": "Repair QA"},
+
+    {"from": "Dispatch",             "action": "approve", "to": "Commissioning"},
+    {"from": "Dispatch",             "action": "reject",  "to": "Final Inspection"},
+
+    {"from": "Commissioning",        "action": "approve", "to": null},
+    {"from": "Commissioning",        "action": "reject",  "to": "Dispatch"}
 ]

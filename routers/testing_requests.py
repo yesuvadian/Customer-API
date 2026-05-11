@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-
+from models import RepairWorkflow
 from auth_utils import get_current_user
 from database import get_db
 from models import User
@@ -24,26 +24,100 @@ router = APIRouter(
 
 def _enrich(req):
     """Attach computed display names to ORM object."""
-    req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
-    req.test_type_name = req.test_type.name if req.test_type else None
-    req.department_name = req.department.name if req.department else None
+
+    req.equipment_type_name = (
+        req.equipment_type.name
+        if req.equipment_type
+        else None
+    )
+
+    req.test_type_name = (
+        req.test_type.name
+        if req.test_type
+        else None
+    )
+
+    req.department_name = (
+        req.department.name
+        if req.department
+        else None
+    )
 
     # Equipment asset register fields
     if req.equipment:
         req.equipment_ueic = req.equipment.ueic
-        req.equipment_name = req.equipment.ueic  # Alias for Flutter UI
+        req.equipment_name = req.equipment.ueic
     else:
         req.equipment_ueic = None
         req.equipment_name = None
 
+    # Originator
     if req.originator:
-        req.originator_name = f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip() or req.originator.email
+        req.originator_name = (
+            f"{req.originator.firstname or ''} "
+            f"{req.originator.lastname or ''}"
+        ).strip() or req.originator.email
     else:
         req.originator_name = None
+
+    # Assigned tester
     if req.assigned_tester:
-        req.assigned_tester_name = f"{req.assigned_tester.firstname or ''} {req.assigned_tester.lastname or ''}".strip() or req.assigned_tester.email
+        req.assigned_tester_name = (
+            f"{req.assigned_tester.firstname or ''} "
+            f"{req.assigned_tester.lastname or ''}"
+        ).strip() or req.assigned_tester.email
     else:
         req.assigned_tester_name = None
+
+    # ─────────────────────────────────────────────
+    # Repair Workflow Enrichment
+    # ─────────────────────────────────────────────
+
+    req.repair_workflow_id = None
+    req.repair_current_stage = None
+    req.repair_status = None
+    req.repair_progress = None
+
+    try:
+
+        next_action = getattr(
+            req,
+            "next_action",
+            None,
+        )
+
+        if next_action and str(next_action) == "repair_cycle":
+
+            workflow = (
+                req._sa_instance_state.session
+                .query(RepairWorkflow)
+                .filter(
+                    RepairWorkflow.source_failure_id
+                    == req.id
+                )
+                .first()
+            )
+
+            if workflow:
+
+                req.repair_workflow_id = str(
+                    workflow.id
+                )
+
+                req.repair_status = workflow.status
+
+                req.repair_progress = (
+                    workflow.progress
+                )
+
+                if workflow.current_stage:
+                    req.repair_current_stage = (
+                        workflow.current_stage.name
+                    )
+
+    except Exception:
+        pass
+
     return req
 
 

@@ -110,24 +110,14 @@ class RepairWorkflowDefinition(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, default="Transformer Repair Lifecycle")
     is_active = Column(Boolean, default=True)
+
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     created_at = Column(DateTime, server_default=func.now())
+
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
-class RepairStageDefinition(Base):
-    __tablename__ = "repair_stage_definitions"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String, nullable=False)
-    code = Column(String, unique=True, nullable=False)   # FAILURE_REPORT, COMMITTEE_REVIEW …
-    sequence = Column(Integer, nullable=False)
-    weight = Column(Integer, default=10)                 # progress contribution
-    is_active = Column(Boolean, default=True)
-    is_mandatory = Column(Boolean, default=True)
-    created_at = Column(DateTime, server_default=func.now())
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class RepairStageTemplate(Base):
@@ -146,14 +136,23 @@ class RepairStageTemplate(Base):
 
 
 class RepairStageRole(Base):
-    """Stage ↔ OrgRole RBAC. can_edit = may fill form; can_approve = may advance/reject."""
+    """Stage ↔ OrgRole RBAC.
+
+    can_edit = may fill or update the form for the stage.
+    can_approve = may advance/reject the stage.
+    can_assign = may assign users to the stage.
+
+    Approval-only roles are supported by setting:
+        can_approve=True, can_edit=False, can_assign=False
+    """
     __tablename__ = "repair_stage_roles"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id", ondelete="CASCADE"))
     role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"))
-    can_edit = Column(Boolean, default=True)
-    can_approve = Column(Boolean, default=True)
+    can_edit = Column(Boolean, default=False)
+    can_approve = Column(Boolean, default=False)
+    can_assign = Column(Boolean, default=False)
 
     __table_args__ = (UniqueConstraint("stage_id", "role_id", name="uq_repair_stage_role"),)
 
@@ -170,88 +169,463 @@ class RepairStageTransition(Base):
     __table_args__ = (UniqueConstraint("from_stage_id", "action", name="uq_repair_transition"),)
 
 
+class RepairStageDefinition(Base):
+    __tablename__ = "repair_stage_definitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    name = Column(String, nullable=False)
+
+    code = Column(String, unique=True, nullable=False)
+
+    sequence = Column(Integer, nullable=False)
+
+    weight = Column(Integer, default=10)
+
+    is_active = Column(Boolean, default=True)
+
+    is_mandatory = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # relationships
+    stage_instances = relationship(
+        "RepairStageInstance",
+        back_populates="stage",
+    )
+
+
 class RepairWorkflow(Base):
-    """One workflow instance per failing transformer."""
+
     __tablename__ = "repair_workflows"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"))
-    current_stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
-    # Traceability: the FR- TestingRequest that triggered this workflow
+
+    workflow_number = Column(
+        String(50),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    equipment_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.equipment.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    current_stage_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_stage_definitions.id"),
+        nullable=True,
+    )
+
+    current_stage_instance_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_stage_instances.id"),
+        nullable=True,
+    )
+
     source_failure_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.testing_requests.id", ondelete="SET NULL"),
         nullable=True,
     )
-    status = Column(String, default="active")   # active / completed / cancelled
-    progress = Column(Integer, default=0)        # 0–100 weight-based
+
+    status = Column(String(20), default="active")
+
+    assignment_pending = Column(Boolean, default=True)
+
+    progress = Column(Integer, default=0)
+
+    priority = Column(String(20), default="normal")
+
     started_at = Column(DateTime, server_default=func.now())
+
     completed_at = Column(DateTime)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
-    created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    cancelled_at = Column(DateTime)
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+    )
+
+    created_at = Column(
+        DateTime,
+        server_default=func.now(),
+    )
+
+    modified_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+    )
+
+    modified_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # relationships
+
+    equipment = relationship(
+        "Equipment",
+        foreign_keys=[equipment_id],
+    )
+
+    current_stage = relationship(
+        "RepairStageDefinition",
+        foreign_keys=[current_stage_id],
+    )
+
+    current_stage_instance = relationship(
+        "RepairStageInstance",
+        foreign_keys=[current_stage_instance_id],
+        post_update=True,
+    )
+
+    source_failure = relationship(
+        "TestingRequest",
+        foreign_keys=[source_failure_id],
+    )
+
+    creator = relationship(
+        "User",
+        foreign_keys=[created_by],
+    )
+
+    modifier = relationship(
+        "User",
+        foreign_keys=[modified_by],
+    )
+
+    stage_instances = relationship(
+        "RepairStageInstance",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        foreign_keys="RepairStageInstance.workflow_id",
+    )
+
+    audit_logs = relationship(
+        "RepairStageAuditLog",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+    )
+
+    assignment_queue = relationship(
+        "RepairAssignmentQueue",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+    )
 
 
 class RepairStageInstance(Base):
-    """Per-stage per-workflow execution record."""
+
     __tablename__ = "repair_stage_instances"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="CASCADE"))
-    stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
-    status = Column(String, default="not_started")   # not_started / in_progress / completed / rejected
-    started_at = Column(DateTime)
-    completed_at = Column(DateTime)
-    completed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
-    remarks = Column(Text)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
-    created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    __table_args__ = (UniqueConstraint("workflow_id", "stage_id", name="uq_repair_instance"),)
+    workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    stage_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_stage_definitions.id"),
+        nullable=False,
+    )
+
+    status = Column(String, default="not_started")
+
+    assigned_user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+        nullable=True,
+    )
+
+    current_role = Column(String)
+
+    assignment_pending = Column(Boolean, default=False)
+
+    started_at = Column(DateTime)
+
+    completed_at = Column(DateTime)
+
+    completed_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+    )
+
+    remarks = Column(Text)
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+    )
+
+    created_at = Column(
+        DateTime,
+        server_default=func.now(),
+    )
+
+    modified_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+    )
+
+    modified_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # relationships
+
+    workflow = relationship(
+        "RepairWorkflow",
+        back_populates="stage_instances",
+        foreign_keys=[workflow_id],
+    )
+
+    stage = relationship(
+        "RepairStageDefinition",
+        back_populates="stage_instances",
+        foreign_keys=[stage_id],
+    )
+
+    assigned_user = relationship(
+        "User",
+        foreign_keys=[assigned_user_id],
+    )
+
+    completed_user = relationship(
+        "User",
+        foreign_keys=[completed_by],
+    )
+
+    creator = relationship(
+        "User",
+        foreign_keys=[created_by],
+    )
+
+    modifier = relationship(
+        "User",
+        foreign_keys=[modified_by],
+    )
+
+    data_entries = relationship(
+        "RepairStageData",
+        back_populates="stage_instance",
+        cascade="all, delete-orphan",
+    )
+
+    documents = relationship(
+        "RepairStageDocument",
+        back_populates="stage_instance",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "stage_id",
+            name="uq_repair_instance",
+        ),
+    )
 
 
 class RepairStageData(Base):
-    """Form data captured at each stage (JSONB)."""
+
     __tablename__ = "repair_stage_data"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    stage_instance_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_instances.id", ondelete="CASCADE"))
+
+    stage_instance_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_stage_instances.id", ondelete="CASCADE"),
+    )
+
     form_data = Column(JSONB)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
-    created_at = Column(DateTime, server_default=func.now())
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+    )
+
+    created_at = Column(
+        DateTime,
+        server_default=func.now(),
+    )
+
+    modified_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+    )
+
+    modified_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    stage_instance = relationship(
+        "RepairStageInstance",
+        back_populates="data_entries",
+    )
+
 
 
 class RepairStageDocument(Base):
-    """Uploaded files for file-type fields inside a stage."""
+
     __tablename__ = "repair_stage_documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    stage_instance_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_instances.id", ondelete="CASCADE"))
-    field_key = Column(String)       # which form field this document belongs to
+
+    stage_instance_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_stage_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    field_key = Column(String)
+
     file_name = Column(String)
-    file_path = Column(Text)         # relative path: uploads/repair/<uuid>_<name>
+
+    file_path = Column(Text)
+
     mime_type = Column(String)
+
     size_bytes = Column(Integer)
-    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
-    uploaded_at = Column(DateTime, server_default=func.now())
+
+    uploaded_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+    )
+
+    uploaded_at = Column(
+        DateTime,
+        server_default=func.now(),
+    )
+
+    # relationships
+
+    stage_instance = relationship(
+        "RepairStageInstance",
+        back_populates="documents",
+    )
+
+    uploader = relationship(
+        "User",
+        foreign_keys=[uploaded_by],
+    )
 
 
 class RepairStageAuditLog(Base):
-    """Immutable audit trail — every action on every workflow."""
+
     __tablename__ = "repair_stage_audit_logs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id"))
-    stage_id = Column(UUID(as_uuid=True), ForeignKey("repair_stage_definitions.id"))
-    action = Column(String)          # created / saved / approve / reject / started
-    performed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
-    performed_at = Column(DateTime, server_default=func.now())
+
+    workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    stage_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_stage_definitions.id"),
+    )
+
+    action = Column(String)
+
+    performed_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+    )
+
+    performed_at = Column(
+        DateTime,
+        server_default=func.now(),
+    )
+
     note = Column(Text)
+
+    # relationships
+
+    workflow = relationship(
+        "RepairWorkflow",
+        back_populates="audit_logs",
+    )
+
+    stage = relationship(
+        "RepairStageDefinition",
+        foreign_keys=[stage_id],
+    )
+
+    performer = relationship(
+        "User",
+        foreign_keys=[performed_by],
+    )
+
+
+
+class RepairAssignmentQueue(Base):
+
+    __tablename__ = "repair_assignment_queue"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    stage_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_stage_definitions.id"),
+    )
+
+    status = Column(String, default="pending")
+
+    assigned_to_user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime,
+        server_default=func.now(),
+    )
+
+    assigned_at = Column(DateTime)
+
+    completed_at = Column(DateTime)
+
+    # relationships
+
+    workflow = relationship(
+        "RepairWorkflow",
+        back_populates="assignment_queue",
+    )
+
+    stage = relationship(
+        "RepairStageDefinition",
+        foreign_keys=[stage_id],
+    )
+
+    assigned_to = relationship(
+        "User",
+        foreign_keys=[assigned_to_user_id],
+    )
 
 
 class RequestCategory(PyEnum):

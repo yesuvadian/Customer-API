@@ -7,8 +7,9 @@ from typing import Optional, List
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
+from pymongo import results
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, text
 
 from models import Equipment, EquipmentStatus, OrgDepartment, CategoryMaster
 
@@ -63,6 +64,44 @@ class EquipmentService:
         if target_level < len(path):
             return path[target_level]
         return None
+
+  
+
+    
+    @classmethod
+    def _get_department_subtree_ids(
+        cls,
+        db: Session,
+        department_id: UUID
+    ) -> List[UUID]:
+        """Return all descendant department IDs including root."""
+
+        sql = text("""
+            WITH RECURSIVE dept_tree AS (
+                SELECT id
+                FROM org_departments
+                WHERE id = :root_id
+                AND is_active = true
+
+                UNION ALL
+
+                SELECT d.id
+                FROM org_departments d
+                INNER JOIN dept_tree dt
+                    ON d.parent_department_id = dt.id
+                WHERE d.is_active = true
+            )
+            SELECT id FROM dept_tree
+        """)
+
+        result = db.execute(sql, {"root_id": department_id})
+
+        rows = result.scalars().all()
+
+        return [
+            r if isinstance(r, UUID) else UUID(str(r))
+            for r in rows
+        ]
 
     @classmethod
     def _get_department_ancestry_names(cls, db: Session, department_id: UUID) -> dict:
@@ -237,7 +276,8 @@ class EquipmentService:
         if organization_id:
             query = query.filter(Equipment.organization_id == organization_id)
         if department_id:
-            query = query.filter(Equipment.department_id == department_id)
+            department_ids = cls._get_department_subtree_ids(db, department_id)
+            query = query.filter(Equipment.department_id.in_(department_ids))
         if equipment_type_id:
             query = query.filter(Equipment.equipment_type_id == equipment_type_id)
         if status:
@@ -254,13 +294,23 @@ class EquipmentService:
                 (Equipment.factory_serial_number.ilike(f"%{search}%"))
             )
 
-        return (
+        results = (
             query
             .order_by(Equipment.ueic)
             .offset(skip)
             .limit(limit)
             .all()
         )
+
+        print(f"[EQUIPMENT FOUND] {len(results)}")
+
+        for e in results:
+            print(
+                f"UEIC={e.ueic} "
+                f"DEPT={e.department_id}"
+            )
+
+        return results
 
     @classmethod
     def update_equipment(
@@ -371,13 +421,26 @@ class EquipmentService:
         return old, new_equipment
 
     @classmethod
-    def get_equipment_for_department(cls, db: Session, department_id: UUID) -> List[Equipment]:
-        """Get all active equipment at a specific substation/department — for test request form auto-populate."""
+    def get_equipment_for_department(
+        cls,
+        db: Session,
+        department_id: UUID
+    ) -> List[Equipment]:
+        """
+        Get all active equipment for a department INCLUDING subtree departments.
+        Used by Testing Request form auto-populate.
+        """
+
+        department_ids = cls._get_department_subtree_ids(
+            db,
+            department_id
+        )
+
         return (
             db.query(Equipment)
             .options(joinedload(Equipment.equipment_type))
             .filter(
-                Equipment.department_id == department_id,
+                Equipment.department_id.in_(department_ids),
                 Equipment.status == EquipmentStatus.active,
             )
             .order_by(Equipment.ueic)

@@ -200,27 +200,20 @@ class ReportingService:
 
     def _run_query(self, query_key: str, params: dict) -> list[dict]:
         registry = {
-            "equipment_condition_summary":      self._q_equipment_condition,
-            "overdue_tests_report":             self._q_overdue_tests,
-            "active_alerts_report":             self._q_active_alerts,
-            "flagged_equipment_report":         self._q_flagged_equipment,
-            "repair_progress_report":           self._q_repair_progress,
-            "maintenance_overdue_report":       self._q_maintenance_overdue,
-            "procurement_pipeline_report":      self._q_procurement_pipeline,
-            "open_remediation_report":          self._q_open_remediation,
-            "testing_request_status_report":    self._q_testing_request_status,
-            "test_results_summary_report":      self._q_test_results_summary,
-            "recommendation_approval_report":   self._q_recommendation_approval,
-            "compliance_status_report":         self._q_compliance_status,
-            "tester_performance_report":        self._q_tester_performance,
-            "monthly_kpi_report":               self._q_monthly_kpi,
-            # §3.3.3 Equipment Failure Registry
-            "equipment_failure_annual_report":  self._q_equipment_failure_annual,
-            "equipment_failure_performance_report": self._q_equipment_failure_performance,
-            # §3.3.4 Failure Resolution (FR → Repair/Replacement traceability)
-            "failure_resolution_report":        self._q_failure_resolution,
-            # §3.5 Equipment Lifecycle
-            "equipment_lifecycle_report":       self._q_equipment_lifecycle,
+            "equipment_condition_summary":    self._q_equipment_condition,
+            "overdue_tests_report":           self._q_overdue_tests,
+            "active_alerts_report":           self._q_active_alerts,
+            "flagged_equipment_report":       self._q_flagged_equipment,
+            "repair_progress_report":         self._q_repair_progress,
+            "maintenance_overdue_report":     self._q_maintenance_overdue,
+            "procurement_pipeline_report":    self._q_procurement_pipeline,
+            "open_remediation_report":        self._q_open_remediation,
+            "testing_request_status_report":  self._q_testing_request_status,
+            "test_results_summary_report":    self._q_test_results_summary,
+            "recommendation_approval_report": self._q_recommendation_approval,
+            "compliance_status_report":       self._q_compliance_status,
+            "tester_performance_report":      self._q_tester_performance,
+            "monthly_kpi_report":             self._q_monthly_kpi,
         }
         fn = registry.get(query_key)
         if not fn:
@@ -679,321 +672,6 @@ class ReportingService:
         """)
         return self._exec(sql)
 
-    # ── §3.3.3 Equipment Failure Registry ─────────────────────────────────────
-
-    def _q_equipment_failure_annual(self, p: dict) -> list[dict]:
-        """Annual Equipment Failure Report — grouped by type, make, model.
-        Auto-generated each calendar year; also available on demand.
-        Parameter: year (int, defaults to previous calendar year).
-        Queries failure_registry direct submissions; failure_date is taken from
-        the test_data JSONB field, not from test evaluation results.
-        """
-        org  = _org_clause(self.org_id, "tr")
-        year = int(_p(p, "year", date.today().year - 1))
-        sql  = text(f"""
-            SELECT
-                COALESCE(cm.name, 'Unknown Type')                               AS equipment_type,
-                COALESCE(e.manufacturer, 'Unknown Make')                         AS make,
-                COALESCE(e.model_number, e.voltage_class || ' kV', '—')        AS model_rating,
-                COALESCE(e.voltage_class || ' kV', '—')                        AS voltage_class,
-                COUNT(tr.id)                                                     AS failure_incidents,
-                COUNT(DISTINCT tr.equipment_id)                                  AS units_affected,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Electrical'
-                           THEN 1 END)                                           AS electrical,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Mechanical'
-                           THEN 1 END)                                           AS mechanical,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Oil'
-                           THEN 1 END)                                           AS oil,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Protection'
-                           THEN 1 END)                                           AS protection,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Thermal'
-                           THEN 1 END)                                           AS thermal,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Other'
-                           THEN 1 END)                                           AS other_category,
-                COUNT(CASE WHEN res.test_data->>'outcome' = 'Repair'
-                           THEN 1 END)                                           AS repaired,
-                COUNT(CASE WHEN res.test_data->>'outcome' = 'Replacement'
-                           THEN 1 END)                                           AS replaced,
-                COUNT(CASE WHEN res.test_data->>'outcome' = 'Under Investigation'
-                           THEN 1 END)                                           AS under_investigation,
-                ROUND(
-                    AVG(NULLIF(res.test_data->>'outage_duration_hours', '')::numeric),
-                1)                                                               AS avg_outage_hours,
-                MAX((NULLIF(res.test_data->>'failure_date', ''))::date)         AS most_recent_failure
-            FROM   public.testing_requests tr
-            JOIN   public.test_results res ON res.testing_request_id = tr.id
-            JOIN   public.equipment    e   ON e.id = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
-            WHERE  tr.request_category     = 'failure_registry'
-              AND  tr.is_direct_submission  = TRUE
-              AND  EXTRACT(YEAR FROM
-                       (NULLIF(res.test_data->>'failure_date', ''))::date
-                   ) = {year}
-              {org}
-            GROUP  BY cm.name, e.manufacturer, e.model_number, e.voltage_class
-            ORDER  BY failure_incidents DESC NULLS LAST,
-                      equipment_type, make, model_rating
-        """)
-        return self._exec(sql)
-
-    def _q_equipment_failure_performance(self, p: dict) -> list[dict]:
-        """On-demand Performance Analysis — failure rates across makes, types,
-        voltage classes, and age bands.
-        Filters: date_from, date_to, equipment_type, make, voltage_class, age_band.
-        Queries failure_registry direct submissions; failure_date is taken from
-        the test_data JSONB field, not from test evaluation results.
-        """
-        org = _org_clause(self.org_id, "tr")
-
-        # Optional failure-date range filter (on test_data->>'failure_date')
-        df = _date(_p(p, "date_from"))
-        dt = _date(_p(p, "date_to"))
-        date_clause = ""
-        if df:
-            date_clause += (
-                f" AND (NULLIF(res.test_data->>'failure_date', ''))::date >= '{df}'"
-            )
-        if dt:
-            date_clause += (
-                f" AND (NULLIF(res.test_data->>'failure_date', ''))::date <= '{dt}'"
-            )
-
-        # Optional dimension filters (applied in WHERE)
-        type_filter  = _p(p, "equipment_type", "")
-        make_filter  = _p(p, "make", "")
-        vcls_filter  = _p(p, "voltage_class", "")
-        aband_filter = _p(p, "age_band", "")
-
-        dim_clause = ""
-        if type_filter:
-            dim_clause += f" AND cm.name = '{type_filter}'"
-        if make_filter:
-            dim_clause += f" AND LOWER(e.manufacturer) LIKE LOWER('%{make_filter}%')"
-        if vcls_filter:
-            dim_clause += f" AND e.voltage_class = '{vcls_filter}'"
-        if aband_filter:
-            age_map = {
-                "0-10 years":  "BETWEEN 0 AND 10",
-                "10-20 years": "BETWEEN 11 AND 20",
-                "20+ years":   "> 20",
-            }
-            if aband_filter in age_map:
-                dim_clause += (
-                    f" AND (EXTRACT(YEAR FROM NOW()) - e.year_of_manufacture)"
-                    f" {age_map[aband_filter]}"
-                )
-
-        age_band_expr = """
-            CASE
-                WHEN e.year_of_manufacture IS NULL THEN 'Unknown'
-                WHEN (EXTRACT(YEAR FROM NOW()) - e.year_of_manufacture) <= 10
-                     THEN '0-10 years'
-                WHEN (EXTRACT(YEAR FROM NOW()) - e.year_of_manufacture) <= 20
-                     THEN '10-20 years'
-                ELSE '20+ years'
-            END"""
-
-        sql = text(f"""
-            SELECT
-                COALESCE(cm.name, 'Unknown Type')                               AS equipment_type,
-                COALESCE(e.manufacturer, 'Unknown Make')                         AS make,
-                COALESCE(e.voltage_class || ' kV', '—')                        AS voltage_class,
-                {age_band_expr}                                                  AS age_band,
-                COUNT(tr.id)                                                     AS failure_incidents,
-                COUNT(DISTINCT tr.equipment_id)                                  AS units_affected,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Electrical'
-                           THEN 1 END)                                           AS electrical,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Mechanical'
-                           THEN 1 END)                                           AS mechanical,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Oil'
-                           THEN 1 END)                                           AS oil,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Protection'
-                           THEN 1 END)                                           AS protection,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Thermal'
-                           THEN 1 END)                                           AS thermal,
-                COUNT(CASE WHEN res.test_data->>'failure_category' = 'Other'
-                           THEN 1 END)                                           AS other_category,
-                COUNT(CASE WHEN res.test_data->>'outcome' = 'Repair'
-                           THEN 1 END)                                           AS repaired,
-                COUNT(CASE WHEN res.test_data->>'outcome' = 'Replacement'
-                           THEN 1 END)                                           AS replaced,
-                COUNT(CASE WHEN res.test_data->>'outcome' = 'Under Investigation'
-                           THEN 1 END)                                           AS under_investigation,
-                ROUND(
-                    COUNT(tr.id)::numeric
-                    / NULLIF(COUNT(DISTINCT tr.equipment_id), 0),
-                2)                                                               AS avg_failures_per_unit,
-                ROUND(
-                    AVG(NULLIF(res.test_data->>'outage_duration_hours', '')::numeric),
-                1)                                                               AS avg_outage_hours
-            FROM   public.testing_requests tr
-            JOIN   public.test_results res ON res.testing_request_id = tr.id
-            JOIN   public.equipment    e   ON e.id = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
-            WHERE  tr.request_category    = 'failure_registry'
-              AND  tr.is_direct_submission = TRUE
-              {date_clause}
-              {org}
-              {dim_clause}
-            GROUP  BY cm.name, e.manufacturer, e.voltage_class,
-                      {age_band_expr}
-            ORDER  BY failure_incidents DESC NULLS LAST,
-                      equipment_type, make, voltage_class
-        """)
-        return self._exec(sql)
-
-    def _q_failure_resolution(self, p: dict) -> list[dict]:
-        """Failure Resolution Report — one row per FR- record, joined to its
-        downstream Repair Lifecycle TR (via source_failure_id) if one exists.
-
-        Shows outcome (Repair / Replacement / Under Investigation / …),
-        the linked RL- work-order status when applicable, and days-open.
-
-        Parameters: date_from, date_to (filter on failure_date in test_data),
-                    outcome ("all" | "Repair" | "Replacement" | "Under Investigation")
-        """
-        org = _org_clause(self.org_id, "fr")
-
-        df = _date(_p(p, "date_from"))
-        dt = _date(_p(p, "date_to"))
-        date_clause = ""
-        if df:
-            date_clause += (
-                f" AND (NULLIF(res.test_data->>'failure_date', ''))::date >= '{df}'"
-            )
-        if dt:
-            date_clause += (
-                f" AND (NULLIF(res.test_data->>'failure_date', ''))::date <= '{dt}'"
-            )
-
-        outcome_filter = _p(p, "outcome", "all")
-        outcome_clause = ""
-        if outcome_filter and outcome_filter != "all":
-            safe = outcome_filter.replace("'", "''")
-            outcome_clause = f" AND res.test_data->>'outcome' = '{safe}'"
-
-        sql = text(f"""
-            SELECT
-                fr.request_number                                       AS fr_number,
-                COALESCE(e.ueic, '—')                                  AS equipment_ueic,
-                COALESCE(cm.name, '—')                                 AS equipment_type,
-                COALESCE(e.manufacturer, '—')                          AS make,
-                COALESCE(e.voltage_class || ' kV', '—')               AS voltage_class,
-                COALESCE(d.name, '—')                                  AS department,
-                COALESCE(org.name, '—')                                AS organization,
-                COALESCE(res.test_data->>'failure_category', '—')      AS failure_category,
-                (NULLIF(res.test_data->>'failure_date', ''))::date      AS failure_date,
-                COALESCE(res.test_data->>'outcome', '—')               AS outcome,
-                COALESCE(res.test_data->>'outage_duration_hours', '—') AS outage_hours,
-                fr.status                                               AS fr_status,
-                fr.cts::date                                            AS submitted_date,
-                CASE
-                    WHEN (NULLIF(res.test_data->>'failure_date', ''))::date IS NOT NULL
-                    THEN CURRENT_DATE
-                         - (NULLIF(res.test_data->>'failure_date', ''))::date
-                END                                                     AS days_since_failure,
-                rl.request_number                                       AS repair_tr_number,
-                rl.status                                               AS repair_tr_status,
-                rl.cts::date                                            AS repair_tr_created,
-                TRIM(COALESCE(u.firstname, '') || ' '
-                     || COALESCE(u.lastname, ''))                       AS submitted_by,
-                res.remarks                                             AS remarks
-            FROM   public.testing_requests fr
-            JOIN   public.test_results res
-                   ON res.testing_request_id = fr.id
-            LEFT JOIN public.equipment         e   ON e.id   = fr.equipment_id
-            LEFT JOIN public."CategoryMaster"  cm  ON cm.id  = e.equipment_type_id
-            LEFT JOIN public.org_departments   d   ON d.id   = fr.department_id
-            LEFT JOIN public.organizations     org ON org.id  = fr.organization_id
-            LEFT JOIN public.users             u   ON u.id   = fr.originator_id
-            LEFT JOIN public.testing_requests  rl
-                   ON rl.source_failure_id  = fr.id
-                  AND rl.request_category   = 'repair_lifecycle'
-            WHERE  fr.request_category     = 'failure_registry'
-              AND  fr.is_direct_submission  = TRUE
-              {date_clause}
-              {outcome_clause}
-              {org}
-            ORDER  BY failure_date DESC NULLS LAST, fr.cts DESC
-        """)
-        return self._exec(sql)
-
-    # ── §3.5 Equipment Lifecycle & History ───────────────────────────────────
-
-    def _q_equipment_lifecycle(self, p: dict) -> list[dict]:
-        """Equipment Lifecycle Report — one row per equipment unit showing
-        commissioned date, test count, failure count, last test date, and
-        current status.  Scoped to the user's organisation.
-        Parameters: department_id (UUID str), status (active|retired|under_repair),
-                    voltage_class (str), date_from / date_to (commissioned date range).
-        """
-        org = _org_clause(self.org_id, "e")
-
-        status_f  = _p(p, "status", "")
-        vcls_f    = _p(p, "voltage_class", "")
-        dept_f    = _p(p, "department_id", "")
-        df        = _date(_p(p, "date_from"))
-        dt        = _date(_p(p, "date_to"))
-
-        extra = ""
-        if status_f:
-            extra += f" AND e.status = '{status_f}'"
-        if vcls_f:
-            extra += f" AND e.voltage_class = '{vcls_f}'"
-        if dept_f:
-            extra += f" AND e.department_id = '{dept_f}'::uuid"
-        if df:
-            extra += f" AND e.commissioned_date >= '{df}'"
-        if dt:
-            extra += f" AND e.commissioned_date <= '{dt}'"
-
-        sql = text(f"""
-            SELECT
-                e.ueic,
-                COALESCE(cm.name, '—')                              AS equipment_type,
-                e.manufacturer,
-                e.model_number,
-                e.voltage_class                                     AS voltage_kv,
-                e.year_of_manufacture,
-                e.commissioned_date::date                           AS commissioned,
-                e.status                                            AS current_status,
-                COALESCE(d.name, '—')                              AS department,
-                COUNT(DISTINCT tr.id)                               AS total_tests,
-                COUNT(DISTINCT fr.id)                               AS total_failures,
-                MAX(res.tested_at)::date                            AS last_tested,
-                COALESCE(lr.overall_result, '—')                   AS last_test_result,
-                e.retired_date::date                                AS retired_date,
-                e.retirement_reason
-            FROM   public.equipment e
-            LEFT JOIN public."CategoryMaster" cm  ON cm.id  = e.equipment_type_id
-            LEFT JOIN public.org_departments  d   ON d.id   = e.department_id
-            LEFT JOIN public.testing_requests tr
-                   ON tr.equipment_id = e.id
-                  AND tr.request_category NOT IN ('failure_registry', 'taqc_inspection')
-            LEFT JOIN public.testing_requests fr
-                   ON fr.equipment_id = e.id
-                  AND fr.request_category = 'failure_registry'
-            LEFT JOIN public.test_results res ON res.testing_request_id = tr.id
-            -- latest test result
-            LEFT JOIN LATERAL (
-                SELECT lr2.overall_result
-                FROM   public.test_results lr2
-                JOIN   public.testing_requests trx ON trx.id = lr2.testing_request_id
-                WHERE  trx.equipment_id = e.id
-                ORDER  BY lr2.tested_at DESC NULLS LAST
-                LIMIT  1
-            ) lr ON true
-            WHERE  1=1
-              {org}
-              {extra}
-            GROUP  BY e.id, e.ueic, cm.name, e.manufacturer, e.model_number,
-                      e.voltage_class, e.year_of_manufacture, e.commissioned_date,
-                      e.status, d.name, lr.overall_result,
-                      e.retired_date, e.retirement_reason
-            ORDER  BY e.ueic
-        """)
-        return self._exec(sql)
-
     # ── Executor ───────────────────────────────────────────────────────────
 
     def _exec(self, sql) -> list[dict]:
@@ -1221,11 +899,7 @@ def run_scheduled_reports(db_factory) -> int:
                 svc = ReportingService(db, defn.organization_id)
                 fmt = defn.output_format if defn.output_format in ("excel", "pdf") \
                       else "excel"
-                # For annual reports auto-triggered in January, report on the previous year
-                params: dict = {}
-                if defn.frequency == "annual":
-                    params = {"year": str(now.year - 1)}
-                svc.generate(defn.id, params, fmt)
+                svc.generate(defn.id, {}, fmt)
                 count += 1
             except Exception as exc:
                 print(f"[Reports] Scheduled '{defn.name}' failed: {exc}")
@@ -1244,10 +918,4 @@ def _is_due(defn: ReportDefinition, now: datetime) -> bool:
         return delta >= 7 * 86_400
     if defn.frequency == "monthly":
         return (now - defn.last_generated_at).days >= 28
-    if defn.frequency == "annual":
-        # Due on the 1st of January each year, after the previous year ends
-        return (
-            now.month == 1 and now.day <= 7           # first week of January
-            and defn.last_generated_at.year < now.year  # not yet run this year
-        )
     return False
