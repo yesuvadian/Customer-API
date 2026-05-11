@@ -21,6 +21,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from models import (
@@ -582,11 +583,12 @@ class RepairWorkflowService:
             "stage": stage.name if stage else str(stage_id),
         }
 
-    def advance_stage(self, workflow_id: UUID, remarks: Optional[str], user_id: UUID) -> dict:
+    def advance_stage(self, workflow_id: UUID, remarks: Optional[str], user_id: UUID, action_label: str = "approve") -> dict:
         """
         Stage actor approves and advances to the next stage.
         Status flow: submitted → completed → next stage pending.
         Requires can_approve permission (same role as can_edit).
+        action_label overrides the audit log entry (default "approve"); routing always uses "approve".
         """
 
         workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
@@ -611,7 +613,7 @@ class RepairWorkflowService:
         instance.completed_at = self._utc_now()
         instance.completed_by = user_id
 
-        self._log_audit(workflow_id, current_stage_id, "approve", user_id, remarks)
+        self._log_audit(workflow_id, current_stage_id, action_label, user_id, remarks)
 
         transition = (
             self.db.query(RepairStageTransition)
@@ -821,6 +823,10 @@ class RepairWorkflowService:
             .filter(
                 RepairWorkflow.status == "active",
                 RepairWorkflow.assignment_pending.is_(True),
+                or_(
+                    RepairWorkflow.workflow_code.is_(None),
+                    RepairWorkflow.workflow_code != "ANNUAL_AUDIT",
+                ),
             )
             .order_by(RepairWorkflow.created_at.asc())
             .all()
@@ -877,6 +883,7 @@ class RepairWorkflowService:
         limit: int = 20,
     ) -> list:
         q = self.db.query(RepairWorkflow)
+        q = q.filter(or_(RepairWorkflow.workflow_code.is_(None), RepairWorkflow.workflow_code != "ANNUAL_AUDIT"))
         if equipment_id:
             q = q.filter(RepairWorkflow.equipment_id == equipment_id)
         if status:
@@ -1538,6 +1545,9 @@ class RepairWorkflowService:
                 }
         return {
             "id": str(workflow.id),
+            "workflow_code": workflow.workflow_code,
+            "entity_type": workflow.entity_type,
+            "entity_id": str(workflow.entity_id) if workflow.entity_id else None,
             "equipment_id": str(workflow.equipment_id),
             "equipment_ueic": equipment.ueic if equipment else None,
             "source_failure_id": str(workflow.source_failure_id) if workflow.source_failure_id else None,

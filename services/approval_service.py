@@ -138,6 +138,7 @@ class ApprovalService:
                 "description": request.description,
                 "status": request.status.value if request.status else None,
                 "priority": request.priority,
+                "request_category": request.request_category.value if request.request_category else None,
                 "equipment_type_name": request.equipment_type.name if request.equipment_type else None,
                 "test_type_name": request.test_type.name if request.test_type else None,
                 "transformer_rating": request.transformer_rating,
@@ -148,6 +149,9 @@ class ApprovalService:
                 "department_name": request.department.name if request.department else None,
                 "originator_name": _user_name(request.originator_id),
                 "assigned_tester_name": _user_name(request.assigned_tester_id),
+                # Schedule fields — used by approver to pre-fill schedule confirmation dialog
+                "scheduled_start_date": request.scheduled_start_date.isoformat() if request.scheduled_start_date else None,
+                "due_date": request.due_date.isoformat() if request.due_date else None,
             }
 
         # Build field-label map from OrgTestTemplate (DB-first, then static fallback)
@@ -214,7 +218,13 @@ class ApprovalService:
         }
 
     def approve_recommendation(
-        self, recommendation_id: UUID, approver_id: UUID, notes: Optional[str] = None
+        self,
+        recommendation_id: UUID,
+        approver_id: UUID,
+        notes: Optional[str] = None,
+        schedule_start_date: Optional[str] = None,
+        schedule_end_date:   Optional[str] = None,
+        schedule_frequency:  Optional[str] = None,
     ) -> dict:
         rec = self.db.query(Recommendation).filter(Recommendation.id == recommendation_id).first()
         if not rec:
@@ -234,6 +244,24 @@ class ApprovalService:
         request = self.db.query(TestingRequest).filter(TestingRequest.id == rec.testing_request_id).first()
         if request:
             request.modified_by = approver_id
+
+        # ── Apply approver schedule overrides (for Maintenance/Inspection/Repair) ──
+        if schedule_start_date or schedule_end_date or schedule_frequency:
+            from datetime import datetime, timezone as _tz
+            from models import ScheduleFrequency
+            if request and schedule_start_date:
+                request.scheduled_start_date = datetime.fromisoformat(
+                    schedule_start_date.replace('Z', '+00:00')
+                )
+            if request and schedule_end_date:
+                request.due_date = datetime.fromisoformat(
+                    schedule_end_date.replace('Z', '+00:00')
+                )
+            if schedule_frequency:
+                try:
+                    rec.schedule_frequency = ScheduleFrequency(schedule_frequency)
+                except ValueError:
+                    pass   # keep tester's original if value is unrecognised
 
         self.db.commit()
         self.db.refresh(rec)

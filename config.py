@@ -129,6 +129,10 @@ LOGIN_LOCK_DURATION_MIN = int(os.getenv("LOGIN_LOCK_DURATION_MIN", 15))
 RESETPASSWORD_TOKEN_EXPIRE = int(os.getenv("RESETPASSWORD_TOKEN_EXPIRE", 300))
 PASSWORD_HISTORY_LIMIT = int(os.getenv("PASSWORD_HISTORY_LIMIT", 5))
 
+# ── Outcome Scheduling ──────────────────────────────────────────────────────
+# Days before next_run_date that the daily scheduler auto-creates the next ticket.
+SCHEDULE_ADVANCE_DAYS = int(os.getenv("SCHEDULE_ADVANCE_DAYS", 15))
+
 
 # ==============================
 # EMAIL SETTINGS

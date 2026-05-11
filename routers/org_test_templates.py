@@ -63,10 +63,10 @@ def provision_overall_assessment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Seed the global overall assessment template if not yet created."""
+    """Seed or update the global overall assessment template."""
     svc = OrgTestTemplateService(db)
     inserted = svc.provision_overall_assessment()
-    return {"inserted": inserted, "message": "Provisioned" if inserted else "Already exists"}
+    return {"inserted": inserted, "message": "Provisioned" if inserted else "Updated"}
 
 
 # ─── Fetch for tester form (by test_type_id, best-match) ─────────────────────

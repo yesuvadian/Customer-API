@@ -87,6 +87,7 @@ class RecommendationType(PyEnum):
 
 class NextActionType(PyEnum):
     none = "none"
+    test = "test"                  # follow-up test request from FR outcome
     maintenance = "maintenance"
     inspection = "inspection"
     repair_cycle = "repair_cycle"
@@ -108,7 +109,8 @@ class RepairWorkflowDefinition(Base):
     __tablename__ = "repair_workflow_definitions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String, default="Transformer Repair Lifecycle")
+    workflow_code = Column(String(100), unique=True, nullable=True)
+    name = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"))
@@ -242,6 +244,9 @@ class RepairWorkflow(Base):
         ForeignKey("public.testing_requests.id", ondelete="SET NULL"),
         nullable=True,
     )
+
+    workflow_type = Column(String(50), default="BREAKDOWN", nullable=True)  # BREAKDOWN / OVERHAUL
+    source = Column(String(50), nullable=True)  # manual / cumulative / scheduled
 
     status = Column(String(20), default="active")
 
@@ -634,6 +639,70 @@ class RepairAssignmentQueue(Base):
         "User",
         foreign_keys=[assigned_to_user_id],
     )
+
+
+class EquipmentOverhaulConfig(Base):
+    """Per-equipment threshold for cumulative operations before overhaul is required."""
+    __tablename__ = "equipment_overhaul_configs"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    threshold_value = Column(Float, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
+
+
+class OverhaulRecommendation(Base):
+    """Records an auto-triggered overhaul recommendation when cumulative threshold is crossed."""
+    __tablename__ = "overhaul_recommendations"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True)
+    cumulative_value = Column(Float, nullable=False)
+    threshold_value = Column(Float, nullable=False)
+    status = Column(String(20), default="OPEN")  # OPEN / CLOSED
+    triggered_at = Column(DateTime(timezone=True), server_default=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
+
+
+class CalibrationRepairRecommendation(Base):
+    """Repair recommendation triggered automatically when a calibration result is Fail."""
+    __tablename__ = "calibration_repair_recommendations"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), default="OPEN")  # OPEN / CLOSED
+    triggered_at = Column(DateTime(timezone=True), server_default=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
+
+
+class EquipmentCalibrationConfig(Base):
+    """Per-equipment calibration schedule config: lead_days before next_due to auto-create a new request."""
+    __tablename__ = "equipment_calibration_configs"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    lead_days = Column(Integer, default=30, nullable=False)
+    is_scheduled = Column(Boolean, default=True, nullable=False)  # False = stopped (FAIL state)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
 
 
 class TAQCAnnualInspection(Base):
@@ -2208,6 +2277,12 @@ class TestingRequest(Base):
     total_sessions_planned = Column(Integer, nullable=True)  # NEW: Number of planned sessions
     session_interval_days = Column(Integer, nullable=True)  # NEW: Days between sessions
 
+    # Cumulative tracking — stamped at creation from template's enable_cumulative flag
+    is_cumulative = Column(Boolean, default=False, nullable=False)
+
+    # Calibration tracking — stamped at creation from template's enable_calibration flag
+    is_calibration = Column(Boolean, default=False, nullable=False)
+
     # Direct submission (Failure Registry / TA&QC — no tester assignment step)
     is_direct_submission = Column(Boolean, default=False)  # True = filler IS the submitter
 
@@ -2617,6 +2692,7 @@ class ProcurementRequest(Base):
     estimated_cost = Column(Float, nullable=True)
     quantity = Column(Integer, nullable=True)
     specifications = Column(Text, nullable=True)
+    replacement_products = Column(JSONB, nullable=True)  # copied from Recommendation
 
     raised_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
     raised_at = Column(DateTime(timezone=True), server_default=func.now())

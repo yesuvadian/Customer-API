@@ -165,6 +165,85 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             .all()
         )
 
+    # ── Shared ticket-creation logic ─────────────────────────────────────────
+    @staticmethod
+    def create_one_ticket(
+        db: Session,
+        schedule: "TestRequestSchedule",
+        template: "TestingRequest",
+        now: datetime,
+    ) -> bool:
+        """
+        Clone a schedule template into a real submitted TestingRequest and advance
+        next_run_date.  Returns True on success, False on failure.
+
+        Called by both run_daily_scheduler() and workflow_dispatch_service when the
+        start date is already within advance_days (immediate first-ticket creation).
+        """
+        from services.testing_request_service import TestingRequestService
+
+        try:
+            svc = TestingRequestService(db)
+            new_data = {
+                "title": template.title,
+                "description": template.description,
+                "transformer_type": template.transformer_type,
+                "transformer_rating": template.transformer_rating,
+                "manufacturer": template.manufacturer,
+                "serial_number": template.serial_number,
+                "equipment_type_id": template.equipment_type_id,
+                "test_type_id": template.test_type_id,
+                "organization_id": template.organization_id,
+                "department_id": template.department_id,
+                "zone": template.zone,
+                "ce_circle": template.ce_circle,
+                "se_division": template.se_division,
+                "ee_subdivision": template.ee_subdivision,
+                "aee_section": template.aee_section,
+                "ae_je": template.ae_je,
+                "assigned_tester_id": template.assigned_tester_id,
+                "priority": template.priority,
+                "notes": template.notes,
+                "requested_date": now,
+                "due_date": schedule.next_run_date,
+            }
+            new_request = svc.create_request(new_data, originator_id=template.originator_id)
+
+            # Mark as submitted (same as manual flow)
+            new_request.status = TestingRequestStatus.submitted
+            db.flush()
+
+            log_entry = TestRequestScheduleLog(
+                schedule_id=schedule.id,
+                run_date=now,
+                status=ScheduleLogStatus.success,
+                generated_request_id=new_request.id,
+            )
+            db.add(log_entry)
+
+            # Advance next_run_date
+            schedule.next_run_date = _advance_date(schedule.next_run_date, schedule.frequency)
+            schedule.last_run_date = now
+
+            # Deactivate if past end_date
+            if schedule.end_date and schedule.next_run_date > schedule.end_date:
+                schedule.is_active = False
+
+            db.commit()
+            return True
+
+        except Exception as e:
+            db.rollback()
+            log_entry = TestRequestScheduleLog(
+                schedule_id=schedule.id,
+                run_date=now,
+                status=ScheduleLogStatus.failed,
+                error_message=str(e),
+            )
+            db.add(log_entry)
+            db.commit()
+            return False
+
     # ── Scheduler job (called daily by APScheduler) ───────────────────────────
     @staticmethod
     def run_daily_scheduler(db: Session) -> dict:
@@ -172,96 +251,43 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         Called once daily. For every active schedule where today >= next_run_date - advance_days,
         clone the template test request and advance next_run_date.
         """
-        from sqlalchemy import func as sqlfunc
-        from services.testing_request_service import TestingRequestService
+        try:
+            from config import SCHEDULE_ADVANCE_DAYS as _adv
+        except Exception:
+            _adv = 15
 
         now = datetime.now(timezone.utc)
         created_count = 0
         failed_count = 0
 
+        # Fetch schedules whose next_run_date falls within the maximum advance window.
+        # The per-schedule trigger check below refines this to the actual advance_days value.
         due_schedules = (
             db.query(TestRequestSchedule)
             .filter(
                 TestRequestSchedule.is_active == True,
-                TestRequestSchedule.next_run_date <= now + timedelta(
-                    days=1  # handled per-schedule below using advance_days
-                ),
+                TestRequestSchedule.next_run_date <= now + timedelta(days=_adv + 1),
             )
             .all()
         )
 
         for schedule in due_schedules:
-            # Check if today >= next_run_date - advance_days
+            # Check if today >= next_run_date - advance_days (per-schedule granularity)
             trigger_date = schedule.next_run_date - timedelta(days=schedule.advance_days)
             if now.date() < trigger_date.date():
                 continue
 
-            # Check end_date
+            # Deactivate expired schedules
             if schedule.end_date and now > schedule.end_date:
                 schedule.is_active = False
                 db.commit()
                 continue
 
-            log_entry = TestRequestScheduleLog(
-                schedule_id=schedule.id,
-                run_date=now,
-                status=ScheduleLogStatus.failed,  # optimistic default; updated on success
-            )
-
-            try:
-                # Clone the template request
-                template: TestingRequest = schedule.test_request
-                svc = TestingRequestService(db)
-                new_data = {
-                    "title": template.title,
-                    "description": template.description,
-                    "transformer_type": template.transformer_type,
-                    "transformer_rating": template.transformer_rating,
-                    "manufacturer": template.manufacturer,
-                    "serial_number": template.serial_number,
-                    "equipment_type_id": template.equipment_type_id,
-                    "test_type_id": template.test_type_id,
-                    "organization_id": template.organization_id,
-                    "department_id": template.department_id,
-                    "zone": template.zone,
-                    "ce_circle": template.ce_circle,
-                    "se_division": template.se_division,
-                    "ee_subdivision": template.ee_subdivision,
-                    "aee_section": template.aee_section,
-                    "ae_je": template.ae_je,
-                    "assigned_tester_id": template.assigned_tester_id,
-                    "priority": template.priority,
-                    "notes": template.notes,
-                    "requested_date": now,
-                    "due_date": schedule.next_run_date,
-                }
-                new_request = svc.create_request(new_data, originator_id=template.originator_id)
-
-                # Set status to submitted (same as manual flow)
-                new_request.status = TestingRequestStatus.submitted
-                db.commit()
-
-                log_entry.generated_request_id = new_request.id
-                log_entry.status = ScheduleLogStatus.success
-
-                # Advance next_run_date
-                schedule.next_run_date = _advance_date(schedule.next_run_date, schedule.frequency)
-                schedule.last_run_date = now
-
-                # Deactivate if past end_date
-                if schedule.end_date and schedule.next_run_date > schedule.end_date:
-                    schedule.is_active = False
-
-                db.add(log_entry)
-                db.commit()
+            template: TestingRequest = schedule.test_request
+            success = TestRequestScheduleService.create_one_ticket(db, schedule, template, now)
+            if success:
                 created_count += 1
-
-            except Exception as e:
-                db.rollback()
-                log_entry.error_message = str(e)
-                log_entry.status = ScheduleLogStatus.failed
-                db.add(log_entry)
-                db.commit()
+            else:
                 failed_count += 1
 
         return {"created": created_count, "failed": failed_count}

@@ -114,6 +114,9 @@ def approve_recommendation(
         recommendation_id=recommendation_id,
         approver_id=current_user.id,
         notes=data.notes,
+        schedule_start_date=data.schedule_start_date,
+        schedule_end_date=data.schedule_end_date,
+        schedule_frequency=data.schedule_frequency,
     )
 
 

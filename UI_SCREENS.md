@@ -80,7 +80,7 @@ All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{de
 
 | Module Path | Menu Label | Roles | Purpose |
 |---|---|---|---|
-| `failure_registry` | Failure Registry | Originator, EE TLSS | Log and track equipment failure incidents (direct submission) |
+| `failure_registry` | Failure Registry (ER) | Originator, EE TLSS | Log and track equipment failure incidents; 6 next_action outcomes; 2-pass approval before tester assignment |
 | `taqc_inspections` | TA&QC Inspections | TAQC Officer, OrgAdmin | Submit and view quality-control inspection records |
 | `procurement_approvals` | Procurement Approvals | FinanceApprover, OrgAdmin | Review and approve procurement requests linked to field work |
 | `repair-workflows` | Repair Workflows | EE TLSS, OrgAdmin | Track multi-stage repair workflow progress for failed equipment |
@@ -443,11 +443,13 @@ Each timeline entry should show:
 
 ---
 
-### Section 19 — Failure Registry
+### Section 19 — Failure Registry (ER — Equipment Register)
 
 **Module**: `failure_registry`  
 **Who**: `originator.north@kptcl.com` · `originator.south@kptcl.com` · `originator.mysuru@kptcl.com`  
 **Template key**: `failure_registry` (fetched from `GET /testing/templates/by-key/failure_registry`)
+
+#### 19a — Submission
 
 | Step | API | Notes |
 |---|---|---|
@@ -476,13 +478,187 @@ Each timeline entry should show:
     "outage_duration_hours": "4",
     "affected_consumers": "250",
     "outage_impact": "Supply interrupted to residential sector",
-    "outcome": "Repair"
+    "outcome": "Under investigation"
   }
 }
 ```
 
 **Initial status**: `submitted` → goes to **Test Assigner** queue for `initial_approve`  
 **No Recommendation created** at submission — Recommendation is created only after the child TR tester submits results.
+
+---
+
+#### 19b — FR 2-Pass Approval (Test Assigner)
+
+FR approval uses a **2-pass model** before a tester can begin work.
+
+##### Pass 1 — Initial Approve (creates child TR)
+
+| Step | API | Notes |
+|---|---|---|
+| Initial approve | `POST /testing-requests/approvals/{fr_id}/initial-approve` | FR must be `submitted`; creates a child TR |
+| Response | `{ child_tr_id, child_tr_number, ... }` | `child_tr_id` returned directly; TR number starts with `TR-` |
+| FR status after | `approved` | FR is locked; child TR is `submitted` |
+| Double approve | `POST .../initial-approve` again | → 400 Bad Request |
+| Non-FR request | `POST .../initial-approve` on a regular TR | → 400 Bad Request |
+| Non-existent FR | `POST .../initial-approve` on fake UUID | → 404 Not Found |
+| No auth | `POST .../initial-approve` without token | → 401 |
+
+##### Pass 2 — Approve and Assign Tester
+
+| Step | API | Notes |
+|---|---|---|
+| Get tester roles | `GET /testing-requests/approvals/{child_tr_id}/tester-roles` | Returns eligible roles for the child TR's org |
+| Get users by role | `GET /testing-requests/approvals/{child_tr_id}/tester-roles/{role_id}/users` | Returns users with `active_requests` workload |
+| Assign tester | `POST /testing-requests/approvals/{child_tr_id}/approve-and-assign` | Body: `{ tester_id, tester_role_id, comment }` |
+| Child TR status after | `assigned` | Ready for tester lifecycle |
+
+```json
+// approve-and-assign body
+{
+  "tester_id":      "<user_uuid>",
+  "tester_role_id": "<role_uuid>",
+  "comment":        "Assigned for FR investigation"
+}
+```
+
+##### FR Rejection
+
+| Step | API | Notes |
+|---|---|---|
+| Reject | `POST /testing-requests/approvals/{fr_id}/reject` | Body: `{ "rejection_comment": "reason" }` |
+| FR status after | `rejected` | Terminal state |
+| Empty comment | `rejection_comment: ""` | → 400 Bad Request |
+| Missing field | No `rejection_comment` key | → 422 Unprocessable |
+| Reject approved FR | Reject after Pass-1 | → 400 Bad Request |
+
+---
+
+#### 19c — Tester Lifecycle on Child TR
+
+After Pass-2 assign, the child TR follows the standard tester flow:
+
+| Step | API | Status |
+|---|---|---|
+| Accept | `PUT /testing/{child_tr_id}/accept` | → `accepted` |
+| Start | `PUT /testing/{child_tr_id}/start` | → `in_progress` |
+| Upload structured results | `POST /testing/{child_tr_id}/results/structured` | Saves `test_data` including `next_action` selection |
+| Submit results | `PUT /testing/{child_tr_id}/submit_results` | → `under_review` → recommendation created |
+
+**`submit_results` body for FR child TR:**
+```json
+{
+  "recommendation_type": "fail",
+  "summary": "Critical insulation failure — replacement required",
+  "next_action": "maintenance",
+  "schedule_frequency": "monthly"
+}
+```
+
+---
+
+#### 19d — `next_action` Options (Tester Selects in Form)
+
+The test result form (`overall_assessment` template) shows a `next_action` dropdown with 6 options. The tester selects one and optionally fills the `outcome_schedule` picker.
+
+| Display Label | Enum Value | Schedule Required | Approver Dialog |
+|---|---|---|---|
+| `Test` | `test` | No | No — direct approve |
+| `Procurement` | `replacement` | No | No — direct approve |
+| `Repair` | `repair_cycle` | Yes (dates/frequency) | ✅ Schedule confirm dialog |
+| `Inspection` | `inspection` | Yes (dates/frequency) | ✅ Schedule confirm dialog |
+| `Maintenance` | `maintenance` | Yes (dates/frequency) | ✅ Schedule confirm dialog |
+| `None` | `none` | No | No — direct approve |
+
+> **Backward compat**: Old label `"Repair Lifecycle"` in saved drafts is automatically normalised to `"Repair"` when the form loads.
+
+---
+
+#### 19e — Recommendation Approval & Outcome Dispatch
+
+After the tester submits results, the TechApprover approves the recommendation.  
+For **Maintenance / Inspection / Repair**, the approver first sees a **schedule confirmation dialog** pre-filled with the tester's chosen dates and frequency — they can confirm or modify before approving.
+
+**Approve API:**
+```
+PUT /approvals/{rec_id}/approve
+```
+
+**Body (direct approve — Test / Procurement / None):**
+```json
+{ "notes": "Approved via portal" }
+```
+
+**Body (schedule-required — Maintenance / Inspection / Repair):**
+```json
+{
+  "notes": "Approved via portal",
+  "schedule_start_date": "2026-06-01T00:00:00Z",
+  "schedule_end_date":   "2027-06-01T00:00:00Z",
+  "schedule_frequency":  "monthly"
+}
+```
+> `schedule_start_date` / `schedule_end_date` / `schedule_frequency` are optional overrides. If omitted, the tester's original values are used.
+
+**Outcome dispatch table:**
+
+| `next_action` | Child TR Status After | Created Artifact |
+|---|---|---|
+| `test` | `outcome_active` | New follow-up `TR-` test request (`status=submitted`) |
+| `replacement` | `finance_pending` | `PR-` Procurement Request → Finance Approver queue |
+| `repair_cycle` | `outcome_active` | Repair Workflow (10-stage, `RL-` prefix) |
+| `inspection` | `outcome_active` | `IN-` Inspection Schedule (recurring) |
+| `maintenance` | `outcome_active` | `MN-` Maintenance Schedule (recurring) |
+| `none` | `closed` | No artifact — FR investigation closed |
+
+> **Schedule ticket timing**: For `inspection` and `maintenance`, the first actual ticket is created only when `start_date ≤ advance_days` away (configurable, default 15 days). The schedule record is always created immediately.
+
+---
+
+#### 19f — FR Approver Schedule Dialog (Flutter UI)
+
+When an approver taps **Approve** on an FR recommendation with `next_action` in `{maintenance, inspection, repair_cycle}`:
+
+1. `TestRequestScheduleDialog` opens in `captureMode: true`
+2. Pre-filled with the tester's values:
+   - Start date → `testing_request.scheduled_start_date`
+   - End date → `testing_request.due_date`
+   - Frequency → `recommendation.schedule_frequency`
+3. Approver can modify or confirm
+4. **Cancel** → approval aborted; FR stays `under_approval`
+5. **Confirm** → `schedule_start_date`, `schedule_end_date`, `schedule_frequency` sent in approve body
+
+For `next_action` in `{test, replacement, none}` — dialog is skipped; approve fires directly.
+
+---
+
+#### 19g — FR Regression Test Coverage (`tests/test_fr_regression.py`)
+
+52 tests across 7 classes — run with:
+```
+pytest tests/test_fr_regression.py -v
+```
+
+| Class | Tests | What is covered |
+|---|---|---|
+| `TestFRSubmission` | 8 | Create, list, get, pagination, equipment link, priority, rich test_data |
+| `TestFRAttachment` | 5 | Upload text, upload PDF, download, missing attachment 404, fake FR 404 |
+| `TestFRPass1` | 7 | initial-approve success, child TR created, FR→approved, double-approve 400, fake 404, non-FR 400, no-auth 401 |
+| `TestFRPass2` | 6 | approve-and-assign, fake request 404, invalid tester 404/400, no-auth 401, tester-roles list, users-by-role |
+| `TestFRRejection` | 6 | Reject success, status→rejected, empty comment 400, reject-after-approve 400, fake 404, missing field 422 |
+| `TestFROutcomes` | 6 | Full lifecycle for all 6 next_actions: test/procurement/repair/inspection/maintenance/none |
+| `TestFRNegative` | 14 | Auth (401), validation (422), wrong category (400/422), double-approve (400), nonexistent rec (404) |
+
+**Outcome assertions:**
+
+| Outcome | Asserted |
+|---|---|
+| `test` | `next_action=test`, `status=outcome_active`, `created` starts with `TR-` |
+| `procurement` | `next_action=replacement`, `status=finance_pending`, `created` starts with `PR-` |
+| `repair` | `next_action=repair_cycle`, `status=outcome_active` |
+| `inspection` | `next_action=inspection`, `status=outcome_active`, `created` starts with `IN-` |
+| `maintenance` | `next_action=maintenance`, `status=outcome_active`, `created` starts with `MN-` |
+| `none` | `next_action=none`, `status` in `{closed, outcome_active}` |
 
 ---
 
@@ -531,24 +707,56 @@ FR and TAQC have **different flows** after submission:
 
 ---
 
-#### Failure Registry (FR)
+#### Failure Registry (FR / ER — Equipment Register)
 
 ```
-POST /direct-submissions/   →  TestingRequest (status=submitted)
-                                    ↓
-                           Test Assigner: initial_approve
-                           PUT /approvals/{rec_id}/approve
-                                    ↓
-                           Child TR created (status=submitted → assigned)
-                           Normal tester lifecycle starts
-                                    ↓
-                           Tester submits results → under_approval
-                                    ↓
-                           TechApprover: approve_results
-                           → WorkflowDispatch: next_action → MN/IN/repair_cycle/replacement/none
+POST /direct-submissions/   →  FR TestingRequest (status=submitted)
+                                          ↓
+                           ┌─── PASS 1 (Test Assigner) ─────────────────────────┐
+                           │  POST /testing-requests/approvals/{fr_id}/          │
+                           │       initial-approve                               │
+                           │  → FR status = approved                             │
+                           │  → Child TR created (TR-prefix, status=submitted)   │
+                           │  Response includes child_tr_id + child_tr_number    │
+                           └─────────────────────────────────────────────────────┘
+                                          ↓
+                           ┌─── PASS 2 (Test Assigner) ─────────────────────────┐
+                           │  GET  /testing-requests/approvals/{child_tr_id}/    │
+                           │       tester-roles                                  │
+                           │  GET  .../tester-roles/{role_id}/users              │
+                           │  POST /testing-requests/approvals/{child_tr_id}/    │
+                           │       approve-and-assign                            │
+                           │  → Child TR status = assigned                       │
+                           └─────────────────────────────────────────────────────┘
+                                          ↓
+                           Tester: accept → start → upload structured result
+                                          ↓
+                           Tester selects next_action:
+                             Test | Procurement | Repair | Inspection | Maintenance | None
+                                          ↓
+                           PUT /testing/{child_tr_id}/submit_results
+                           → Recommendation created (approval_status=pending)
+                                          ↓
+                           ┌─── TechApprover ────────────────────────────────────┐
+                           │  For Maintenance / Inspection / Repair:              │
+                           │    → Schedule dialog shown (pre-filled, modifiable)  │
+                           │    → Approve body includes schedule_start/end/freq   │
+                           │  For Test / Procurement / None:                      │
+                           │    → Direct approve (no dialog)                      │
+                           │  PUT /approvals/{rec_id}/approve                     │
+                           └─────────────────────────────────────────────────────┘
+                                          ↓
+                           WorkflowDispatch → outcome artifact:
+                             test        →  New TR-  (follow-up test, submitted)
+                             replacement →  PR-  (Procurement Request, finance_pending)
+                             repair_cycle→  RL-  (Repair Workflow, 10-stage)
+                             inspection  →  IN-  (Inspection Schedule, recurring)
+                             maintenance →  MN-  (Maintenance Schedule, recurring)
+                             none        →  FR closed
 ```
 
-> FR submission creates only `TestingRequest` + `TestResult`. No Recommendation yet.
+> FR submission creates only `TestingRequest` + `TestResult`. No Recommendation yet.  
+> Recommendation is created by the **tester** when they call `submit_results` on the child TR.
 
 ---
 
@@ -565,15 +773,17 @@ POST /direct-submissions/   →  TestingRequest (status=under_approval)
 
 **After TechApprover approval — `next_action` determines outcome:**
 
-| `next_action` | TR Status | Created |
-|---|---|---|
-| `none` | `commissioned` | Equipment record + MN schedule + IN schedule |
-| `maintenance` | `outcome_active` | `TestRequestSchedule` (MN- prefix, recurring) |
-| `inspection` | `outcome_active` | `TestRequestSchedule` (IN- prefix, recurring) |
-| `repair_cycle` | `outcome_active` | `RepairWorkflow` (10-stage) |
-| `replacement` | `finance_pending` | `ProcurementRequest` → Finance Approver queue |
+| `next_action` | TR Status | Created | Approver Dialog |
+|---|---|---|---|
+| `none` | `commissioned` | Equipment record + MN schedule + IN schedule | No |
+| `test` | `outcome_active` | New `TR-` follow-up test request | No |
+| `maintenance` | `outcome_active` | `MN-` `TestRequestSchedule` (recurring) | ✅ Schedule dialog |
+| `inspection` | `outcome_active` | `IN-` `TestRequestSchedule` (recurring) | ✅ Schedule dialog |
+| `repair_cycle` | `outcome_active` | `RL-` `RepairWorkflow` (10-stage) | ✅ Schedule dialog |
+| `replacement` | `finance_pending` | `PR-` `ProcurementRequest` → Finance Approver queue | No |
 
-> `none` on TAQC = **commissioning** — Equipment auto-created from E&C form data, MN + IN maintenance schedules auto-created.
+> `none` on TAQC = **commissioning** — Equipment auto-created from E&C form data, MN + IN maintenance schedules auto-created.  
+> For FR child TR outcomes, `none` = `closed` (no commissioning step).
 
 ---
 

@@ -331,7 +331,9 @@ def initial_approve_fr(
         testing_request_id=str(fr.id),
         assigned_tester_id=None,
         assigned_tester_email=None,
-        new_status=fr.status
+        new_status=fr.status,
+        child_tr_id=str(child_tr.id),
+        child_tr_number=tr_number,
     )
 
 

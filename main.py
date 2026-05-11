@@ -83,8 +83,11 @@ from routers import (
     session_comments,  # NEW: Session comments for approvers
     tester_locations,  # Tester-to-zone mapping
     direct_submissions,  # NEW: Failure Registry & TA&QC direct-submit modules
+    annual_audits,       # Annual Audit observation workflow module
     test_register,       # NEW: Test Register — periodic maintenance catalogue
 )
+from routers import cumulative  # Cumulative / Overhaul lifecycle module
+from routers import calibration as calibration_router  # Calibration lifecycle module
 
 # Organization Multi-Tenancy
 from routers import organizations, org_departments, org_users, org_roles
@@ -450,6 +453,61 @@ scheduler.add_job(
 )
 
 
+# Annual Audit SLA overdue check (runs daily at 09:00 UTC — design §14H)
+def _annual_audit_overdue_check():
+    db = SessionLocal()
+    try:
+        from services.annual_audit_service import AnnualAuditService
+
+        class _SystemUser:
+            id = None
+            organization_id = None
+
+        result = AnnualAuditService(db).run_overdue_check(_SystemUser())
+        if result.get("updated"):
+            logger.info(f"[AnnualAudit] Overdue check: {result['updated']} observation(s) updated")
+    except Exception as e:
+        logger.error(f"[AnnualAudit] Overdue check job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _annual_audit_overdue_check,
+    trigger="cron",
+    hour=9,
+    minute=0,
+    id="annual_audit_overdue_check_job",
+)
+
+
+# Calibration pre-due check (runs daily at 08:00 UTC)
+# Auto-creates new calibration TestingRequests for equipment where
+# today >= next_due - lead_days and no open calibration request exists.
+def _calibration_pre_due_check():
+    db = SessionLocal()
+    try:
+        from services.calibration_service import CalibrationService
+        result = CalibrationService(db).run_pre_due_check()
+        if result.get("created"):
+            logger.info(
+                f"[Calibration] Pre-due check: {result['created']} request(s) auto-created"
+            )
+    except Exception as e:
+        logger.error(f"[Calibration] Pre-due check job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _calibration_pre_due_check,
+    trigger="cron",
+    hour=8,
+    minute=0,
+    id="calibration_pre_due_check_job",
+)
+
+
 # Scheduled report generation (runs every hour, service decides which are due)
 def _run_scheduled_reports():
     from services.reporting_service import run_scheduled_reports
@@ -633,7 +691,10 @@ app.include_router(org_test_templates.router)
 app.include_router(org_test_templates.browser_router)
 app.include_router(test_request_schedules.router)
 app.include_router(direct_submissions.router)  # NEW: Failure Registry & TA&QC
+app.include_router(annual_audits.router)       # Annual Audit observations
 app.include_router(test_register.router)       # NEW: Test Register catalogue
+app.include_router(cumulative.router)          # Cumulative / Overhaul lifecycle
+app.include_router(calibration_router.router)  # Calibration lifecycle
 
 # Equipment Asset Register
 app.include_router(equipment.router)

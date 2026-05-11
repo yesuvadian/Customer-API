@@ -25,6 +25,7 @@ class RecommendationService:
         detailed_notes: Optional[str] = None,
         next_action: Optional[str] = None,
         schedule_frequency: Optional[str] = None,
+        replacement_products: Optional[list] = None,
     ) -> Recommendation:
         request = self.db.query(TestingRequest).filter(TestingRequest.id == testing_request_id).first()
         if not request:
@@ -88,6 +89,7 @@ class RecommendationService:
             existing_rec.detailed_notes = detailed_notes
             existing_rec.next_action = parsed_next_action
             existing_rec.schedule_frequency = parsed_frequency
+            existing_rec.replacement_products = replacement_products or []
             existing_rec.submitted_by = submitted_by
             existing_rec.submitted_at = UTCDateTimeMixin._utc_now()
             existing_rec.modified_by = submitted_by
@@ -101,6 +103,7 @@ class RecommendationService:
                 detailed_notes=detailed_notes,
                 next_action=parsed_next_action,
                 schedule_frequency=parsed_frequency,
+                replacement_products=replacement_products or [],
                 submitted_by=submitted_by,
                 submitted_at=UTCDateTimeMixin._utc_now(),
                 approval_status="pending",

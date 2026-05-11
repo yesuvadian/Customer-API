@@ -256,9 +256,101 @@ def submit_test_results(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # If recommendation fields are supplied directly, create/update the recommendation
-    # via RecommendationService (supports next_action, schedule_frequency routing).
-    if body and body.recommendation_type and body.summary:
+    # ── Map display-value labels (from dynamic form) to API enum strings ──────
+    _ACTION_MAP = {
+        "none":             "none",
+        "test":             "test",           # follow-up test from FR outcome
+        "maintenance":      "maintenance",
+        "inspection":       "inspection",
+        "repair":           "repair_cycle",   # new shorter label
+        "repair lifecycle": "repair_cycle",   # backward compat with old label
+        "procurement":      "replacement",
+    }
+    _FREQ_MAP = {
+        "monthly":   "monthly",
+        "quarterly": "quarterly",
+        "bi-annual": "semi_annual",
+        "yearly":    "yearly",
+    }
+    _REC_MAP = {
+        "pass":        "pass",
+        "fail":        "fail",
+        "conditional": "conditional",
+        "retest":      "retest",
+    }
+
+    # ── Extract outcome fields from the latest test result's test_data ────────
+    # These are submitted via the dynamic overall_assessment form fields
+    # (next_action, recommendation_type, outcome_start_date, outcome_due_date, …).
+    from models import TestResult as _TR
+    from datetime import datetime as _dt
+
+    latest = (
+        db.query(_TR)
+        .filter(_TR.testing_request_id == request_id)
+        .order_by(_TR.cts.desc())
+        .first()
+    )
+    td: dict = (latest.test_data or {}) if latest else {}
+
+    def _from_td(key: str, mapping: dict) -> Optional[str]:
+        raw = (td.get(key) or "").strip().lower()
+        return mapping.get(raw) if raw else None
+
+    if body is None:
+        from schemas import SubmitTestResultsBody as _Body
+        body = _Body()
+
+    # Merge test_data values — body fields take precedence if already set
+    body.next_action         = body.next_action         or _from_td("next_action",         _ACTION_MAP)
+    body.recommendation_type = body.recommendation_type or _from_td("recommendation_type", _REC_MAP)
+    body.summary             = body.summary             or (td.get("outcome_summary") or "").strip() or None
+    body.detailed_notes      = body.detailed_notes      or (td.get("outcome_notes")   or "").strip() or None
+
+    # schedule_frequency: prefer explicit body value → schedule_frequency field →
+    # outcome_frequency stored by the outcome_schedule picker widget
+    body.schedule_frequency = (
+        body.schedule_frequency
+        or _from_td("schedule_frequency", _FREQ_MAP)
+        or _from_td("outcome_frequency",  _FREQ_MAP)
+    )
+
+    # Parse and store outcome dates on the TestingRequest so the dispatch
+    # service can pick them up via tr.scheduled_start_date / tr.due_date.
+    # outcome_start_date is set by the outcome_schedule picker widget.
+    outcome_start_raw = td.get("outcome_start_date")
+    outcome_due_raw   = td.get("outcome_due_date") or td.get("outcome_end_date")
+
+    def _parse_date(raw) -> Optional[_dt]:
+        if not raw:
+            return None
+        try:
+            return _dt.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    outcome_start = _parse_date(outcome_start_raw)
+    outcome_due   = _parse_date(outcome_due_raw)
+
+    if outcome_start or outcome_due:
+        tr_for_dates = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+        if tr_for_dates:
+            if outcome_start:
+                tr_for_dates.scheduled_start_date = outcome_start
+            if outcome_due:
+                tr_for_dates.due_date = outcome_due
+            tr_for_dates.modified_by = current_user.id
+            db.commit()
+
+    # ── Validate: Procurement requires at least one replacement product ──────
+    if body.next_action == "replacement" and not body.replacement_products:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one replacement product is required when next_action is 'replacement' (Procurement).",
+        )
+
+    # ── If recommendation fields are available, create/update recommendation ──
+    if body.recommendation_type and body.summary:
         from services.recommendation_service import RecommendationService
         rec_svc = RecommendationService(db)
         rec_svc.create_recommendation(
@@ -269,14 +361,14 @@ def submit_test_results(
             detailed_notes=body.detailed_notes,
             next_action=body.next_action,
             schedule_frequency=body.schedule_frequency,
+            replacement_products=body.replacement_products,
         )
-        # Refresh the TestingRequest to return updated status
         req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
         if not req:
             raise HTTPException(status_code=404, detail="Testing request not found")
         return _enrich(req)
 
-    # Legacy path: auto-derive recommendation from uploaded test result data
+    # ── Legacy path: auto-derive recommendation from test result data ─────────
     service = TestingService(db)
     req = service.submit_test_results(
         request_id,

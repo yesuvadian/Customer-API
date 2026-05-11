@@ -1094,6 +1094,11 @@ class TestingRequestResponse(BaseModel):
     total_sessions_planned: Optional[int] = None
     session_interval_days: Optional[int] = None
     session_count: int = 0  # Computed field
+
+    # Lifecycle flags — stamped at creation from template flags
+    is_cumulative: Optional[bool] = False
+    is_calibration: Optional[bool] = False
+
         # ─────────────────────────────────────────────
     # Repair Workflow Projection
     # ─────────────────────────────────────────────
@@ -1413,6 +1418,10 @@ class RecommendationUpdate(BaseModel):
 
 class ApprovalAction(BaseModel):
     notes: Optional[str] = None
+    # Approver can confirm / override the tester's schedule before dispatch
+    schedule_start_date: Optional[str] = None   # ISO 8601 UTC
+    schedule_end_date:   Optional[str] = None   # ISO 8601 UTC (optional)
+    schedule_frequency:  Optional[str] = None   # "monthly"|"quarterly"|"yearly"|…
 
 class SubmitTestResultsBody(BaseModel):
     replacement_products: Optional[list] = None  # [{item_id, item_name, category, quantity}, ...]
@@ -2208,6 +2217,9 @@ class ApprovalResponse(BaseModel):
     assigned_tester_id: Optional[str] = None
     assigned_tester_email: Optional[str] = None
     new_status: str
+    # Populated by initial-approve: the auto-created child TR
+    child_tr_id: Optional[str] = None
+    child_tr_number: Optional[str] = None
 
     class Config:
         from_attributes = True

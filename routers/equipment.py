@@ -647,6 +647,23 @@ def get_applicable_tests(
         raise HTTPException(status_code=404, detail="Equipment not found")
 
     tests = EquipmentService.get_applicable_tests(db, equipment_id)
+
+    # Pull lifecycle flags from each test type's linked OrgTestTemplate
+    from models import OrgTestTemplate
+
+    def _template_flags(test_type_id: int) -> dict:
+        tpl = (
+            db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.test_type_id == test_type_id)
+            .order_by(OrgTestTemplate.version.desc())
+            .first()
+        )
+        data = (tpl.template_data or {}) if tpl else {}
+        return {
+            "enable_cumulative": bool(data.get("enable_cumulative", False)),
+            "enable_calibration": bool(data.get("enable_calibration", False)),
+        }
+
     return [
         {
             "id": t.id,
@@ -654,6 +671,7 @@ def get_applicable_tests(
             "description": t.description,
             "category_type": t.category_type,
             "is_active": t.is_active,
+            **_template_flags(t.id),
         }
         for t in tests
     ]
