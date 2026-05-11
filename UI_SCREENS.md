@@ -166,44 +166,280 @@ All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{de
 
 ---
 
-### Section 13 — Repair Workflow Lifecycle
+## Repair Workflow Stage Access Matrix
 
-| Step | API | Who | Notes |
-|---|---|---|---|
-| Start workflow | `POST /repair-workflows/start` | EE TLSS | Requires `equipment_id` |
-| Get current form | `GET /repair-workflows/{id}/current-form` | EE TLSS | Returns form fields for current stage |
-| Save stage data | `POST /repair-workflows/{id}/stages/{stage_id}/save` | EE TLSS | Submit form data for the stage |
-| Advance stage | `POST /repair-workflows/{id}/advance` | EE TLSS | Moves to next stage |
-| Reject workflow | `POST /repair-workflows/{id}/reject` | EE TLSS | Terminates workflow |
-| View timeline | `GET /repair-workflows/{id}/timeline` | EE TLSS | Stage history |
-| View progress | `GET /repair-workflows/{id}/progress` | EE TLSS | Completion % |
+The Repair Workflow module contains a 10-stage lifecycle.
+
+Each stage exposes different UI actions depending on the logged-in user's role and transition permissions.
 
 ---
 
-### Section 13a — Repair Workflow Stage Testing (UI)
+## Repair Workflow Roles
 
-| Scenario | Login | Screen / Action | Expected UI Behavior |
+| Login | Expected Access |
+|---|---|
+| `eetlss.north@kptcl.com` | Full workflow management access |
+| `orgadmin.north@kptcl.com` | Full org-wide workflow visibility |
+| `assigner.north@kptcl.com` | Assignment queue + assignment actions |
+| `financeapprover.north@kptcl.com` | Approval-only access for finance stages |
+| `techapprover.north@kptcl.com` | Technical approval stages |
+| `tester.north@kptcl.com` | Assigned execution stages only |
+| `originator.north@kptcl.com` | Workflow initiation + tracking |
+| `taqc.north@kptcl.com` | TAQC inspection stages |
+| `sectionhead.north@kptcl.com` | Review visibility depending on stage |
+| `depthead.north@kptcl.com` | Department-level workflow visibility |
+
+---
+
+# 10-Stage Repair Workflow UI Lifecycle
+
+| Stage No | Stage Name | Primary Role | Expected UI Actions |
 |---|---|---|---|
-| Open Repair Workflows module | `eetlss.north@kptcl.com` / `TestDept@123` | Navigate to `repair-workflows` | Workflow cards load; current stage, progress, status, and assignment badge are visible |
-| Identify pending assignment | `eetlss.north@kptcl.com` / `TestDept@123` | Repair workflows list | Workflow card shows `ASSIGN` badge when `assignment_pending=true` |
-| Open workflow detail sheet | `eetlss.north@kptcl.com` / `TestDept@123` | Tap workflow card | Detail sheet opens with current stage, progress header, stage list, and available actions; current stage form fields are loaded dynamically from the backend template |
-| Verify stage role summary in detail | `eetlss.north@kptcl.com` / `TestDept@123` | Workflow detail sheet | Each stage line shows assigned user, current role, and role summary pills for Assign / Approve / Edit |
-| Assign a user to pending stage | `eetlss.north@kptcl.com` / `TestDept@123` | Tap `Assign User` | Dialog shows eligible users and allows manual user ID entry; assignment succeeds and UI refreshes |
-| Assigned user sees submit action | assigned stage user | Workflow detail sheet | When stage is `assigned` or `in_progress`, `Submit for Review` button appears |
-| Submit stage from UI | assigned stage user | Tap `Submit for Review` | Confirmation dialog appears; on submit, stage status updates to `submitted` and approve/reject becomes available |
-| Approver sees approve/reject buttons | approver role user | Workflow detail sheet | For `submitted` stage, `Approve` and `Reject` buttons are visible; `Submit` is hidden if role is approval-only |
-| Approve submitted stage | approver role user | Tap `Approve` | Approve dialog shown; after success, stage moves to completed and next stage becomes active |
-| Reject submitted stage | approver role user | Tap `Reject` | Reject dialog shown; after success, stage shows `rejected` status and workflow updates accordingly |
-| Confirm timeline entries | any repair workflow user | Timeline tab or section | Timeline includes `assign`, `submit`, `approve`, `reject`, and `cancel` actions with performer names |
-| Confirm progress increment | any repair workflow user | Workflow detail header | Percent progress increases after stage completion and current stage updates in header |
-| Verify multiple roles per stage | any repair workflow user | Stage list | Stage can show multiple role labels in the role summary area |
-| Verify approval-only role behavior | `financeapprover.north@kptcl.com` / `TestDept@123` | Workflow detail sheet | Only `Approve` / `Reject` actions are visible; no `Submit` or `Assign` if user is only approver |
-| Verify assignment-only role behavior | `assigner.north@kptcl.com` / `TestDept@123` | Workflow detail sheet | Only `Assign User` action is visible on pending assignment stages |
+| 1 | Failure Assessment | Originator / EE TLSS | Create workflow, save assessment |
+| 2 | Initial Review | Section Head | Review notes, approve/reject |
+| 3 | Technical Inspection | Tester / Inspector | Submit inspection findings |
+| 4 | Repair Estimation | EE TLSS | Upload estimate, submit |
+| 5 | Technical Approval | Tech Approver | Approve/reject estimate |
+| 6 | Procurement Review | Finance Approver | Approve procurement-related stages |
+| 7 | Repair Execution | Assigned Engineer | Submit execution updates |
+| 8 | QA / TAQC Inspection | TAQC Officer | Inspection submission |
+| 9 | Final Approval | Dept Head / EE TLSS | Final approve/reject |
+| 10 | Workflow Closure | Org Admin / EE TLSS | Close workflow |
 
-> Notes:
-> - Use the department login variants for `eetlss.north`, `eetlss.south`, `eetlss.mysuru`, `orgadmin.north` to verify scope and role-based UI visibility.
-> - The UI should never show an action button the logged-in user is not permitted to use.
-> - If a stage is pending assignment, the stage detail should clearly indicate that coordinator assignment is required before form filling.
+---
+
+# Stage-Based UI Behavior
+
+## Stage 1 — Failure Assessment
+
+### Visible To
+
+- Originator
+- EE TLSS
+- OrgAdmin
+
+### Expected UI
+
+- Dynamic form fields
+- Save draft
+- Submit stage
+- Equipment details visible
+
+---
+
+## Stage 2 — Initial Review
+
+### Visible To
+
+- Section Head
+- EE TLSS
+- OrgAdmin
+
+### Expected UI
+
+- Review comments
+- Approve button
+- Reject button
+- Timeline visibility
+
+---
+
+## Stage 3 — Technical Inspection
+
+### Visible To
+
+- Tester
+- Assigned inspector
+
+### Expected UI
+
+- Upload reports
+- Save inspection data
+- Submit for approval
+
+---
+
+## Stage 4 — Repair Estimation
+
+### Visible To
+
+- EE TLSS
+- Assigned engineer
+
+### Expected UI
+
+- Estimate form
+- File uploads
+- Cost fields
+- Submit action
+
+---
+
+## Stage 5 — Technical Approval
+
+### Visible To
+
+- Technical Approver
+- OrgAdmin
+
+### Expected UI
+
+- Approve button
+- Reject button
+- Estimate review panel
+
+---
+
+## Stage 6 — Procurement Review
+
+### Visible To
+
+- Finance Approver
+- OrgAdmin
+
+### Expected UI
+
+- Approval-only actions
+- Procurement review notes
+- Financial attachments
+
+---
+
+## Stage 7 — Repair Execution
+
+### Visible To
+
+- Assigned engineer
+- EE TLSS
+
+### Expected UI
+
+- Work progress updates
+- Execution notes
+- Upload completion evidence
+
+---
+
+## Stage 8 — QA / TAQC Inspection
+
+### Visible To
+
+- TAQC Officer
+- OrgAdmin
+
+### Expected UI
+
+- QA inspection form
+- Inspection checklist
+- Submit findings
+
+---
+
+## Stage 9 — Final Approval
+
+### Visible To
+
+- Dept Head
+- EE TLSS
+- OrgAdmin
+
+### Expected UI
+
+- Final review summary
+- Approve/reject actions
+- Timeline audit visibility
+
+---
+
+## Stage 10 — Workflow Closure
+
+### Visible To
+
+- OrgAdmin
+- EE TLSS
+
+### Expected UI
+
+- Read-only workflow summary
+- Completion status
+- Final timeline
+- Close workflow action
+
+---
+
+# Assignment Queue UI
+
+## Visible To
+
+| Login | Expected |
+|---|---|
+| `assigner.north@kptcl.com` | Sees pending assignment queue |
+| `eetlss.north@kptcl.com` | Can manually assign stages |
+| `orgadmin.north@kptcl.com` | Full assignment visibility |
+
+---
+
+## Assignment Queue Behaviors
+
+| Scenario | Expected |
+|---|---|
+| Pending assignment exists | ASSIGN badge visible |
+| Tap Assign | Assignment dialog opens |
+| Assignment success | Workflow refreshes |
+| Assigned stage | Badge disappears |
+
+---
+
+# Approval-Only UI Behavior
+
+| Login | Expected UI |
+|---|---|
+| `financeapprover.north@kptcl.com` | Only Approve/Reject visible |
+| `techapprover.north@kptcl.com` | Technical approval actions only |
+
+These users must NOT see:
+
+- Submit button
+- Assignment controls
+- Edit form actions
+
+---
+
+# Workflow Detail Screen Validation
+
+Every stage detail screen should show:
+
+- workflow number
+- equipment UEIC
+- current stage
+- status badge
+- dynamic actions
+- timeline history
+- performer names
+- stage notes
+- timestamps
+
+---
+
+# Timeline Validation
+
+Timeline must include:
+
+| Action | Example |
+|---|---|
+| assign | User assigned |
+| submit | Stage submitted |
+| approve | Stage approved |
+| reject | Stage rejected |
+| upload | Document uploaded |
+| cancel | Workflow cancelled |
+
+Each timeline entry should show:
+
+- stage name
+- performer name
+- note
+- timestamp
 
 ---
 

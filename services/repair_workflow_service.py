@@ -1150,11 +1150,20 @@ class RepairWorkflowService:
             if stage_status == "pending":
                 result["can_assign"] = True
 
-        # can_submit: stage actor (can_edit=True) when assigned
+        # can_submit: assigned actor with can_edit=True
         if stage_status in ("assigned", "in_progress"):
-            is_assignee = instance.assigned_user_id and str(instance.assigned_user_id) == str(user_id)
-            has_edit = self._has_stage_edit(current_stage_id, user_id)
-            if is_assignee or has_edit:
+
+            is_assignee = (
+                instance.assigned_user_id
+                and str(instance.assigned_user_id) == str(user_id)
+            )
+
+            has_edit = self._has_stage_edit(
+                current_stage_id,
+                user_id,
+            )
+
+            if is_assignee and has_edit:
                 result["can_submit"] = True
 
         # can_approve / can_reject: stage actor (can_approve=True) when submitted
