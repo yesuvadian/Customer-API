@@ -144,6 +144,23 @@ def list_equipment_types(db: Session = Depends(get_db)):
     return TestingRequestService(db).list_equipment_types()
 
 
+# ─── Lifecycle Types (calibration + cumulative, separate masters) ────────────
+@router.get("/lifecycle-types")
+def list_lifecycle_types(db: Session = Depends(get_db)):
+    """Returns calibration and cumulative test types from their dedicated masters.
+
+    Response:
+      {
+        "calibration": [{"id", "name", "enable_calibration": true, ...}],
+        "cumulative":  [{"id", "name", "enable_cumulative":  true, ...}]
+      }
+
+    Flutter uses this to reload the test-type dropdown when a lifecycle flag
+    is detected on a selected test type.
+    """
+    return TestingRequestService(db).list_lifecycle_types()
+
+
 # ─── Generic dropdown by master description ─────────────
 @router.get("/dropdown/{master_desc}")
 def get_dropdown_values(master_desc: str, db: Session = Depends(get_db)):

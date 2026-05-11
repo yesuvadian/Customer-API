@@ -2326,6 +2326,7 @@ def seed_test_type_categories(session, master_ids):
             "maintenance": [
                 "Routine Preventive Maintenance",
                 "Power Transformer Major Maintenance",
+                "OLTC Operations Count",              # cumulative tap-change tracking
             ],
             "inspection": [
                 "Electrical Safety",
@@ -2360,6 +2361,7 @@ def seed_test_type_categories(session, master_ids):
             "maintenance": [
                 "Routine Preventive Maintenance",
                 "Circuit Breaker Major Maintenance",
+                "Circuit Breaker Operations Count",   # cumulative ops tracking
             ],
             "inspection": [
                 "Electrical Safety",
@@ -2370,6 +2372,34 @@ def seed_test_type_categories(session, master_ids):
                 "General Maintenance",
             ],
            
+        },
+        # ── Protection Relay ─────────────────────────────────────────────────
+        "Protection Relay": {
+            "test": [
+                "Protection Relay Functional Test",
+            ],
+            "maintenance": [
+                "Protection Relay Calibration and History",  # calibration lifecycle
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+        },
+        # ── Electronic Tri-vector Meter ──────────────────────────────────────
+        "Electronic Tri-vector Meter": {
+            "test": [
+                "Meter Testing",
+            ],
+            "maintenance": [
+                "Electronic Tri-vector Meter Calibration",  # calibration lifecycle
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
         },
         # ── Lightning Arrester ───────────────────────────────────────────────
         "Lightning Arrester": {
@@ -2418,6 +2448,59 @@ def seed_test_type_categories(session, master_ids):
             ],
         },
     }
+
+    # ── Dedicated lifecycle masters (NOT under "Testing Equipment") ──────────
+    # These are fetched via GET /testing_requests/lifecycle-types, not mixed
+    # into the equipment-type dropdown.
+    lifecycle_masters = {
+        "Calibration Lifecycle": {
+            "description": "Calibration Lifecycle",
+            "details": [
+                "Protection Relay Calibration and History",
+                "Electronic Tri-vector Meter Calibration",
+            ],
+        },
+        "Cumulative Lifecycle": {
+            "description": "Cumulative Lifecycle",
+            "details": [
+                "Circuit Breaker Operations Count",
+                "OLTC Operations Count",
+            ],
+        },
+    }
+
+    for master_name, cfg in lifecycle_masters.items():
+        lm = session.query(CategoryMaster).filter_by(name=master_name).first()
+        if not lm:
+            lm = CategoryMaster(
+                name=master_name,
+                description=cfg["description"],
+                is_active=True,
+            )
+            session.add(lm)
+            session.flush()
+        else:
+            lm.description = cfg["description"]
+            lm.is_active = True
+
+        for detail_name in cfg["details"]:
+            existing_d = session.query(CategoryDetails).filter_by(
+                name=detail_name,
+                category_master_id=lm.id,
+            ).first()
+            if not existing_d:
+                session.add(CategoryDetails(
+                    name=detail_name,
+                    description=f"Lifecycle test type: {detail_name}",
+                    category_type="maintenance",
+                    category_master_id=lm.id,
+                    is_active=True,
+                ))
+            else:
+                existing_d.category_type = "maintenance"
+                existing_d.is_active = True
+
+    session.flush()
 
     for equipment_name, test_list in equipment_tests.items():
         # ---- upsert CategoryMaster (Equipment) ----
@@ -5766,6 +5849,273 @@ def seed_annual_audit_templates(session) -> int:
     return count
 
 
+def seed_cumulative_template(session) -> int:
+    """
+    Seed the Operations Tracking OrgTestTemplate (CUMULATIVE_DIFF rules).
+
+    Strategy — never modify existing CategoryMaster / CategoryDetails rows:
+    - CategoryMaster "Repair Lifecycle" is owned by the stage-based workflow
+      engine; touching it breaks existing repair lifecycle flows.
+    - We only CREATE the master/detail when they are completely absent, and we
+      never update any fields on rows that already exist.
+    - Only the OrgTestTemplate (template_key="operations_tracking") is
+      upserted, because it is owned solely by this feature.
+    """
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+
+    # ── CategoryMaster — look up only, create if truly absent ─────────────────
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.name == "Repair Lifecycle"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Repair Lifecycle",
+            description="Repair and Lifecycle workflow test types",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+    # Never modify an existing master row.
+
+    # ── CategoryDetails — look up only, create if absent ─────────────────────
+    # (name, description, category_type)
+    # Operations Tracking: category_type='maintenance' → Maintenance dropdown.
+    # Others: workflow-launcher subtypes, no category_type assigned here.
+    subtypes = [
+        ("Breakdown Repair",          "Unplanned breakdown repair workflow",                                                          None),
+        ("Preventive Maintenance",     "Scheduled preventive maintenance workflow",                                                    None),
+        ("Major Maintenance Overhaul", "Planned major maintenance and overhaul workflow",                                              None),
+        ("Operations Tracking",        "Multi-session cumulative operations tracking — triggers overhaul when threshold crossed",  "maintenance"),
+    ]
+    detail_ids = {}
+    for name, desc, cat_type in subtypes:
+        d = session.query(CategoryDetails).filter(
+            CategoryDetails.category_master_id == master.id,
+            CategoryDetails.name == name,
+        ).first()
+        if not d:
+            d = CategoryDetails(
+                category_master_id=master.id,
+                name=name,
+                description=desc,
+                category_type=cat_type,
+                is_active=True,
+            )
+            session.add(d)
+            session.flush()
+        # Never update existing rows — they belong to the live system.
+        detail_ids[name] = d.id
+
+    # ── Operations Tracking template with rules[] ─────────────────────────────
+    OPS_KEY = "operations_tracking"
+    ops_template_data = {
+        "name": "Operations Tracking",
+        "key": OPS_KEY,
+        "description": "Multi-session operations tracking with cumulative difference calculation for overhaul triggering.",
+        "enable_cumulative": True,
+        "multi_session": True,
+        "sections": [
+            {
+                "title": "Session Reading",
+                "fields": [
+                    {
+                        "key": "reading",
+                        "label": "Operations Reading",
+                        "type": "number",
+                        "required": True,
+                        "unit": "ops",
+                    },
+                    {
+                        "key": "reading_date",
+                        "label": "Reading Date",
+                        "type": "date",
+                        "required": True,
+                    },
+                    {
+                        "key": "notes",
+                        "label": "Notes",
+                        "type": "textarea",
+                        "required": False,
+                    },
+                ],
+            }
+        ],
+        "rules": [
+            {
+                "field": "reading",
+                "type": "CUMULATIVE_DIFF",
+                "config": {
+                    "order_by": "reading_date",
+                    "group_by": "equipment_id",
+                    "requires_multi_session": True,
+                    "reset_on_drop": True,
+                },
+            }
+        ],
+    }
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == OPS_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail_ids["Operations Tracking"]
+        existing.template_data = ops_template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=OPS_KEY,
+            org_id=None,
+            test_type_id=detail_ids["Operations Tracking"],
+            template_data=ops_template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] Repair Lifecycle / Operations Tracking template seeded (master_id={master.id}).")
+    return count
+
+
+def seed_calibration_template(session) -> int:
+    """
+    Seed the Calibration OrgTestTemplate (DATE_ADD rule).
+
+    Strategy — same as seed_cumulative_template:
+    - Never modify existing CategoryMaster / CategoryDetails rows.
+    - Only CREATE master/detail when completely absent.
+    - Upsert the OrgTestTemplate (template_key="calibration") which is
+      owned solely by this feature.
+    """
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+
+    # ── CategoryMaster — look up only, create if truly absent ─────────────────
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.name == "Repair Lifecycle"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Repair Lifecycle",
+            description="Repair and Lifecycle workflow test types",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+    # Never modify an existing master row.
+
+    # ── CategoryDetails — look up, create if absent ───────────────────────────
+    cal_name = "Calibration"
+    d = session.query(CategoryDetails).filter(
+        CategoryDetails.category_master_id == master.id,
+        CategoryDetails.name == cal_name,
+    ).first()
+    if not d:
+        d = CategoryDetails(
+            category_master_id=master.id,
+            name=cal_name,
+            description="Equipment calibration lifecycle — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
+            category_type="maintenance",
+            is_active=True,
+        )
+        session.add(d)
+        session.flush()
+    # Never update existing rows.
+
+    # ── Calibration template with DATE_ADD rule ───────────────────────────────
+    CAL_KEY = "calibration"
+    cal_template_data = {
+        "name": "Calibration",
+        "key": CAL_KEY,
+        "description": "Equipment calibration lifecycle tracking. Computes next due date and triggers repair on failure.",
+        "enable_calibration": True,
+        "multi_session": True,
+        "sections": [
+            {
+                "title": "Calibration Record",
+                "fields": [
+                    {
+                        "key": "calibration_date",
+                        "label": "Calibration Date",
+                        "type": "date",
+                        "required": True,
+                    },
+                    {
+                        "key": "validity_months",
+                        "label": "Validity (Months)",
+                        "type": "number",
+                        "required": True,
+                        "unit": "months",
+                    },
+                    {
+                        "key": "overall_result",
+                        "label": "Result",
+                        "type": "dropdown",
+                        "options": ["Pass", "Fail"],
+                        "required": True,
+                    },
+                    {
+                        "key": "calibrated_by",
+                        "label": "Calibrated By (Agency / Lab)",
+                        "type": "text",
+                        "required": False,
+                    },
+                    {
+                        "key": "certificate_number",
+                        "label": "Certificate Number",
+                        "type": "text",
+                        "required": False,
+                    },
+                    {
+                        "key": "notes",
+                        "label": "Notes",
+                        "type": "textarea",
+                        "required": False,
+                    },
+                ],
+            }
+        ],
+        "rules": [
+            {
+                "field": "calibration_date",
+                "type": "DATE_ADD",
+                "config": {
+                    "validity_field": "validity_months",
+                    "result_field": "overall_result",
+                    "order_by": "calibration_date",
+                    "group_by": "equipment_id",
+                    "requires_multi_session": True,
+                },
+            }
+        ],
+    }
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == CAL_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = d.id
+        existing.template_data = cal_template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=CAL_KEY,
+            org_id=None,
+            test_type_id=d.id,
+            template_data=cal_template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] Calibration template seeded (master_id={master.id}, detail_id={d.id}).")
+    return count
+
+
 def seed_tr_workflows(session):
     """
     Seed the IntegratedWorkflowEngine with three workflows:
@@ -6709,11 +7059,15 @@ def run_seed():
         n = svc.provision_global_defaults()
         print(f"[OK] Provisioned {n} global test templates.")
         inserted = svc.provision_overall_assessment()
-        print(f"[OK] Overall assessment template: {'provisioned' if inserted else 'already exists'}.")
+        print(f"[OK] Overall assessment template: {'inserted' if inserted else 'updated'}.")
         n2 = seed_direct_submission_templates(session)
         print(f"[OK] Direct-submission templates: {n2} seeded.")
         n3 = seed_annual_audit_templates(session)
         print(f"[OK] Annual Audit templates: {n3} seeded.")
+        n4 = seed_cumulative_template(session)
+        print(f"[OK] Cumulative / Operations Tracking template: {n4} seeded.")
+        n5 = seed_calibration_template(session)
+        print(f"[OK] Calibration template: {n5} seeded.")
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")

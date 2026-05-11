@@ -12,6 +12,7 @@ from models import (
     Organization, OrgDepartment,
     Role, UserRole, TesterLocation,
     OrgRole, OrgUserRole,
+    OrgTestTemplate,
 )
 from utils.common_service import UTCDateTimeMixin
 
@@ -50,8 +51,39 @@ class TestingRequestService:
         )
         return f"TR-{today}-{(count + 1):04d}"
 
+    def _resolve_is_cumulative(self, test_type_id) -> bool:
+        """Return True if the OrgTestTemplate for this test_type_id has enable_cumulative=true."""
+        if not test_type_id:
+            return False
+        tpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.test_type_id == test_type_id)
+            .order_by(OrgTestTemplate.version.desc())
+            .first()
+        )
+        if not tpl:
+            return False
+        return bool((tpl.template_data or {}).get("enable_cumulative", False))
+
+    def _resolve_is_calibration(self, test_type_id) -> bool:
+        """Return True if the OrgTestTemplate for this test_type_id has enable_calibration=true."""
+        if not test_type_id:
+            return False
+        tpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.test_type_id == test_type_id)
+            .order_by(OrgTestTemplate.version.desc())
+            .first()
+        )
+        if not tpl:
+            return False
+        return bool((tpl.template_data or {}).get("enable_calibration", False))
+
     def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
         request_number = self._generate_request_number()
+        test_type_id = data.get("test_type_id")
+        is_cumulative = self._resolve_is_cumulative(test_type_id)
+        is_calibration = self._resolve_is_calibration(test_type_id)
         request = TestingRequest(
             request_number=request_number,
             title=data["title"],
@@ -61,7 +93,7 @@ class TestingRequestService:
             manufacturer=data.get("manufacturer"),
             serial_number=data.get("serial_number"),
             equipment_type_id=data.get("equipment_type_id"),
-            test_type_id=data.get("test_type_id"),
+            test_type_id=test_type_id,
             equipment_id=data.get("equipment_id"),
             request_category=data.get("request_category", "test"),
             organization_id=data.get("organization_id"),
@@ -84,6 +116,8 @@ class TestingRequestService:
             is_multi_session=data.get("is_multi_session", False),
             total_sessions_planned=data.get("total_sessions_planned"),
             session_interval_days=data.get("session_interval_days"),
+            is_cumulative=is_cumulative,
+            is_calibration=is_calibration,
         )
         self.db.add(request)
         self.db.commit()
@@ -357,15 +391,76 @@ class TestingRequestService:
             for t in all_types:
                 cat = t.category_type or "test"
                 bucket = types_by_category.get(cat, types_by_category["test"])
-                bucket.append(
-                    {"id": t.id, "name": t.name, "category_type": t.category_type}
+                # Look up linked OrgTestTemplate to expose lifecycle flags
+                tpl = (
+                    self.db.query(OrgTestTemplate)
+                    .filter(OrgTestTemplate.test_type_id == t.id)
+                    .order_by(OrgTestTemplate.version.desc())
+                    .first()
                 )
+                tpl_data = (tpl.template_data or {}) if tpl else {}
+                bucket.append({
+                    "id": t.id,
+                    "name": t.name,
+                    "category_type": t.category_type,
+                    "enable_cumulative": bool(tpl_data.get("enable_cumulative", False)),
+                    "enable_calibration": bool(tpl_data.get("enable_calibration", False)),
+                })
             result.append({
                 "id": m.id,
                 "name": m.name,
                 "tests": types_by_category["test"],    # legacy field
                 "types_by_category": types_by_category,
             })
+        return result
+
+    def list_lifecycle_types(self) -> dict:
+        """Return calibration and cumulative test types from their dedicated masters.
+
+        Used by the request form to reload the test-type dropdown when a
+        lifecycle flag (enable_calibration / enable_cumulative) is detected.
+        """
+        result: dict = {"calibration": [], "cumulative": []}
+
+        mapping = {
+            "Calibration Lifecycle": "calibration",
+            "Cumulative Lifecycle":  "cumulative",
+        }
+
+        for master_name, bucket_key in mapping.items():
+            master = (
+                self.db.query(CategoryMaster)
+                .filter(CategoryMaster.name == master_name)
+                .first()
+            )
+            if not master:
+                continue
+
+            details = (
+                self.db.query(CategoryDetails)
+                .filter(
+                    CategoryDetails.category_master_id == master.id,
+                    CategoryDetails.is_active.is_(True),
+                )
+                .order_by(CategoryDetails.name)
+                .all()
+            )
+            for t in details:
+                tpl = (
+                    self.db.query(OrgTestTemplate)
+                    .filter(OrgTestTemplate.test_type_id == t.id)
+                    .order_by(OrgTestTemplate.version.desc())
+                    .first()
+                )
+                tpl_data = (tpl.template_data or {}) if tpl else {}
+                result[bucket_key].append({
+                    "id": t.id,
+                    "name": t.name,
+                    "category_type": t.category_type,
+                    "enable_calibration": bool(tpl_data.get("enable_calibration", False)),
+                    "enable_cumulative":  bool(tpl_data.get("enable_cumulative",  False)),
+                })
+
         return result
 
     def get_dropdown_values(self, master_desc: str) -> list:
