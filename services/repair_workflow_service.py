@@ -1062,16 +1062,22 @@ class RepairWorkflowService:
 
         # Roles allowed to receive assignments
         role_ids = [
-            r.role_id
-            for r in (
-                self.db.query(RepairStageRole)
-                .filter(
-                    RepairStageRole.stage_id == stage_id,
-                    RepairStageRole.can_edit.is_(True),
-                )
-                .all()
-            )
-        ]
+    r.role_id
+    for r in (
+        self.db.query(RepairStageRole)
+        .join(
+            OrgRole,
+            OrgRole.id == RepairStageRole.role_id,
+        )
+        .filter(
+            RepairStageRole.stage_id == stage_id,
+            RepairStageRole.can_edit.is_(True),
+            OrgRole.org_id
+            == current_user.organization_id,
+        )
+        .all()
+    )
+]
 
         if not role_ids:
             raise ValueError(
