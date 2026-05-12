@@ -5619,14 +5619,9 @@ def seed_direct_submission_templates(session) -> int:
                         {"key": "outage_impact",         "label": "Outage Impact Description",    "type": "textarea", "required": False},
                     ],
                 },
-                {
-                    "title": "Outcome",
-                    "fields": [
-                        {"key": "outcome", "label": "Outcome / Action Taken", "type": "dropdown", "required": True,
-                         "options": ["Repair", "Replacement", "Under Investigation"]},
-                        {"key": "remarks", "label": "Remarks / Additional Notes", "type": "textarea", "required": False},
-                    ],
-                },
+                # NOTE: "Outcome" section removed — the API appends "Outcome & Scheduling"
+                # from the overall_assessment template for failure_registry forms,
+                # which covers next_action, schedule, summary and notes.
             ],
         },
     }
@@ -5638,16 +5633,19 @@ def seed_direct_submission_templates(session) -> int:
             OrgTestTemplate.org_id == None,  # noqa: E711
         ).first()
         if existing:
-            continue
-        session.add(OrgTestTemplate(
-            template_key=key,
-            org_id=None,
-            test_type_id=None,
-            template_data=data,
-            is_system=True,
-            version=1,
-        ))
-        count += 1
+            # Always update template_data so changes to sections/fields are picked up
+            existing.template_data = data
+            existing.version = (existing.version or 1) + 1
+        else:
+            session.add(OrgTestTemplate(
+                template_key=key,
+                org_id=None,
+                test_type_id=None,
+                template_data=data,
+                is_system=True,
+                version=1,
+            ))
+            count += 1
     session.commit()
     return count
 

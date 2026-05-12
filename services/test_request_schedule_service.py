@@ -56,6 +56,11 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         req = self.db.query(TestingRequest).filter(
             TestingRequest.id == test_request_id
         ).first()
+        if not req.is_schedule_template:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Schedules can only be created for template requests."
+    )
         if not req:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -98,16 +103,161 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
     # ── Get ──────────────────────────────────────────────────────────────────
     def get_schedule(self, test_request_id: UUID) -> TestRequestSchedule:
-        schedule = self.db.query(TestRequestSchedule).filter(
-            TestRequestSchedule.test_request_id == test_request_id
-        ).first()
+        schedule = (
+            self.db.query(TestRequestSchedule)
+            .join(TestingRequest)
+            .filter(
+                TestRequestSchedule.test_request_id == test_request_id,
+                TestingRequest.is_schedule_template.is_(True),
+            )
+            .first()
+        )
         if not schedule:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No schedule found for this test request"
             )
         return schedule
+    # ── List Schedules ──────────────────────────────────────────────────────────
+    def list_schedules(
+        self,
+        organization_id: Optional[UUID] = None,
+        equipment_type_id: Optional[int] = None,
+        active_only: bool = True,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[dict]:
 
+        query = (
+            self.db.query(TestRequestSchedule, TestingRequest)
+            .join(
+                TestingRequest,
+                TestingRequest.id == TestRequestSchedule.test_request_id,
+            )
+            .filter(
+                TestingRequest.is_schedule_template.is_(True)
+            )
+        )
+
+        if organization_id:
+            query = query.filter(
+                TestRequestSchedule.organization_id == organization_id
+            )
+
+        if equipment_type_id:
+            query = query.filter(
+                TestingRequest.equipment_type_id == equipment_type_id
+            )
+
+        if active_only:
+            query = query.filter(
+                TestRequestSchedule.is_active.is_(True)
+            )
+
+        rows = (
+            query
+            .order_by(TestRequestSchedule.next_run_date.asc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+        results = []
+
+        for schedule, request in rows:
+            results.append({
+                "schedule_id": str(schedule.id),
+                "test_request_id": str(request.id),
+                "request_number": request.request_number,
+                "title": request.title,
+                "description": request.description,
+                "equipment_type_id": request.equipment_type_id,
+                "organization_id": str(schedule.organization_id),
+
+                "frequency": (
+                    schedule.frequency.value
+                    if schedule.frequency else None
+                ),
+
+                "start_date": (
+                    schedule.start_date.isoformat()
+                    if schedule.start_date else None
+                ),
+
+                "next_run_date": (
+                    schedule.next_run_date.isoformat()
+                    if schedule.next_run_date else None
+                ),
+
+                "last_run_date": (
+                    schedule.last_run_date.isoformat()
+                    if schedule.last_run_date else None
+                ),
+
+                "end_date": (
+                    schedule.end_date.isoformat()
+                    if schedule.end_date else None
+                ),
+
+                "advance_days": schedule.advance_days,
+                "revised_periodicity_days": schedule.revised_periodicity_days,
+                "oem_reference": schedule.oem_reference,
+                "responsible_role_id": (
+                    str(schedule.responsible_role_id)
+                    if schedule.responsible_role_id else None
+                ),
+                "reviewing_role_id": (
+                    str(schedule.reviewing_role_id)
+                    if schedule.reviewing_role_id else None
+                ),
+                "is_active": schedule.is_active,
+
+                "created_at": (
+                    schedule.cts.isoformat()
+                    if schedule.cts else None
+                ),
+            })
+
+        return results
+
+
+    # ── Soft Delete Schedule ────────────────────────────────────────────────────
+    def delete_schedule(
+        self,
+        test_request_id: UUID,
+        modified_by: UUID,
+    ) -> dict:
+
+        schedule = (
+            self.db.query(TestRequestSchedule)
+            .join(
+                TestingRequest,
+                TestingRequest.id == TestRequestSchedule.test_request_id,
+            )
+            .filter(
+                TestRequestSchedule.test_request_id == test_request_id,
+                TestingRequest.is_schedule_template.is_(True),
+            )
+            .first()
+        )
+
+        if not schedule:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Template schedule not found"
+            )
+
+        schedule.is_active = False
+        schedule.modified_by = modified_by
+        schedule.mts = self._utc_now()
+
+        self.db.commit()
+
+        return {
+            "message": "Schedule deactivated successfully",
+            "schedule_id": str(schedule.id),
+            "is_active": schedule.is_active,
+        }
     # ── Update ───────────────────────────────────────────────────────────────
     def update_schedule(
         self,
@@ -141,13 +291,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         self.db.refresh(schedule)
         return schedule
 
-    # ── Delete ───────────────────────────────────────────────────────────────
-    def delete_schedule(self, test_request_id: UUID) -> bool:
-        schedule = self.get_schedule(test_request_id)
-        self.db.delete(schedule)
-        self.db.commit()
-        return True
-
+   
     # ── Logs ─────────────────────────────────────────────────────────────────
     def get_logs(
         self,
