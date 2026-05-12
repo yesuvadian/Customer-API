@@ -24,3 +24,5 @@ PyJWT
 redis
 reportlab
 apscheduler
+python-dateutil
+python-docx
