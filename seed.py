@@ -8035,6 +8035,82 @@ def _dft_assign_role(session, user_id, role_id, dept_id):
     session.flush()
 
 
+def _seed_dft_equipment(session, org, dept_map: dict):
+    """
+    Seed sample equipment into each of the 3 dept-filter divisions
+    (RT_NORTH, RT_SOUTH, MYSURU) so originators / testers scoped to those
+    divisions can see equipment in the TR form without needing the org-wide
+    fallback.
+
+    dept_map = {"north": <OrgDepartment>, "south": ..., "mysuru": ...}
+    """
+    from services.equipment_service import EquipmentService
+    from models import CategoryMaster
+
+    if not org:
+        return
+
+    # Get admin user for created_by
+    admin = session.query(User).filter(
+        User.organization_id == org.id,
+        User.email.ilike("%orgadmin%"),
+    ).first() or session.query(User).filter(
+        User.organization_id == org.id
+    ).first()
+    created_by = admin.id if admin else None
+
+    equip_types = (
+        session.query(CategoryMaster)
+        .filter(CategoryMaster.description == "Testing Equipment", CategoryMaster.is_active == True)
+        .all()
+    )
+    type_map = {et.name: et.id for et in equip_types}
+
+    # Per-division sample configs  (type, voltage, bay, manufacturer, model, serial, year)
+    division_configs = {
+        "north": [
+            ("Power Transformer",   "220", "01", "BHEL",             "PT-220-N",  "NTH2024001", 2021),
+            ("Current Transformer", "220", "01", "Siemens",          "CT-220-N",  "NTH2024002", 2022),
+            ("Power Transformer",   "110", "01", "ABB",              "PT-110-N",  "NTH2024003", 2020),
+        ],
+        "south": [
+            ("Power Transformer",   "220", "01", "BHEL",             "PT-220-S",  "STH2024001", 2021),
+            ("Current Transformer", "110", "01", "CGL",              "CT-110-S",  "STH2024002", 2022),
+            ("CVT",                 "220", "01", "BHEL",             "CVT-220-S", "STH2024003", 2020),
+        ],
+        "mysuru": [
+            ("Power Transformer",   "110", "01", "Crompton Greaves", "PT-110-M",  "MYS2024001", 2019),
+            ("Current Transformer", "220", "01", "Siemens",          "CT-220-M",  "MYS2024002", 2021),
+            ("Power Transformer",   "66",  "01", "ABB",              "PT-066-M",  "MYS2024003", 2018),
+        ],
+    }
+
+    created = 0
+    for slug, dept_obj in dept_map.items():
+        configs = division_configs.get(slug, [])
+        for type_name, voltage, bay, mfr, model, serial, year in configs:
+            if type_name not in type_map:
+                continue
+            try:
+                EquipmentService.create_equipment(
+                    db=session,
+                    organization_id=org.id,
+                    department_id=dept_obj.id,
+                    equipment_type_id=type_map[type_name],
+                    voltage_class=voltage,
+                    bay_number=bay,
+                    manufacturer=mfr,
+                    model_number=model,
+                    factory_serial_number=serial,
+                    year_of_manufacture=year,
+                    created_by=created_by,
+                )
+                created += 1
+            except Exception:
+                session.rollback()
+    print(f"  [OK] {created} equipment items seeded across {len(dept_map)} divisions")
+
+
 def seed_dept_filter_users(session, org=None):
     """
     Seeds KPTCL org with 3 department divisions, each having the complete set
@@ -8137,6 +8213,13 @@ def seed_dept_filter_users(session, org=None):
         if r:
             _dft_assign_role(session, u.id, r.id, dept_obj.id)
         print(f"  {email:48s}  {role_name:22s}  {dept_obj.name}")
+
+    # ── 6. Sample equipment in each division ────────────────────────────────
+    # Without this, originator/tester users see no equipment in the TR form
+    # because seed_sample_equipment() only seeds into the Excel-based KPTCL
+    # substations, which are in a different branch of the dept tree.
+    print("\n[6] Sample equipment per division")
+    _seed_dft_equipment(session, org, dept_map)
 
     session.commit()
 
