@@ -969,7 +969,7 @@ class TestingRequestCreate(BaseModel):
     equipment_id: Optional[UUID] = None
 
     # Request category: test | maintenance | inspection | repair_lifecycle
-    request_category: Optional[Literal["test", "maintenance", "inspection", "repair_lifecycle"]] = "test"
+    request_category: Optional[Literal["test", "maintenance", "inspection", "repair_lifecycle", "failure_registry", "taqc_inspection"]] = "test"
 
     # New department-based location
     organization_id: Optional[UUID] = None
@@ -1095,6 +1095,21 @@ class TestingRequestResponse(BaseModel):
     session_interval_days: Optional[int] = None
     session_count: int = 0  # Computed field
 
+    # Lifecycle flags — stamped at creation from template flags
+    is_cumulative: Optional[bool] = False
+    is_calibration: Optional[bool] = False
+
+        # ─────────────────────────────────────────────
+    # Repair Workflow Projection
+    # ─────────────────────────────────────────────
+
+    repair_workflow_id: Optional[str] = None
+
+    repair_current_stage: Optional[str] = None
+
+    repair_status: Optional[str] = None
+
+    repair_progress: Optional[int] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
@@ -1390,17 +1405,32 @@ class RecommendationCreate(BaseModel):
     summary: str
     detailed_notes: Optional[str] = None
     organization_id: Optional[UUID] = None
+    # next_action dispatch — set by Tester when submitting result
+    next_action: Optional[str] = None          # none|maintenance|inspection|repair_cycle|replacement
+    schedule_frequency: Optional[str] = None   # yearly|quarterly|monthly|semi_annual etc.
 
 class RecommendationUpdate(BaseModel):
     recommendation_type: Optional[str] = None
     summary: Optional[str] = None
     detailed_notes: Optional[str] = None
+    next_action: Optional[str] = None
+    schedule_frequency: Optional[str] = None
 
 class ApprovalAction(BaseModel):
     notes: Optional[str] = None
+    # Approver can confirm / override the tester's schedule before dispatch
+    schedule_start_date: Optional[str] = None   # ISO 8601 UTC
+    schedule_end_date:   Optional[str] = None   # ISO 8601 UTC (optional)
+    schedule_frequency:  Optional[str] = None   # "monthly"|"quarterly"|"yearly"|…
 
 class SubmitTestResultsBody(BaseModel):
     replacement_products: Optional[list] = None  # [{item_id, item_name, category, quantity}, ...]
+    # Recommendation fields — when provided, a recommendation is created/updated directly
+    recommendation_type: Optional[str] = None   # pass | fail | conditional | retest
+    summary: Optional[str] = None
+    detailed_notes: Optional[str] = None
+    next_action: Optional[str] = None           # none | maintenance | inspection | repair_cycle | replacement
+    schedule_frequency: Optional[str] = None    # yearly | half_yearly | quarterly | monthly
 
 
 class RecommendationResponse(BaseModel):
@@ -1411,6 +1441,8 @@ class RecommendationResponse(BaseModel):
     summary: str
     detailed_notes: Optional[str] = None
     replacement_products: Optional[list] = None
+    next_action: Optional[str] = None
+    schedule_frequency: Optional[str] = None
     approval_status: Optional[str] = None
     approved_by: Optional[UUID] = None
     approved_by_name: Optional[str] = None   # resolved display name
@@ -2185,6 +2217,9 @@ class ApprovalResponse(BaseModel):
     assigned_tester_id: Optional[str] = None
     assigned_tester_email: Optional[str] = None
     new_status: str
+    # Populated by initial-approve: the auto-created child TR
+    child_tr_id: Optional[str] = None
+    child_tr_number: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -2195,7 +2230,7 @@ class ApprovalResponse(BaseModel):
 # ==========================================
 
 class EquipmentCreate(BaseModel):
-    organization_id: UUID
+    organization_id: Optional[UUID] = None
     department_id: UUID
     equipment_type_id: int
     voltage_class: Optional[str] = None
@@ -2219,6 +2254,20 @@ class EquipmentUpdate(BaseModel):
     commissioned_date: Optional[datetime] = None
 
 
+class EquipmentChainRef(BaseModel):
+    """Lightweight reference used inside EquipmentResponse for chain links."""
+    id: UUID
+    ueic: str
+    status: str
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    commissioned_date: Optional[datetime] = None
+    retired_date: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class EquipmentResponse(BaseModel):
     id: UUID
     ueic: str
@@ -2232,7 +2281,12 @@ class EquipmentResponse(BaseModel):
     serial_in_bay: Optional[str] = None
     nameplate_data: Optional[dict] = None
     status: str
-    replaces_equipment_id: Optional[UUID] = None
+    # Replacement chain (bidirectional)
+    replaces_equipment_id: Optional[UUID] = None   # UUID of the old unit this replaced
+    replaces_equipment: Optional[EquipmentChainRef] = None  # inline summary of the old unit
+    replaced_by_id: Optional[UUID] = None          # UUID of the new unit that replaced this one
+    replaced_by: Optional[EquipmentChainRef] = None  # inline summary of the new unit
+    replacement_reason_type: Optional[str] = None
     commissioned_date: Optional[datetime] = None
     retired_date: Optional[datetime] = None
     retirement_reason: Optional[str] = None
@@ -2255,6 +2309,8 @@ class EquipmentRetireRequest(BaseModel):
 
 class EquipmentReplaceRequest(BaseModel):
     reason: str
+    reason_type: str = "other"          # "recommendation_compliance" | "other"
+    recommendation_id: Optional[UUID] = None  # required when reason_type="recommendation_compliance"
     nameplate_data: Optional[dict] = None
     commissioned_date: Optional[datetime] = None
     manufacturer: Optional[str] = None
@@ -2269,3 +2325,94 @@ class EquipmentCountResponse(BaseModel):
     scrapped: int = 0
     under_repair: int = 0
     total: int = 0
+
+
+# =============================================================================
+# Repair Workflow Schemas
+# =============================================================================
+
+class RepairStageCreate(BaseModel):
+    name: str
+    code: str
+    sequence: int
+    weight: int = 10
+    is_mandatory: bool = True
+
+
+class RepairStageUpdate(BaseModel):
+    name: Optional[str] = None
+    sequence: Optional[int] = None
+    weight: Optional[int] = None
+    is_active: Optional[bool] = None
+    is_mandatory: Optional[bool] = None
+
+
+class RepairRoleAssignment(BaseModel):
+    role_id: UUID
+    can_edit: bool = False
+    can_approve: bool = False
+    can_assign: bool = False
+
+
+class RepairTransitionUpsert(BaseModel):
+    from_stage_id: UUID
+    to_stage_id: Optional[UUID] = None   # None = terminal (end of workflow)
+    action: str                          # "approve" | "reject"
+
+
+class RepairWorkflowStartRequest(BaseModel):
+    equipment_id: UUID
+    source_failure_id: Optional[UUID] = None
+
+
+class RepairWorkflowResponse(BaseModel):
+    id: UUID
+    equipment_id: Optional[UUID] = None
+    current_stage_id: Optional[UUID] = None
+    status: str
+    progress: int
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RepairAdvanceRequest(BaseModel):
+    remarks: Optional[str] = None
+
+
+class RepairSaveDataRequest(BaseModel):
+    form_data: dict
+
+
+class RepairAssignRequest(BaseModel):
+    assign_to_user_id: UUID
+
+
+class RepairSubmitRequest(BaseModel):
+    remarks: Optional[str] = None
+
+
+class RepairCancelRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class RepairStageDefResponse(BaseModel):
+    id: UUID
+    name: str
+    code: str
+    sequence: int
+    weight: int
+    is_active: bool
+    is_mandatory: bool
+    template_id: Optional[UUID] = None
+    roles: List[dict] = []
+    transitions: List[dict] = []
+
+    class Config:
+        from_attributes = True
+
+
+# Backward-compat alias (old router used RepairWorkflowCreate)
+RepairWorkflowCreate = RepairWorkflowStartRequest

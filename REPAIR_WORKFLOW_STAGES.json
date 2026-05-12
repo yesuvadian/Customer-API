@@ -1,0 +1,12 @@
+[
+    {"name": "Failure Reporting", "sequence": 1},
+    {"name": "Committee Review", "sequence": 2},
+    {"name": "Vendor Assignment", "sequence": 3},
+    {"name": "Lifting", "sequence": 4},
+    {"name": "Joint Inspection", "sequence": 5},
+    {"name": "Estimate & Work Award", "sequence": 6},
+    {"name": "Repair QA", "sequence": 7},
+    {"name": "Final Inspection", "sequence": 8},
+    {"name": "Dispatch", "sequence": 9},
+    {"name": "Commissioning", "sequence": 10}
+]

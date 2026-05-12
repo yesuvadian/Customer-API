@@ -4,7 +4,17 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from models import Recommendation, RecommendationType, TestingRequest, TestingRequestStatus, TestResult, User
+from datetime import datetime, timezone
+
+from models import (
+    Recommendation,
+    RecommendationType,
+    RequestCategory,
+    TestingRequest,
+    TestingRequestStatus,
+    TestResult,
+    User,
+)
 from utils.common_service import UTCDateTimeMixin
 
 
@@ -128,6 +138,7 @@ class ApprovalService:
                 "description": request.description,
                 "status": request.status.value if request.status else None,
                 "priority": request.priority,
+                "request_category": request.request_category.value if request.request_category else None,
                 "equipment_type_name": request.equipment_type.name if request.equipment_type else None,
                 "test_type_name": request.test_type.name if request.test_type else None,
                 "transformer_rating": request.transformer_rating,
@@ -138,6 +149,9 @@ class ApprovalService:
                 "department_name": request.department.name if request.department else None,
                 "originator_name": _user_name(request.originator_id),
                 "assigned_tester_name": _user_name(request.assigned_tester_id),
+                # Schedule fields — used by approver to pre-fill schedule confirmation dialog
+                "scheduled_start_date": request.scheduled_start_date.isoformat() if request.scheduled_start_date else None,
+                "due_date": request.due_date.isoformat() if request.due_date else None,
             }
 
         # Build field-label map from OrgTestTemplate (DB-first, then static fallback)
@@ -187,6 +201,8 @@ class ApprovalService:
             "recommendation_type": rec.recommendation_type.value if rec.recommendation_type else None,
             "summary": rec.summary,
             "detailed_notes": rec.detailed_notes,
+            "next_action": rec.next_action.value if rec.next_action else None,
+            "schedule_frequency": rec.schedule_frequency.value if rec.schedule_frequency else None,
             "approval_status": rec.approval_status,
             "approved_by": str(rec.approved_by) if rec.approved_by else None,
             "approved_at": rec.approved_at.isoformat() if rec.approved_at else None,
@@ -202,8 +218,14 @@ class ApprovalService:
         }
 
     def approve_recommendation(
-        self, recommendation_id: UUID, approver_id: UUID, notes: Optional[str] = None
-    ) -> Recommendation:
+        self,
+        recommendation_id: UUID,
+        approver_id: UUID,
+        notes: Optional[str] = None,
+        schedule_start_date: Optional[str] = None,
+        schedule_end_date:   Optional[str] = None,
+        schedule_frequency:  Optional[str] = None,
+    ) -> dict:
         rec = self.db.query(Recommendation).filter(Recommendation.id == recommendation_id).first()
         if not rec:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found")
@@ -219,16 +241,32 @@ class ApprovalService:
         rec.approval_notes = notes
         rec.modified_by = approver_id
 
-        # Update testing request status
         request = self.db.query(TestingRequest).filter(TestingRequest.id == rec.testing_request_id).first()
         if request:
-            request.status = TestingRequestStatus.approved
             request.modified_by = approver_id
+
+        # ── Apply approver schedule overrides (for Maintenance/Inspection/Repair) ──
+        if schedule_start_date or schedule_end_date or schedule_frequency:
+            from datetime import datetime, timezone as _tz
+            from models import ScheduleFrequency
+            if request and schedule_start_date:
+                request.scheduled_start_date = datetime.fromisoformat(
+                    schedule_start_date.replace('Z', '+00:00')
+                )
+            if request and schedule_end_date:
+                request.due_date = datetime.fromisoformat(
+                    schedule_end_date.replace('Z', '+00:00')
+                )
+            if schedule_frequency:
+                try:
+                    rec.schedule_frequency = ScheduleFrequency(schedule_frequency)
+                except ValueError:
+                    pass   # keep tester's original if value is unrecognised
 
         self.db.commit()
         self.db.refresh(rec)
 
-        # ── Notification: recommendation approved → notify procurement ─────────
+        # ── Notification ──────────────────────────────────────────────────────
         if request:
             try:
                 from services.notification_service import NotificationService
@@ -236,7 +274,112 @@ class ApprovalService:
             except Exception as _n:
                 print(f"[WARN] recommendation_approved notification failed: {_n}")
 
-        return rec
+        # ── next_action dispatch (new flow) ───────────────────────────────────
+        dispatch_result = {}
+        if request and rec.next_action is not None:
+            try:
+                from services.workflow_dispatch_service import WorkflowDispatchService
+                dispatch_result = WorkflowDispatchService(self.db).dispatch(request, rec, approver_id)
+            except Exception as _d:
+                print(f"[WARN] next_action dispatch failed: {_d}")
+
+        return {
+            "id": str(rec.id),
+            "testing_request_id": str(rec.testing_request_id),
+            "recommendation_type": rec.recommendation_type.value if rec.recommendation_type else None,
+            "next_action": rec.next_action.value if rec.next_action else None,
+            "schedule_frequency": rec.schedule_frequency.value if rec.schedule_frequency else None,
+            "approval_status": rec.approval_status,
+            "approved_by": str(rec.approved_by) if rec.approved_by else None,
+            "approved_at": rec.approved_at.isoformat() if rec.approved_at else None,
+            "approval_notes": rec.approval_notes,
+            **dispatch_result,
+        }
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _generate_tr_number(self, prefix: str) -> str:
+        """Generate a sequential request number like RL-20260501-0001."""
+        from sqlalchemy import func
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        count = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.request_number.like(f"{prefix}-{today}-%"))
+            .scalar()
+        )
+        return f"{prefix}-{today}-{(count + 1):04d}"
+
+    def _create_repair_tr(
+        self,
+        source_request: TestingRequest,
+        td: dict,
+        approver_id: UUID,
+    ) -> str:
+        """
+        Auto-create a repair_lifecycle TestingRequest linked to an approved FR-,
+        and trigger the 10-stage RepairWorkflow for the equipment.
+        """
+        now = datetime.now(timezone.utc)
+        rn = self._generate_tr_number("RL")
+
+        failure_category = td.get("failure_category", "")
+        failure_date = td.get("failure_date", "")
+        fr_title = source_request.title or source_request.request_number
+
+        # ── RL- ticket (traceability / audit record) ──────────────────────────
+        repair_tr = TestingRequest(
+            request_number=rn,
+            title=f"[Repair] {fr_title}",
+            description=(
+                f"Auto-created from Failure Registry approval.\n"
+                f"Source FR: {source_request.request_number}\n"
+                f"Failure Category: {failure_category}\n"
+                f"Failure Date: {failure_date}"
+            ),
+            request_category=RequestCategory.repair_lifecycle,
+            equipment_id=source_request.equipment_id,
+            organization_id=source_request.organization_id,
+            department_id=source_request.department_id,
+            priority=source_request.priority or "normal",
+            status=TestingRequestStatus.submitted,
+            is_direct_submission=False,
+            source_failure_id=source_request.id,     # traceability FK
+            originator_id=source_request.originator_id,
+            created_by=approver_id,
+            requested_date=now,
+        )
+        self.db.add(repair_tr)
+        self.db.commit()
+        self.db.refresh(repair_tr)
+
+        # ── Trigger the 10-stage repair workflow ──────────────────────────────
+        if source_request.equipment_id:
+            try:
+                from services.repair_workflow_service import RepairWorkflowService
+                from models import RepairWorkflow
+
+                svc = RepairWorkflowService(self.db)
+                workflow_dict = svc.start_workflow(
+                    equipment_id=source_request.equipment_id,
+                    user_id=approver_id,
+                )
+                # Link FR → Workflow for traceability
+                wf = self.db.query(RepairWorkflow).filter(
+                    RepairWorkflow.id == UUID(workflow_dict["id"])
+                ).first()
+                if wf:
+                    wf.source_failure_id = source_request.id
+                    self.db.commit()
+
+                print(
+                    f"[INFO] Repair workflow {workflow_dict['id']} started "
+                    f"for equipment {source_request.equipment_id} (FR: {source_request.request_number})"
+                )
+            except Exception as e:
+                # Workflow trigger failure must NOT break the approval transaction
+                print(f"[WARN] Repair workflow auto-start failed: {e}")
+
+        return repair_tr.request_number
 
     def get_approval_stats(self, approver_id: UUID = None) -> dict:
         """Return approval counts: pending, approved, rejected, total_reviewed."""
@@ -302,13 +445,44 @@ class ApprovalService:
         rec.approval_notes = notes
         rec.modified_by = approver_id
 
-        # Update testing request status
+        # Move TR to under_review so tester can revise and resubmit
         request = self.db.query(TestingRequest).filter(TestingRequest.id == rec.testing_request_id).first()
         if request:
-            request.status = TestingRequestStatus.rejected
+            request.status = TestingRequestStatus.under_review
             request.rejection_reason = notes
             request.modified_by = approver_id
 
         self.db.commit()
         self.db.refresh(rec)
+
+        # Notify the submitter of rejection
+        if request:
+            try:
+                from services.notification_service import NotificationService
+                ns = NotificationService(self.db)
+                if request.request_category == RequestCategory.failure_registry:
+                    submitter = self.db.query(User).filter(
+                        User.id == request.originator_id
+                    ).first() if request.originator_id else None
+                    if submitter:
+                        ns.fire(
+                            event_type="fr_rejected",
+                            context={
+                                "fr_number": request.request_number,
+                                "reason": notes or "No reason provided",
+                            },
+                            organization_id=request.organization_id,
+                            source_id=request.id,
+                            source_type="testing_request",
+                            severity="alert",
+                            extra_recipients=[submitter],
+                            workflow_type="failure_registry",
+                            test_type="failure_registry",
+                        )
+                else:
+                    # Standard TR rejection — notify the assigned tester to revise
+                    ns.notify_recommendation_rejected(request, rec)
+            except Exception as _n:
+                print(f"[WARN] recommendation_rejected notification failed: {_n}")
+
         return rec

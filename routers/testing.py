@@ -166,8 +166,27 @@ def approve_test_results(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Approve submitted test results — delegates to the approval/recommendation workflow."""
+    """Approve submitted test results — delegates to the approval/recommendation workflow.
+    Blocked for: originator of the request, assigned tester."""
     from services.approval_service import ApprovalService
+
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+
+    # Prevent originator from approving their own request
+    if req.originator_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="The originator of a request cannot approve its results. An independent reviewer must approve.",
+        )
+    # Prevent assigned tester from approving results they submitted
+    if req.assigned_tester_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="The assigned tester cannot approve the results they submitted.",
+        )
+
     rec = (
         db.query(Recommendation)
         .filter(Recommendation.testing_request_id == request_id)
@@ -181,8 +200,7 @@ def approve_test_results(
         approver_id=current_user.id,
         notes=body.get("comment"),
     )
-    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
-    return _enrich(req)
+    return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
 
 
 @router.put("/{request_id}/reject_results", response_model=TestingRequestResponse)
@@ -192,8 +210,26 @@ def reject_test_results(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Reject submitted test results — delegates to the approval/recommendation workflow."""
+    """Reject submitted test results — delegates to the approval/recommendation workflow.
+    Blocked for: originator of the request, assigned tester."""
     from services.approval_service import ApprovalService
+
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+
+    # Prevent originator from rejecting/approving their own request
+    if req.originator_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="The originator of a request cannot reject its results.",
+        )
+    if req.assigned_tester_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="The assigned tester cannot reject the results they submitted.",
+        )
+
     rec = (
         db.query(Recommendation)
         .filter(Recommendation.testing_request_id == request_id)
@@ -210,8 +246,7 @@ def reject_test_results(
         approver_id=current_user.id,
         notes=comment,
     )
-    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
-    return _enrich(req)
+    return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
 
 
 @router.put("/{request_id}/submit_results", response_model=TestingRequestResponse)
@@ -221,6 +256,119 @@ def submit_test_results(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # ── Map display-value labels (from dynamic form) to API enum strings ──────
+    _ACTION_MAP = {
+        "none":             "none",
+        "test":             "test",           # follow-up test from FR outcome
+        "maintenance":      "maintenance",
+        "inspection":       "inspection",
+        "repair":           "repair_cycle",   # new shorter label
+        "repair lifecycle": "repair_cycle",   # backward compat with old label
+        "procurement":      "replacement",
+    }
+    _FREQ_MAP = {
+        "monthly":   "monthly",
+        "quarterly": "quarterly",
+        "bi-annual": "semi_annual",
+        "yearly":    "yearly",
+    }
+    _REC_MAP = {
+        "pass":        "pass",
+        "fail":        "fail",
+        "conditional": "conditional",
+        "retest":      "retest",
+    }
+
+    # ── Extract outcome fields from the latest test result's test_data ────────
+    # These are submitted via the dynamic overall_assessment form fields
+    # (next_action, recommendation_type, outcome_start_date, outcome_due_date, …).
+    from models import TestResult as _TR
+    from datetime import datetime as _dt
+
+    latest = (
+        db.query(_TR)
+        .filter(_TR.testing_request_id == request_id)
+        .order_by(_TR.cts.desc())
+        .first()
+    )
+    td: dict = (latest.test_data or {}) if latest else {}
+
+    def _from_td(key: str, mapping: dict) -> Optional[str]:
+        raw = (td.get(key) or "").strip().lower()
+        return mapping.get(raw) if raw else None
+
+    if body is None:
+        from schemas import SubmitTestResultsBody as _Body
+        body = _Body()
+
+    # Merge test_data values — body fields take precedence if already set
+    body.next_action         = body.next_action         or _from_td("next_action",         _ACTION_MAP)
+    body.recommendation_type = body.recommendation_type or _from_td("recommendation_type", _REC_MAP)
+    body.summary             = body.summary             or (td.get("outcome_summary") or "").strip() or None
+    body.detailed_notes      = body.detailed_notes      or (td.get("outcome_notes")   or "").strip() or None
+
+    # schedule_frequency: prefer explicit body value → schedule_frequency field →
+    # outcome_frequency stored by the outcome_schedule picker widget
+    body.schedule_frequency = (
+        body.schedule_frequency
+        or _from_td("schedule_frequency", _FREQ_MAP)
+        or _from_td("outcome_frequency",  _FREQ_MAP)
+    )
+
+    # Parse and store outcome dates on the TestingRequest so the dispatch
+    # service can pick them up via tr.scheduled_start_date / tr.due_date.
+    # outcome_start_date is set by the outcome_schedule picker widget.
+    outcome_start_raw = td.get("outcome_start_date")
+    outcome_due_raw   = td.get("outcome_due_date") or td.get("outcome_end_date")
+
+    def _parse_date(raw) -> Optional[_dt]:
+        if not raw:
+            return None
+        try:
+            return _dt.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    outcome_start = _parse_date(outcome_start_raw)
+    outcome_due   = _parse_date(outcome_due_raw)
+
+    if outcome_start or outcome_due:
+        tr_for_dates = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+        if tr_for_dates:
+            if outcome_start:
+                tr_for_dates.scheduled_start_date = outcome_start
+            if outcome_due:
+                tr_for_dates.due_date = outcome_due
+            tr_for_dates.modified_by = current_user.id
+            db.commit()
+
+    # ── Validate: Procurement requires at least one replacement product ──────
+    if body.next_action == "replacement" and not body.replacement_products:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one replacement product is required when next_action is 'replacement' (Procurement).",
+        )
+
+    # ── If recommendation fields are available, create/update recommendation ──
+    if body.recommendation_type and body.summary:
+        from services.recommendation_service import RecommendationService
+        rec_svc = RecommendationService(db)
+        rec_svc.create_recommendation(
+            testing_request_id=request_id,
+            recommendation_type=body.recommendation_type,
+            summary=body.summary,
+            submitted_by=current_user.id,
+            detailed_notes=body.detailed_notes,
+            next_action=body.next_action,
+            schedule_frequency=body.schedule_frequency,
+            replacement_products=body.replacement_products,
+        )
+        req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+        if not req:
+            raise HTTPException(status_code=404, detail="Testing request not found")
+        return _enrich(req)
+
+    # ── Legacy path: auto-derive recommendation from test result data ─────────
     service = TestingService(db)
     req = service.submit_test_results(
         request_id,
@@ -228,6 +376,113 @@ def submit_test_results(
         replacement_products=body.replacement_products if body else None,
     )
     return _enrich(req)
+
+
+@router.put("/{request_id}/decline")
+def decline_assignment(
+    request_id: UUID,
+    body: Optional[dict] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Tester declines an assigned testing request.
+    - Status must be 'accepted' or 'in_progress'
+    - Only the assigned tester can decline
+    - Sets status back to 'submitted', clears assigned_tester_id
+    - Notifies Test Assigner role
+    """
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+    if req.assigned_tester_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the assigned tester can decline this request")
+    if req.status not in [TestingRequestStatus.accepted, TestingRequestStatus.in_progress]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot decline a request in status '{req.status.value}'"
+        )
+
+    reason = (body or {}).get("reason", "No reason provided")
+    req.status = TestingRequestStatus.submitted
+    req.assigned_tester_id = None
+    req.rejection_reason = reason
+    req.modified_by = current_user.id
+    db.commit()
+
+    try:
+        from services.notification_service import NotificationService
+        NotificationService(db).fire(
+            event_type="tester_declined",
+            context={
+                "request_number": req.request_number,
+                "tester_name": f"{current_user.firstname or ''} {current_user.lastname or ''}".strip() or current_user.email,
+                "reason": reason,
+            },
+            organization_id=req.organization_id,
+            source_id=req.id,
+            source_type="testing_request",
+            severity="alert",
+        )
+    except Exception as _n:
+        print(f"[WARN] tester_declined notification failed: {_n}")
+
+    return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
+
+
+@router.put("/{request_id}/resubmit")
+def resubmit_for_review(
+    request_id: UUID,
+    body: Optional[dict] = Body(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Tester resubmits after Tech Approver rejection (under_review → accepted).
+
+    Used in the TAQC workflow when the Tech Approver rejects the E&C form data
+    and sends it back for revision. The tester corrects the form and calls this
+    endpoint to re-enter the under_approval queue.
+
+    - Status must be 'under_review'
+    - Only the assigned tester can resubmit
+    - Moves status back to 'accepted' so tester can update structured results
+      and call submit_results again
+    """
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+    if req.assigned_tester_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the assigned tester can resubmit this request")
+    if req.status != TestingRequestStatus.under_review:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only resubmit from 'under_review' status, currently '{req.status.value}'"
+        )
+
+    notes = (body or {}).get("notes", "")
+    req.status = TestingRequestStatus.accepted
+    req.modified_by = current_user.id
+    db.commit()
+
+    try:
+        from services.notification_service import NotificationService
+        NotificationService(db).fire(
+            event_type="tester_resubmitted",
+            context={
+                "request_number": req.request_number,
+                "tester_name": f"{current_user.firstname or ''} {current_user.lastname or ''}".strip() or current_user.email,
+                "notes": notes,
+            },
+            organization_id=req.organization_id,
+            source_id=req.id,
+            source_type="testing_request",
+            severity="info",
+        )
+    except Exception as _n:
+        print(f"[WARN] tester_resubmitted notification failed: {_n}")
+
+    return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
 
 
 # ─── Template & Structured Results ──────────────────────────
@@ -631,6 +886,158 @@ def preview_test_result(
 
             fields_html += '</div>'
 
+    # ── Session data section (multi-session testing) ─────────────────────────
+    from models import TestSession as _TestSession, TestSessionReading as _TestSessionReading
+    from sqlalchemy.orm import joinedload as _jl
+
+    _sessions = (
+        db.query(_TestSession)
+        .options(_jl(_TestSession.readings))
+        .filter(_TestSession.testing_request_id == result.testing_request_id)
+        .order_by(_TestSession.session_number)
+        .all()
+    )
+
+    SESSION_STATUS_COLORS = {
+        "completed":  "#4CAF50",
+        "in_progress": "#FF9800",
+        "skipped":    "#F44336",
+        "scheduled":  "#9E9E9E",
+    }
+    RESULT_STATUS_COLORS = {
+        "pass":        "#4CAF50",
+        "fail":        "#F44336",
+        "conditional": "#FF9800",
+        "warning":     "#FFC107",
+    }
+
+    def _fmt_dt(dt):
+        return dt.strftime("%d/%m/%Y %H:%M") if dt else "-"
+
+    sessions_html = ""
+    if _sessions:
+        # ── Part 1: Session Summary table ─────────────────────────────────────
+
+        def _dur(sess):
+            if sess.started_at and sess.completed_at:
+                mins = int((sess.completed_at - sess.started_at).total_seconds() / 60)
+                return f"{mins//60}h {mins%60}m" if mins >= 60 else f"{mins}m"
+            return "-"
+
+        sessions_html += '<div class="section"><h3>Session Data</h3>'
+        sessions_html += '<h4 style="color:#2a5298;margin-bottom:8px">Session Summary</h4>'
+        sessions_html += '''<table class="data-table">
+          <thead><tr>
+            <th>#</th><th>Session Name</th><th>Date</th>
+            <th>Readings</th><th>Duration</th><th>Status</th>
+          </tr></thead><tbody>'''
+        for s in _sessions:
+            s_status = (s.status or "scheduled").lower()
+            s_color  = SESSION_STATUS_COLORS.get(s_status, "#9E9E9E")
+            r_count  = len(s.readings or [])
+            sessions_html += f'''<tr>
+              <td style="text-align:center">{s.session_number}</td>
+              <td>{s.session_name or f"Session {s.session_number}"}</td>
+              <td style="text-align:center">{_fmt_dt(s.session_date)[:10]}</td>
+              <td style="text-align:center">{r_count}</td>
+              <td style="text-align:center">{_dur(s)}</td>
+              <td style="text-align:center">
+                <span style="background:{s_color};color:#fff;padding:3px 10px;
+                  border-radius:10px;font-size:11px;font-weight:700">
+                  {s_status.upper()}
+                </span>
+              </td>
+            </tr>'''
+        sessions_html += "</tbody></table>"
+
+        # ── Part 2: Merged-cell Readings table ─────────────────────────────────
+        # Session / Day column uses HTML rowspan so the session label appears
+        # once on the left, spanning all readings of that session.
+        # Columns = template measurement fields (same across all sessions)
+
+        _all_keys: list = []
+        for s in _sessions:
+            for _r in sorted(s.readings or [], key=lambda r: r.reading_number):
+                for _k in (_r.reading_data or {}).keys():
+                    if _k not in _all_keys:
+                        _all_keys.append(_k)
+
+        _has_readings = any(s.readings for s in _sessions)
+        if _has_readings:
+            _readable   = [" ".join(w.capitalize() for w in k.split("_")) for k in _all_keys]
+            _total_r    = sum(len(s.readings or []) for s in _sessions)
+
+            # Alternating session colours (bg for session-cell vs row cells)
+            _CELL_STYLES = [
+                ("background:#C8D9F5", "background:#EEF4FF"),   # blue tones
+                ("background:#C8EDD5", "background:#F4FFF4"),   # green tones
+            ]
+
+            sessions_html += (
+                f'<h4 style="color:#2a5298;margin:20px 0 8px">'
+                f'Detailed Readings ({_total_r} readings across {len(_sessions)} sessions)</h4>'
+            )
+            sessions_html += '<table class="data-table"><thead><tr>'
+            for _h in ["Session / Day", "R#"] + _readable + ["Result", "Remarks"]:
+                sessions_html += f"<th>{_h}</th>"
+            sessions_html += "</tr></thead><tbody>"
+
+            for _s_idx, s in enumerate(_sessions):
+                _readings = sorted(s.readings or [], key=lambda r: r.reading_number)
+                if not _readings:
+                    continue
+                _n = len(_readings)
+                _cell_bg, _row_bg = _CELL_STYLES[_s_idx % 2]
+                _date_str   = _fmt_dt(s.session_date)[:10]
+                _name_label = s.session_name or f"Session {s.session_number}"
+
+                # Thick top border between sessions (except first)
+                _sep_style = (
+                    'border-top:2px solid #1E3C72;'
+                    if _s_idx > 0 else ''
+                )
+
+                for _r_idx, _r in enumerate(_readings):
+                    _rs = (_r.result_status or "").lower()
+                    _rc = RESULT_STATUS_COLORS.get(_rs, "#9E9E9E")
+
+                    sessions_html += f"<tr style='{_row_bg};{_sep_style if _r_idx == 0 else ''}'>"
+
+                    # Session / Day cell — only emitted for first reading; uses rowspan
+                    if _r_idx == 0:
+                        sessions_html += (
+                            f"<td rowspan='{_n}' style='{_cell_bg};{_sep_style}"
+                            f"font-weight:700;text-align:center;vertical-align:middle;"
+                            f"border-right:2px solid #1E3C72;line-height:1.6;"
+                            f"border-top:2px solid #1E3C72 !important'>"
+                            f"Session {s.session_number}<br>"
+                            f"<small style='font-weight:400'>{_name_label}</small><br>"
+                            f"<small style='color:#555'>{_date_str}</small>"
+                            f"</td>"
+                        )
+
+                    # R#
+                    sessions_html += f"<td style='text-align:center'>{_r.reading_number}</td>"
+                    # Measurement columns
+                    for _k in _all_keys:
+                        sessions_html += f"<td style='text-align:center'>{(_r.reading_data or {}).get(_k, '-')}</td>"
+                    # Result badge
+                    sessions_html += (
+                        f"<td style='text-align:center'>"
+                        f"<span style='background:{_rc};color:#fff;padding:2px 8px;"
+                        f"border-radius:10px;font-size:11px;font-weight:600'>"
+                        f"{_rs.upper() or '-'}</span></td>"
+                    )
+                    # Remarks
+                    sessions_html += f"<td>{_r.remarks or '-'}</td>"
+                    sessions_html += "</tr>"
+
+            sessions_html += "</tbody></table>"
+
+        sessions_html += "</div>"
+
+    fields_html += sessions_html
+
     html_page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -777,6 +1184,41 @@ def preview_test_result(
             border-radius: 4px;
             overflow-x: auto;
             font-size: 12px;
+        }}
+        .session-card {{
+            margin-bottom: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }}
+        .session-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+        }}
+        .session-title {{
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+        }}
+        .session-badge {{
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }}
+        .session-meta {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            padding: 10px 16px;
+            background: #f8f9fa;
+            font-size: 12px;
+            color: #555;
+            border-bottom: 1px solid #e0e0e0;
         }}
         .preview-badge {{
             position: fixed;

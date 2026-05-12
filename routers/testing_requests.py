@@ -3,18 +3,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-
+from models import RepairWorkflow
 from auth_utils import get_current_user
 from database import get_db
-from models import User, CategoryMaster, CategoryDetails, Role, UserRole, TesterLocation, OrgDepartment, Organization
-from sqlalchemy import or_
+from models import User
 from schemas import (
     TestingRequestCreate,
     TestingRequestUpdate,
     TestingRequestAssign,
     TestingRequestResponse,
 )
-from services.testing_request_service import TestingRequestService
+from services.testing_request_service import TestingRequestService, get_dept_subtree_ids
 
 router = APIRouter(
     prefix="/testing_requests",
@@ -23,39 +22,102 @@ router = APIRouter(
 )
 
 
-def _user_role_names(db: Session, user_id) -> set:
-    """Return set of role names for a user."""
-    roles = (
-        db.query(Role.name)
-        .join(UserRole, UserRole.role_id == Role.id)
-        .filter(UserRole.user_id == user_id)
-        .all()
-    )
-    return {r[0] for r in roles}
-
-
 def _enrich(req):
     """Attach computed display names to ORM object."""
-    req.equipment_type_name = req.equipment_type.name if req.equipment_type else None
-    req.test_type_name = req.test_type.name if req.test_type else None
-    req.department_name = req.department.name if req.department else None
+
+    req.equipment_type_name = (
+        req.equipment_type.name
+        if req.equipment_type
+        else None
+    )
+
+    req.test_type_name = (
+        req.test_type.name
+        if req.test_type
+        else None
+    )
+
+    req.department_name = (
+        req.department.name
+        if req.department
+        else None
+    )
 
     # Equipment asset register fields
     if req.equipment:
         req.equipment_ueic = req.equipment.ueic
-        req.equipment_name = req.equipment.ueic  # Alias for Flutter UI
+        req.equipment_name = req.equipment.ueic
     else:
         req.equipment_ueic = None
         req.equipment_name = None
 
+    # Originator
     if req.originator:
-        req.originator_name = f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip() or req.originator.email
+        req.originator_name = (
+            f"{req.originator.firstname or ''} "
+            f"{req.originator.lastname or ''}"
+        ).strip() or req.originator.email
     else:
         req.originator_name = None
+
+    # Assigned tester
     if req.assigned_tester:
-        req.assigned_tester_name = f"{req.assigned_tester.firstname or ''} {req.assigned_tester.lastname or ''}".strip() or req.assigned_tester.email
+        req.assigned_tester_name = (
+            f"{req.assigned_tester.firstname or ''} "
+            f"{req.assigned_tester.lastname or ''}"
+        ).strip() or req.assigned_tester.email
     else:
         req.assigned_tester_name = None
+
+    # ─────────────────────────────────────────────
+    # Repair Workflow Enrichment
+    # ─────────────────────────────────────────────
+
+    req.repair_workflow_id = None
+    req.repair_current_stage = None
+    req.repair_status = None
+    req.repair_progress = None
+
+    try:
+
+        next_action = getattr(
+            req,
+            "next_action",
+            None,
+        )
+
+        if next_action and str(next_action) == "repair_cycle":
+
+            workflow = (
+                req._sa_instance_state.session
+                .query(RepairWorkflow)
+                .filter(
+                    RepairWorkflow.source_failure_id
+                    == req.id
+                )
+                .first()
+            )
+
+            if workflow:
+
+                req.repair_workflow_id = str(
+                    workflow.id
+                )
+
+                req.repair_status = workflow.status
+
+                req.repair_progress = (
+                    workflow.progress
+                )
+
+                if workflow.current_stage:
+                    req.repair_current_stage = (
+                        workflow.current_stage.name
+                    )
+
+    except Exception:
+        pass
+
     return req
 
 
@@ -64,133 +126,48 @@ def _enrich(req):
 def get_department_hierarchy(
     org_id: Optional[UUID] = None,
     parent_id: Optional[UUID] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
+    """Returns department hierarchy for location selection.
+
+    - Get all organizations:           /department_hierarchy
+    - Get root depts for an org:       /department_hierarchy?org_id=<uuid>
+    - Get children of a department:    /department_hierarchy?org_id=<uuid>&parent_id=<uuid>
     """
-    Returns department hierarchy for location selection.
-    Can be filtered by organization_id and parent_department_id.
-
-    Use cases:
-    - Get all organizations: /department_hierarchy
-    - Get root departments for an org: /department_hierarchy?org_id=<uuid>
-    - Get children of a department: /department_hierarchy?org_id=<uuid>&parent_id=<uuid>
-    """
-    if org_id is None:
-        # Return list of organizations
-        orgs = db.query(Organization).filter(Organization.is_active == True).order_by(Organization.name).all()
-        return [{
-            "id": str(org.id),
-            "name": org.name,
-            "code": org.code,
-            "type": "organization"
-        } for org in orgs]
-
-    # Return departments for the organization
-    query = db.query(OrgDepartment).filter(
-        OrgDepartment.organization_id == org_id,
-        OrgDepartment.is_active == True
-    )
-
-    if parent_id is None:
-        # Root level departments (no parent)
-        query = query.filter(OrgDepartment.parent_department_id == None)
-    else:
-        # Children of specified parent
-        query = query.filter(OrgDepartment.parent_department_id == parent_id)
-
-    departments = query.order_by(OrgDepartment.name).all()
-
-    return [{
-        "id": str(dept.id),
-        "name": dept.name,
-        "code": dept.code,
-        "parent_department_id": str(dept.parent_department_id) if dept.parent_department_id else None,
-        "has_children": db.query(OrgDepartment).filter(
-            OrgDepartment.parent_department_id == dept.id,
-            OrgDepartment.is_active == True
-        ).count() > 0,
-        "type": "department"
-    } for dept in departments]
+    return TestingRequestService(db).get_department_hierarchy(org_id, parent_id)
 
 
 # ─── Equipment Types (for form dropdowns) ───────────────────
 @router.get("/equipment_types")
 def list_equipment_types(db: Session = Depends(get_db)):
+    """Returns equipment types grouped by request category."""
+    return TestingRequestService(db).list_equipment_types()
+
+
+# ─── Lifecycle Types (calibration + cumulative, separate masters) ────────────
+@router.get("/lifecycle-types")
+def list_lifecycle_types(db: Session = Depends(get_db)):
+    """Returns calibration and cumulative test types from their dedicated masters.
+
+    Response:
+      {
+        "calibration": [{"id", "name", "enable_calibration": true, ...}],
+        "cumulative":  [{"id", "name", "enable_cumulative":  true, ...}]
+      }
+
+    Flutter uses this to reload the test-type dropdown when a lifecycle flag
+    is detected on a selected test type.
     """
-    Returns equipment types (CategoryMaster where description='Testing Equipment')
-    with their types grouped by request category (test, maintenance, inspection, repair_lifecycle).
-    Per SRS: All categories need type dropdowns with multiple options.
-    """
-    masters = (
-        db.query(CategoryMaster)
-        .filter(CategoryMaster.description == "Testing Equipment", CategoryMaster.is_active == True)
-        .order_by(CategoryMaster.name)
-        .all()
-    )
-    result = []
-    for m in masters:
-        # Get all types for this equipment
-        all_types = (
-            db.query(CategoryDetails)
-            .filter(CategoryDetails.category_master_id == m.id, CategoryDetails.is_active == True)
-            .order_by(CategoryDetails.name)
-            .all()
-        )
-
-        # Group types by category using category_type column
-        types_by_category = {
-            "test": [],
-            "maintenance": [],
-            "inspection": [],
-            "repair_lifecycle": []
-        }
-
-        for t in all_types:
-            category = t.category_type or "test"  # Default to test if not set
-            if category in types_by_category:
-                types_by_category[category].append({
-                    "id": t.id,
-                    "name": t.name,
-                    "category_type": t.category_type
-                })
-            else:
-                # Fallback to test for unknown categories
-                types_by_category["test"].append({
-                    "id": t.id,
-                    "name": t.name,
-                    "category_type": t.category_type
-                })
-
-        result.append({
-            "id": m.id,
-            "name": m.name,
-            "tests": types_by_category["test"],  # Legacy field for backward compatibility
-            "types_by_category": types_by_category,  # New field with all categories
-        })
-    return result
+    return TestingRequestService(db).list_lifecycle_types()
 
 
 # ─── Generic dropdown by master description ─────────────
 @router.get("/dropdown/{master_desc}")
 def get_dropdown_values(master_desc: str, db: Session = Depends(get_db)):
-    """
-    Returns CategoryDetails for a CategoryMaster identified by description.
+    """Returns CategoryDetails for a CategoryMaster identified by description.
     E.g. /dropdown/Testing Priority → [{id, name}, ...]
     """
-    master = (
-        db.query(CategoryMaster)
-        .filter(CategoryMaster.description == master_desc, CategoryMaster.is_active == True)
-        .first()
-    )
-    if not master:
-        return []
-    details = (
-        db.query(CategoryDetails)
-        .filter(CategoryDetails.category_master_id == master.id, CategoryDetails.is_active == True)
-        .order_by(CategoryDetails.id)
-        .all()
-    )
-    return [{"id": d.id, "name": d.name} for d in details]
+    return TestingRequestService(db).get_dropdown_values(master_desc)
 
 
 # ─── List testers (users with Tester role, optionally filtered by location) ───
@@ -202,69 +179,10 @@ def list_testers(
     ee_subdivision: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """Returns active users with the 'Tester' role.
-    Optionally filters by location via the tester_locations mapping table."""
-    tester_role = db.query(Role).filter(Role.name == "Tester").first()
-    if not tester_role:
-        return []
-
-    # Check if any location filter is provided
-    has_location_filter = any([zone, ce_circle, se_division, ee_subdivision])
-
-    if has_location_filter:
-        query = (
-            db.query(User, TesterLocation)
-            .join(UserRole, UserRole.user_id == User.id)
-            .join(TesterLocation, TesterLocation.user_id == User.id)
-            .filter(UserRole.role_id == tester_role.id, User.isactive == True,
-                    TesterLocation.is_active == True)
-        )
-        if zone:
-            query = query.filter(TesterLocation.zone == zone)
-        if ce_circle:
-            query = query.filter(TesterLocation.ce_circle == ce_circle)
-        if se_division:
-            query = query.filter(TesterLocation.se_division == se_division)
-        if ee_subdivision:
-            query = query.filter(TesterLocation.ee_subdivision == ee_subdivision)
-
-        results = query.order_by(User.firstname).all()
-        return [
-            {
-                "id": str(u.id),
-                "name": f"{u.firstname} {u.lastname}".strip(),
-                "email": u.email,
-                "zone": tl.zone,
-                "ce_circle": tl.ce_circle,
-                "se_division": tl.se_division,
-                "ee_subdivision": tl.ee_subdivision,
-            }
-            for u, tl in results
-        ]
-    else:
-        testers = (
-            db.query(User)
-            .join(UserRole, UserRole.user_id == User.id)
-            .filter(UserRole.role_id == tester_role.id, User.isactive == True)
-            .order_by(User.firstname)
-            .all()
-        )
-        # Attach location info if available
-        result = []
-        for t in testers:
-            loc = db.query(TesterLocation).filter(
-                TesterLocation.user_id == t.id, TesterLocation.is_active == True
-            ).first()
-            result.append({
-                "id": str(t.id),
-                "name": f"{t.firstname} {t.lastname}".strip(),
-                "email": t.email,
-                "zone": loc.zone if loc else None,
-                "ce_circle": loc.ce_circle if loc else None,
-                "se_division": loc.se_division if loc else None,
-                "ee_subdivision": loc.ee_subdivision if loc else None,
-            })
-        return result
+    """Returns active users with the 'Tester' role, optionally filtered by location."""
+    return TestingRequestService(db).list_testers(
+        zone=zone, ce_circle=ce_circle, se_division=se_division, ee_subdivision=ee_subdivision
+    )
 
 
 @router.get("/stats")
@@ -302,6 +220,8 @@ def list_request_categories():
         {"value": "maintenance",      "label": "Maintenance",      "icon": "build",          "description": "Preventive or corrective maintenance"},
         {"value": "inspection",       "label": "Inspection",       "icon": "search",         "description": "Visual or functional inspection"},
         {"value": "repair_lifecycle", "label": "Repair / Lifecycle","icon": "engineering",   "description": "Repair work or lifecycle assessment"},
+        {"value": "failure_registry", "label": "Failure Registry", "icon": "report_problem", "description": "Equipment failure registration and tracking"},
+        {"value": "taqc_inspection",  "label": "TA&QC Inspection", "icon": "verified",       "description": "Type approval and quality control inspection"},
     ]
 
 
@@ -313,13 +233,31 @@ def list_testing_requests(
     category: Optional[str] = None,
     originator_id: Optional[UUID] = None,
     tester_id: Optional[UUID] = None,
+    department_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Filter by organization if user belongs to one
     organization_id = current_user.organization_id
-
     service = TestingRequestService(db)
+
+    # Auto-apply department scope from the user's OrgUserRole unless:
+    #   (a) an explicit department_id filter was already passed, or
+    #   (b) the user holds an is_org_admin role (org-wide scope)
+    if department_id is None and organization_id:
+        is_admin, scoped_dept = service.get_user_scope(current_user.id, organization_id)
+        if not is_admin and scoped_dept:
+            department_id = scoped_dept
+
+    # Expand department_id to the full subtree (zone/circle users see all child depts).
+    # Leaf-level users see only their exact dept.
+    dept_ids = None
+    if department_id:
+        subtree = get_dept_subtree_ids(db, department_id)
+        if len(subtree) > 1:
+            # Parent dept — expand to include all children
+            dept_ids = subtree
+        # else: single leaf dept, use department_id directly (faster exact match)
+
     requests = service.get_requests(
         skip=skip,
         limit=limit,
@@ -328,6 +266,8 @@ def list_testing_requests(
         originator_id=originator_id,
         tester_id=tester_id,
         organization_id=organization_id,
+        department_id=department_id if dept_ids is None else None,
+        department_ids=dept_ids,
     )
     return [_enrich(r) for r in requests]
 

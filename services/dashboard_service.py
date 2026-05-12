@@ -21,16 +21,19 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
+from sqlalchemy import func, true
 from sqlalchemy.orm import Session
 
 from models import (
     Equipment, EquipmentStatus,
+    Module,
     ProcurementRequest,
     Recommendation,
     RequestCategory,
     TestingRequest, TestingRequestStatus,
     TestResult,
     OrgRole, OrgUserRole,
+    TestSession,
 )
 from services.redis_cache import RedisCacheService
 
@@ -38,11 +41,51 @@ logger = logging.getLogger(__name__)
 
 CACHE_TTL = 900  # 15 minutes
 
-# ── Role → view mapping ────────────────────────────────────────────────────
+# ── Dashboard view type resolution ────────────────────────────────────────
+# View type is driven ENTIRELY by OrgRole.default_module.path.
+# Flutter navigates to the same module path on login — dashboard service mirrors it.
+# No keyword matching on role names anywhere.
+#
+#   Module path        → Dashboard view type → Widget set
+#   admin_dashboard    → "admin"    → all widgets
+#   dashboard          → "admin"    → all widgets (legacy generic admin module)
+#   ee_tlss_dashboard  → "ee_tlss"  → EE TLSS widgets
+#   aee_dashboard      → "ee_tlss"  → AEE = field supervisor, same widget set
+#   see_dashboard      → "see_cee"  → SEE/CEE widgets
+#   cee_dashboard      → "see_cee"  → CEE widgets
+#   <anything else>    → "field"    → minimal field widgets
+#
+# To add a new dashboard type:
+#   1. Add a Module record with a new path in seed.py (seed_modules)
+#   2. Add an entry in MODULE_PATH_TO_VIEW below
+#   3. Add a widget set in _WIDGET_SETS in dashboard_kpi.py
+#   4. Add a typed GET route in dashboard_kpi.py
 
-EE_KEYWORDS      = ("ee tlss", "electrical engineer", "ee ", "tlss")
-SEE_CEE_KEYWORDS = ("see", "cee", "superintending", "chief electrical")
-ADMIN_KEYWORDS   = ("system admin", "org admin", "administrator")
+def resolve_user_org_id(db: Session, user_id: UUID) -> Optional[UUID]:
+    """Return the organisation_id from the user's first active OrgUserRole.
+
+    Called by the router _svc() helper so no DB access leaks into route handlers.
+    """
+    row = (
+        db.query(OrgUserRole)
+        .filter(OrgUserRole.user_id == user_id, OrgUserRole.is_active.is_(True))
+        .first()
+    )
+    if row:
+        role = db.query(OrgRole).filter(OrgRole.id == row.org_role_id).first()
+        if role:
+            return role.organization_id
+    return None
+
+
+MODULE_PATH_TO_VIEW: Dict[str, str] = {
+    "admin_dashboard":   "admin",
+    "dashboard":         "admin",
+    "ee_tlss_dashboard": "ee_tlss",
+    "aee_dashboard":     "ee_tlss",
+    "see_dashboard":     "see_cee",
+    "cee_dashboard":     "see_cee",
+}
 
 OPEN_STATUSES = (
     TestingRequestStatus.submitted,
@@ -51,23 +94,34 @@ OPEN_STATUSES = (
     TestingRequestStatus.in_progress,
     TestingRequestStatus.test_submitted,
     TestingRequestStatus.under_approval,
+    TestingRequestStatus.under_review,     # sent back to tester for revision
+    TestingRequestStatus.finance_pending,  # awaiting finance approval
 )
 CLOSED_STATUSES = (
     TestingRequestStatus.approved,
     TestingRequestStatus.rejected,
+    TestingRequestStatus.outcome_active,   # approved + downstream ticket created
+    TestingRequestStatus.commissioned,     # equipment commissioned (TAQC terminal)
 )
 
 
-def resolve_dashboard_view(role_names: List[str]) -> str:
-    """Return 'ee_tlss' | 'see_cee' | 'admin' | 'field'."""
-    combined = " ".join(r.lower() for r in role_names)
-    if any(k in combined for k in ADMIN_KEYWORDS):
-        return "admin"
-    if any(k in combined for k in SEE_CEE_KEYWORDS):
-        return "see_cee"
-    if any(k in combined for k in EE_KEYWORDS):
-        return "ee_tlss"
-    return "field"
+def resolve_dashboard_view(role_names: Optional[List[str]] = None, module_paths: Optional[List[str]] = None) -> str:
+    """Return 'admin' | 'see_cee' | 'ee_tlss' | 'field' | 'generic'.
+
+    View type is resolved EXCLUSIVELY from OrgRole.default_module.path via MODULE_PATH_TO_VIEW.
+    If the user holds multiple roles, the widest view wins (admin > see_cee > ee_tlss > field).
+    If no module path resolves to a known view → "field" (safe default).
+    No role-name keyword matching.
+    """
+    _priority = {"admin": 5, "see_cee": 4, "ee_tlss": 3, "field": 2, "generic": 1}
+
+    best = "field"
+    if module_paths:
+        for path in module_paths:
+            view = MODULE_PATH_TO_VIEW.get(path or "", "")
+            if view and _priority.get(view, 0) > _priority.get(best, 0):
+                best = view
+    return best
 
 
 def get_user_role_names(db: Session, user_id: UUID, org_id: Optional[UUID]) -> List[str]:
@@ -84,11 +138,33 @@ def get_user_role_names(db: Session, user_id: UUID, org_id: Optional[UUID]) -> L
     return [r[0] for r in q.all()]
 
 
+def get_user_module_paths(db: Session, user_id: UUID, org_id: Optional[UUID]) -> List[str]:
+    """Return the default_module.path for every active OrgRole the user holds.
+
+    This mirrors what Flutter uses on login to navigate to the correct dashboard.
+    """
+    q = (
+        db.query(Module.path)
+        .join(OrgRole, OrgRole.default_module_id == Module.id)
+        .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
+        .filter(
+            OrgUserRole.user_id == user_id,
+            OrgUserRole.is_active.is_(True),
+            OrgRole.default_module_id.isnot(None),
+            Module.is_active.is_(True),
+        )
+    )
+    if org_id:
+        q = q.filter(OrgRole.organization_id == org_id)
+    return [r[0] for r in q.all() if r[0]]
+
+
 # ── Cache helpers ──────────────────────────────────────────────────────────
 
-def _cache_key(org_id: Optional[UUID], widget: str) -> str:
+def _cache_key(org_id: Optional[UUID], widget: str = "", dept_id: Optional[UUID] = None) -> str:
     scope = str(org_id) if org_id else "global"
-    return f"dashboard::{scope}::{widget}"
+    dept  = str(dept_id) if dept_id else "all"
+    return f"dashboard::{scope}::dept_{dept}::{widget}"
 
 
 def _cached(key: str, compute_fn, ttl: int = CACHE_TTL) -> Any:
@@ -102,6 +178,7 @@ def _cached(key: str, compute_fn, ttl: int = CACHE_TTL) -> Any:
 
 def invalidate_dashboard_cache(org_id: Optional[UUID] = None) -> None:
     scope = str(org_id) if org_id else "global"
+    # Invalidate all cached keys for this org (including all dept sub-scopes)
     RedisCacheService.delete_pattern(f"dashboard::{scope}::*")
     RedisCacheService.delete_pattern("dashboard::global::*")
 
@@ -128,13 +205,24 @@ def _make_tz(dt: Optional[datetime]) -> Optional[datetime]:
 
 class DashboardService:
 
-    def __init__(self, db: Session, org_id: Optional[UUID] = None):
+    def __init__(
+        self,
+        db: Session,
+        org_id: Optional[UUID] = None,
+        dept_id: Optional[UUID] = None,
+    ):
         self.db = db
         self.org_id = org_id
+        # dept_id is optional: when None → show all departments (org-wide view)
+        # when provided → narrow results to that department only
+        self.dept_id = dept_id
 
     def _org_filter(self, q, model=TestingRequest):
+        """Apply org-level filter. When dept_id is also set, narrows to that dept."""
         if self.org_id:
-            return q.filter(model.organization_id == self.org_id)
+            q = q.filter(model.organization_id == self.org_id)
+        if self.dept_id and hasattr(model, "department_id"):
+            q = q.filter(model.department_id == self.dept_id)
         return q
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -142,7 +230,7 @@ class DashboardService:
     # ══════════════════════════════════════════════════════════════════════════
 
     def all_kpi_cards(self) -> List[Dict]:
-        key = _cache_key(self.org_id, "kpi_cards")
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="kpi_cards")
         return _cached(key, self._compute_all_kpis)
 
     def _compute_all_kpis(self) -> List[Dict]:
@@ -156,29 +244,36 @@ class DashboardService:
             self._compliance(RequestCategory.maintenance, 90,
                              "Maintenance compliance", "green"),
             self._taqc_kpi(),
+            self._failure_registry_kpi(),
         ]
 
     def _total_active_requests_kpi(self) -> Dict:
         """Show total active requests (all statuses except rejected/cancelled)."""
         q = self._org_filter(
             self.db.query(TestingRequest).filter(
-                TestingRequest.status.in_(OPEN_STATUSES)
+                TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         )
         total = q.count()
 
-        # Breakdown by status
-        submitted = q.filter(TestingRequest.status == TestingRequestStatus.submitted).count()
-        assigned = q.filter(TestingRequest.status == TestingRequestStatus.assigned).count()
-        in_progress = q.filter(TestingRequest.status == TestingRequestStatus.in_progress).count()
-
         # Breakdown by category
-        test_count = q.filter(TestingRequest.request_category == RequestCategory.test).count()
-        maint_count = q.filter(TestingRequest.request_category == RequestCategory.maintenance).count()
-        insp_count = q.filter(TestingRequest.request_category == RequestCategory.inspection).count()
+        test_count   = q.filter(TestingRequest.request_category == RequestCategory.test).count()
+        maint_count  = q.filter(TestingRequest.request_category == RequestCategory.maintenance).count()
+        insp_count   = q.filter(TestingRequest.request_category == RequestCategory.inspection).count()
+        repair_count = q.filter(TestingRequest.request_category == RequestCategory.repair_lifecycle).count()
+        fr_count     = q.filter(TestingRequest.request_category == RequestCategory.failure_registry).count()
+        taqc_count   = q.filter(TestingRequest.request_category == RequestCategory.taqc_inspection).count()
 
         colour = "blue" if total > 0 else "grey"
-        sub_text = f"{test_count} test · {maint_count} maint · {insp_count} inspection"
+        parts = []
+        if test_count:   parts.append(f"{test_count} test")
+        if maint_count:  parts.append(f"{maint_count} maint")
+        if insp_count:   parts.append(f"{insp_count} insp")
+        if repair_count: parts.append(f"{repair_count} repair")
+        if fr_count:     parts.append(f"{fr_count} FR")
+        if taqc_count:   parts.append(f"{taqc_count} TA&QC")
+        sub_text = " · ".join(parts) if parts else "No active requests"
 
         return {
             "label": "Active Requests",
@@ -200,6 +295,7 @@ class DashboardService:
                 TestingRequest.due_date.isnot(None),
                 TestingRequest.due_date >= since,
                 TestingRequest.due_date <= now,
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         )
         total = q.count()
@@ -232,6 +328,7 @@ class DashboardService:
                 TestingRequest.due_date.isnot(None),
                 TestingRequest.due_date < now,
                 TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         )
         total = q.count()
@@ -292,11 +389,15 @@ class DashboardService:
         }
 
     def _taqc_kpi(self) -> Dict:
+        """TA&QC Inspection KPI — uses request_category=taqc_inspection (direct submissions)."""
         since = _period_start(90)
         now   = _now()
+        # TAQC inspections are stored as TestingRequests with request_category=taqc_inspection
+        # and is_direct_submission=True (no tester assignment step)
         q = self._org_filter(
             self.db.query(TestingRequest).filter(
-                TestingRequest.request_category == RequestCategory.inspection,
+                TestingRequest.request_category == RequestCategory.taqc_inspection,
+                TestingRequest.is_schedule_template.is_(False),
             )
         )
         open_count = q.filter(TestingRequest.status.in_(OPEN_STATUSES)).count()
@@ -316,10 +417,42 @@ class DashboardService:
         return {
             "label": "TA&QC compliance",
             "value": pct,
-            "display": f"{pct}%",
-            "sub": f"{open_count} observations open",
+            "display": f"{pct}%" if total_due else "N/A",
+            "sub": f"{open_count} open · {done}/{total_due} done (90d)",
             "trend": None,
             "trend_dir": "neutral",
+            "colour": colour,
+        }
+
+    def _failure_registry_kpi(self) -> Dict:
+        """Failure Registry KPI — count of open FR entries and high-priority items."""
+        q = self._org_filter(
+            self.db.query(TestingRequest).filter(
+                TestingRequest.request_category == RequestCategory.failure_registry,
+                TestingRequest.is_schedule_template.is_(False),
+            )
+        )
+        total_open = q.filter(TestingRequest.status.in_(OPEN_STATUSES)).count()
+        # High priority failures (priority = 'high' or 'critical')
+        high_priority = q.filter(
+            TestingRequest.status.in_(OPEN_STATUSES),
+            TestingRequest.priority.in_(["high", "critical"]),
+        ).count()
+        # Resolved in last 30 days
+        resolved_since = _now() - timedelta(days=30)
+        resolved = q.filter(
+            TestingRequest.status.in_(CLOSED_STATUSES),
+            TestingRequest.completed_at.isnot(None),
+            TestingRequest.completed_at >= resolved_since,
+        ).count()
+        colour = "red" if high_priority > 0 else ("amber" if total_open > 0 else "green")
+        return {
+            "label": "Failure Registry",
+            "value": total_open,
+            "display": str(total_open),
+            "sub": f"{high_priority} high-priority · {resolved} resolved (30d)",
+            "trend": None,
+            "trend_dir": "up" if high_priority > 0 else "neutral",
             "colour": colour,
         }
 
@@ -330,7 +463,7 @@ class DashboardService:
     # ── Overdue tests breakdown ──────────────────────────────────────────────
 
     def overdue_tests_breakdown(self) -> Dict:
-        key = _cache_key(self.org_id, "overdue_breakdown")
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="overdue_breakdown")
         return _cached(key, self._compute_overdue_breakdown)
 
     def _compute_overdue_breakdown(self) -> Dict:
@@ -341,6 +474,7 @@ class DashboardService:
                 TestingRequest.due_date.isnot(None),
                 TestingRequest.due_date < now,
                 TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         ).order_by(TestingRequest.due_date.asc()).all()
 
@@ -391,7 +525,7 @@ class DashboardService:
     # ── Active alerts feed ───────────────────────────────────────────────────
 
     def active_alerts(self, limit: int = 10) -> List[Dict]:
-        key = _cache_key(self.org_id, f"active_alerts_{limit}")
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget=f"active_alerts_{limit}")
         return _cached(key, lambda: self._compute_active_alerts(limit))
 
     def _compute_active_alerts(self, limit: int) -> List[Dict]:
@@ -447,7 +581,7 @@ class DashboardService:
     # ── Equipment flagged ALERT / CRITICAL ───────────────────────────────────
 
     def flagged_equipment(self) -> List[Dict]:
-        key = _cache_key(self.org_id, "flagged_equipment")
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="flagged_equipment")
         return _cached(key, self._compute_flagged_equipment)
 
     def _compute_flagged_equipment(self) -> List[Dict]:
@@ -497,7 +631,7 @@ class DashboardService:
     # ── Repair lifecycle progress ────────────────────────────────────────────
 
     def repair_progress(self) -> List[Dict]:
-        key = _cache_key(self.org_id, "repair_progress")
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="repair_progress")
         return _cached(key, self._compute_repair_progress)
 
     def _compute_repair_progress(self) -> List[Dict]:
@@ -506,6 +640,7 @@ class DashboardService:
                 TestingRequest.request_category == RequestCategory.repair_lifecycle,
                 TestingRequest.status.in_(OPEN_STATUSES),
                 TestingRequest.is_multi_session.is_(True),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         ).order_by(TestingRequest.cts.desc()).limit(10).all()
 
@@ -553,7 +688,7 @@ class DashboardService:
     # ── Maintenance overdue list ─────────────────────────────────────────────
 
     def maintenance_overdue(self) -> Dict:
-        key = _cache_key(self.org_id, "maintenance_overdue")
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="maintenance_overdue")
         return _cached(key, self._compute_maintenance_overdue)
 
     def _compute_maintenance_overdue(self) -> Dict:
@@ -564,6 +699,7 @@ class DashboardService:
                 TestingRequest.due_date.isnot(None),
                 TestingRequest.due_date < now,
                 TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
             )
         ).order_by(TestingRequest.due_date.asc())
 
@@ -587,10 +723,90 @@ class DashboardService:
             })
         return {"total": total, "items": items}
 
+    # ── Failure Registry list ────────────────────────────────────────────────
+
+    def failure_registry_list(self) -> Dict:
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="failure_registry")
+        return _cached(key, self._compute_failure_registry)
+
+    def _compute_failure_registry(self) -> Dict:
+        q = self._org_filter(
+            self.db.query(TestingRequest).filter(
+                TestingRequest.request_category == RequestCategory.failure_registry,
+                TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),
+            )
+        ).order_by(TestingRequest.cts.desc())
+
+        total = q.count()
+        rows  = q.limit(10).all()
+        items = []
+        now   = _now()
+        for r in rows:
+            created = _make_tz(r.cts)
+            days_open = (now - created).days
+            ueic = (r.equipment.ueic if r.equipment
+                    else (r.equipment_type.name if r.equipment_type else ""))
+            substation = r.zone or r.ee_subdivision or r.aee_section or ""
+            items.append({
+                "id": str(r.id),
+                "request_number": r.request_number,
+                "title": r.title,
+                "substation": substation,
+                "equipment": ueic,
+                "priority": r.priority,
+                "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+                "days_open": days_open,
+                "severity": "red" if r.priority in ("high", "critical") else "amber",
+            })
+        return {"total": total, "items": items}
+
+    # ── TA&QC Inspections list ───────────────────────────────────────────────
+
+    def taqc_inspections_list(self) -> Dict:
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="taqc_inspections")
+        return _cached(key, self._compute_taqc_inspections)
+
+    def _compute_taqc_inspections(self) -> Dict:
+        q = self._org_filter(
+            self.db.query(TestingRequest).filter(
+                TestingRequest.request_category == RequestCategory.taqc_inspection,
+                TestingRequest.is_schedule_template.is_(False),
+            )
+        ).order_by(TestingRequest.cts.desc())
+
+        total      = q.count()
+        open_count = q.filter(TestingRequest.status.in_(OPEN_STATUSES)).count()
+        closed_count = q.filter(TestingRequest.status.in_(CLOSED_STATUSES)).count()
+        rows = q.limit(10).all()
+        now  = _now()
+        items = []
+        for r in rows:
+            ueic = (r.equipment.ueic if r.equipment
+                    else (r.equipment_type.name if r.equipment_type else ""))
+            substation = r.zone or r.ee_subdivision or r.aee_section or ""
+            status_val = r.status.value if hasattr(r.status, "value") else str(r.status)
+            items.append({
+                "id": str(r.id),
+                "request_number": r.request_number,
+                "title": r.title,
+                "substation": substation,
+                "equipment": ueic,
+                "status": status_val,
+                "is_open": r.status in OPEN_STATUSES,
+                "cts": _make_tz(r.cts).isoformat() if r.cts else None,
+            })
+        return {
+            "total": total,
+            "open": open_count,
+            "closed": closed_count,
+            "items": items,
+        }
+
     # ── Procurement pipeline ─────────────────────────────────────────────────
 
     def procurement_pipeline(self) -> Dict:
-        key = _cache_key(self.org_id, "procurement_pipeline")
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="procurement_pipeline")
         return _cached(key, self._compute_procurement_pipeline)
 
     def _compute_procurement_pipeline(self) -> Dict:
@@ -601,20 +817,30 @@ class DashboardService:
         rows = q.order_by(ProcurementRequest.cts.desc()).limit(30).all()
 
         STATUS_LABEL = {
-            "initiated":  "Pending technical approval",
-            "approved":   "RFQ issued / quotes pending",
-            "rfq_issued": "RFQ issued / quotes pending",
-            "po_issued":  "PO/WO issued · awaiting delivery",
-            "delivered":  "Under inspection",
+            "initiated":        "Pending technical approval",
+            "approved":         "Technically approved",
+            "finance_pending":  "Awaiting finance approval",
+            "finance_approved": "Finance approved · RFQ pending",
+            "finance_rejected": "Finance rejected",
+            "rfq_issued":       "RFQ issued / quotes pending",
+            "po_issued":        "PO/WO issued · awaiting delivery",
+            "delivered":        "Under inspection",
+            "closed":           "Closed",
+            "rejected":         "Rejected",
         }
         STATUS_COLOUR = {
-            "initiated":  "blue",
-            "approved":   "teal",
-            "rfq_issued": "teal",
-            "po_issued":  "amber",
-            "delivered":  "green",
+            "initiated":        "blue",
+            "approved":         "teal",
+            "finance_pending":  "amber",
+            "finance_approved": "green",
+            "finance_rejected": "red",
+            "rfq_issued":       "teal",
+            "po_issued":        "amber",
+            "delivered":        "green",
+            "closed":           "grey",
+            "rejected":         "red",
         }
-        active_rows = [r for r in rows if r.status not in ("closed", "rejected")]
+        active_rows = [r for r in rows if r.status not in ("closed", "rejected", "finance_rejected")]
 
         stage_counts: Dict[str, int] = {}
         for r in active_rows:
@@ -655,7 +881,7 @@ class DashboardService:
     # ── Open remediation list ────────────────────────────────────────────────
 
     def open_remediation_list(self) -> Dict:
-        key = _cache_key(self.org_id, "open_remediation_list")
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="open_remediation_list")
         return _cached(key, self._compute_open_remediation)
 
     def _compute_open_remediation(self) -> Dict:
@@ -699,30 +925,459 @@ class DashboardService:
     # ── Role view metadata ───────────────────────────────────────────────────
 
     def role_view(self, user_id: UUID) -> Dict:
-        role_names = get_user_role_names(self.db, user_id, self.org_id)
-        view = resolve_dashboard_view(role_names)
-        WIDGETS = {
-            "ee_tlss": [
+        role_names   = get_user_role_names(self.db, user_id, self.org_id)
+        module_paths = get_user_module_paths(self.db, user_id, self.org_id)
+
+        # View type resolved from OrgRole.default_module.path (same source as Flutter nav)
+        view = resolve_dashboard_view(module_paths=module_paths)
+
+        # Widget sets per view — widgets are the dashboard panel components
+        WIDGETS: Dict[str, List[str]] = {
+            "admin": [
                 "kpi_cards", "overdue_tests", "active_alerts",
                 "flagged_equipment", "repair_progress",
                 "maintenance_overdue", "procurement_pipeline",
-                "open_remediation",
+                "open_remediation", "failure_registry", "taqc_inspections",
             ],
             "see_cee": [
                 "kpi_cards", "overdue_tests", "active_alerts",
                 "flagged_equipment", "repair_progress",
                 "procurement_pipeline", "open_remediation",
+                "failure_registry", "taqc_inspections",
             ],
-            "admin": [
+            "ee_tlss": [
                 "kpi_cards", "overdue_tests", "active_alerts",
                 "flagged_equipment", "repair_progress",
                 "maintenance_overdue", "procurement_pipeline",
-                "open_remediation",
+                "open_remediation", "failure_registry",
             ],
-            "field": ["overdue_tests", "maintenance_overdue", "open_remediation"],
+            "field": [
+                "overdue_tests", "maintenance_overdue",
+                "open_remediation", "failure_registry",
+            ],
+            "generic": [
+                "overdue_tests", "open_remediation",
+            ],
         }
         return {
-            "view": view,
-            "role_names": role_names,
+            "view":              view,
+            "role_names":        role_names,
+            "module_paths":      module_paths,   # Flutter uses same paths for navigation
             "permitted_widgets": WIDGETS.get(view, WIDGETS["field"]),
+        }
+
+    # ── Role-specific full dashboards (legacy convenience endpoints) ─────────
+
+    def aee_dashboard(self) -> Dict:
+        """AEE / field-supervisor dashboard data — all DB access centralised here."""
+        org_id = self.org_id
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        dept_id = self.dept_id
+        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
+        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+
+        pending_approvals = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status.in_(["submitted", "pending_approval"]))
+            .scalar() or 0
+        )
+        assigned_tests = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status.in_(["in_progress", "assigned"]))
+            .scalar() or 0
+        )
+        equipment_count = (
+            self.db.query(func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "active")
+            .scalar() or 0
+        )
+        # Equipment that had a maintenance TR in the last 30 days
+        recently_maintained_sq = (
+            self.db.query(func.distinct(TestingRequest.equipment_id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.equipment_id.isnot(None),
+                    TestingRequest.request_category == "maintenance",
+                    TestingRequest.cts >= thirty_days_ago)
+            .subquery()
+        )
+        maintenance_due = (
+            self.db.query(func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "active",
+                    ~Equipment.id.in_(self.db.query(recently_maintained_sq)))
+            .scalar() or 0
+        )
+        fr_pending = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.request_category == "failure_registry",
+                    TestingRequest.status == "under_approval")
+            .scalar() or 0
+        )
+        alert_count = (
+            self.db.query(func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "under_repair")
+            .scalar() or 0
+        )
+        # Recent open assignments
+        raw_assignments = (
+            self.db.query(TestingRequest)
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status.in_(
+                        ["submitted", "pending_approval", "in_progress", "assigned"]))
+            .order_by(TestingRequest.due_date.asc().nullslast())
+            .limit(10).all()
+        )
+        assignments_list = []
+        for req in raw_assignments:
+            due_str, color, status_text = "No deadline", "blue", ""
+            if req.due_date:
+                days_diff = (req.due_date.date() - datetime.now().date()).days
+                if days_diff < 0:
+                    due_str, color, status_text = f"{abs(days_diff)} days", "red", "Overdue"
+                elif days_diff == 0:
+                    due_str, color = "Today", "orange"
+                    status_text = req.status.value.replace("_", " ").title()
+                else:
+                    due_str = f"{days_diff} days"
+                    color = "blue" if req.status.value == "in_progress" else "orange"
+                    status_text = req.status.value.replace("_", " ").title()
+            else:
+                status_text = req.status.value.replace("_", " ").title()
+
+            sess = (
+                self.db.query(
+                    func.count(TestSession.id).label("cnt"),
+                    func.max(TestSession.session_date).label("last_date"),
+                )
+                .filter(TestSession.testing_request_id == req.id)
+                .first()
+            )
+            assignments_list.append({
+                "id": str(req.id),
+                "title": f"{req.test_type.name if req.test_type else 'Test'}"
+                         f" - {req.department.name if req.department else 'Unknown'}",
+                "status": status_text,
+                "due": due_str,
+                "color": color,
+                "session_count": sess.cnt or 0,
+                "last_session_date": (
+                    sess.last_date.strftime("%d %b %Y") if sess and sess.last_date else None
+                ),
+            })
+        return {
+            "kpis": {
+                "pending_approvals": pending_approvals,
+                "assigned_tests": assigned_tests,
+                "equipment_count": equipment_count,
+                "maintenance_due": maintenance_due,
+                "fr_pending": fr_pending,
+            },
+            "assignments": assignments_list,
+            "equipment_status": {
+                "operational": equipment_count,
+                "under_test": assigned_tests,
+                "alert": alert_count,
+            },
+        }
+
+    def ee_tlss_dashboard(self) -> Dict:
+        """EE TLSS condition-monitoring dashboard."""
+        org_id = self.org_id
+        ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
+        dept_id = self.dept_id
+        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
+        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+
+        total_equipment = (
+            self.db.query(func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "active")
+            .scalar() or 0
+        )
+        tested_equipment = (
+            self.db.query(func.count(func.distinct(TestingRequest.equipment_id)))
+            .join(TestSession, TestSession.testing_request_id == TestingRequest.id)
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.equipment_id.isnot(None),
+                    TestSession.session_date >= ninety_days_ago)
+            .scalar() or 0
+        )
+        test_compliance = int(tested_equipment / total_equipment * 100) if total_equipment else 0
+
+        overdue_tests = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status.in_(
+                        ["submitted", "pending_approval", "assigned", "scheduled"]),
+                    TestingRequest.due_date < datetime.now())
+            .scalar() or 0
+        )
+        alert_critical = (
+            self.db.query(func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "under_repair")
+            .scalar() or 0
+        )
+        open_remediation = (
+            self.db.query(func.count(func.distinct(Recommendation.testing_request_id)))
+            .filter(Recommendation.organization_id == org_id,
+                    Recommendation.approval_status == "pending",
+                    Recommendation.testing_request_id.in_(
+                        self.db.query(TestingRequest.id)
+                        .filter(TestingRequest.organization_id == org_id,
+                                dept_cond_tr,
+                                TestingRequest.status != "completed")
+                    ))
+            .scalar() or 0
+        )
+        maintenance_compliant = (
+            self.db.query(func.count(func.distinct(TestingRequest.equipment_id)))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.equipment_id.isnot(None),
+                    TestingRequest.request_category == "maintenance",
+                    TestingRequest.completed_at >= ninety_days_ago)
+            .scalar() or 0
+        )
+        maintenance_compliance = (
+            int(maintenance_compliant / total_equipment * 100) if total_equipment else 0
+        )
+        total_tests = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.cts >= ninety_days_ago)
+            .scalar() or 0
+        )
+        approved_tests = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status == "approved",
+                    TestingRequest.cts >= ninety_days_ago)
+            .scalar() or 0
+        )
+        taqc_compliance = int(approved_tests / total_tests * 100) if total_tests else 0
+        fr_pending = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.request_category == "failure_registry",
+                    TestingRequest.status == "under_approval")
+            .scalar() or 0
+        )
+        overdue_requests = (
+            self.db.query(TestingRequest)
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status.in_(
+                        ["submitted", "pending_approval", "assigned", "scheduled"]),
+                    TestingRequest.due_date < datetime.now())
+            .limit(10).all()
+        )
+        overdue_breakdown = [
+            {
+                "id": str(r.id),
+                "title": f"{r.test_type.name if r.test_type else 'Test'}"
+                         f" - {r.department.name if r.department else 'Unknown'}",
+                "days_overdue": (
+                    (datetime.now().date() - r.due_date.date()).days if r.due_date else 0
+                ),
+                "severity": (
+                    "critical" if r.due_date and
+                    (datetime.now().date() - r.due_date.date()).days > 30 else
+                    "warning" if r.due_date and
+                    (datetime.now().date() - r.due_date.date()).days > 14 else "normal"
+                ),
+            }
+            for r in overdue_requests
+        ]
+        alert_equipment = (
+            self.db.query(Equipment)
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status.in_(["under_repair", "active"]))
+            .limit(10).all()
+        )
+        alerts_feed = [
+            {
+                "id": str(eq.id),
+                "ueic": eq.ueic,
+                "name": eq.manufacturer or eq.ueic,
+                "status": eq.status.value if hasattr(eq.status, "value") else eq.status,
+                "severity": "critical" if eq.status == "under_repair" else "alert",
+            }
+            for eq in alert_equipment
+        ]
+        return {
+            "kpis": {
+                "test_compliance": test_compliance,
+                "overdue_tests": overdue_tests,
+                "alert_critical": alert_critical,
+                "open_remediation": open_remediation,
+                "maintenance_compliance": maintenance_compliance,
+                "taqc_compliance": taqc_compliance,
+                "equipment_monitored": total_equipment,
+                "ai_predictions": 0,
+                "fr_pending": fr_pending,
+            },
+            "overdue_breakdown": overdue_breakdown,
+            "alerts_feed": alerts_feed,
+        }
+
+    def see_dashboard(self) -> Dict:
+        """SEE circle-level supervision dashboard."""
+        org_id = self.org_id
+        ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
+        dept_id = self.dept_id
+        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
+        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+
+        total_equipment = (
+            self.db.query(func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "active")
+            .scalar() or 0
+        )
+        total_requests = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.cts >= ninety_days_ago)
+            .scalar() or 0
+        )
+        completed_requests = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status == "completed",
+                    TestingRequest.cts >= ninety_days_ago)
+            .scalar() or 0
+        )
+        circle_compliance = int(completed_requests / total_requests * 100) if total_requests else 0
+        pending_approvals = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status.in_(["submitted", "pending_approval"]))
+            .scalar() or 0
+        )
+        critical_issues = (
+            self.db.query(func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "under_repair")
+            .scalar() or 0
+        )
+        fr_pending = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.request_category == "failure_registry",
+                    TestingRequest.status == "under_approval")
+            .scalar() or 0
+        )
+        pending_trs = (
+            self.db.query(TestingRequest)
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status.in_(["submitted", "pending_approval"]))
+            .order_by(TestingRequest.cts.desc()).limit(10).all()
+        )
+        reviews_list = [
+            {
+                "id": str(r.id),
+                "title": f"{r.test_type.name if r.test_type else 'Test'}"
+                         f" - {r.department.name if r.department else 'Unknown'}",
+                "status": r.status.value.replace("_", " ").title(),
+                "created": r.cts.strftime("%Y-%m-%d") if r.cts else "N/A",
+            }
+            for r in pending_trs
+        ]
+        return {
+            "kpis": {
+                "circle_compliance": circle_compliance,
+                "pending_approvals": pending_approvals,
+                "critical_issues": critical_issues,
+                "equipment_units": total_equipment,
+                "fr_pending": fr_pending,
+            },
+            "pending_reviews": reviews_list,
+        }
+
+    def cee_dashboard(self) -> Dict:
+        """CEE zone-level executive dashboard."""
+        org_id = self.org_id
+        dept_id = self.dept_id
+        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
+        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+
+        zone_equipment = (
+            self.db.query(func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id,
+                    dept_cond_eq,
+                    Equipment.status == "active")
+            .scalar() or 0
+        )
+        zone_reliability = round(
+            (zone_equipment / zone_equipment * 100) if zone_equipment else 0.0, 1
+        )
+        major_decisions = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status.in_(["submitted", "pending_approval"]))
+            .scalar() or 0
+        )
+        fr_pending = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.request_category == "failure_registry",
+                    TestingRequest.status == "under_approval")
+            .scalar() or 0
+        )
+        strategic_trs = (
+            self.db.query(TestingRequest)
+            .filter(TestingRequest.organization_id == org_id,
+                    dept_cond_tr,
+                    TestingRequest.status.in_(["submitted", "pending_approval"]))
+            .order_by(TestingRequest.cts.desc()).limit(10).all()
+        )
+        decisions_list = [
+            {
+                "id": str(r.id),
+                "title": f"{r.test_type.name if r.test_type else 'Test'}"
+                         f" - {r.department.name if r.department else 'Unknown'}",
+                "status": r.status.value.replace("_", " ").title(),
+                "created": r.cts.strftime("%Y-%m-%d") if r.cts else "N/A",
+            }
+            for r in strategic_trs
+        ]
+        return {
+            "kpis": {
+                "zone_reliability": zone_reliability,
+                "major_decisions": major_decisions,
+                "zone_equipment": zone_equipment,
+                "fr_pending": fr_pending,
+            },
+            "strategic_decisions": decisions_list,
         }

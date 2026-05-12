@@ -2222,6 +2222,228 @@ TEST_TEMPLATES = {
             },
         ],
     },
+
+    # ────────────────────────────────────────────────────────────
+    # Calibration — Protection Relay
+    # enable_calibration=True, DATE_ADD rule
+    # ────────────────────────────────────────────────────────────
+    "protection_relay_calibration": {
+        "key": "protection_relay_calibration",
+        "name": "Protection Relay Calibration",
+        "equipment_type": "Protection Relays",
+        "description": "Calibration record for protection relays — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
+        "enable_calibration": True,
+        "multi_session": True,
+        "sections": [
+            {
+                "title": "Relay Identification",
+                "fields": [
+                    {"key": "relay_make",       "label": "Relay Make",         "type": "text",   "required": True},
+                    {"key": "relay_model",      "label": "Relay Model / Type", "type": "text",   "required": True},
+                    {"key": "relay_serial",     "label": "Serial Number",      "type": "text",   "required": False},
+                    {"key": "relay_location",   "label": "Location / Bay",     "type": "text",   "required": False},
+                ],
+            },
+            {
+                "title": "Calibration Checks",
+                "fields": [
+                    {"key": "pickup_current_set",    "label": "Pickup Current (Set)",    "type": "number", "unit": "A",   "required": True},
+                    {"key": "pickup_current_actual", "label": "Pickup Current (Actual)", "type": "number", "unit": "A",   "required": True},
+                    {"key": "tms_setting",           "label": "TMS Setting",             "type": "number",                "required": True},
+                    {"key": "operating_time_2x",     "label": "Operating Time at 2×Is",  "type": "number", "unit": "sec", "required": True},
+                    {"key": "operating_time_5x",     "label": "Operating Time at 5×Is",  "type": "number", "unit": "sec", "required": False},
+                    {"key": "ef_pickup_set",         "label": "EF Pickup (Set)",         "type": "number", "unit": "A",   "required": False},
+                    {"key": "ef_pickup_actual",      "label": "EF Pickup (Actual)",      "type": "number", "unit": "A",   "required": False},
+                    {"key": "burden_va",             "label": "Burden",                  "type": "number", "unit": "VA",  "required": False},
+                    {"key": "insulation_resistance", "label": "Insulation Resistance",   "type": "number", "unit": "MΩ",  "required": False},
+                ],
+            },
+            {
+                "title": "Calibration Record",
+                "fields": [
+                    {"key": "calibration_date",    "label": "Calibration Date",                  "type": "date",     "required": True},
+                    {"key": "validity_months",     "label": "Validity (Months)",                 "type": "number",   "required": True,  "unit": "months"},
+                    {"key": "overall_result",      "label": "Calibration Result",                "type": "dropdown", "required": True,  "options": ["Pass", "Fail"]},
+                    {"key": "calibrated_by",       "label": "Calibrated By (Agency / Lab)",      "type": "text",     "required": False},
+                    {"key": "certificate_number",  "label": "Certificate Number",                "type": "text",     "required": False},
+                    {"key": "next_calibration_due","label": "Next Calibration Due (computed)",   "type": "text",     "required": False, "read_only": True},
+                    {"key": "notes",               "label": "Notes / Observations",              "type": "textarea", "required": False},
+                ],
+            },
+        ],
+        "rules": [
+            {
+                "field": "calibration_date",
+                "type": "DATE_ADD",
+                "config": {
+                    "validity_field": "validity_months",
+                    "result_field": "overall_result",
+                    "order_by": "calibration_date",
+                    "group_by": "equipment_id",
+                    "requires_multi_session": True,
+                },
+            }
+        ],
+    },
+
+    # ────────────────────────────────────────────────────────────
+    # Calibration — Electronic Tri-vector Meter
+    # enable_calibration=True, DATE_ADD rule
+    # ────────────────────────────────────────────────────────────
+    "tri_vector_meter_calibration": {
+        "key": "tri_vector_meter_calibration",
+        "name": "Electronic Tri-vector Meter Calibration",
+        "equipment_type": "Electronic Tri-vector Meters",
+        "description": "Calibration record for electronic tri-vector meters — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
+        "enable_calibration": True,
+        "multi_session": True,
+        "sections": [
+            {
+                "title": "Meter Identification",
+                "fields": [
+                    {"key": "meter_make",         "label": "Meter Make",           "type": "text",     "required": True},
+                    {"key": "meter_model",        "label": "Meter Model",          "type": "text",     "required": True},
+                    {"key": "meter_serial",       "label": "Serial Number",        "type": "text",     "required": True},
+                    {"key": "meter_class",        "label": "Accuracy Class",       "type": "dropdown", "required": True, "options": ["Class 0.2S", "Class 0.5S", "Class 1", "Class 2"]},
+                    {"key": "ct_ratio",           "label": "CT Ratio",             "type": "text",     "required": True},
+                    {"key": "pt_ratio",           "label": "PT Ratio",             "type": "text",     "required": True},
+                    {"key": "meter_location",     "label": "Location / Feeder",    "type": "text",     "required": False},
+                ],
+            },
+            {
+                "title": "Calibration Measurements",
+                "fields": [
+                    {"key": "kWh_error_pct",      "label": "kWh Error (%)",             "type": "number", "unit": "%",   "required": True},
+                    {"key": "kVAh_error_pct",     "label": "kVAh Error (%)",            "type": "number", "unit": "%",   "required": True},
+                    {"key": "kVARh_error_pct",    "label": "kVARh Error (%)",           "type": "number", "unit": "%",   "required": True},
+                    {"key": "voltage_error_pct",  "label": "Voltage Measurement Error", "type": "number", "unit": "%",   "required": False},
+                    {"key": "current_error_pct",  "label": "Current Measurement Error", "type": "number", "unit": "%",   "required": False},
+                    {"key": "phase_angle_error",  "label": "Phase Angle Error",         "type": "number", "unit": "min", "required": False},
+                    {"key": "burden_va",          "label": "Voltage Circuit Burden",    "type": "number", "unit": "VA",  "required": False},
+                    {"key": "meter_constant",     "label": "Meter Constant",            "type": "number", "unit": "imp/kWh", "required": False},
+                    {"key": "test_current_amps",  "label": "Test Current",              "type": "number", "unit": "A",   "required": False},
+                    {"key": "test_voltage_v",     "label": "Test Voltage",              "type": "number", "unit": "V",   "required": False},
+                ],
+            },
+            {
+                "title": "Calibration Record",
+                "fields": [
+                    {"key": "calibration_date",   "label": "Calibration Date",                 "type": "date",     "required": True},
+                    {"key": "validity_months",    "label": "Validity (Months)",                "type": "number",   "required": True,  "unit": "months"},
+                    {"key": "overall_result",     "label": "Calibration Result",               "type": "dropdown", "required": True,  "options": ["Pass", "Fail"]},
+                    {"key": "calibrated_by",      "label": "Calibrated By (Agency / Lab)",     "type": "text",     "required": False},
+                    {"key": "certificate_number", "label": "Certificate Number",               "type": "text",     "required": False},
+                    {"key": "next_calibration_due","label": "Next Calibration Due (computed)", "type": "text",     "required": False, "read_only": True},
+                    {"key": "notes",              "label": "Notes / Observations",             "type": "textarea", "required": False},
+                ],
+            },
+        ],
+        "rules": [
+            {
+                "field": "calibration_date",
+                "type": "DATE_ADD",
+                "config": {
+                    "validity_field": "validity_months",
+                    "result_field": "overall_result",
+                    "order_by": "calibration_date",
+                    "group_by": "equipment_id",
+                    "requires_multi_session": True,
+                },
+            }
+        ],
+    },
+
+    # ────────────────────────────────────────────────────────────
+    # Cumulative — Circuit Breaker Operations Count
+    # enable_cumulative=True, CUMULATIVE_DIFF rule
+    # ────────────────────────────────────────────────────────────
+    "circuit_breaker_operations": {
+        "key": "circuit_breaker_operations",
+        "name": "Circuit Breaker Operations Count",
+        "equipment_type": "Circuit Breakers",
+        "description": "Multi-session cumulative operations count for circuit breakers — triggers overhaul when threshold crossed.",
+        "enable_cumulative": True,
+        "multi_session": True,
+        "sections": [
+            {
+                "title": "Circuit Breaker Identification",
+                "fields": [
+                    {"key": "breaker_make",       "label": "Breaker Make",         "type": "text",     "required": True},
+                    {"key": "breaker_type",       "label": "Breaker Type",         "type": "dropdown", "required": True, "options": ["SF6", "Vacuum", "Air Blast", "Oil", "Other"]},
+                    {"key": "breaker_serial",     "label": "Serial Number",        "type": "text",     "required": False},
+                    {"key": "breaker_voltage_kv", "label": "Rated Voltage",        "type": "number",   "required": True, "unit": "kV"},
+                    {"key": "breaker_location",   "label": "Location / Bay",       "type": "text",     "required": False},
+                ],
+            },
+            {
+                "title": "Operations Reading",
+                "fields": [
+                    {"key": "reading",       "label": "Operations Counter Reading", "type": "number", "required": True,  "unit": "ops"},
+                    {"key": "reading_date",  "label": "Reading Date",              "type": "date",   "required": True},
+                    {"key": "reading_by",    "label": "Recorded By",               "type": "text",   "required": False},
+                    {"key": "notes",         "label": "Notes / Observations",      "type": "textarea","required": False},
+                ],
+            },
+        ],
+        "rules": [
+            {
+                "field": "reading",
+                "type": "CUMULATIVE_DIFF",
+                "config": {
+                    "order_by": "reading_date",
+                    "group_by": "equipment_id",
+                    "requires_multi_session": True,
+                    "reset_on_drop": True,
+                },
+            }
+        ],
+    },
+
+    # ────────────────────────────────────────────────────────────
+    # Cumulative — OLTC Operations Count
+    # enable_cumulative=True, CUMULATIVE_DIFF rule
+    # ────────────────────────────────────────────────────────────
+    "oltc_operations": {
+        "key": "oltc_operations",
+        "name": "OLTC Operations Count",
+        "equipment_type": "OLTCs",
+        "description": "Multi-session cumulative tap-change operations count for OLTCs — triggers overhaul when threshold crossed.",
+        "enable_cumulative": True,
+        "multi_session": True,
+        "sections": [
+            {
+                "title": "OLTC Identification",
+                "fields": [
+                    {"key": "oltc_make",          "label": "OLTC Make",            "type": "text",     "required": True},
+                    {"key": "oltc_type",          "label": "OLTC Type",            "type": "dropdown", "required": True, "options": ["Motor-operated OLTC", "Pneumatic OLTC", "Other"]},
+                    {"key": "oltc_serial",        "label": "Serial Number",        "type": "text",     "required": False},
+                    {"key": "transformer_rating", "label": "Associated Transformer Rating", "type": "text", "required": False},
+                    {"key": "oltc_location",      "label": "Location / Substation","type": "text",     "required": False},
+                ],
+            },
+            {
+                "title": "Operations Reading",
+                "fields": [
+                    {"key": "reading",       "label": "Tap-Change Counter Reading", "type": "number", "required": True,  "unit": "ops"},
+                    {"key": "reading_date",  "label": "Reading Date",               "type": "date",   "required": True},
+                    {"key": "reading_by",    "label": "Recorded By",                "type": "text",   "required": False},
+                    {"key": "notes",         "label": "Notes / Observations",       "type": "textarea","required": False},
+                ],
+            },
+        ],
+        "rules": [
+            {
+                "field": "reading",
+                "type": "CUMULATIVE_DIFF",
+                "config": {
+                    "order_by": "reading_date",
+                    "group_by": "equipment_id",
+                    "requires_multi_session": True,
+                    "reset_on_drop": True,
+                },
+            }
+        ],
+    },
 }
 
 
@@ -2284,6 +2506,14 @@ TEST_TYPE_TO_TEMPLATE = {
     "Tan Delta NCT Test": "tandelta_nct",
     # CVT
     "CVT Test Report": "cvt_test",
+
+    # ── Calibration test types (enable_calibration=True, DATE_ADD rule) ──
+    "Protection Relay Calibration and History": "protection_relay_calibration",
+    "Electronic Tri-vector Meter Calibration":  "tri_vector_meter_calibration",
+
+    # ── Cumulative operations test types (enable_cumulative=True, CUMULATIVE_DIFF rule) ──
+    "Circuit Breaker Operations Count": "circuit_breaker_operations",
+    "OLTC Operations Count":            "oltc_operations",
 
     # ── Category-based type mappings (Option 1: reuse templates) ──
     # Maintenance types → transformer_maintenance

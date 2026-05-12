@@ -1,0 +1,12 @@
+ {
+    "Failure Reporting": ["AEE Maintenance"],
+    "Committee Review": ["EE TLSS", "SEE W&M"],
+    "Vendor Assignment": ["CEE RT&R&D", "CEE Transmission Zone"],
+    "Lifting": ["Vendor"],
+    "Joint Inspection": ["EE RT"],
+    "Estimate & Work Award": ["SEE RT"],
+    "Repair QA": ["EE RT"],
+    "Final Inspection": ["SEE RT"],
+    "Dispatch": ["Vendor"],
+    "Commissioning": ["AEE Maintenance"]
+}
