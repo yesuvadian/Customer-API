@@ -7,8 +7,9 @@ from typing import Optional, List
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
+from pymongo import results
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, text
 
 from models import Equipment, EquipmentStatus, OrgDepartment, CategoryMaster
 
@@ -63,6 +64,44 @@ class EquipmentService:
         if target_level < len(path):
             return path[target_level]
         return None
+
+  
+
+    
+    @classmethod
+    def _get_department_subtree_ids(
+        cls,
+        db: Session,
+        department_id: UUID
+    ) -> List[UUID]:
+        """Return all descendant department IDs including root."""
+
+        sql = text("""
+            WITH RECURSIVE dept_tree AS (
+                SELECT id
+                FROM org_departments
+                WHERE id = :root_id
+                AND is_active = true
+
+                UNION ALL
+
+                SELECT d.id
+                FROM org_departments d
+                INNER JOIN dept_tree dt
+                    ON d.parent_department_id = dt.id
+                WHERE d.is_active = true
+            )
+            SELECT id FROM dept_tree
+        """)
+
+        result = db.execute(sql, {"root_id": department_id})
+
+        rows = result.scalars().all()
+
+        return [
+            r if isinstance(r, UUID) else UUID(str(r))
+            for r in rows
+        ]
 
     @classmethod
     def _get_department_ancestry_names(cls, db: Session, department_id: UUID) -> dict:
@@ -237,7 +276,8 @@ class EquipmentService:
         if organization_id:
             query = query.filter(Equipment.organization_id == organization_id)
         if department_id:
-            query = query.filter(Equipment.department_id == department_id)
+            department_ids = cls._get_department_subtree_ids(db, department_id)
+            query = query.filter(Equipment.department_id.in_(department_ids))
         if equipment_type_id:
             query = query.filter(Equipment.equipment_type_id == equipment_type_id)
         if status:
@@ -254,13 +294,23 @@ class EquipmentService:
                 (Equipment.factory_serial_number.ilike(f"%{search}%"))
             )
 
-        return (
+        results = (
             query
             .order_by(Equipment.ueic)
             .offset(skip)
             .limit(limit)
             .all()
         )
+
+        print(f"[EQUIPMENT FOUND] {len(results)}")
+
+        for e in results:
+            print(
+                f"UEIC={e.ueic} "
+                f"DEPT={e.department_id}"
+            )
+
+        return results
 
     @classmethod
     def update_equipment(
@@ -322,10 +372,28 @@ class EquipmentService:
         old_equipment_id: UUID,
         reason: str,
         created_by: Optional[UUID] = None,
+        reason_type: str = "other",
+        recommendation_id: Optional[UUID] = None,
+        analysis_report_path: Optional[str] = None,
         **new_equipment_kwargs,
     ) -> tuple:
-        """Retire old equipment and register a new replacement. Returns (old, new)."""
+        """Retire old equipment and register a new replacement. Returns (old, new).
+
+        When reason_type='recommendation_compliance' and recommendation_id is set,
+        the originating Recommendation row is auto-closed (approval_status='fulfilled').
+        """
         old = cls.retire_equipment(db, old_equipment_id, reason, modified_by=created_by)
+
+        # Auto-close the originating recommendation
+        if reason_type == "recommendation_compliance" and recommendation_id:
+            try:
+                from models import Recommendation
+                rec = db.query(Recommendation).filter(Recommendation.id == recommendation_id).first()
+                if rec:
+                    rec.approval_status = "fulfilled"
+                    db.flush()
+            except Exception:
+                pass  # Non-fatal: recommendation link is informational
 
         # Create replacement with same location and type
         new_kwargs = {
@@ -339,19 +407,40 @@ class EquipmentService:
         new_kwargs.update(new_equipment_kwargs)
 
         new_equipment = cls.create_equipment(db, **new_kwargs)
+        # Forward link: new equipment records which unit it replaced
         new_equipment.replaces_equipment_id = old.id
+        new_equipment.replacement_reason_type = reason_type
+        if recommendation_id:
+            new_equipment.replacement_recommendation_id = recommendation_id
+        if analysis_report_path:
+            new_equipment.analysis_report_path = analysis_report_path
+        # Reverse link: retired equipment records which unit replaced it
+        old.replaced_by_id = new_equipment.id
         db.flush()
 
         return old, new_equipment
 
     @classmethod
-    def get_equipment_for_department(cls, db: Session, department_id: UUID) -> List[Equipment]:
-        """Get all active equipment at a specific substation/department — for test request form auto-populate."""
+    def get_equipment_for_department(
+        cls,
+        db: Session,
+        department_id: UUID
+    ) -> List[Equipment]:
+        """
+        Get all active equipment for a department INCLUDING subtree departments.
+        Used by Testing Request form auto-populate.
+        """
+
+        department_ids = cls._get_department_subtree_ids(
+            db,
+            department_id
+        )
+
         return (
             db.query(Equipment)
             .options(joinedload(Equipment.equipment_type))
             .filter(
-                Equipment.department_id == department_id,
+                Equipment.department_id.in_(department_ids),
                 Equipment.status == EquipmentStatus.active,
             )
             .order_by(Equipment.ueic)

@@ -62,6 +62,30 @@ QUERY_KEYS = [
      "description": "Tester completion rates and average turnaround times"},
     {"key": "monthly_kpi_report",             "label": "Monthly KPI Summary",
      "description": "Monthly aggregated KPIs: requests, completions, alerts, findings"},
+    # §3.3.3 Equipment Failure Registry
+    {"key": "equipment_failure_annual_report",
+     "label": "Equipment Failure Annual Report",
+     "description": "Yearly failure summary grouped by equipment type, make, and model. "
+                    "Parameter: year (default = previous calendar year)."},
+    {"key": "equipment_failure_performance_report",
+     "label": "Equipment Failure Performance Analysis",
+     "description": "On-demand comparative failure-rate analysis across makes, types, "
+                    "voltage classes, and age bands. Supports date range and dimension filters."},
+    # §3.3.4 Failure Resolution
+    {"key": "failure_resolution_report",
+     "label": "Failure Resolution Report",
+     "description": "End-to-end traceability report: each Failure Registry (FR-) record "
+                    "with its outcome (Repair / Replacement / Under Investigation) and the "
+                    "linked Repair Lifecycle work order status. "
+                    "Parameters: date_from, date_to (failure_date), outcome (all | Repair | "
+                    "Replacement | Under Investigation)."},
+    # §3.5 Equipment Lifecycle
+    {"key": "equipment_lifecycle_report",
+     "label": "Equipment Lifecycle Summary",
+     "description": "One row per equipment unit: commissioned date, test count, failure count, "
+                    "last test result, and current status. "
+                    "Parameters: status, voltage_class, department_id, date_from, date_to "
+                    "(commissioned date range)."},
 ]
 
 

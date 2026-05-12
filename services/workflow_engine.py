@@ -43,7 +43,8 @@ class IntegratedWorkflowEngine:
         workflow_id: UUID,
         current_state_id: UUID,
         user_id: UUID,
-        entity_department_id: Optional[UUID] = None
+        entity_department_id: Optional[UUID] = None,
+        entity_context: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get all transitions available to a user from the current state.
@@ -95,11 +96,21 @@ class IntegratedWorkflowEngine:
 
         available = []
         for transition in transitions:
+            # Filter by conditions JSONB if present and entity_context is given
+            if entity_context and transition.conditions:
+                match = all(
+                    str(entity_context.get(k)) == str(v)
+                    for k, v in transition.conditions.items()
+                )
+                if not match:
+                    continue
+
             # Check if user has permission for this transition
             has_permission = self._check_transition_permission(
                 transition.id,
                 user_roles,
-                entity_department_id
+                entity_department_id,
+                org_user_roles=org_user_roles,
             )
 
             if has_permission:
@@ -129,7 +140,8 @@ class IntegratedWorkflowEngine:
         self,
         transition_id: UUID,
         user_roles: List[UserRole],
-        entity_department_id: Optional[UUID] = None
+        entity_department_id: Optional[UUID] = None,
+        org_user_roles=None,
     ) -> bool:
         """
         Check if user has permission to execute a transition.
@@ -138,12 +150,13 @@ class IntegratedWorkflowEngine:
             transition_id: Transition UUID
             user_roles: User's active roles
             entity_department_id: Department of the entity
+            org_user_roles: User's active OrgUserRole entries (new role system)
 
         Returns:
             True if user can execute transition
         """
+        # Check old UserRole system
         for user_role in user_roles:
-            # Get permission entries for this transition and role
             permissions = self.db.query(PermissionMatrix).filter(
                 and_(
                     PermissionMatrix.transition_id == transition_id,
@@ -154,10 +167,29 @@ class IntegratedWorkflowEngine:
             ).order_by(PermissionMatrix.priority.desc()).all()
 
             for perm in permissions:
-                # Check department scope
                 if self._check_department_scope(
                     perm.scope_type,
                     user_role.department_id,
+                    entity_department_id,
+                    perm.department_type_id
+                ):
+                    return True
+
+        # Check new OrgUserRole system
+        for org_role in (org_user_roles or []):
+            permissions = self.db.query(PermissionMatrix).filter(
+                and_(
+                    PermissionMatrix.transition_id == transition_id,
+                    PermissionMatrix.role_id == org_role.org_role_id,
+                    PermissionMatrix.is_active == True,
+                    PermissionMatrix.can_execute == True
+                )
+            ).order_by(PermissionMatrix.priority.desc()).all()
+
+            for perm in permissions:
+                if self._check_department_scope(
+                    perm.scope_type,
+                    None,  # OrgUserRole doesn't have department_id directly
                     entity_department_id,
                     perm.department_type_id
                 ):
@@ -315,7 +347,8 @@ class IntegratedWorkflowEngine:
         has_permission = self._check_transition_permission(
             transition_id,
             user_roles,
-            entity_department_id
+            entity_department_id,
+            org_user_roles=org_user_roles,
         )
 
         if not has_permission:

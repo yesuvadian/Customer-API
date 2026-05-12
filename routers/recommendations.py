@@ -54,6 +54,61 @@ def list_recommendations(
     )
 
 
+@router.get("/stats")
+def get_recommendation_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Quick stats: total, pending, approved, rejected counts for the current org."""
+    from models import Recommendation, TestingRequest
+    from sqlalchemy import func
+    org_id = current_user.organization_id
+    q = (
+        db.query(Recommendation.approval_status, func.count(Recommendation.id))
+        .join(TestingRequest, TestingRequest.id == Recommendation.testing_request_id)
+        .filter(TestingRequest.organization_id == org_id)
+        .group_by(Recommendation.approval_status)
+        .all()
+    )
+    totals = {row[0]: row[1] for row in q}
+    return {
+        "total":    sum(totals.values()),
+        "pending":  totals.get("pending",  0),
+        "approved": totals.get("approved", 0),
+        "rejected": totals.get("rejected", 0),
+    }
+
+
+@router.get("/pending", response_model=List[RecommendationResponse])
+def list_pending_recommendations(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """All recommendations awaiting technical approval for the current org."""
+    service = RecommendationService(db)
+    return service.get_recommendations(
+        organization_id=current_user.organization_id,
+        approval_status="pending",
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.get("/by-request/{testing_request_id}", response_model=List[RecommendationResponse])
+def list_recommendations_by_request(
+    testing_request_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = RecommendationService(db)
+    return service.get_recommendations(
+        testing_request_id=testing_request_id,
+        organization_id=current_user.organization_id,
+    )
+
+
 @router.get("/{recommendation_id}", response_model=RecommendationResponse)
 def get_recommendation(
     recommendation_id: UUID,
@@ -131,6 +186,8 @@ def get_recommendation_detail(
         "recommendation_type": rec.recommendation_type.value if rec.recommendation_type else None,
         "summary": rec.summary,
         "detailed_notes": rec.detailed_notes,
+        "next_action": rec.next_action.value if rec.next_action else None,
+        "schedule_frequency": rec.schedule_frequency.value if rec.schedule_frequency else None,
         "approval_status": rec.approval_status,
         "approved_by": str(rec.approved_by) if rec.approved_by else None,
         "approved_by_name": _user_name(rec.approved_by),

@@ -85,6 +85,9 @@ class OrganizationService(UTCDateTimeMixin):
             default_roles = self._provision_default_roles(org.id)
             self.db.flush()
 
+            # 2b. Clone PermissionMatrix entries so new org gets workflow permissions
+            self._provision_workflow_permissions(org.id, default_roles)
+
             # 3. Create admin user
             admin_user = User(
                 email=admin_email,
@@ -179,6 +182,75 @@ class OrganizationService(UTCDateTimeMixin):
             roles.append(role)
 
         return roles
+
+    def _provision_workflow_permissions(self, org_id: UUID, new_roles: list) -> None:
+        """
+        For each newly created OrgRole, copy PermissionMatrix entries from
+        any existing role with the same name (seeded by seed_tr_workflows).
+        This ensures new orgs get workflow transition permissions matching
+        their role names without needing to re-run the global seed.
+        """
+        try:
+            from models import Workflow, WorkflowTransition, PermissionMatrix, OrgRole
+
+            # Build name → new_role_id map for roles just created
+            name_to_new_role = {r.name: r.id for r in new_roles}
+
+            # Find existing PermissionMatrix entries for roles with matching names
+            # (from other orgs that were seeded already)
+            existing_roles = (
+                self.db.query(OrgRole)
+                .filter(
+                    OrgRole.name.in_(list(name_to_new_role.keys())),
+                    OrgRole.organization_id != org_id,
+                    OrgRole.is_active.is_(True),
+                )
+                .all()
+            )
+            if not existing_roles:
+                return
+
+            # For each existing role, clone its PermissionMatrix rows to the new role
+            seen = set()
+            for existing_role in existing_roles:
+                new_role_id = name_to_new_role.get(existing_role.name)
+                if not new_role_id:
+                    continue
+
+                pm_rows = (
+                    self.db.query(PermissionMatrix)
+                    .filter(
+                        PermissionMatrix.role_id == existing_role.id,
+                        PermissionMatrix.is_active.is_(True),
+                    )
+                    .all()
+                )
+                for pm in pm_rows:
+                    key = (pm.transition_id, new_role_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    # Check not already exists
+                    exists = (
+                        self.db.query(PermissionMatrix)
+                        .filter_by(transition_id=pm.transition_id, role_id=new_role_id)
+                        .first()
+                    )
+                    if not exists:
+                        self.db.add(PermissionMatrix(
+                            workflow_id=pm.workflow_id,
+                            transition_id=pm.transition_id,
+                            role_id=new_role_id,
+                            scope_type=pm.scope_type,
+                            department_type_id=pm.department_type_id,
+                            can_execute=pm.can_execute,
+                            can_reject=pm.can_reject,
+                            can_comment=pm.can_comment,
+                            priority=pm.priority,
+                            is_active=True,
+                        ))
+        except Exception as e:
+            print(f"[WARN] _provision_workflow_permissions failed: {e}")
 
     def get_organization(self, org_id: UUID) -> Optional[Organization]:
         """Get organization by ID."""

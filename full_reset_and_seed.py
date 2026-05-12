@@ -11,15 +11,40 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 from database import engine, Base
+import models  # ← MUST import so all models register with Base.metadata
 
 def drop_all_tables():
-    """Drop all tables in the public schema"""
+    """Drop all tables in the public schema using CASCADE to handle FK cycles"""
     print("=" * 80)
     print("STEP 1: DROPPING ALL TABLES")
     print("=" * 80)
 
-    # Drop all tables
-    Base.metadata.drop_all(bind=engine)
+    from sqlalchemy import text, inspect
+    with engine.connect() as conn:
+        # Get all table names in public schema
+        insp = inspect(engine)
+        tables = insp.get_table_names(schema="public")
+        if tables:
+            tables_sql = ", ".join(f'public."{t}"' for t in tables)
+            conn.execute(text(f"DROP TABLE IF EXISTS {tables_sql} CASCADE"))
+            conn.commit()
+            print(f"[OK] Dropped {len(tables)} tables with CASCADE")
+
+        # Drop all custom enum types
+        result = conn.execute(text("""
+            SELECT t.typname
+            FROM pg_type t
+            JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+            WHERE n.nspname = 'public'
+              AND t.typtype = 'e'
+        """))
+        enums = [row[0] for row in result]
+        for enum in enums:
+            conn.execute(text(f'DROP TYPE IF EXISTS public."{enum}" CASCADE'))
+        if enums:
+            conn.commit()
+            print(f"[OK] Dropped {len(enums)} enum types: {', '.join(enums)}")
+
     print("[OK] All tables dropped successfully\n")
 
 def create_all_tables():

@@ -79,8 +79,7 @@ class AutoStatusTransitionService:
 
                 self.db.commit()
 
-                # TODO: Send notification to approvers
-                # self._notify_approvers(testing_request)
+                self._notify_approvers(testing_request)
 
                 return True
             else:
@@ -217,13 +216,9 @@ class AutoStatusTransitionService:
             return False
 
     def _notify_approvers(self, testing_request: TestingRequest):
-        """
-        Send notification to approvers that test is ready for review.
-        TODO: Implement notification system integration
-        """
-        # This will be implemented when notification system is in place
-        logger.info(
-            f"TODO: Notify approvers that test '{testing_request.title}' "
-            f"(ID: {testing_request.id}) is ready for review"
-        )
-        pass
+        """Notify approvers that all sessions are complete and test is ready for review."""
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).notify_test_submitted(testing_request)
+        except Exception as _n:
+            logger.warning(f"[Notif] auto-transition notify_approvers failed: {_n}")

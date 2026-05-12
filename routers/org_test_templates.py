@@ -63,10 +63,10 @@ def provision_overall_assessment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Seed the global overall assessment template if not yet created."""
+    """Seed or update the global overall assessment template."""
     svc = OrgTestTemplateService(db)
     inserted = svc.provision_overall_assessment()
-    return {"inserted": inserted, "message": "Provisioned" if inserted else "Already exists"}
+    return {"inserted": inserted, "message": "Provisioned" if inserted else "Updated"}
 
 
 # ─── Fetch for tester form (by test_type_id, best-match) ─────────────────────
@@ -126,6 +126,51 @@ def get_by_request_category(
     if not tmpl:
         raise HTTPException(status_code=404, detail=f"Template '{template_key}' not found in DB — run /provision/global first")
     return tmpl
+
+
+# ─── List by category_type (e.g., "nameplate") ───────────────────────────────
+
+@router.get("/by-category-type/{category_type}")
+def list_by_category_type(
+    category_type: str,
+    org_id: Optional[UUID] = Query(None, description="Org UUID; omit for global defaults"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return all templates whose linked CategoryDetails has the given category_type.
+    Use category_type='nameplate' to list all 19 nameplate field-entry templates.
+    Falls back to globals when org_id is not supplied.
+    """
+    from models import CategoryDetails as CD
+
+    q = (
+        db.query(OrgTestTemplate)
+        .join(CD, CD.id == OrgTestTemplate.test_type_id)
+        .filter(CD.category_type == category_type)
+    )
+    if org_id:
+        q = q.filter(OrgTestTemplate.org_id == org_id)
+    else:
+        q = q.filter(OrgTestTemplate.org_id == None)  # noqa: E711
+
+    results = q.order_by(OrgTestTemplate.template_key).all()
+
+    # Return lightweight list (key, name, equipment_type, section count)
+    return [
+        {
+            "id": str(t.id),
+            "template_key": t.template_key,
+            "test_type_id": t.test_type_id,
+            "name": t.template_data.get("name", t.template_key),
+            "equipment_type": t.template_data.get("equipment_type"),
+            "template_type": t.template_data.get("template_type"),
+            "section_count": len(t.template_data.get("sections", [])),
+            "is_system": t.is_system,
+            "version": t.version,
+        }
+        for t in results
+    ]
 
 
 # ─── Single ──────────────────────────────────────────────────────────────────
@@ -357,8 +402,24 @@ def preview_template(
             if not default_rows:
                 html += '<tr>' + ''.join(f'<td><input type="text"></td>' for _ in cols) + '</tr>'
             html += "</tbody></table></div>"
+        elif ftype == "file":
+            accept_types = f.get("accept", ["image/jpeg", "application/pdf"])
+            accept_str = ",".join(accept_types)
+            max_kb = f.get("max_size_kb", 10240)
+            accepted_label = ", ".join(
+                t.replace("image/", "").replace("application/", "").upper()
+                for t in accept_types
+            )
+            html += (
+                f'<div style="border:1px dashed rgba(63,169,245,0.4);border-radius:8px;'
+                f'padding:10px;text-align:center;color:#3fa9f5aa;font-size:12px;">'
+                f'<div style="font-size:20px;margin-bottom:4px;">📎</div>'
+                f'<div>{accepted_label} &nbsp;·&nbsp; max {max_kb // 1024} MB</div>'
+                f'<input type="file" accept="{accept_str}" style="display:none">'
+                f'</div>'
+            )
         else:
-            html += f'<input type="text" value="{default}" placeholder="{label}"{unit_txt} {"readonly" if read_only else ""}>{unit_txt}'
+            html += f'<input type="text" value="{default}" placeholder="{label}" {"readonly" if read_only else ""}>{unit_txt}'
 
         html += "</div>"
         return html
@@ -577,6 +638,14 @@ def pdf_template(
             elif ftype == "table":
                 cols = f.get("columns", [])
                 val_text = "Table: " + ", ".join(c.get("label", c.get("key", "")) for c in cols)
+            elif ftype == "file":
+                accept_types = f.get("accept", ["image/jpeg", "application/pdf"])
+                accepted_label = " / ".join(
+                    t.replace("image/", "").replace("application/", "").upper()
+                    for t in accept_types
+                )
+                max_kb = f.get("max_size_kb", 10240)
+                val_text = f"[File Upload — {accepted_label}, max {max_kb // 1024} MB]"
             else:
                 disp = f"{default} {unit}".strip() if default else f"___ {unit}".strip()
                 val_text = disp

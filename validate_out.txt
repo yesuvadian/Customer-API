@@ -1,0 +1,61 @@
+[OK] ERP PostgreSQL connected successfully.
+[OK] Vendor PostgreSQL connected successfully.
+[OK] MongoDB connected successfully.
+
+=================================================================
+  MULTI-USER API VALIDATION  (port 8001)
+=================================================================
+
+[1] SUPER ADMIN  superadmin@system.com
+  [PASS]  SuperAdmin login
+  [PASS]  GET /users/me  (superadmin@system.com)
+  [PASS]  GET /test-register/  (15 templates)
+  [PASS]  GET /equipment/  (HTTP 403)
+
+[2] ORG ADMIN  orgadmin@kptcl.com
+  [PASS]  Org Admin login
+  [PASS]  GET /users/me  (orgadmin@kptcl.com)
+  [PASS]  GET /test-register/ (org filter)  (15 templates)
+  [PASS]  GET /equipment/  (27 units)
+
+[3] EE TLSS  ee.tlss@kptcl.com
+  [PASS]  EE TLSS login
+  [PASS]  GET /users/me  (ee.tlss@kptcl.com)
+  [PASS]  GET /test-register/ (read)  (15 templates)
+  [PASS]  GET /test-register/{id}  (Tan Delta / Power Factor Test)
+  [PASS]  POST /test-register/commission/{equipment_id}  (requests_created=4)
+  [PASS]  GET /test-register/equipment/{id}/schedules  (8 live schedules)
+  [PASS]  GET /direct-submissions/?category=failure_registry  (0 records)
+  [PASS]  GET /direct-submissions/?category=taqc_inspection  (0 records)
+  [PASS]  POST /test-register/alert-reschedule/{id}  (next=2026-07-29)
+  [PASS]  GET /dashboard/ee-tlss (EE TLSS role dashboard)  (HTTP 200 -- ['kpis', 'overdue_breakdown', 'alerts_feed'])
+  [PASS]  GET /dashboard/overdue-tests  (HTTP 200 -- non-list response (widget dict))
+  [PASS]  GET /dashboard/active-alerts  (HTTP 200)
+  [PASS]  GET /dashboard/kpi  (HTTP 200)
+
+[4] AEE MAINTENANCE  aee.maintenance@kptcl.com
+  [PASS]  AEE Maintenance login
+  [PASS]  GET /users/me  (aee.maintenance@kptcl.com)
+  [PASS]  GET /test-register/ (read as AEE)  (15 templates)
+  [PASS]  GET /dashboard/aee (AEE role dashboard)  (HTTP 200)
+
+[5] ORIGINATOR  originator@kptcl.com
+  [PASS]  Originator login
+  [PASS]  GET /users/me  (originator@kptcl.com)
+  [PASS]  GET /test-register/ (read as Originator)  (15 templates)
+
+[6] CROSS-CHECKS
+  [PASS]  GET /test-register/ no token (expect 401/403)  (HTTP 401)
+  [PASS]  GET /direct-submissions/ no token (expect 401/403)  (HTTP 401)
+  [PASS]  POST /direct-submissions/ bad category (expect 400/422)  (HTTP 400)
+  [PASS]  is_schedule_template partitions DB rows cleanly  (live=12  templates=15)
+  [PASS]  GET /dashboard/role-view (EE TLSS)  (HTTP 200)
+  [PASS]  GET /dashboard/full (Admin)  (HTTP 200)
+  [PASS]  GET /dashboard/maintenance-overdue  (HTTP 200)
+
+=================================================================
+  FINAL REPORT
+=================================================================
+=================================================================
+  PASSED: 35   FAILED: 0   TOTAL: 35
+=================================================================

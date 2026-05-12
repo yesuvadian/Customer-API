@@ -1,0 +1,12 @@
+ {
+    "Failure Reporting": "repair_stage_failure_reporting",
+    "Committee Review": "repair_stage_committee_review",
+    "Vendor Assignment": "repair_stage_vendor_assignment",
+    "Lifting": "repair_stage_lifting",
+    "Joint Inspection": "repair_stage_joint_inspection",
+    "Estimate & Work Award": "repair_stage_estimate",
+    "Repair QA": "repair_stage_qa",
+    "Final Inspection": "repair_stage_final_inspection",
+    "Dispatch": "repair_stage_dispatch",
+    "Commissioning": "repair_stage_commissioning"
+}
