@@ -8270,8 +8270,24 @@ def _seed_dft_equipment(session, org, dept_map: dict):
     type_map = {et.name: et.id for et in equip_types}
 
     division_configs = {
-        ...
-    }
+    "north": [
+        ("Power Transformer", "220", "01", "BHEL", "PT-220-N", "NTH2024001", 2021),
+        ("Current Transformer", "220", "01", "Siemens", "CT-220-N", "NTH2024002", 2022),
+        ("Power Transformer", "110", "01", "ABB", "PT-110-N", "NTH2024003", 2020),
+    ],
+
+    "south": [
+        ("Power Transformer", "220", "01", "BHEL", "PT-220-S", "STH2024001", 2021),
+        ("Current Transformer", "110", "01", "CGL", "CT-110-S", "STH2024002", 2022),
+        ("CVT", "220", "01", "BHEL", "CVT-220-S", "STH2024003", 2020),
+    ],
+
+    "mysuru": [
+        ("Power Transformer", "110", "01", "Crompton Greaves", "PT-110-M", "MYS2024001", 2019),
+        ("Current Transformer", "220", "01", "Siemens", "CT-220-M", "MYS2024002", 2021),
+        ("Power Transformer", "66", "01", "ABB", "PT-066-M", "MYS2024003", 2018),
+    ],
+}
 
     created = 0
 
@@ -8321,6 +8337,15 @@ def _seed_dft_equipment(session, org, dept_map: dict):
                     f"  [WARN] Equipment seed failed "
                     f"for {serial}: {e}"
                 )
+                print(
+        f"\n[ERROR] Equipment seed failed"
+    )
+
+                print(f"type       : {type_name}")
+                print(f"serial     : {serial}")
+                print(f"department : {slug}")
+
+                print(f"\nException:\n{repr(e)}\n")
 
     print(
         f"  [OK] {created} equipment items seeded "
