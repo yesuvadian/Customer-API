@@ -761,6 +761,238 @@ Dropdown from `GET .../stages/{stage_id}/eligible-users` → confirm → `POST .
 
 ---
 
+## 6A. Annual Audit — User Login Walkthrough
+
+> This section describes the **exact screens, buttons, and form fields** each role encounters when working through the annual audit workflow. Use this as a manual QA / demo script.
+
+### Login credentials (Annual Audit roles)
+
+| Login email | Password | Role | What they do in Annual Audit |
+|---|---|---|---|
+| `taqc.north@kptcl.com` | `TestDept@123` | TA&QC Officer | Create inspection + observation · Fill & approve stage 1 · Review & approve/reject stage 4 · Close stage 5 |
+| `wfcoordinator.north@kptcl.com` | `TestDept@123` | Workflow Coordinator | Fill & approve stage 2 · Assign stages 3 / 4 / 5 to officers |
+| `aeemaint.north@kptcl.com` | `TestDept@123` | AEE Maintenance | Fill compliance evidence & submit stage 3 |
+| `orgadmin@kptcl.com` | `admin123` | Org Admin | Full read/write across all annual audit screens |
+
+---
+
+### Role: TA&QC Officer (`taqc.north@kptcl.com`)
+
+**Menu items visible**: Annual Audits · Audit Queue · TA&QC Inspections · Equipment · Notifications
+
+---
+
+#### Step 1 — Create an Inspection
+
+1. Open **Annual Audits** from the sidebar → AUD-1 screen loads (space/glass theme, 4 tabs).
+2. Tap the **Create Inspection** icon button (top-right of tab bar).
+3. Dark dialog appears:
+   - **Substation**: select from dropdown (e.g., `BL-MYSU-066-01-PT-01`)
+   - **Inspection Date**: pick today's date
+   - **Remarks**: optional free text
+4. Tap **Create** → `POST /annual-audits/inspections` → snackbar "Inspection created" → inspection number `TR-ANU-INSP-YYYYMMDD-####` assigned.
+
+---
+
+#### Step 2 — Create an Observation
+
+1. Tap **+** FAB → Create Observation dialog:
+   - **Category**: select from dropdown (e.g., `Electrical Safety`)
+   - **Severity**: `Major` / `Minor` / `Advisory`
+   - **Target Compliance Date**: pick a future date
+   - **Description**: free text describing the issue
+2. Tap **Create** → `POST /annual-audits/inspections/{id}/observations` → observation number `TR-ANU-YYYYMMDD-####` assigned, stage set to `OBSERVATION_REPORTING`.
+
+---
+
+#### Step 3 — Fill & Submit Stage 1 (OBSERVATION_REPORTING)
+
+1. Tap the observation card in the list → AUD-2 right panel slides in.
+2. Header shows: observation number + cyan **OBSERVATION REPORTING** stage chip.
+3. **Workflow Progress** stepper: step 1 is active (editing), steps 2–5 are indexed.
+4. **Stage Form** section shows (from template `audit_stage_observation_reporting`):
+
+   | Field | Type | Required |
+   |---|---|---|
+   | Observation Description | Textarea | ✅ |
+   | Severity | Dropdown (Major / Minor / Advisory) | ✅ |
+   | Target Compliance Date | Date picker | ✅ |
+   | Assessment Result | Dropdown (Non-Compliant / Conditional) | ✅ |
+   | Supporting Photo | File upload | ❌ |
+
+5. Fill all required fields. Optionally upload a supporting photo via file picker.
+6. **Remarks** field: add optional note.
+7. Tap **Save Draft** → `POST .../stages/{stage_id}/save` → no validation, data persisted.
+8. Tap **Submit** → validates required fields → `POST .../stages/{stage_id}/submit` → stage status moves to `submitted`.
+9. Available actions update to show **Approve** and **Reject** buttons.
+
+---
+
+#### Step 4 — Approve Stage 1 (as TA&QC Officer)
+
+1. Still in the same AUD-2 panel.
+2. **Actions** section shows: **Approve** (green) · **Reject** (red outlined).
+3. Optionally fill Remarks.
+4. Tap **Approve** → `POST .../stages/{stage_id}/approve` → stage advances to `OBSERVATION_ASSIGNMENT`.
+5. Stepper: step 1 shows "Completed" (green), step 2 becomes active.
+6. Stage chip in header changes to amber **OBSERVATION ASSIGNMENT**.
+7. Panel refreshes — Actions section disappears (TA&QC Officer has no role in stage 2).
+
+---
+
+#### Step 5 — (Later) Review Stage 4 (COMPLIANCE_REVIEW)
+
+> After WfCoordinator completes stage 2 and AeeMaint completes stage 3, the observation returns to TA&QC Officer for review.
+
+1. Open observation from AUD-1 list → AUD-2 panel.
+2. Header shows purple **COMPLIANCE REVIEW** chip.
+3. Stepper: steps 1–3 show "Completed", step 4 active.
+4. **Stage Form** (template `audit_stage_compliance_review`):
+
+   | Field | Type | Required |
+   |---|---|---|
+   | Review Remarks | Textarea | ✅ |
+   | Compliance Status | Dropdown (Compliant / Non-Compliant / Conditional) | ✅ |
+   | Review Evidence | File upload | ❌ |
+
+5. Fill fields → **Save Draft** → **Submit**.
+6. To approve: tap **Approve** → advances to `OBSERVATION_CLOSURE`.
+7. To reject: tap **Reject** → dark dialog appears asking for reason → type reason → tap **Reject** → stage bounces back to `COMPLIANCE_SUBMISSION`. Stepper shows step 3 with red "Rejected" subtitle.
+
+---
+
+#### Step 6 — Close Stage 5 (OBSERVATION_CLOSURE)
+
+1. After stage 4 approval, observation moves to `OBSERVATION_CLOSURE`.
+2. AUD-2 shows green **OBSERVATION CLOSURE** chip.
+3. **Stage Form** (template `audit_stage_observation_closure`):
+
+   | Field | Type | Required |
+   |---|---|---|
+   | Closure Remarks | Textarea | ✅ |
+   | Date of Closure | Date picker | ✅ |
+   | Closure Evidence | File upload | ❌ |
+
+4. Fill fields → **Save Draft** → **Submit** → **Approve** → observation status = `COMPLETED`.
+5. Stepper shows all 5 steps green "Completed".
+6. The observation moves to the **Closed** tab in AUD-1.
+
+---
+
+### Role: Workflow Coordinator (`wfcoordinator.north@kptcl.com`)
+
+**Menu items visible**: Annual Audits · Audit Queue · Notifications
+
+---
+
+#### Step A — Check Assignment Queue
+
+1. Open **Audit Queue** (AUD-3) → list of observations pending stage assignment.
+2. Each card shows: observation number · category · severity · pending stage name · target date.
+3. If an observation shows stage `OBSERVATION_ASSIGNMENT` as pending: tap **Assign** → select yourself from the dropdown → confirm.
+
+---
+
+#### Step B — Fill & Approve Stage 2 (OBSERVATION_ASSIGNMENT)
+
+1. Open **Annual Audits** → tap the observation (stage chip = amber **OBSERVATION ASSIGNMENT**).
+2. AUD-2 panel shows **Actions**: **Save Draft** · **Submit** (because you are the assigned officer).
+3. **Stage Form** (template `audit_stage_observation_assignment`):
+
+   | Field | Type | Required |
+   |---|---|---|
+   | Assignment Remarks | Textarea | ❌ |
+   | Priority Note | Text | ❌ |
+
+4. Fill fields → **Save Draft** → **Submit** → stage status = `submitted`.
+5. Available actions: **Approve** appears.
+6. Tap **Approve** → stage advances to `COMPLIANCE_SUBMISSION`.
+7. Stepper: steps 1–2 green, step 3 active.
+
+---
+
+#### Step C — Assign Stage 3 to AEE Maintenance
+
+1. Open the observation (stage chip = blue **COMPLIANCE SUBMISSION**).
+2. **Actions** shows **Assign** button (WfCoordinator is the `assignment_role` for stage 3).
+3. Tap **Assign** → dropdown shows eligible `AEE Maintenance` users → select `aeemaint.north@kptcl.com` → tap **Assign**.
+4. Stage 3 is now assigned; WfCoordinator's actions disappear — AeeMaint must act next.
+
+> WfCoordinator also assigns stages 4 (COMPLIANCE_REVIEW → TaqcOfficer) and 5 (OBSERVATION_CLOSURE → TaqcOfficer) after each preceding stage completes.
+
+---
+
+### Role: AEE Maintenance (`aeemaint.north@kptcl.com`)
+
+**Menu items visible**: Annual Audits · Notifications
+
+---
+
+#### Step A — Fill Stage 3 (COMPLIANCE_SUBMISSION)
+
+1. Open **Annual Audits** → tap observation assigned to you (stage chip = blue **COMPLIANCE SUBMISSION**).
+2. AUD-2 shows **Save Draft** · **Submit** in Actions.
+3. **Stage Form** (template `audit_stage_compliance_submission`):
+
+   | Field | Type | Required | Notes |
+   |---|---|---|---|
+   | Corrective Action Taken | Textarea | ✅ | Describe what was fixed |
+   | Date of Compliance | Date picker | ✅ | When the fix was completed |
+   | Compliance Evidence | **File upload** | ✅ | **Must upload before submitting** |
+   | Additional Remarks | Textarea | ❌ | Optional notes |
+
+4. **Upload evidence first**: tap the file upload field → select a PDF/image → `POST /repair-workflows/{workflow_id}/stages/{stage_id}/upload` → field shows uploaded filename.
+5. Fill text fields → **Save Draft** (saves text fields; evidence already uploaded).
+6. Tap **Submit** → validates all required fields including the uploaded evidence → `POST .../stages/{stage_id}/submit`.
+7. Available actions: **Approve** appears.
+8. Tap **Approve** → stage advances to `COMPLIANCE_REVIEW`.
+
+> **Important**: If you tap Submit before uploading the evidence file, submit will return a validation error: `"Compliance Evidence (file upload) is required."` — upload the file first, then submit.
+
+---
+
+### What each role sees on AUD-1 tabs
+
+| Tab | TaqcOfficer sees | WfCoordinator sees | AeeMaint sees |
+|---|---|---|---|
+| **All** | All observations in their dept | All observations in their dept | Only observations assigned to them |
+| **Mine** | Observations assigned to their user | Observations assigned to their user | Observations assigned to their user |
+| **Overdue** | Overdue observations | Overdue observations | Overdue observations assigned to them |
+| **Closed** | Closed observations | Closed observations | Closed observations |
+
+---
+
+### End-to-end status flow (single observation)
+
+```
+TaqcOfficer creates inspection + observation
+            ↓
+Stage 1: OBSERVATION_REPORTING
+  TaqcOfficer fills form → Save Draft → Submit → Approve
+            ↓
+Stage 2: OBSERVATION_ASSIGNMENT  (WfCoordinator self-assigns via queue)
+  WfCoordinator fills form → Submit → Approve
+            ↓
+  WfCoordinator assigns stage 3 → AeeMaint
+            ↓
+Stage 3: COMPLIANCE_SUBMISSION
+  AeeMaint uploads evidence + fills form → Submit → Approve
+            ↓
+  WfCoordinator assigns stage 4 → TaqcOfficer
+            ↓
+Stage 4: COMPLIANCE_REVIEW
+  TaqcOfficer fills review → Submit → Approve (or Reject → back to stage 3)
+            ↓
+  WfCoordinator assigns stage 5 → TaqcOfficer
+            ↓
+Stage 5: OBSERVATION_CLOSURE
+  TaqcOfficer fills closure → Submit → Approve
+            ↓
+         COMPLETED  ✓  (observation appears in Closed tab)
+```
+
+---
+
 ## 7. Repair Workflow Screens
 
 ### 10-Stage Repair Workflow
