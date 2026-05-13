@@ -7919,6 +7919,9 @@ def _dft_get_or_create_dept(session, org_id, name, code,
         organization_id=org_id, code=code
     ).first()
     if d:
+        if parent_id and d.parent_department_id != parent_id:
+            d.parent_department_id = parent_id
+            session.flush()
         return d
     now = datetime.now()
     d = OrgDepartment(
@@ -8045,6 +8048,9 @@ def _dft_assign_role(session, user_id, role_id, dept_id):
         user_id=user_id, org_role_id=role_id
     ).first()
     if exists:
+        if exists.department_id != dept_id:
+            exists.department_id = dept_id
+            session.flush()
         return
     now = datetime.now()
     session.add(OrgUserRole(
