@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, text
 
 from models import Equipment, EquipmentStatus, OrgDepartment, CategoryMaster
+from services.test_request_schedule_service import TestRequestScheduleService
 
 
 class EquipmentService:
@@ -229,6 +230,11 @@ class EquipmentService:
         )
         db.add(equipment)
         db.flush()
+        TestRequestScheduleService.instantiate_equipment_schedules(
+            db=db,
+            equipment=equipment,
+            user_id=created_by,
+        )
         return equipment
 
     @classmethod

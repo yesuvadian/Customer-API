@@ -1,0 +1,96 @@
+{
+  "audit_stage_observation_reporting": {
+    "name": "Observation Reporting",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Observation Details",
+        "fields": [
+          {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": true},
+          {
+            "key": "severity",
+            "label": "Severity",
+            "type": "dropdown",
+            "required": true,
+            "options": ["Major", "Minor", "Advisory"]
+          },
+          {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": true},
+          {
+            "key": "overall_result",
+            "label": "Assessment Result",
+            "type": "dropdown",
+            "required": true,
+            "options": ["Non-Compliant", "Conditional"]
+          },
+          {"key": "supporting_photo", "label": "Supporting Photo", "type": "file", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_stage_observation_assignment": {
+    "name": "Observation Assignment",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Assignment Details",
+        "fields": [
+          {"key": "assignment_remarks", "label": "Assignment Remarks", "type": "textarea", "required": false},
+          {"key": "priority_note", "label": "Priority Note", "type": "text", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_stage_compliance_submission": {
+    "name": "Compliance Submission",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "compliance_evidence", "label": "Compliance Evidence", "type": "file", "required": true},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_stage_compliance_review": {
+    "name": "Compliance Review",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Review Assessment",
+        "fields": [
+          {"key": "review_remarks", "label": "Review Remarks", "type": "textarea", "required": true},
+          {
+            "key": "overall_result",
+            "label": "Compliance Status",
+            "type": "dropdown",
+            "required": true,
+            "options": ["Compliant", "Non-Compliant", "Conditional"]
+          },
+          {"key": "review_evidence", "label": "Review Evidence", "type": "file", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_stage_observation_closure": {
+    "name": "Observation Closure",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Closure Confirmation",
+        "fields": [
+          {"key": "closure_remarks", "label": "Closure Remarks", "type": "textarea", "required": true},
+          {"key": "closure_date", "label": "Date of Closure", "type": "date", "required": true},
+          {"key": "closure_evidence", "label": "Closure Evidence", "type": "file", "required": false}
+        ]
+      }
+    ]
+  }
+}

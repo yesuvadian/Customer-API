@@ -1,0 +1,31 @@
+[
+  {
+    "stage_code": "OBSERVATION_REPORTING",
+    "roles":           ["TA&QC Officer"],
+    "assign_also":     ["TA&QC Officer"],
+    "assignment_role": "Workflow Coordinator"
+  },
+  {
+    "stage_code": "OBSERVATION_ASSIGNMENT",
+    "roles":           ["Workflow Coordinator"],
+    "assign_also":     ["Workflow Coordinator"],
+    "assignment_role": null
+  },
+  {
+    "stage_code": "COMPLIANCE_SUBMISSION",
+    "roles":           ["AEE Maintenance"],
+    "assignment_role": "Workflow Coordinator"
+  },
+  {
+    "stage_code": "COMPLIANCE_REVIEW",
+    "roles":           ["TA&QC Officer"],
+    "assign_also":     ["TA&QC Officer"],
+    "assignment_role": "Workflow Coordinator"
+  },
+  {
+    "stage_code": "OBSERVATION_CLOSURE",
+    "roles":           ["TA&QC Officer"],
+    "assign_also":     ["TA&QC Officer"],
+    "assignment_role": "Workflow Coordinator"
+  }
+]

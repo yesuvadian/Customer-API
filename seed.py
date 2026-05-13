@@ -4853,6 +4853,18 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     session.commit()
     print(f"[OK] Deleted {deleted_requests} testing requests")
 
+    # Delete annual audit inspections first (FK → equipment, observations cascade)
+    try:
+        from models import TAQCAnnualInspection
+        deleted_inspections = session.query(TAQCAnnualInspection).filter(
+            TAQCAnnualInspection.organization_id == uuid.UUID(org_id)
+        ).delete()
+        session.commit()
+        if deleted_inspections:
+            print(f"[OK] Deleted {deleted_inspections} annual audit inspections (and their observations)")
+    except Exception:
+        session.rollback()
+
     # Delete existing equipment for this organization
     print(f"[INFO] Deleting existing equipment for organization: {org.name}")
     from models import Equipment
@@ -7062,6 +7074,8 @@ def run_seed():
         print(f"[OK] Direct-submission templates: {n2} seeded.")
         n3 = seed_annual_audit_templates(session)
         print(f"[OK] Annual Audit templates: {n3} seeded.")
+        from seed_annual_audit import seed_annual_audit_stages
+        seed_annual_audit_stages(session)
         n4 = seed_cumulative_template(session)
         print(f"[OK] Cumulative / Operations Tracking template: {n4} seeded.")
         n5 = seed_calibration_template(session)
@@ -7088,6 +7102,16 @@ def run_seed():
                 print(f"[WARN] KPTCL department seeding failed: {e}")
                 print("[INFO] You can retry with:")
                 print(f"       python seed.py --kptcl {kptcl_org.id}")
+
+        # Annual Audit role mappings for KPTCL (stages must already exist from seed_annual_audit_stages above)
+        if kptcl_org:
+            try:
+                session.rollback()  # clear any aborted transaction from earlier steps
+                from seed_annual_audit import seed_annual_audit_role_mappings
+                seed_annual_audit_role_mappings(session, kptcl_org.id)
+            except Exception as e:
+                session.rollback()
+                print(f"[WARN] Annual Audit role mapping failed: {e}")
 
         # Sample Equipment (after departments + equipment types exist)
         seed_sample_equipment(session, kptcl_org)

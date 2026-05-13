@@ -2300,7 +2300,11 @@ class TestingRequest(Base):
     # Notes
     notes = Column(Text, nullable=True)
     rejection_reason = Column(Text, nullable=True)
-
+    source_schedule_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("public.test_request_schedules.id"),
+    nullable=True,
+)
     # Audit
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -2328,7 +2332,7 @@ class TestingRequest(Base):
 # ------------------------------
 class TestRequestSchedule(Base):
     __tablename__ = "test_request_schedules"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = ( UniqueConstraint( "test_request_id", "equipment_id", name="uq_schedule_template_equipment" ), {"schema": "public"}, )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     test_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False, unique=True)
@@ -2347,7 +2351,8 @@ class TestRequestSchedule(Base):
     oem_reference = Column(Text, nullable=True)                # OEM/IS standard clause that mandates this test
     responsible_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
     reviewing_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
-
+    # NEW 
+    equipment_id = Column( UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=True, index=True, )
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
@@ -2359,8 +2364,26 @@ class TestRequestSchedule(Base):
     creator = relationship("User", foreign_keys=[created_by])
     responsible_role = relationship("OrgRole", foreign_keys=[responsible_role_id])
     reviewing_role = relationship("OrgRole", foreign_keys=[reviewing_role_id])
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
+    # relationships equipment = relationship( "Equipment", foreign_keys=[equipment_id], )
     logs = relationship("TestRequestScheduleLog", back_populates="schedule", cascade="all, delete-orphan")
+    last_success_at = Column(DateTime(timezone=True))
 
+    last_failure_at = Column(DateTime(timezone=True))
+
+    consecutive_failures = Column(Integer, default=0)
+
+    paused_at = Column(DateTime(timezone=True))
+
+    paused_by = Column(UUID(as_uuid=True))
+
+    pause_reason = Column(Text)
+
+    is_deleted = Column(Boolean, default=False)
+
+    deleted_at = Column(DateTime(timezone=True))
+
+    deleted_by = Column(UUID(as_uuid=True))
 
 # ------------------------------
 # TestRequestScheduleLog Model
