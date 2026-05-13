@@ -229,8 +229,7 @@ def deactivate_template(
 
 @router.post(
     "/commission/{equipment_id}",
-    status_code=status.HTTP_201_CREATED,
-    summary="Commission equipment — clone templates to live requests",
+    summary="Commission equipment — run scheduler immediately for one unit",
 )
 def commission_equipment(
     equipment_id: UUID,
@@ -238,14 +237,30 @@ def commission_equipment(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Manually trigger commissioning for an equipment unit.
-    Finds all active register templates matching equipment.equipment_type_id
-    and creates a live TestingRequest + TestRequestSchedule for each.
-
-    This is also called automatically from the equipment creation endpoint.
+    Trigger the scheduler immediately for a single equipment unit.
+    Generates tickets for any template schedules that are currently due.
     """
     svc = TestRegisterService(db)
     return svc.commission_equipment(equipment_id, current_user)
+
+
+@router.post(
+    "/run-scheduler",
+    summary="Run the schedule engine — generate due tickets for all equipment",
+)
+def run_scheduler(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Scans all active template schedules. For each schedule whose
+    next_run_date - advance_days <= today, creates a TestingRequest ticket
+    (status=submitted) for every active equipment unit of that type.
+    Advances next_run_date after each template is processed.
+    Idempotent: skips equipment that already has an open ticket for that test.
+    """
+    svc = TestRegisterService(db)
+    return svc.run_scheduler()
 
 
 # ── ALERT reschedule ───────────────────────────────────────────────────────────

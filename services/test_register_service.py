@@ -41,9 +41,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+from datetime import timedelta
+
 from models import (
     CategoryMaster,
     Equipment,
+    EquipmentStatus,
     OrgRole,
     RequestCategory,
     ScheduleFrequency,
@@ -369,10 +372,9 @@ class TestRegisterService:
 
     def commission_equipment(self, equipment_id: UUID, triggered_by: User) -> dict:
         """
-        Clone all active register templates matching equipment.equipment_type_id
-        into live TestingRequest + TestRequestSchedule records.
-
-        Returns a summary dict with the count and IDs of created requests.
+        Register an equipment unit against its matching schedule templates.
+        Runs the scheduler immediately for this equipment so any currently-due
+        tests generate tickets right away.
         """
         equipment = (
             self.db.query(Equipment)
@@ -384,93 +386,132 @@ class TestRegisterService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Equipment not found.",
             )
+        return self.run_scheduler(equipment_id=equipment_id)
 
-        org_id = equipment.organization_id or getattr(triggered_by, "organization_id", None)
+    # ── Scheduler — generate tickets from due template schedules ─────────────
 
-        templates = (
-            self.db.query(TestingRequest)
-            .join(
-                TestRequestSchedule,
-                TestRequestSchedule.test_request_id == TestingRequest.id,
+    def run_scheduler(self, equipment_id: Optional[UUID] = None) -> dict:
+        """
+        For every active template TestRequestSchedule whose
+        next_run_date - advance_days <= today:
+          - Find all active Equipment of the matching type + org
+          - Skip any equipment that already has an open ticket for that test
+          - Create TestingRequest(is_schedule_template=False, status=submitted)
+          - Advance next_run_date by frequency after processing each template
+
+        Pass equipment_id to scope the run to one unit (used by commission_equipment).
+        """
+        now = self._now()
+        today = now.date()
+
+        template_schedules = (
+            self.db.query(TestRequestSchedule)
+            .join(TestingRequest, TestingRequest.id == TestRequestSchedule.test_request_id)
+            .options(
+                joinedload(TestRequestSchedule.test_request),
+                joinedload(TestRequestSchedule.responsible_role),
+                joinedload(TestRequestSchedule.reviewing_role),
             )
             .filter(
                 TestingRequest.is_schedule_template.is_(True),
-                TestingRequest.equipment_type_id == equipment.equipment_type_id,
-                TestingRequest.organization_id == org_id,
                 TestRequestSchedule.is_active.is_(True),
             )
-            .options(joinedload(TestingRequest.test_results))
             .all()
         )
 
-        now = self._now()
+        _open_statuses = {
+            TestingRequestStatus.submitted,
+            TestingRequestStatus.pending_approval,
+            TestingRequestStatus.assigned,
+            TestingRequestStatus.accepted,
+            TestingRequestStatus.in_progress,
+            TestingRequestStatus.test_submitted,
+            TestingRequestStatus.under_approval,
+            TestingRequestStatus.scheduled,
+        }
+
+        tickets_created = 0
+        schedules_skipped = 0
         created_ids = []
 
-        for tmpl in templates:
-            tmpl_sched = self._get_schedule_for(tmpl.id)
-            if not tmpl_sched:
+        for tmpl_sched in template_schedules:
+            tmpl = tmpl_sched.test_request
+
+            # Check if this template schedule is due
+            due_on = (tmpl_sched.next_run_date - timedelta(days=tmpl_sched.advance_days)).date()
+            if today < due_on:
+                schedules_skipped += 1
                 continue
 
-            # Derive due_date from frequency
-            due_date = now + self._freq_delta(tmpl_sched.frequency)
-
-            today_str = now.strftime("%Y%m%d")
-            count = (
-                self.db.query(func.count(TestingRequest.id))
-                .filter(TestingRequest.request_number.like(f"TR-{today_str}-%"))
-                .scalar()
+            # Equipment scope — all active units of this type + org, or just one
+            eq_query = self.db.query(Equipment).filter(
+                Equipment.equipment_type_id == tmpl.equipment_type_id,
+                Equipment.organization_id == tmpl.organization_id,
+                Equipment.status == EquipmentStatus.active,
             )
-            req_number = f"TR-{today_str}-{(count + 1):04d}"
+            if equipment_id:
+                eq_query = eq_query.filter(Equipment.id == equipment_id)
+            equipment_list = eq_query.all()
 
-            live_req = TestingRequest(
-                id=uuid4(),
-                request_number=req_number,
-                title=tmpl.title,
-                description=tmpl.description,
-                equipment_type_id=tmpl.equipment_type_id,
-                equipment_id=equipment.id,
-                organization_id=org_id,
-                department_id=tmpl.department_id or equipment.department_id,
-                request_category=RequestCategory.test,
-                priority=tmpl.priority,
-                notes=tmpl.notes,
-                status=TestingRequestStatus.submitted,
-                is_schedule_template=False,
-                is_direct_submission=False,
-                originator_id=triggered_by.id,
-                created_by=triggered_by.id,
-                requested_date=now,
-                due_date=due_date,
-            )
-            self.db.add(live_req)
-            self.db.flush()
+            for equip in equipment_list:
+                # Skip if an open ticket already exists for this equipment + test
+                already_open = (
+                    self.db.query(TestingRequest.id)
+                    .filter(
+                        TestingRequest.equipment_id == equip.id,
+                        TestingRequest.title == tmpl.title,
+                        TestingRequest.is_schedule_template.is_(False),
+                        TestingRequest.status.in_(_open_statuses),
+                    )
+                    .first()
+                )
+                if already_open:
+                    continue
 
-            live_sched = TestRequestSchedule(
-                id=uuid4(),
-                test_request_id=live_req.id,
-                organization_id=org_id,
-                frequency=tmpl_sched.frequency,
-                start_date=now,
-                next_run_date=due_date,
-                advance_days=tmpl_sched.advance_days,
-                is_active=True,
-                responsible_role_id=tmpl_sched.responsible_role_id,
-                reviewing_role_id=tmpl_sched.reviewing_role_id,
-                revised_periodicity_days=tmpl_sched.revised_periodicity_days,
-                oem_reference=tmpl_sched.oem_reference,
-                created_by=triggered_by.id,
-            )
-            self.db.add(live_sched)
-            created_ids.append(str(live_req.id))
+                today_str = now.strftime("%Y%m%d")
+                seq = (
+                    self.db.query(func.count(TestingRequest.id))
+                    .filter(TestingRequest.request_number.like(f"TR-SCH-{today_str}-%"))
+                    .scalar()
+                )
+                req_number = f"TR-SCH-{today_str}-{(seq + tickets_created + 1):04d}"
+
+                ticket = TestingRequest(
+                    id=uuid4(),
+                    request_number=req_number,
+                    title=tmpl.title,
+                    description=tmpl.description,
+                    equipment_type_id=tmpl.equipment_type_id,
+                    test_type_id=tmpl.test_type_id,
+                    equipment_id=equip.id,
+                    organization_id=tmpl.organization_id,
+                    department_id=tmpl.department_id or equip.department_id,
+                    request_category=tmpl.request_category,
+                    priority=tmpl.priority,
+                    notes=tmpl.notes,
+                    status=TestingRequestStatus.submitted,
+                    is_schedule_template=False,
+                    is_direct_submission=False,
+                    originator_id=equip.created_by,
+                    created_by=equip.created_by,
+                    requested_date=now,
+                    due_date=tmpl_sched.next_run_date,
+                )
+                self.db.add(ticket)
+                tickets_created += 1
+                created_ids.append(str(ticket.id))
+
+            # Advance schedule after processing all equipment for this template
+            tmpl_sched.last_run_date = now
+            tmpl_sched.next_run_date = now + self._freq_delta(tmpl_sched.frequency)
 
         self.db.commit()
 
         return {
-            "equipment_id": str(equipment_id),
-            "equipment_ueic": getattr(equipment, "ueic", None),
-            "templates_matched": len(templates),
-            "requests_created": len(created_ids),
-            "created_request_ids": created_ids,
+            "tickets_created": tickets_created,
+            "schedules_skipped": schedules_skipped,
+            "equipment_id": str(equipment_id) if equipment_id else None,
+            "created_ticket_ids": created_ids,
         }
 
     # ── ALERT reschedule ──────────────────────────────────────────────────────
@@ -521,21 +562,33 @@ class TestRegisterService:
     # ── Equipment schedule view ───────────────────────────────────────────────
 
     def list_equipment_schedules(self, equipment_id: UUID) -> list:
-        """List all live test schedules for a specific equipment unit."""
+        """
+        Return the template schedules that apply to this equipment unit,
+        showing when each test is next due.
+        """
+        equipment = (
+            self.db.query(Equipment)
+            .filter(Equipment.id == equipment_id)
+            .first()
+        )
+        if not equipment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Equipment not found.",
+            )
+
         rows = (
             self.db.query(TestRequestSchedule)
-            .join(
-                TestingRequest,
-                TestingRequest.id == TestRequestSchedule.test_request_id,
-            )
+            .join(TestingRequest, TestingRequest.id == TestRequestSchedule.test_request_id)
             .options(
                 joinedload(TestRequestSchedule.responsible_role),
                 joinedload(TestRequestSchedule.reviewing_role),
                 joinedload(TestRequestSchedule.test_request).joinedload(TestingRequest.equipment_type),
             )
             .filter(
-                TestingRequest.equipment_id == equipment_id,
-                TestingRequest.is_schedule_template.is_(False),
+                TestingRequest.is_schedule_template.is_(True),
+                TestingRequest.equipment_type_id == equipment.equipment_type_id,
+                TestingRequest.organization_id == equipment.organization_id,
                 TestRequestSchedule.is_active.is_(True),
             )
             .order_by(TestRequestSchedule.next_run_date.asc())
@@ -546,8 +599,7 @@ class TestRegisterService:
             req = row.test_request
             return {
                 "schedule_id": str(row.id),
-                "request_id": str(req.id),
-                "request_number": req.request_number,
+                "template_request_id": str(req.id),
                 "title": req.title,
                 "equipment_type_name": getattr(req.equipment_type, "name", None),
                 "frequency": row.frequency.value if row.frequency else None,

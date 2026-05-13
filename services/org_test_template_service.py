@@ -371,6 +371,17 @@ class OrgTestTemplateService:
                     .first()
                 )
                 if existing:
+                    # Lifecycle-flagged templates must always be kept in sync —
+                    # the enable_cumulative / enable_calibration flags may have
+                    # been added to test_templates.py after the initial seed, so
+                    # a plain "skip if exists" would leave stale records forever.
+                    is_lifecycle = (
+                        template_data.get("enable_cumulative")
+                        or template_data.get("enable_calibration")
+                    )
+                    if is_lifecycle:
+                        existing.template_data = template_data
+                        existing.template_key = template_key
                     continue
 
                 self.db.add(OrgTestTemplate(

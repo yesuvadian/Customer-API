@@ -144,11 +144,12 @@ class TestingRequestService:
         organization_id: Optional[UUID] = None,
         department_id: Optional[UUID] = None,
         department_ids: Optional[List[UUID]] = None,  # subtree list (overrides department_id)
+        equipment_id: Optional[UUID] = None,
     ) -> List[TestingRequest]:
         query = (
-    self.db.query(TestingRequest)
-    .filter(TestingRequest.is_schedule_template.is_(False))
-)
+            self.db.query(TestingRequest)
+            .filter(TestingRequest.is_schedule_template.is_(False))
+        )
         if status_filter:
             query = query.filter(TestingRequest.status == status_filter)
         if category_filter:
@@ -159,6 +160,8 @@ class TestingRequestService:
             query = query.filter(TestingRequest.assigned_tester_id == tester_id)
         if organization_id:
             query = query.filter(TestingRequest.organization_id == organization_id)
+        if equipment_id:
+            query = query.filter(TestingRequest.equipment_id == equipment_id)
         # department_ids (subtree) takes priority over single department_id
         if department_ids is not None:
             query = query.filter(TestingRequest.department_id.in_(department_ids))
