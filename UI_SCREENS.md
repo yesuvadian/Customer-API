@@ -219,42 +219,76 @@ All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{de
 **Visible to**: Originator, OrgAdmin  
 **Provider**: `TestingRequestProvider`
 
-#### Form sections
+#### User scenarios — Create mode
 
-**Equipment Selection**
-| Field | Type | Notes |
+**Scenario 1 — Standard test type (e.g. Transformer Oil Test)**
+1. Originator logs in as `originator.north@kptcl.com`
+2. Taps **+** FAB on TR-1 → TR-2 form opens
+3. Selects Equipment → selects Category `Testing` → selects test type `Transformer Oil Test`
+4. Multi-session section appears with a toggle switch (default OFF)
+5. User can freely turn multi-session ON or OFF
+6. Fills in Priority, Due Date, Description → taps **Create**
+7. Snackbar: "TR-XXXX created" → returns to TR-1 list
+
+**Scenario 2 — Cumulative test type (Circuit Breaker Operations Count)**
+1. Originator selects Category `Testing` → selects `Circuit Breaker Operations Count`
+2. Multi-session switch **automatically turns ON** and is **greyed out** (not togglable)
+3. Label beneath the switch reads: *"Required for cumulative tracking — always on"*
+4. User can still change Number of Sessions and Days Between Sessions
+5. Taps **Create** → TR is created with `is_multi_session=true` and `is_cumulative=true` stamped by the server
+
+**Scenario 3 — Calibration test type (Protection Relay Calibration)**
+1. Originator selects Category `Testing` → selects `Protection Relay Calibration and History`
+2. Multi-session switch **automatically turns ON** and is **greyed out**
+3. Label reads: *"Required for calibration lifecycle — always on"*
+4. Taps **Create** → TR is created with `is_multi_session=true` and `is_calibration=true` stamped by the server
+
+**Scenario 4 — Repair Lifecycle category**
+1. Originator selects Category `Repair`
+2. The multi-session section is **not shown at all**
+3. The repair workflow's own stage engine manages all data capture — no generic sessions apply
+
+---
+
+#### User scenarios — Edit mode (reopening a saved draft)
+
+**Scenario 5 — Reopening a cumulative draft**
+1. Originator taps a `draft` TR that was created with `Circuit Breaker Operations Count`
+2. Form reopens; multi-session switch is **still locked ON** and shows *"Required for cumulative tracking — always on"*
+3. User cannot toggle it off
+
+**Scenario 6 — Reopening a calibration draft**
+1. Originator taps a `draft` TR created with `Protection Relay Calibration and History`
+2. Multi-session switch is **locked ON**, label reads *"Required for calibration lifecycle — always on"*
+3. No way to accidentally disable multi-session
+
+**Scenario 7 — Reopening a standard multi-session draft**
+1. Originator taps a `draft` TR created with a normal test type and multi-session ON
+2. Switch is ON but freely togglable — user can turn it off if needed
+
+---
+
+#### Form fields reference
+
+| Field | Type | Required |
 |---|---|---|
-| Equipment | Searchable dropdown | Fetched from `GET /equipment` — dept-scoped |
-| Registered Equipment | Dropdown | Auto-populated from selected equipment's registration |
-
-**Test Type Selection**
-| Field | Type | Notes |
-|---|---|---|
-| Category | Dropdown | `test` · `maintenance` · `inspection` · `repair_lifecycle` |
-| Test Type | Dropdown | Populated from `equipment_types` API — shows types for selected equipment under chosen category |
-
-> **Important**: The Test Type dropdown always shows the equipment's own test types from `types_by_category`. It does NOT switch to lifecycle bucket types even if the selected test type has `enable_calibration=true` or `enable_cumulative=true`. The lifecycle flags only drive `_forceMultiSession`.
-
-**Lifecycle flags (auto-detected, invisible to user)**
-| Flag | Source | Effect |
-|---|---|---|
-| `_isCalibration` | `selectedTest["enable_calibration"] == true` | Forces multi-session mode (calibration history) |
-| `_isCumulative` | `selectedTest["enable_cumulative"] == true` | Forces multi-session mode (operation counts) |
-| `_forceMultiSession` | `_isCalibration || _isCumulative` | Shows Session panel in TR detail; sends `is_multi_session=true` |
-
-**Schedule & Priority**
-| Field | Type | Notes |
-|---|---|---|
-| Priority | Dropdown | `Normal` · `High` · `Critical` |
-| Scheduled Date | Date picker | Optional |
-| Due Date | Date picker | Optional |
-| Description | Multi-line text | Free text |
+| Equipment | Searchable dropdown | Yes (if registered equipment known) |
+| Category | Dropdown (`Testing` · `Maintenance` · `Inspection` · `Repair`) | Yes |
+| Test Type | Dropdown (filtered by equipment + category) | Yes |
+| Priority | Dropdown (`Normal` · `High` · `Critical`) | Yes |
+| Scheduled Date | Date picker | No |
+| Due Date | Date picker | Yes (required to submit) |
+| Description | Multi-line text | No |
+| Multi-session toggle | Switch — freely togglable for standard types; locked ON for cumulative/calibration; hidden for repair | — |
+| Number of Sessions | Stepper (min 1) | When multi-session ON |
+| Days Between Sessions | Stepper (min 1) | When multi-session ON |
 
 #### Buttons
-| Button | Action |
+| Button | Behaviour |
 |---|---|
-| **Create** | `POST /testing_requests/` → snackbar "TR-XXXX created" → back to TR-1 |
-| **Cancel** | Discard |
+| **Save Draft** | Saves without validation — only title required |
+| **Submit** | Full validation (due date required) → TR moves to `submitted` |
+| **Cancel** | Discards changes, returns to TR-1 |
 
 ---
 
@@ -536,15 +570,31 @@ POST /testing_requests/{id}/results/structured
 
 ## 6. Annual Audit Screens
 
+> **Theme**: Space/glass dark — `space_bg.png` background + `BackdropFilter` blur overlay, `DashboardGlassCard` surfaces, `Color(0xFF3FA9F5)` blue accent, `Color(0xFF0F2233)` dark base. Matches `testing_requests_screen.dart` theme.
+
 ### AUD-1 — Annual Audit List + Dashboard
 
 **File**: `lib/pages/zoho/annual_audit_page.dart`  
 **Visible to**: TAQC Officer, OrgAdmin, EE TLSS  
 **Provider**: `AnnualAuditProvider`  
-**API**: `GET /annual-audits/inspections/`, `GET /annual-audits/dashboard`
+**APIs**: `GET /annual-audits/observations`, `GET /annual-audits/dashboard`, `GET /annual-audits/inspections`
+
+#### Layout
+`Stack` → `space_bg.png` + `BackdropFilter` blur → `Column`:
+- **Header row**: dark pill `TabBar` + Create Inspection icon button + Refresh icon button
+- **Dashboard strip**: 5 `DashboardGlassCard` metric cards
+- **Tab body**: observation list as `DashboardGlassCard` cards with hover effect
+
+#### Tabs
+| Tab | Label | Filter params |
+|---|---|---|
+| 0 | All | `status=all` |
+| 1 | Mine | `assigned_to_me=true` |
+| 2 | Overdue | `overdue=true` |
+| 3 | Closed | `status=closed` |
 
 #### Dashboard strip (5 metric cards)
-| Card | API field | Colour |
+| Card | API field | Icon colour |
 |---|---|---|
 | Total | `total_observations` | Blue |
 | Open | `open_observations` | Orange |
@@ -552,76 +602,112 @@ POST /testing_requests/{id}/results/structured
 | Overdue | `overdue_observations` | Red |
 | Compliance % | `compliance_percentage` | Teal |
 
-#### Inspection list
+#### Observation list cards
 | Element | Value |
 |---|---|
-| Cards | Inspection number (`TR-ANU-INSP-YYYYMMDD-XXXX`) · Status · Date · Substation |
-| Tap card | → AUD-2 Inspection Detail |
+| Number | `TR-ANU-YYYYMMDD-####` |
+| Stage chip | Colored by stage (see map below) |
+| Severity chip | Critical=red, High=orange, Medium=amber, Low=white54 |
+| Overdue badge | Red "OVERDUE" if `is_overdue=true` |
+| Tap | Opens `AnnualAuditDetailPage` in `RightPanelWrapper` (right-slide on desktop, fullscreen on mobile) |
 
-#### Observation list tab
-| Element | Value |
+#### Stage chip colour map
+| Stage Code | Colour |
 |---|---|
-| Cards | Observation number (`TR-ANU-YYYYMMDD-XXXX`) · Category · Severity · Stage · Overdue badge |
-| Filter | By stage / category / severity |
-| Pull-to-refresh | Reloads from API |
+| `OBSERVATION_REPORTING` | Cyan |
+| `OBSERVATION_ASSIGNMENT` | Amber |
+| `COMPLIANCE_SUBMISSION` | `Color(0xFF3FA9F5)` blue |
+| `COMPLIANCE_REVIEW` | Purple |
+| `OBSERVATION_CLOSURE` | Green |
+
+#### Create Inspection dialog (dark `AlertDialog`, `backgroundColor: Color(0xFF0F2233)`)
+| Field | Type |
+|---|---|
+| Substation | Searchable dropdown (`GET /equipment`) |
+| Inspection Date | Date picker |
+| Remarks | Optional text |
+
+Submit: `POST /annual-audits/inspections`
+
+#### Create Observation dialog (dark-themed)
+| Field | Type |
+|---|---|
+| Category | Dropdown from audit categories |
+| Severity | Dropdown (Low / Medium / High / Critical) |
+| Target Compliance Date | Date picker |
+| Description | Multi-line text |
+
+Submit: `POST /annual-audits/inspections/{inspection_id}/observations`
 
 #### FAB
-| Role | FAB action |
-|---|---|
-| TAQC Officer | + → Create new inspection |
-| OrgAdmin | + → Create new inspection |
+`+` → Create Observation (selects or creates inspection first)
 
 ---
 
 ### AUD-2 — Annual Audit Observation Detail
 
 **File**: `lib/pages/zoho/annual_audit_detail_page.dart`  
+**Opened via**: `RightPanelWrapper.show()` from AUD-1 observation tap  
 **Visible to**: TAQC Officer, OrgAdmin, EE TLSS, Workflow Coordinator, AEE Maintenance  
 **Provider**: `AnnualAuditProvider`
 
-#### Sections displayed
-| Section | Content |
+#### Layout pattern (identical to `testing_request_detail.dart`)
+`Material(transparent)` → `ClipRect` → `Stack`:
+- `BackdropFilter(blur sigmaX/Y=6)` + `Colors.black.withOpacity(0.6)` — blurs the space background visible through the panel
+- `Column`:
+  - **Header bar** — `Container` with bottom border: `IconButton` (close/back) + observation number + stage chip inline
+  - **Body** — `Expanded` → `SingleChildScrollView(padding: 16)` → `Column` of `_glassSection` containers  
+    (each: `BoxDecoration: color=black.0.35, borderRadius=14, border=white.0.12`)
+
+#### Glass sections
+| Section | Visible when |
 |---|---|
-| **Header** | Observation number · Stage badge · Severity chip · Is overdue badge |
-| **Observation Details** | Category · Description · Target compliance date · Substation |
-| **Dynamic form** | Template-driven form for current stage (read or edit mode) |
-| **Assignment** | Assigned officer name (if OBSERVATION_ASSIGNMENT stage) |
-| **Timeline** | Stage history — performer · action · timestamp |
+| **Observation Details** (stage, severity chip, substation, category, target date, assigned to, overdue) | Always |
+| **Workflow Progress** (API-driven 5-step Stepper) | Always |
+| **Read Only notice** | No actionable permissions |
+| **Stage Form** (`SharedDynamicForm` from `form['template_data']`) | `form` available; editable only if `can_submit=true` |
+| **Remarks** (`TextField`) | `can_submit=true` or `can_approve=true` |
+| **Actions** (`ElevatedButton.icon` row) | `available-actions` non-empty |
+| **Timeline** (dot-and-line list) | Always |
 
-#### Stage badge colours
-| Stage | Colour |
-|---|---|
-| `OBSERVATION_REPORTING` | Blue |
-| `OBSERVATION_ASSIGNMENT` | Amber |
-| `COMPLIANCE_SUBMISSION` | Orange |
-| `COMPLIANCE_REVIEW` | Purple |
-| `OBSERVATION_CLOSURE` | Green |
+#### Workflow Stepper states
+| stage `status` | `StepState` | Subtitle |
+|---|---|---|
+| `completed` | `complete` | "Completed" (green) |
+| `rejected` | `error` | "Rejected" (red) |
+| Current stage code match | `editing` | — |
+| Others | `indexed` | — |
 
-#### Action buttons — stage-gated
+Stepper uses `ThemeData.dark()` with `primary: Color(0xFF3FA9F5)`.  
+Falls back to hardcoded 5-stage list when `detail['workflow']['stages']` not loaded.
 
-> **Current implementation**: buttons are shown based on current stage. A future fix (Plan GAP-7) will additionally filter by available-actions API.
+#### Action buttons — driven by `GET .../available-actions`
+| `can_*` flag | Button | Style | API endpoint |
+|---|---|---|---|
+| `can_assign` | **Assign** | Blue filled | `POST .../stages/{stage_id}/assign` |
+| `can_submit` | **Save Draft** | White outlined | `POST .../stages/{stage_id}/save` (no validation) |
+| `can_submit` | **Submit** | Blue filled | save → `POST .../stages/{stage_id}/submit` (validates required fields) |
+| `can_approve` | **Approve** | Green filled | `POST .../stages/{stage_id}/approve` |
+| `can_reject` | **Reject** | Red outlined | Dark reason dialog → `POST .../stages/{stage_id}/reject` |
 
-| Stage | Buttons shown |
-|---|---|
-| `OBSERVATION_REPORTING` | **Assign** |
-| `OBSERVATION_ASSIGNMENT` | **Submit** |
-| `COMPLIANCE_SUBMISSION` | **Review** |
-| `COMPLIANCE_REVIEW` | **Approve** · **Reject** |
-| `OBSERVATION_CLOSURE` | Read-only; no actions |
+> **Save vs Submit**: Save is always a draft — no required-field validation. Validation (including file upload fields) runs at submit time only.  
+> **File uploads**: Upload via `POST /repair-workflows/{workflow_id}/stages/{stage_id}/upload` (`field_key` + `file` multipart) **before** submitting. The upload auto-patches `form_data[field_key]` with a document reference dict which passes submit validation.
+
+#### Assign dialog (dark `AlertDialog`, `backgroundColor: Color(0xFF1E1E2E)`)
+Dropdown from `GET .../stages/{stage_id}/eligible-users` → confirm → `POST .../stages/{stage_id}/assign`
 
 #### 5-Stage Annual Audit Lifecycle
-| # | Stage Code | Action to advance | Role |
-|---|---|---|---|
-| 1 | `OBSERVATION_REPORTING` | `assign` | TA&QC Officer / Workflow Coordinator |
-| 2 | `OBSERVATION_ASSIGNMENT` | `submit` | AEE Maintenance |
-| 3 | `COMPLIANCE_SUBMISSION` | `review` | Workflow Coordinator |
-| 4 | `COMPLIANCE_REVIEW` | `approve` | TA&QC Officer |
-| 4→3 | `COMPLIANCE_REVIEW` | `reject` | TA&QC Officer (sends back to COMPLIANCE_SUBMISSION) |
-| 5 | `OBSERVATION_CLOSURE` | — | Terminal state |
+| # | Stage Code | Role filling | Role approving | Next stage |
+|---|---|---|---|---|
+| 1 | `OBSERVATION_REPORTING` | TaqcOfficer | TaqcOfficer | `OBSERVATION_ASSIGNMENT` |
+| 2 | `OBSERVATION_ASSIGNMENT` | WfCoordinator | WfCoordinator | `COMPLIANCE_SUBMISSION` |
+| 3 | `COMPLIANCE_SUBMISSION` | AeeMaint (uploads evidence) | AeeMaint | `COMPLIANCE_REVIEW` |
+| 4 | `COMPLIANCE_REVIEW` | TaqcOfficer | TaqcOfficer approve → stage 5; reject → back to stage 3 | `OBSERVATION_CLOSURE` |
+| 5 | `OBSERVATION_CLOSURE` | TaqcOfficer | TaqcOfficer | `COMPLETED` (terminal) |
 
 #### Observation numbering
-- Observations: `TR-ANU-YYYYMMDD-####` (e.g., `TR-ANU-20260512-0001`)
-- Inspections: `TR-ANU-INSP-YYYYMMDD-####`
+- Observations: `TR-ANU-YYYYMMDD-####` (e.g., `TR-ANU-20260513-0001`)
+- Inspections: `TR-ANU-INSP-YYYYMMDD-####` (e.g., `TR-ANU-INSP-20260513-0001`)
 
 ---
 
@@ -630,20 +716,21 @@ POST /testing_requests/{id}/results/structured
 **File**: `lib/pages/zoho/annual_audit_assignment_queue_page.dart`  
 **Visible to**: TAQC Officer, OrgAdmin  
 **Provider**: `AnnualAuditProvider`  
-**API**: `GET /annual-audits/observations/queue`
+**API**: `GET /annual-audits/assignment-queue`
 
 #### What is displayed
 | Element | Value |
 |---|---|
 | Queue cards | Observation number · Category · Severity · Target date · Substation |
-| Overdue badge | Red "OVERDUE" chip if `is_overdue=true` |
+| Pending stage | `pending_stage.stage_name` + `instance_status` badge |
+| Overdue badge | Red "OVERDUE" if `is_overdue=true` |
 | Empty state | "No observations pending assignment" |
 
 #### Actions
 | Button | Action |
 |---|---|
-| **Assign** | Opens assign dialog → select officer → `POST /annual-audits/observations/{id}/assign` |
-| Tap card | → AUD-2 detail (read-only) |
+| **Assign** | User picker dialog → `POST /annual-audits/observations/{id}/stages/{stage_id}/assign` |
+| Tap card | → AUD-2 detail |
 
 ---
 
@@ -651,17 +738,26 @@ POST /testing_requests/{id}/results/structured
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/annual-audits/config/ensure` | POST | Seed categories, templates, stages, roles (idempotent) |
-| `/annual-audits/inspections/` | POST | Create inspection |
-| `/annual-audits/inspections/` | GET | List inspections (dept-scoped) |
-| `/annual-audits/inspections/{id}` | GET | Get inspection detail |
-| `/annual-audits/observations/` | GET | List observations (filter by stage/category) |
-| `/annual-audits/observations/{id}` | GET | Get observation detail |
-| `/annual-audits/observations/{id}/advance` | POST | Advance stage (action=assign/submit/review/approve/reject) |
-| `/annual-audits/observations/{id}/available-actions` | GET | Returns actions available to current user at current stage |
-| `/annual-audits/observations/queue` | GET | Assignment queue |
-| `/annual-audits/dashboard` | GET | 5-metric dashboard data |
-| `/annual-audits/sla/run-overdue-check` | POST | Manually trigger overdue flag update |
+| `/annual-audits/config/ensure` | POST | Seed stage definitions, templates, role mappings (idempotent) |
+| `/annual-audits/inspections` | POST | Create inspection (`substation_id`, `inspection_date`, `remarks`) |
+| `/annual-audits/inspections` | GET | List inspections (dept-scoped) |
+| `/annual-audits/inspections/{id}` | GET | Inspection detail with nested `observations[]` |
+| `/annual-audits/inspections/{id}/observations` | POST | Create observation under inspection |
+| `/annual-audits/observations` | GET | List observations — filters: `status`, `assigned_to_me`, `overdue` |
+| `/annual-audits/observations/{id}` | GET | Observation detail — includes `workflow_id`, `workflow.stages[]` |
+| `/annual-audits/observations/{id}/current-form` | GET | Current stage: `stage_id`, `stage_code`, `template_data`, `saved_form_data` |
+| `/annual-audits/observations/{id}/timeline` | GET | Audit log — `action`, `note`, `performed_at` |
+| `/annual-audits/observations/{id}/available-actions` | GET | `can_assign`, `can_submit`, `can_approve`, `can_reject`, `can_cancel` |
+| `/annual-audits/observations/{id}/stages/{stage_id}/eligible-users` | GET | Users eligible to be assigned to this stage |
+| `/annual-audits/observations/{id}/stages/{stage_id}/assign` | POST | Assign stage to user (`user_id`) |
+| `/annual-audits/observations/{id}/stages/{stage_id}/save` | POST | Save form draft — no validation |
+| `/annual-audits/observations/{id}/stages/{stage_id}/submit` | POST | Submit — validates all required fields incl. file uploads |
+| `/annual-audits/observations/{id}/stages/{stage_id}/approve` | POST | Approve → advance to next stage |
+| `/annual-audits/observations/{id}/stages/{stage_id}/reject` | POST | Reject → bounce to previous stage |
+| `/annual-audits/assignment-queue` | GET | Pending-assignment queue for coordinators |
+| `/annual-audits/dashboard` | GET | 5-metric summary |
+| `/annual-audits/sla/run-overdue-check` | POST | Recompute `is_overdue` flags |
+| `/repair-workflows/{workflow_id}/stages/{stage_id}/upload` | POST | Upload file field — `field_key` + `file` multipart; patches `form_data[field_key]` with document reference dict |
 
 ---
 
@@ -839,52 +935,98 @@ KPTCL (organisation)
 
 ---
 
-## 13. Multi-Session — Calibration & Cumulative Deep Dive
+## 13. Multi-Session — Calibration & Cumulative User Scenarios
 
-### When multi-session is required
+### Which test types force multi-session ON
 
-Multi-session mode (`is_multi_session=true`) is forced for lifecycle test types:
+| Test Type | Behaviour when selected |
+|---|---|
+| Protection Relay Calibration and History | Switch locked ON — *"Required for calibration lifecycle — always on"* |
+| Electronic Tri-vector Meter Calibration | Switch locked ON — *"Required for calibration lifecycle — always on"* |
+| Circuit Breaker Operations Count | Switch locked ON — *"Required for cumulative tracking — always on"* |
+| OLTC Operations Count | Switch locked ON — *"Required for cumulative tracking — always on"* |
+| Any other test type | Switch freely togglable by user |
+| Any `repair_lifecycle` category | Multi-session section hidden — not applicable |
 
-| Test Type | `enable_calibration` | `enable_cumulative` | Force multi-session |
-|---|---|---|---|
-| Protection Relay Calibration and History | ✅ | — | ✅ |
-| Electronic Tri-vector Meter Calibration | ✅ | — | ✅ |
-| Circuit Breaker Operations Count | — | ✅ | ✅ |
-| OLTC Operations Count | — | ✅ | ✅ |
+---
 
-### Session creation — required fields
-```
-POST /testing_requests/{id}/sessions/
-{
-  "session_number": <int>,    ← required, must be unique per TR
-  "session_date": "<ISO datetime>",  ← required
-  "session_name": "<string>"  ← optional
-}
-```
+### Cumulative test — end-to-end user flow
 
-### Structured result submission per session
-```
-POST /testing_requests/{id}/results/structured
-{
-  "template_key": "circuit_breaker_operations",
-  "test_session_id": "<session_uuid>",  ← must differ per reading
-  "test_data": { "count_value": 4500 }
-}
-```
+**Login**: `tester.north@kptcl.com`
 
-### Why unique sessions matter for cumulative
-- Upsert key = `(testing_request_id, template_key, test_session_id)`
-- Two readings with same `test_session_id` → second overwrites first → only 1 row
-- `cumulative_diff` requires ≥ 2 rows to compute a non-zero diff
-- Always create a new session for each cumulative reading
+1. **Originator** creates TR with test type `Circuit Breaker Operations Count`
+   - Multi-session switch auto-locks ON
+   - Sets Number of Sessions = 2, Days Between Sessions = 30
+   - Submits draft → TR assigned to tester
 
-### Calibration date computation
-- `CalibrationService` reads the `DATE_ADD` rule from the OrgTestTemplate
-- Rule = `{ "type": "DATE_ADD", "field": "test_date", "offset_months": 24 }`
-- `next_due = last_calibration_date + offset_months`
-- If `today > next_due` → state = `OVERDUE`
-- If `today + advance_days > next_due` → state = `DUE`
-- Otherwise → `NORMAL`
+2. **Tester** opens the TR → taps **Accept** → **Start Testing**
+
+3. **Tester** opens the Sessions Panel (visible on TR-3 because `is_multi_session=true`)
+   - Taps **Add Session** → enters Session 1 date → saves
+   - Taps **Start** on Session 1
+   - Taps **Add Reading** → enters `count_value: 4500` → saves
+   - Taps **Complete** on Session 1
+
+4. Tester adds Session 2 (different session, different date)
+   - Enters `count_value: 4750` → saves → completes
+
+5. After all sessions complete, tester taps **Submit Results**
+   - System computes cumulative diff: 4750 − 4500 = **250 operations**
+   - Cumulative total increments on CUM-1 screen
+
+6. **CUM-1 screen** (`cumulative.north@kptcl.com` or OrgAdmin) shows updated count vs threshold
+   - If count ≥ threshold → status badge turns **CRITICAL** (red)
+
+> **Common mistake**: If the tester submits both readings under the same session, the second reading overwrites the first — diff = 0, no cumulative increment. Always use a separate session per reading.
+
+---
+
+### Calibration test — end-to-end user flow
+
+**Login**: `tester.north@kptcl.com`
+
+1. **Originator** creates TR with test type `Protection Relay Calibration and History`
+   - Multi-session switch locks ON automatically
+   - Submits → assigned to tester
+
+2. **Tester** accepts → starts testing → opens TR-4 result form
+   - Enters calibration date and validity months (e.g., `calibration_date: 2026-05-13`, `validity_months: 24`)
+   - Saves and submits
+
+3. System computes `next_due = 2026-05-13 + 24 months = 2028-05-13`
+
+4. **CAL-1 screen** shows the equipment's calibration state:
+   - Today well before due → **NORMAL** (green)
+   - Within advance window before due → **DUE** (amber)
+   - Past due date → **OVERDUE** (red)
+   - No result on record → **NOT CALIBRATED** (grey)
+
+---
+
+### Multi-session switch — what the user sees
+
+| Situation | Switch appearance | Label |
+|---|---|---|
+| Standard test type, multi-session OFF | Toggle is OFF, enabled | *"Spread test across multiple days/sessions"* |
+| Standard test type, multi-session ON | Toggle is ON, enabled | *"Spread test across multiple days/sessions"* |
+| Cumulative test type selected | Toggle is ON, **greyed out** (not tappable) | *"Required for cumulative tracking — always on"* |
+| Calibration test type selected | Toggle is ON, **greyed out** (not tappable) | *"Required for calibration lifecycle — always on"* |
+| Repair lifecycle category | Multi-session row **not shown** | — |
+
+When multi-session is ON (any reason), the form expands to show:
+- **Number of Sessions** — stepper, minimum 1
+- **Days Between Sessions** — stepper, minimum 1
+
+---
+
+### Reopening a saved draft — expected behaviour
+
+| Draft type | Switch on reopen |
+|---|---|
+| Created with cumulative test type | Locked ON, correct label shown |
+| Created with calibration test type | Locked ON, correct label shown |
+| Created with standard type, multi-session ON | ON, freely togglable |
+| Created with standard type, multi-session OFF | OFF, freely togglable |
 
 ---
 
@@ -900,7 +1042,7 @@ POST /testing_requests/{id}/results/structured
 | `tests/test_multi_session.py` | ~20 | Session CRUD, readings, statistics, auto-generate |
 | `tests/test_schedule.py` | ~20 | TR schedule CRUD, pause/resume, log generation |
 | `tests/test_repair_workflow.py` | ~35 | 10-stage repair workflow lifecycle, assignment queue |
-| `tests/test_annual_audit.py` | ~30 | Annual audit 5-stage lifecycle, dashboard, overdue check |
+| `tests/test_annual_audit_integration.py` | ~90 | Full 5-stage annual audit lifecycle end-to-end — file uploads, save/submit/approve/reject per stage, timeline, dashboard |
 | `tests/test_lifecycle_types_integration.py` | 76 | Lifecycle types API, equipment_types flags, template provisioning, calibration lifecycle, cumulative lifecycle |
 
 ### Run all tests
