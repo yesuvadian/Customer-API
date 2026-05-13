@@ -118,6 +118,7 @@ class TestRegisterService:
             "priority": req.priority,
             "equipment_type_id": req.equipment_type_id,
             "equipment_type_name": getattr(eq_type, "name", None),
+            "test_type_id": req.test_type_id,
             "organization_id": str(req.organization_id) if req.organization_id else None,
             "template_key": (
                 req.test_results[0].template_key
@@ -128,6 +129,10 @@ class TestRegisterService:
                     "id": str(schedule.id),
                     "frequency": schedule.frequency.value if schedule.frequency else None,
                     "advance_days": schedule.advance_days,
+                    "start_date": schedule.start_date.isoformat() if schedule.start_date else None,
+                    "next_run_date": schedule.next_run_date.isoformat() if schedule.next_run_date else None,
+                    "last_run_date": schedule.last_run_date.isoformat() if schedule.last_run_date else None,
+                    "end_date": schedule.end_date.isoformat() if schedule.end_date else None,
                     "revised_periodicity_days": schedule.revised_periodicity_days,
                     "oem_reference": schedule.oem_reference,
                     "responsible_role_id": str(schedule.responsible_role_id) if schedule.responsible_role_id else None,
@@ -222,8 +227,9 @@ class TestRegisterService:
 
     def create_template(self, data: dict, creator: User) -> dict:
         """
-        Required keys: title, equipment_type_id, organization_id, frequency
-        Optional keys: template_key, priority, notes, advance_days,
+        Required keys: equipment_type_id, organization_id, frequency
+        Optional keys: title (auto-generated from test_type_id if omitted),
+                       test_type_id, template_key, priority, notes, advance_days,
                        responsible_role_id, reviewing_role_id,
                        revised_periodicity_days, oem_reference
         """
@@ -237,13 +243,35 @@ class TestRegisterService:
                 detail=f"Invalid frequency. Accepted: {[f.value for f in ScheduleFrequency]}",
             )
 
+        # Resolve title from test_type_id if not supplied
+        test_type_id = data.get("test_type_id")
+        title = data.get("title")
+        if not title:
+            if test_type_id:
+                from models import CategoryDetails
+                test_type = self.db.query(CategoryDetails).filter(
+                    CategoryDetails.id == test_type_id
+                ).first()
+                eq_type = self.db.query(CategoryMaster).filter(
+                    CategoryMaster.id == data["equipment_type_id"]
+                ).first()
+                type_name = getattr(test_type, "name", "Test")
+                eq_name = getattr(eq_type, "name", "Equipment")
+                title = f"{type_name} — {eq_name}"
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Provide either 'title' or 'test_type_id'.",
+                )
+
         now = self._now()
         req = TestingRequest(
             id=uuid4(),
             request_number=self._gen_request_number(),
-            title=data["title"],
+            title=title,
             description=data.get("description"),
             equipment_type_id=data["equipment_type_id"],
+            test_type_id=test_type_id,
             organization_id=data["organization_id"],
             department_id=data.get("department_id"),
             request_category=RequestCategory.test,

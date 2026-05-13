@@ -1145,6 +1145,14 @@ class TestRequestScheduleUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class TestRequestScheduleCreateByType(BaseModel):
+    equipment_type_id: int
+    test_type_id: int
+    frequency: ScheduleFrequencyEnum
+    advance_days: int = 1
+    end_date: Optional[datetime] = None
+
+
 class TestRequestScheduleResponse(BaseModel):
     id: UUID
     test_request_id: UUID

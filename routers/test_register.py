@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User
+from models import CategoryDetails, CategoryMaster, User
 from services.test_register_service import TestRegisterService
 
 router = APIRouter(
@@ -49,11 +49,12 @@ router = APIRouter(
 # ── Request schemas ────────────────────────────────────────────────────────────
 
 class TemplateCreateBody(BaseModel):
-    title: str
     equipment_type_id: int
     organization_id: UUID
     frequency: str                       # ScheduleFrequency value
 
+    title: Optional[str] = None          # auto-generated from test_type if omitted
+    test_type_id: Optional[int] = None   # CategoryDetails PK
     description: Optional[str] = None
     department_id: Optional[UUID] = None
     template_key: Optional[str] = None
@@ -105,6 +106,56 @@ def list_templates(
         skip=skip,
         limit=limit,
     )
+
+
+# ── Test types lookup ──────────────────────────────────────────────────────────
+
+@router.get("/test-types", summary="List test types grouped by equipment type")
+def list_test_types(db: Session = Depends(get_db)):
+    rows = (
+        db.query(CategoryDetails, CategoryMaster)
+        .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
+        .filter(
+            CategoryDetails.category_type == "test",
+            CategoryDetails.is_active.is_(True),
+            CategoryMaster.is_active.is_(True),
+        )
+        .order_by(CategoryMaster.name, CategoryDetails.name)
+        .all()
+    )
+    return [
+        {
+            "id": detail.id,
+            "name": detail.name,
+            "equipment_type_id": detail.category_master_id,
+            "equipment_type_name": master.name,
+        }
+        for detail, master in rows
+    ]
+
+
+@router.get("/maintenance-types", summary="List maintenance types grouped by equipment type")
+def list_maintenance_types(db: Session = Depends(get_db)):
+    rows = (
+        db.query(CategoryDetails, CategoryMaster)
+        .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
+        .filter(
+            CategoryDetails.category_type == "maintenance",
+            CategoryDetails.is_active.is_(True),
+            CategoryMaster.is_active.is_(True),
+        )
+        .order_by(CategoryMaster.name, CategoryDetails.name)
+        .all()
+    )
+    return [
+        {
+            "id": detail.id,
+            "name": detail.name,
+            "equipment_type_id": detail.category_master_id,
+            "equipment_type_name": master.name,
+        }
+        for detail, master in rows
+    ]
 
 
 # ── Create template ────────────────────────────────────────────────────────────
