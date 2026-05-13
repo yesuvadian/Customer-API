@@ -204,16 +204,78 @@ class DirectSubmissionService:
         self.db.flush()  # get req.id without committing
 
         # ── TestResult ────────────────────────────────────────────────────────
+        # In create_direct_submission(), replace the TestResult block:
+
+        test_data = data.get("test_data", {})
+
+        # Extract scheduling fields to proper columns
+        next_action         = test_data.pop("next_action",          None)
+        test_type           = test_data.pop("test_type",            None)
+        schedule_start_date = test_data.pop("schedule_start_date",  None)
+        schedule_end_date   = test_data.pop("schedule_end_date",    None)
+        scheduling_gap      = test_data.pop("scheduling_gap",       None)
+        summary             = test_data.pop("summary",              None)
+
+        # ── validation ─────────────────────────────
+
+        valid_actions = {
+            "Test",
+            "Maintenance",
+            "Repair",
+            "Inspection",
+            "Procurement",
+            "None",
+        }
+
+        if next_action and next_action not in valid_actions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid next_action: {next_action}"
+            )
+
+        valid_gaps = {
+            "monthly",
+            "quarterly",
+            "semi_annual",
+            "yearly",
+            "triennial",
+        }
+
+        if next_action in {
+            "Test",
+            "Maintenance",
+            "Repair",
+            "Inspection",
+        }:
+            if not schedule_start_date:
+                raise HTTPException(
+                    status_code=400,
+                    detail="schedule_start_date required"
+                )
+
+            if scheduling_gap not in valid_gaps:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid scheduling_gap"
+                )
+
         result = TestResult(
-            testing_request_id=req.id,
-            template_key=data.get("template_key", category.value),
-            test_name=data.get("title") or category.value.replace("_", " ").title(),
-            test_category=category.value,
-            test_data=data.get("test_data", {}),
-            overall_result=data.get("overall_result") or default_result,
-            remarks=data.get("remarks"),
-            tested_by=submitter.id,
-            tested_at=now,
+            testing_request_id  = req.id,
+            template_key        = data.get("template_key", category.value),
+            test_name           = data.get("title") or category.value.replace("_", " ").title(),
+            test_category       = category.value,
+            test_data           = test_data,          # clean — scheduling fields removed
+            overall_result      = data.get("overall_result") or default_result,
+            remarks             = data.get("remarks"),
+            tested_by           = submitter.id,
+            tested_at           = now,
+            # scheduling fields
+            next_action         = next_action,
+            test_type           = test_type,
+            schedule_start_date = schedule_start_date,
+            schedule_end_date   = schedule_end_date,
+            scheduling_gap      = scheduling_gap,
+            summary             = summary,
         )
         self.db.add(result)
         self.db.flush()
@@ -391,65 +453,178 @@ class DirectSubmissionService:
         if result:
             out["result"] = {
                 "id": str(result.id),
-                "template_key": result.template_key,
-                "test_data": result.test_data,
-                "overall_result": result.overall_result,
-                "remarks": result.remarks,
-                "tested_at": result.tested_at.isoformat() if result.tested_at else None,
+
+                "template_key":
+                    result.template_key,
+
+                "test_data":
+                    result.test_data,
+
+                "overall_result":
+                    result.overall_result,
+
+                "remarks":
+                    result.remarks,
+
+                "tested_at":
+                    result.tested_at.isoformat()
+                    if result.tested_at else None,
+
+                "next_action":
+                    result.next_action,
+
+                "test_type":
+                    result.test_type,
+
+                "schedule_start_date":
+                    (
+                        result.schedule_start_date.isoformat()
+                        if result.schedule_start_date
+                        else None
+                    ),
+
+                "schedule_end_date":
+                    (
+                        result.schedule_end_date.isoformat()
+                        if result.schedule_end_date
+                        else None
+                    ),
+
+                "scheduling_gap":
+                    result.scheduling_gap,
+
+                "summary":
+                    result.summary,
+
+                "evaluation_result":
+                    result.evaluation_result,
+
+                "replacement_products":
+                    result.replacement_products,
             }
+
         return out
 
     # ── serialiser ────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+# SERIALIZER
+# Replace ENTIRE _serialize() method with this
+# ─────────────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _serialize(req: TestingRequest) -> dict:
-        # Pull the first (and typically only) TestResult for direct submissions
-        result = req.test_results[0] if req.test_results else None
+            # Pull the first (and typically only) TestResult
+            result = req.test_results[0] if req.test_results else None
 
-        eq = req.equipment
-        eq_type_name = None
-        if eq and eq.equipment_type:
-            eq_type_name = getattr(eq.equipment_type, "name", None)
+            eq = req.equipment
 
-        return {
-            "id": str(req.id),
-            "request_number": req.request_number,
-            "title": req.title,
+            eq_type_name = None
+            if eq and eq.equipment_type:
+                eq_type_name = getattr(eq.equipment_type, "name", None)
 
-            "request_category": getattr(req.request_category, "value", None),
-            "status": getattr(req.status, "value", None),
-            "priority": req.priority,
+            return {
+                "id": str(req.id),
+                "request_number": req.request_number,
+                "title": req.title,
 
-            "equipment_ueic": getattr(eq, "ueic", None),
-            "equipment_type_name": eq_type_name,
-            "equipment_manufacturer": getattr(eq, "manufacturer", None),
+                "request_category":
+                    getattr(req.request_category, "value", None),
 
-            "organization": getattr(req.organization, "name", None),
-            "department": getattr(req.department, "name", None),
+                "status":
+                    getattr(req.status, "value", None),
 
-            "submitted_by": (
-                f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip()
-                if req.originator else "-"
-            ),
+                "priority": req.priority,
 
-            # Use "cts" key to match Flutter client expectations
-            "cts": req.cts.isoformat() if req.cts else None,
+                # Equipment
+                "equipment_ueic":
+                    getattr(eq, "ueic", None),
 
-            "notes": req.notes,
+                "equipment_type_name":
+                    eq_type_name,
 
-            # TestResult fields — populated for all direct submissions
-            "test_data": result.test_data if result else {},
-            "overall_result": result.overall_result if result else None,
-            "remarks": result.remarks if result else None,
+                "equipment_manufacturer":
+                    getattr(eq, "manufacturer", None),
 
-            # Attachment metadata (file_data itself is not serialised here)
-            "has_attachment": bool(result and result.file_data),
-            "attachment_name": result.file_name if result else None,
-            "attachment_size": result.file_size if result else None,
-            "attachment_type": result.file_type if result else None,
-        }
+                # Organization
+                "organization":
+                    getattr(req.organization, "name", None),
 
-    # ── file attachment ───────────────────────────────────────────────────────
+                "department":
+                    getattr(req.department, "name", None),
+
+                # Submitter
+                "submitted_by": (
+                    f"{req.originator.firstname or ''} "
+                    f"{req.originator.lastname or ''}"
+                ).strip() if req.originator else "-",
+
+                # Dates
+                "cts":
+                    req.cts.isoformat()
+                    if req.cts else None,
+
+                # Notes
+                "notes":
+                    req.notes,
+
+                # Result Data
+                "test_data":
+                    result.test_data if result else {},
+
+                "overall_result":
+                    result.overall_result if result else None,
+
+                "remarks":
+                    result.remarks if result else None,
+
+                # Attachment
+                "has_attachment":
+                    bool(result and result.file_data),
+
+                "attachment_name":
+                    result.file_name if result else None,
+
+                "attachment_size":
+                    result.file_size if result else None,
+
+                "attachment_type":
+                    result.file_type if result else None,
+
+                # Outcome / Scheduling
+                "next_action":
+                    result.next_action if result else None,
+
+                "test_type":
+                    result.test_type if result else None,
+
+                "schedule_start_date":
+                    (
+                        result.schedule_start_date.isoformat()
+                        if result and result.schedule_start_date
+                        else None
+                    ),
+
+                "schedule_end_date":
+                    (
+                        result.schedule_end_date.isoformat()
+                        if result and result.schedule_end_date
+                        else None
+                    ),
+
+                "scheduling_gap":
+                    result.scheduling_gap if result else None,
+
+                "summary":
+                    result.summary if result else None,
+
+                # Evaluation
+                "evaluation_result":
+                    result.evaluation_result if result else None,
+
+                # Procurement / Replacement
+                "replacement_products":
+                    result.replacement_products if result else None,
+            }
 
     async def attach_file(
         self,

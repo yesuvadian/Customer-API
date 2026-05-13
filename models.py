@@ -2465,8 +2465,27 @@ class TestResult(Base):
     tester = relationship("User", foreign_keys=[tested_by])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
+    next_action         = Column(String(64),  nullable=True)   # Test/Maintenance/Repair/Inspection/Procurement/None
+    test_type           = Column(String(128), nullable=True)   # Oil BDV Test / IR Test etc.
+    schedule_start_date = Column(Date,        nullable=True)
+    schedule_end_date   = Column(Date,        nullable=True)
+    scheduling_gap      = Column(String(32),  nullable=True)   # monthly/quarterly/semi_annual/yearly/triennial
+    summary             = Column(Text,        nullable=True)
 
+class FROutcomeLog(Base):
+    __tablename__ = "fr_outcome_logs"
+    __table_args__ = {"schema": "public"}
 
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    testing_request_id  = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id"), nullable=False, index=True)
+    next_action         = Column(String(64),  nullable=True)
+    action_taken        = Column(String(128), nullable=True)   # "scheduled", "immediate_ticket", "procurement", "none"
+    schedule_id         = Column(UUID(as_uuid=True), ForeignKey("public.test_request_schedules.id"), nullable=True)
+    child_request_id    = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id"),       nullable=True)
+    procurement_id      = Column(UUID(as_uuid=True), ForeignKey("public.procurement_requests.id"),   nullable=True)
+    error_message       = Column(Text,        nullable=True)
+    processed_by        = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts                 = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 # ------------------------------
 # Test Result Image Model
 # ------------------------------

@@ -62,6 +62,7 @@ from routers import (
     zoho_dashboard,
     zoho_items,
     zoho_register,
+    fr_outcome,
 )
 from routers.kyc_router import router as kyc_router
 from routers.customer_care import router as customer_care_router
@@ -674,6 +675,7 @@ app.include_router(statements.router)
 app.include_router(zoho_register.router)
 app.include_router(webhook_zoho.router)
 app.include_router(customer_care_router)
+app.include_router(fr_outcome.router)
 
 # Testing Request System
 app.include_router(testing_requests.router)
