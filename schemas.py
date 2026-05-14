@@ -1129,20 +1129,34 @@ class ScheduleFrequencyEnum(str, PyEnum):
     biweekly = "biweekly"
     monthly = "monthly"
     quarterly = "quarterly"
+    semi_annual = "semi_annual"
     yearly = "yearly"
+    triennial = "triennial"
 
 
 class TestRequestScheduleCreate(BaseModel):
+    equipment_type_id: int
+    test_type_id: int
+    title: str
     frequency: ScheduleFrequencyEnum
+    advance_days: int = 15
     end_date: Optional[datetime] = None
-    advance_days: int = 1
+    description: Optional[str] = None
+    oem_reference: Optional[str] = None
+    revised_periodicity_days: Optional[int] = None
+    priority: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class TestRequestScheduleUpdate(BaseModel):
+    title: Optional[str] = None
     frequency: Optional[ScheduleFrequencyEnum] = None
-    end_date: Optional[datetime] = None
     advance_days: Optional[int] = None
+    end_date: Optional[datetime] = None
     is_active: Optional[bool] = None
+    oem_reference: Optional[str] = None
+    revised_periodicity_days: Optional[int] = None
+    description: Optional[str] = None
 
 
 class TestRequestScheduleCreateByType(BaseModel):

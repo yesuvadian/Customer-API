@@ -21,6 +21,8 @@ from models import (
     RepairStageTransition, OrgTestTemplate,
     # Notification config tables
     NotificationEventCatalogue, NotificationRoutingRule, NotificationScheduleRule,
+    # Schedule
+    TestRequestSchedule, ScheduleFrequency,
 )
 from security_utils import get_password_hash  # password hashing utils
 
@@ -2746,35 +2748,8 @@ def seed_test_type_categories(session, master_ids):
 
 
 def seed_sample_testing_request(session):
-    """Seeds a sample testing request in draft status for demo purposes."""
-    from models import TestingRequest, TestingRequestStatus
-
-    existing = session.query(TestingRequest).filter_by(request_number="TR-20260313-0001").first()
-    if existing:
-        print("[INFO] Sample testing request already exists.")
-        return
-
-    originator = session.query(User).filter_by(email="originator@relu.com").first()
-    if not originator:
-        print("[WARN] Originator user not found. Skipping sample testing request.")
-        return
-
-    request = TestingRequest(
-        request_number="TR-20260313-0001",
-        title="11kV Distribution Transformer 100kVA - Routine Testing",
-        description="Routine testing required for newly procured 11kV 100kVA distribution transformer before deployment.",
-        transformer_type="Distribution Transformer",
-        transformer_rating="100 kVA",
-        manufacturer="Sample Manufacturer Ltd",
-        serial_number="DT-2026-001",
-        status=TestingRequestStatus.draft,
-        priority="normal",
-        originator_id=originator.id,
-        created_by=originator.id,
-    )
-    session.add(request)
-    session.commit()
-    print("[OK] Sample testing request seeded.")
+    # removed — testing requests are created via the UI, not seeded
+    pass
 
 
 # ----------------- Migrate Equipment Asset Register -----------------
@@ -4053,7 +4028,7 @@ def seed_kptcl_organization(session):
         # Create missing test users for new SRS roles
         kptcl_users = [
             {
-                "email": "aee.maintenance@kptcl.com",
+                "email": "aee.maintenance@utility.com",
                 "password": "admin123",
                 "firstname": "AEE",
                 "lastname": "Maintenance",
@@ -4062,7 +4037,7 @@ def seed_kptcl_organization(session):
                 "employee_id": "KPTCL-AEE-M-001",
             },
             {
-                "email": "ee.tlss@kptcl.com",
+                "email": "ee.tlss@utility.com",
                 "password": "admin123",
                 "firstname": "EE",
                 "lastname": "TLSS",
@@ -4071,7 +4046,7 @@ def seed_kptcl_organization(session):
                 "employee_id": "KPTCL-EE-TLSS-001",
             },
             {
-                "email": "see.wm@kptcl.com",
+                "email": "see.wm@utility.com",
                 "password": "admin123",
                 "firstname": "SEE",
                 "lastname": "W&M",
@@ -4080,7 +4055,7 @@ def seed_kptcl_organization(session):
                 "employee_id": "KPTCL-SEE-WM-001",
             },
             {
-                "email": "ee.rt@kptcl.com",
+                "email": "ee.rt@utility.com",
                 "password": "admin123",
                 "firstname": "EE",
                 "lastname": "RT",
@@ -4089,7 +4064,7 @@ def seed_kptcl_organization(session):
                 "employee_id": "KPTCL-EE-RT-001",
             },
             {
-                "email": "see.rt@kptcl.com",
+                "email": "see.rt@utility.com",
                 "password": "admin123",
                 "firstname": "SEE",
                 "lastname": "RT",
@@ -4101,7 +4076,7 @@ def seed_kptcl_organization(session):
             },
             # ── Zone-based SEE RT testers ──────────────────────────────────────
             {
-                "email": "see.rt.bangalore@kptcl.com",
+                "email": "see.rt.bangalore@utility.com",
                 "password": "admin123",
                 "firstname": "SEE RT",
                 "lastname": "Bangalore",
@@ -4112,7 +4087,7 @@ def seed_kptcl_organization(session):
                 "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
             },
             {
-                "email": "see.rt.hubli@kptcl.com",
+                "email": "see.rt.hubli@utility.com",
                 "password": "admin123",
                 "firstname": "SEE RT",
                 "lastname": "Hubli",
@@ -4123,7 +4098,7 @@ def seed_kptcl_organization(session):
                 "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
             },
             {
-                "email": "see.rt.mysore@kptcl.com",
+                "email": "see.rt.mysore@utility.com",
                 "password": "admin123",
                 "firstname": "SEE RT",
                 "lastname": "Mysore",
@@ -4134,7 +4109,7 @@ def seed_kptcl_organization(session):
                 "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
             },
             {
-                "email": "see.rt.gulbarga@kptcl.com",
+                "email": "see.rt.gulbarga@utility.com",
                 "password": "admin123",
                 "firstname": "SEE RT",
                 "lastname": "Gulbarga",
@@ -4145,7 +4120,7 @@ def seed_kptcl_organization(session):
                 "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
             },
             {
-                "email": "cee.zone@kptcl.com",
+                "email": "cee.zone@utility.com",
                 "password": "admin123",
                 "firstname": "CEE",
                 "lastname": "Transmission Zone",
@@ -4154,7 +4129,7 @@ def seed_kptcl_organization(session):
                 "employee_id": "KPTCL-CEE-TZ-001",
             },
             {
-                "email": "cee.rtrd@kptcl.com",
+                "email": "cee.rtrd@utility.com",
                 "password": "admin123",
                 "firstname": "CEE",
                 "lastname": "RT&R&D",
@@ -4163,7 +4138,7 @@ def seed_kptcl_organization(session):
                 "employee_id": "KPTCL-CEE-RTRD-001",
             },
             {
-                "email": "field.tester@kptcl.com",
+                "email": "field.tester@utility.com",
                 "password": "Tester123!",
                 "firstname": "Field",
                 "lastname": "Tester",
@@ -4172,7 +4147,7 @@ def seed_kptcl_organization(session):
                 "employee_id": "KPTCL-FT-001",
             },
             {
-                "email": "lab.tester@kptcl.com",
+                "email": "lab.tester@utility.com",
                 "password": "Tester123!",
                 "firstname": "Lab",
                 "lastname": "Tester",
@@ -4181,7 +4156,7 @@ def seed_kptcl_organization(session):
                 "employee_id": "KPTCL-LT-001",
             },
             {
-                "email": "wf.coordinator@kptcl.com",
+                "email": "wf.coordinator@utility.com",
                 "password": "Coord123!",
                 "firstname": "Workflow",
                 "lastname": "Coordinator",
@@ -4272,7 +4247,7 @@ def seed_kptcl_organization(session):
         display_name="KPTCL",
         organization_type="utility",
         industry="Power Transmission",
-        primary_email="info@kptcl.com",
+        primary_email="info@utility.com",
         primary_phone="+91-80-25801500",
         website="https://kptcl.karnataka.gov.in",
         address="Cauvery Bhavan, K.G. Road",
@@ -4357,7 +4332,7 @@ def seed_kptcl_organization(session):
     # Create KPTCL users — one per org role
     kptcl_users = [
         {
-            "email": "orgadmin@kptcl.com",
+            "email": "orgadmin@utility.com",
             "password": "admin123",
             "firstname": "Org",
             "lastname": "Admin",
@@ -4366,7 +4341,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-ADM-001",
         },
         {
-            "email": "originator@kptcl.com",
+            "email": "originator@utility.com",
             "password": "admin123",
             "firstname": "KPTCL",
             "lastname": "Originator",
@@ -4375,7 +4350,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-ORIG-001",
         },
         {
-            "email": "testassigner@kptcl.com",
+            "email": "testassigner@utility.com",
             "password": "admin123",
             "firstname": "KPTCL Test",
             "lastname": "Assigner",
@@ -4384,7 +4359,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-TA-001",
         },
         {
-            "email": "depthead@kptcl.com",
+            "email": "depthead@utility.com",
             "password": "admin123",
             "firstname": "Department",
             "lastname": "Head",
@@ -4393,7 +4368,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-DH-001",
         },
         {
-            "email": "purchaser@kptcl.com",
+            "email": "purchaser@utility.com",
             "password": "admin123",
             "firstname": "KPTCL",
             "lastname": "Purchaser",
@@ -4402,7 +4377,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-PUR-001",
         },
         {
-            "email": "docviewer@kptcl.com",
+            "email": "docviewer@utility.com",
             "password": "admin123",
             "firstname": "KPTCL Doc",
             "lastname": "Viewer",
@@ -4412,7 +4387,7 @@ def seed_kptcl_organization(session):
         },
         # ✅ SRS DESIGNATION ROLES — Test users
         {
-            "email": "aee.maintenance@kptcl.com",
+            "email": "aee.maintenance@utility.com",
             "password": "admin123",
             "firstname": "AEE",
             "lastname": "Maintenance",
@@ -4421,7 +4396,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-AEE-M-001",
         },
         {
-            "email": "ee.tlss@kptcl.com",
+            "email": "ee.tlss@utility.com",
             "password": "admin123",
             "firstname": "EE",
             "lastname": "TLSS",
@@ -4430,7 +4405,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-EE-TLSS-001",
         },
         {
-            "email": "see.wm@kptcl.com",
+            "email": "see.wm@utility.com",
             "password": "admin123",
             "firstname": "SEE",
             "lastname": "W&M",
@@ -4439,7 +4414,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-SEE-WM-001",
         },
         {
-            "email": "ee.rt@kptcl.com",
+            "email": "ee.rt@utility.com",
             "password": "admin123",
             "firstname": "EE",
             "lastname": "RT",
@@ -4448,7 +4423,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-EE-RT-001",
         },
         {
-            "email": "see.rt@kptcl.com",
+            "email": "see.rt@utility.com",
             "password": "admin123",
             "firstname": "SEE",
             "lastname": "RT",
@@ -4460,7 +4435,7 @@ def seed_kptcl_organization(session):
         },
         # ── Zone-based SEE RT testers ──────────────────────────────────────
         {
-            "email": "see.rt.bangalore@kptcl.com",
+            "email": "see.rt.bangalore@utility.com",
             "password": "admin123",
             "firstname": "SEE RT",
             "lastname": "Bangalore",
@@ -4471,7 +4446,7 @@ def seed_kptcl_organization(session):
             "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
         },
         {
-            "email": "see.rt.hubli@kptcl.com",
+            "email": "see.rt.hubli@utility.com",
             "password": "admin123",
             "firstname": "SEE RT",
             "lastname": "Hubli",
@@ -4482,7 +4457,7 @@ def seed_kptcl_organization(session):
             "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
         },
         {
-            "email": "see.rt.mysore@kptcl.com",
+            "email": "see.rt.mysore@utility.com",
             "password": "admin123",
             "firstname": "SEE RT",
             "lastname": "Mysore",
@@ -4493,7 +4468,7 @@ def seed_kptcl_organization(session):
             "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
         },
         {
-            "email": "see.rt.gulbarga@kptcl.com",
+            "email": "see.rt.gulbarga@utility.com",
             "password": "admin123",
             "firstname": "SEE RT",
             "lastname": "Gulbarga",
@@ -4504,7 +4479,7 @@ def seed_kptcl_organization(session):
             "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
         },
         {
-            "email": "cee.zone@kptcl.com",
+            "email": "cee.zone@utility.com",
             "password": "admin123",
             "firstname": "CEE",
             "lastname": "Transmission Zone",
@@ -4513,7 +4488,7 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-CEE-TZ-001",
         },
         {
-            "email": "cee.rtrd@kptcl.com",
+            "email": "cee.rtrd@utility.com",
             "password": "admin123",
             "firstname": "CEE",
             "lastname": "RT&R&D",
@@ -4656,7 +4631,7 @@ def seed_kptcl_organization(session):
 
     tester_users_config = [
         {
-            "email": "fieldtester1@kptcl.com",
+            "email": "fieldtester1@utility.com",
             "password": "Tester123!",
             "role_name": "Field Tester",
             "firstname": "KPTCL Field",
@@ -4664,7 +4639,7 @@ def seed_kptcl_organization(session):
             "phone": "9999999101"
         },
         {
-            "email": "fieldtester2@kptcl.com",
+            "email": "fieldtester2@utility.com",
             "password": "Tester123!",
             "role_name": "Field Tester",
             "firstname": "KPTCL Field",
@@ -4672,7 +4647,7 @@ def seed_kptcl_organization(session):
             "phone": "9999999102"
         },
         {
-            "email": "labtester1@kptcl.com",
+            "email": "labtester1@utility.com",
             "password": "Tester123!",
             "role_name": "Lab Tester",
             "firstname": "KPTCL Lab",
@@ -4680,7 +4655,7 @@ def seed_kptcl_organization(session):
             "phone": "9999999103"
         },
         {
-            "email": "labtester2@kptcl.com",
+            "email": "labtester2@utility.com",
             "password": "Tester123!",
             "role_name": "Lab Tester",
             "firstname": "KPTCL Lab",
@@ -4772,9 +4747,9 @@ def seed_notifications_module_and_permissions(session):
     # ─────────────────────────────────────────────────────────────
     # 3. Get user
     # ─────────────────────────────────────────────────────────────
-    user = session.query(User).filter_by(email="orgadmin@kptcl.com").first()
+    user = session.query(User).filter_by(email="orgadmin@utility.com").first()
     if not user:
-        raise Exception("User orgadmin@kptcl.com not found")
+        raise Exception("User orgadmin@utility.com not found")
 
     # ─────────────────────────────────────────────────────────────
     # 4. Validate user belongs to KPTCL org
@@ -5294,388 +5269,127 @@ def seed_org_role_permissions_for_modules(session, module_ids):
 
 
 def seed_test_register(session, org):
-    """
-    SRS §5.1.1 — Seed the Test Register for a KPTCL organisation.
-
-    Creates TestingRequest (is_schedule_template=True) + TestRequestSchedule rows
-    for each mandatory periodic test grouped by equipment type.
-
-    Idempotent — skips entries whose request_number already exists.
-    """
-    if not org:
-        print("[SKIP] seed_test_register: no org supplied.")
-        return
-
-    from models import (
-        CategoryMaster, OrgRole, ScheduleFrequency,
-        TestingRequest, TestingRequestStatus, TestRequestSchedule, RequestCategory
-    )
-    from datetime import datetime, timezone
-    import uuid as _uuid
-
-    now = datetime.now(timezone.utc)
-
-    # ── look up system user (org admin) as template originator ────────────────
-    from models import User, OrgUserRole
-    admin_role = session.query(OrgRole).filter_by(
-        organization_id=org.id, name="Org Admin"
-    ).first()
-    system_user = None
-    if admin_role:
-        link = session.query(OrgUserRole).filter_by(org_role_id=admin_role.id).first()
-        if link:
-            system_user = session.query(User).filter_by(id=link.user_id).first()
-    if not system_user:
-        system_user = session.query(User).filter_by(email="superadmin@system.com").first()
-    if not system_user:
-        print("[WARN] seed_test_register: no system user found — skipping.")
-        return
-
-    # ── look up key OrgRoles ──────────────────────────────────────────────────
-    def get_role(name):
-        return session.query(OrgRole).filter_by(
-            organization_id=org.id, name=name
-        ).first()
-
-    aee_maintenance = get_role("AEE Maintenance")
-    ee_tlss         = get_role("EE TLSS")
-    field_tester    = get_role("Field Tester")
-    aee_role        = get_role("AEE")
-
-    responsible_default = aee_maintenance
-    reviewing_default   = ee_tlss
-
-    # ── helper: get equipment type master ─────────────────────────────────────
-    def get_eq_type(name):
-        return session.query(CategoryMaster).filter_by(
-            name=name, is_active=True
-        ).first()
-
-    # ── register catalogue ────────────────────────────────────────────────────
-    # (equipment_type_name, test_name, template_key, frequency, advance_days,
-    #  responsible_role, reviewing_role, revised_periodicity_days, oem_reference)
-    REGISTER = [
-        # ── Power Transformer ─────────────────────────────────────────────────
-        ("Power Transformer", "DGA — Dissolved Gas Analysis",
-         "transformer_dga",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, 180,
-         "IS 10593 / IS 1866 Cl.4.2"),
-
-        ("Power Transformer", "BDV — Oil Dielectric Strength",
-         "transformer_bdv",
-         ScheduleFrequency.semi_annual, 10,
-         aee_maintenance, ee_tlss, 90,
-         "IS 6792 Cl.5.1"),
-
-        ("Power Transformer", "IR — Winding Insulation Resistance",
-         "transformer_ir",
-         ScheduleFrequency.semi_annual, 10,
-         aee_maintenance, ee_tlss, None,
-         "IS 2026 Pt.1"),
-
-        ("Power Transformer", "Tan Delta / Power Factor Test",
-         "transformer_tan_delta",
-         ScheduleFrequency.triennial, 30,
-         aee_maintenance, ee_tlss, None,
-         "IS 2026 Pt.1 / IEC 60076-1"),
-
-        # ── Circuit Breaker ───────────────────────────────────────────────────
-        ("Circuit Breaker", "SF6 Gas Purity Test",
-         "cb_sf6_purity",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, 180,
-         "IEC 60376 / IS 13734"),
-
-        ("Circuit Breaker", "SF6 Gas Pressure Check",
-         "cb_sf6_pressure",
-         ScheduleFrequency.quarterly, 7,
-         field_tester or aee_maintenance, aee_maintenance or ee_tlss, None,
-         "Manufacturer O&M Manual"),
-
-        ("Circuit Breaker", "IR — Insulation Resistance",
-         "cb_ir",
-         ScheduleFrequency.semi_annual, 10,
-         aee_maintenance, ee_tlss, None,
-         "IEC 62271-100"),
-
-        ("Circuit Breaker", "Contact Resistance Test",
-         "cb_contact_resistance",
-         ScheduleFrequency.semi_annual, 10,
-         aee_maintenance, ee_tlss, None,
-         "IEC 62271-100 Cl.6.4"),
-
-        # ── Current Transformer ───────────────────────────────────────────────
-        ("Current Transformer", "IR — Insulation Resistance",
-         "ct_ir",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, None,
-         "IS 2705 / IEC 61869-2"),
-
-        ("Current Transformer", "Ratio & Phase Error Test",
-         "ct_ratio",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, None,
-         "IS 2705 Cl.8"),
-
-        # ── Lightning Arrester ────────────────────────────────────────────────
-        ("Lightning Arrester", "IR / Leakage Current Test",
-         "la_ir",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, 180,
-         "IS 3070 Pt.3 / IEC 60099-4"),
-
-        ("Lightning Arrester", "V-I Characteristic Test",
-         "la_vi",
-         ScheduleFrequency.triennial, 30,
-         aee_maintenance, ee_tlss, None,
-         "IEC 60099-4 Cl.8.3"),
-
-        # ── Battery Bank ──────────────────────────────────────────────────────
-        ("Battery Bank", "Specific Gravity Check",
-         "battery_specific_gravity",
-         ScheduleFrequency.quarterly, 7,
-         field_tester or aee_maintenance, aee_maintenance or ee_tlss, None,
-         "IS 1651 / Manufacturer Manual"),
-
-        ("Battery Bank", "Float Voltage per Cell",
-         "battery_float_voltage",
-         ScheduleFrequency.monthly, 5,
-         field_tester or aee_maintenance, aee_maintenance or ee_tlss, None,
-         "IS 1652 / Manufacturer Manual"),
-
-        ("Battery Bank", "Discharge / Capacity Test",
-         "battery_capacity",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, None,
-         "IS 1651 Cl.10"),
-    ]
-
-    created = 0
-    skipped = 0
-
-    for (eq_type_name, test_name, tpl_key, freq, adv_days,
-         resp_role, rev_role, revised_days, oem_ref) in REGISTER:
-
-        eq_type = get_eq_type(eq_type_name)
-        if not eq_type:
-            print(f"  [WARN] Equipment type '{eq_type_name}' not found — skipping '{test_name}'")
-            skipped += 1
-            continue
-
-        # Idempotency: skip if a template with this title + org + eq_type already exists
-        existing = session.query(TestingRequest).filter_by(
-            title=test_name,
-            organization_id=org.id,
-            equipment_type_id=eq_type.id,
-            is_schedule_template=True,
-        ).first()
-        if existing:
-            skipped += 1
-            continue
-
-        req_num = f"TR-REG-{now.strftime('%Y%m%d')}-{(created + 1):04d}"
-        req = TestingRequest(
-            id=_uuid.uuid4(),
-            request_number=req_num,
-            title=test_name,
-            description=f"Mandatory periodic test per {oem_ref}" if oem_ref else None,
-            equipment_type_id=eq_type.id,
-            organization_id=org.id,
-            request_category=RequestCategory.test,
-            priority="normal",
-            notes=oem_ref,
-            status=TestingRequestStatus.draft,
-            is_schedule_template=True,
-            is_direct_submission=False,
-            originator_id=system_user.id,
-            created_by=system_user.id,
-            requested_date=now,
-        )
-        session.add(req)
-        session.flush()
-
-        sched = TestRequestSchedule(
-            id=_uuid.uuid4(),
-            test_request_id=req.id,
-            organization_id=org.id,
-            frequency=freq,
-            start_date=now,
-            next_run_date=now,   # placeholder; overwritten on commissioning
-            advance_days=adv_days,
-            is_active=True,
-            responsible_role_id=getattr(resp_role, "id", None),
-            reviewing_role_id=getattr(rev_role, "id", None),
-            revised_periodicity_days=revised_days,
-            oem_reference=oem_ref,
-            created_by=system_user.id,
-        )
-        session.add(sched)
-        created += 1
-
-    session.commit()
-    print(
-        f"[OK] Test Register seeded: {created} templates created, "
-        f"{skipped} skipped (already exist or missing eq type)."
-    )
+    # removed — test register templates are created via the UI, not seeded
+    pass
 
 
 def seed_default_test_register(session, org):
-    """
-    Seeds ONE TestingRequest (is_schedule_template=True) + TestRequestSchedule
-    for EVERY CategoryDetails row with category_type IN ('test', 'maintenance')
-    under any active CategoryMaster (equipment type).
+    # removed — test register templates are created via the UI, not seeded
+    pass
 
-    Links test_type_id so commission_equipment() can auto-instantiate live
-    schedules when equipment is onboarded.
 
-    Idempotent — skips if a template with the same (test_type_id, organization_id)
-    already exists.
-    """
-    if not org:
-        print("[SKIP] seed_default_test_register: no org supplied.")
-        return
+# ============================================================
+# MASTER SCHEDULE SEED
+# Creates TestRequestSchedule master rows (equipment_id=NULL)
+# for representative test types across all 6 equipment types.
+# Idempotent — skips if (org, equipment_type_id, test_type_id) exists.
+# ============================================================
 
-    from models import (
-        CategoryMaster, CategoryDetails, OrgRole,
-        ScheduleFrequency, TestingRequest, TestingRequestStatus,
-        TestRequestSchedule, RequestCategory, User, OrgUserRole,
-    )
-    from datetime import datetime, timezone
-    import uuid as _uuid
+_MASTER_SCHEDULE_SEED = {
+    # equipment_type_name: [(test_detail_name, frequency, advance_days, oem_ref)]
+    "Power Transformer": [
+        ("Ratio Test HV-LV",                          "yearly",     30, "IEC 60076-1"),
+        ("Capacitance & Tan Delta Test (Transformer)", "triennial",  45, "IEC 60137"),
+        ("Magnetic Balance Test HV",                  "yearly",     30, None),
+    ],
+    "Circuit Breaker": [
+        ("Contact Resistance Test",  "yearly",    30, "IEC 62271-100"),
+        ("Insulation Resistance Test", "yearly",  30, None),
+        ("Travel and Timing Test",   "triennial", 45, "IEC 62271-100"),
+    ],
+    "Protection Relay": [
+        ("Protection Relay Functional Test", "yearly", 30, "IEC 60255"),
+    ],
+    "Electronic Tri-vector Meter": [
+        ("Meter Testing", "yearly", 30, "IS 16444"),
+    ],
+    "Lightning Arrester": [
+        ("Insulation Resistance / Leakage Current Test", "yearly",    30, "IEC 60099-4"),
+        ("V-I Characteristic Test",                      "triennial", 45, "IEC 60099-4"),
+    ],
+    "Battery Bank": [
+        ("Specific Gravity Check",    "quarterly", 15, None),
+        ("Discharge / Capacity Test", "yearly",    30, "IEEE 450"),
+        ("Float Voltage per Cell",    "quarterly", 15, None),
+    ],
+}
+
+
+def seed_master_schedules(session, org):
+    """Create master TestRequestSchedule rows for all 6 equipment types."""
+    from datetime import timezone
+    from dateutil.relativedelta import relativedelta
+
+    _FREQ_DELTA = {
+        "daily":       timedelta(days=1),
+        "weekly":      timedelta(weeks=1),
+        "biweekly":    timedelta(weeks=2),
+        "monthly":     relativedelta(months=1),
+        "quarterly":   relativedelta(months=3),
+        "semi_annual": relativedelta(months=6),
+        "yearly":      relativedelta(years=1),
+        "triennial":   relativedelta(years=3),
+    }
 
     now = datetime.now(timezone.utc)
+    inserted = 0
+    skipped = 0
 
-    # ── system user ───────────────────────────────────────────────────────────
-    admin_role = session.query(OrgRole).filter_by(
-        organization_id=org.id, name="Org Admin"
-    ).first()
-    system_user = None
-    if admin_role:
-        link = session.query(OrgUserRole).filter_by(org_role_id=admin_role.id).first()
-        if link:
-            system_user = session.query(User).filter_by(id=link.user_id).first()
-    if not system_user:
-        system_user = session.query(User).filter_by(email="superadmin@system.com").first()
-    if not system_user:
-        print("[WARN] seed_default_test_register: no system user found — skipping.")
-        return
-
-    # ── org roles ─────────────────────────────────────────────────────────────
-    def get_role(name):
-        return session.query(OrgRole).filter_by(
-            organization_id=org.id, name=name
-        ).first()
-
-    aee_maintenance  = get_role("AEE Maintenance")
-    ee_tlss          = get_role("EE TLSS")
-    field_tester     = get_role("Field Tester")
-
-    # ── frequency heuristic ───────────────────────────────────────────────────
-    def _default_frequency(name: str) -> ScheduleFrequency:
-        n = name.lower()
-        if any(k in n for k in ("float voltage", "cell voltage")):
-            return ScheduleFrequency.monthly
-        if any(k in n for k in ("specific gravity", "pressure check", "gas pressure",
-                                 "electrolyte level")):
-            return ScheduleFrequency.quarterly
-        if any(k in n for k in ("insulation resistance", " ir ", " ir—", "bdv",
-                                 "dielectric strength", "contact resistance")):
-            return ScheduleFrequency.semi_annual
-        if any(k in n for k in ("tan delta", "power factor", "v-i characteristic",
-                                 "capacity test", "discharge")):
-            return ScheduleFrequency.triennial
-        return ScheduleFrequency.yearly
-
-    def _default_advance(freq: ScheduleFrequency) -> int:
-        return {
-            ScheduleFrequency.monthly:     5,
-            ScheduleFrequency.quarterly:   7,
-            ScheduleFrequency.semi_annual: 10,
-            ScheduleFrequency.yearly:      15,
-            ScheduleFrequency.triennial:   30,
-        }.get(freq, 15)
-
-    # ── fetch all test / maintenance types ────────────────────────────────────
-    rows = (
-        session.query(CategoryDetails, CategoryMaster)
-        .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
-        .filter(
-            CategoryDetails.category_type.in_(["test", "maintenance"]),
-            CategoryDetails.is_active.is_(True),
-            CategoryMaster.is_active.is_(True),
+    for eq_type_name, tests in _MASTER_SCHEDULE_SEED.items():
+        master = (
+            session.query(CategoryMaster)
+            .filter_by(name=eq_type_name)
+            .first()
         )
-        .order_by(CategoryMaster.name, CategoryDetails.name)
-        .all()
-    )
-
-    created = skipped = 0
-
-    for detail, master in rows:
-        # idempotency: skip if template for this test_type_id + org already exists
-        existing = session.query(TestingRequest).filter_by(
-            test_type_id=detail.id,
-            organization_id=org.id,
-            is_schedule_template=True,
-        ).first()
-        if existing:
-            skipped += 1
+        if not master:
+            print(f"  [WARN] Equipment type not found: {eq_type_name!r} — skipping")
             continue
 
-        cat = (RequestCategory.test
-               if detail.category_type == "test"
-               else RequestCategory.maintenance)
-        freq      = _default_frequency(detail.name)
-        adv_days  = _default_advance(freq)
-        title     = f"{detail.name} — {master.name}"
+        for detail_name, freq_str, adv_days, oem_ref in tests:
+            detail = (
+                session.query(CategoryDetails)
+                .filter_by(category_master_id=master.id, name=detail_name)
+                .first()
+            )
+            if not detail:
+                print(f"  [WARN] Test detail not found: {detail_name!r} under {eq_type_name!r} — skipping")
+                continue
 
-        resp_role = field_tester or aee_maintenance
-        rev_role  = aee_maintenance or ee_tlss
-        if detail.category_type == "test":
-            resp_role = aee_maintenance
-            rev_role  = ee_tlss
+            existing = (
+                session.query(TestRequestSchedule)
+                .filter(
+                    TestRequestSchedule.equipment_id.is_(None),
+                    TestRequestSchedule.organization_id == org.id,
+                    TestRequestSchedule.equipment_type_id == master.id,
+                    TestRequestSchedule.test_type_id == detail.id,
+                    TestRequestSchedule.is_deleted == False,
+                )
+                .first()
+            )
+            if existing:
+                skipped += 1
+                continue
 
-        req_num = f"TR-DEF-{now.strftime('%Y%m%d')}-{(created + 1):04d}"
-        req = TestingRequest(
-            id=_uuid.uuid4(),
-            request_number=req_num,
-            title=title,
-            equipment_type_id=master.id,
-            test_type_id=detail.id,
-            organization_id=org.id,
-            request_category=cat,
-            priority="normal",
-            status=TestingRequestStatus.draft,
-            is_schedule_template=True,
-            is_direct_submission=False,
-            originator_id=system_user.id,
-            created_by=system_user.id,
-            requested_date=now,
-        )
-        session.add(req)
-        session.flush()
-
-        sched = TestRequestSchedule(
-            id=_uuid.uuid4(),
-            test_request_id=req.id,
-            organization_id=org.id,
-            frequency=freq,
-            start_date=now,
-            next_run_date=now,
-            advance_days=adv_days,
-            is_active=True,
-            responsible_role_id=getattr(resp_role, "id", None),
-            reviewing_role_id=getattr(rev_role, "id", None),
-            created_by=system_user.id,
-        )
-        session.add(sched)
-        created += 1
+            sched = TestRequestSchedule(
+                organization_id=org.id,
+                equipment_type_id=master.id,
+                test_type_id=detail.id,
+                equipment_id=None,
+                title=detail_name,
+                frequency=ScheduleFrequency(freq_str),
+                advance_days=adv_days,
+                oem_reference=oem_ref,
+                start_date=now,
+                next_run_date=now + _FREQ_DELTA[freq_str],
+                is_active=True,
+                is_deleted=False,
+            )
+            session.add(sched)
+            inserted += 1
 
     session.commit()
-    print(
-        f"[OK] Default Test Register seeded: {created} templates created, "
-        f"{skipped} skipped (already exist)."
-    )
+    print(f"[OK] Master schedules: {inserted} inserted, {skipped} already exist.")
+    return inserted
 
 
 def migrate_new_status_values(session):
@@ -7278,10 +6992,14 @@ def run_seed():
         # Sample Equipment (after departments + equipment types exist)
         seed_sample_equipment(session, kptcl_org)
 
-        # Test Register (SRS §5.1.1) — after KPTCL org + roles + equipment types exist
-        print("\n--- Test Register Seeding (SRS §5.1.1) ---")
-        seed_test_register(session, kptcl_org)
-        seed_default_test_register(session, kptcl_org)
+        # Master Schedules — blueprint templates for each equipment type
+        print("\n--- Master Schedule Seeding ---")
+        try:
+            seed_master_schedules(session, kptcl_org)
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Master schedule seed failed (non-fatal): {_e}")
+            traceback.print_exc()
 
         # Zoho Import Mapping (after KPTCL org + departments exist)
         seed_zoho_import_mapping(session, kptcl_org)
@@ -7367,7 +7085,7 @@ def run_seed():
         print("  1. Super Admin: superadmin@system.com / Admin123!")
         print("  2. Sample Org Admin: orgadmin@sampleorg.com / OrgAdmin123!")
         if kptcl_org:
-            print("  3. KPTCL Org Admin: orgadmin@kptcl.com / admin123")
+            print("  3. KPTCL Org Admin: orgadmin@utility.com / admin123")
         print("  4. Dept-filter users: tester.north / tester.south / tester.mysuru @ kptcl.com / TestDept@123")
         print(f"  {5 if kptcl_org else 4}. View API docs: http://localhost:8000/docs")
         print("\n" + "=" * 80 + "\n")
@@ -8065,7 +7783,7 @@ def _dft_get_or_create_org(session) -> Organization:
         display_name="KPTCL",
         organization_type="utility",
         industry="Power Transmission",
-        primary_email="info@kptcl.com",
+        primary_email="info@utility.com",
         primary_phone="+91-80-22207684",
         is_active=True,
         is_verified=True,
@@ -8361,7 +8079,7 @@ def seed_dept_filter_users(session, org=None):
     function reuses it as the default org rather than doing a separate lookup.
 
     Hierarchy:  BLR_ZONE → BLR_CIRCLE → RT_NORTH / RT_SOUTH / MYSURU
-    Email:      {role}.{dept}@kptcl.com   (e.g. tester.north@kptcl.com)
+    Email:      {role}.{dept}@utility.com   (e.g. tester.north@utility.com)
     Password:   TestDept@123
     """
     print("\n" + "=" * 72)
@@ -8424,7 +8142,7 @@ def seed_dept_filter_users(session, org=None):
     for dept_slug, dept_label, email_sfx in _DFT_DEPTS:
         dept_obj = dept_map[dept_slug]
         for role_name, is_admin, is_dept in _DFT_ROLES:
-            email     = f"{_DFT_ROLE_EMAIL[role_name]}.{email_sfx}@kptcl.com"
+            email     = f"{_DFT_ROLE_EMAIL[role_name]}.{email_sfx}@utility.com"
             firstname = _DFT_ROLE_FNAME[role_name]
             lastname  = dept_label.split()[0]          # "RT" or "Mysuru"
             phone     = _DFT_PHONE[(dept_slug, role_name)]
@@ -8439,10 +8157,10 @@ def seed_dept_filter_users(session, org=None):
     print("\n[5] Top-level hierarchy users  (circle + zone)")
     _top_level_users = [
         # (email,                   fname,  lname,    role_name,             dept_obj)
-        ("ee.circle@kptcl.com",   "EE",   "Circle", "EE TLSS",             circle),
-        ("see.circle@kptcl.com",  "SEE",  "Circle", "Technical Approver",  circle),
-        ("cee.zone@kptcl.com",    "CEE",  "Zone",   "Org Admin",           zone),
-        ("see.zone@kptcl.com",    "SEE",  "Zone",   "Technical Approver",  zone),
+        ("ee.circle@utility.com",   "EE",   "Circle", "EE TLSS",             circle),
+        ("see.circle@utility.com",  "SEE",  "Circle", "Technical Approver",  circle),
+        ("cee.zone@utility.com",    "CEE",  "Zone",   "Org Admin",           zone),
+        ("see.zone@utility.com",    "SEE",  "Zone",   "Technical Approver",  zone),
     ]
     for email, fname, lname, role_name, dept_obj in _top_level_users:
         phone = "9000000099"

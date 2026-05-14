@@ -1,18 +1,28 @@
-from typing import List, Optional
+# ============================================================
+# routes/test_request_schedule_routes.py
+# ============================================================
+
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    Query,
+)
+
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
+
 from models import User
+
 from schemas import (
     TestRequestScheduleCreate,
     TestRequestScheduleUpdate,
-    TestRequestScheduleResponse,
-    TestRequestScheduleLogResponse,
 )
+
 from services.test_request_schedule_service import (
     TestRequestScheduleService,
 )
@@ -23,221 +33,318 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-
-# ─────────────────────────────────────────────────────────────
-# LIST ALL TEMPLATE SCHEDULES
-# ─────────────────────────────────────────────────────────────
-
-@router.get("")
-def list_schedules(
-    organization_id: Optional[UUID] = Query(None),
-    equipment_type_id: Optional[int] = Query(None),
-    active_only: bool = Query(True),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    List template schedules.
-    """
-
-    svc = TestRequestScheduleService(db)
-
-    return svc.list_schedules(
-        organization_id=organization_id or current_user.organization_id,
-        equipment_type_id=equipment_type_id,
-        active_only=active_only,
-        skip=skip,
-        limit=limit,
-    )
+# ============================================================
+# MASTER SCHEDULES
+# equipment_id = NULL
+# ============================================================
 
 
-# ─────────────────────────────────────────────────────────────
-# CREATE SCHEDULE
-# ─────────────────────────────────────────────────────────────
+# ============================================================
+# CREATE MASTER SCHEDULE
+# ============================================================
 
 @router.post(
-    "/{test_request_id}",
-    response_model=TestRequestScheduleResponse,
+    "/master",
     status_code=201,
 )
-def create_schedule(
-    test_request_id: UUID,
+def create_master_schedule(
     data: TestRequestScheduleCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Create recurring schedule for template request.
-    """
 
     svc = TestRequestScheduleService(db)
 
-    return svc.create_schedule(
-        test_request_id=test_request_id,
-        frequency=data.frequency.value,
-        end_date=data.end_date,
-        advance_days=data.advance_days,
-        created_by=current_user.id,
+    payload = data.dict(exclude_unset=True)
+
+    payload["organization_id"] = (
+        current_user.organization_id
+    )
+
+    return svc.create_master_schedule(
+        data=payload,
+        user_id=current_user.id,
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# GET SINGLE SCHEDULE
-# ─────────────────────────────────────────────────────────────
+# ============================================================
+# LIST MASTER SCHEDULES
+# ============================================================
 
-@router.get(
-    "/{test_request_id}",
-    response_model=TestRequestScheduleResponse,
-)
-def get_schedule(
-    test_request_id: UUID,
+@router.get("/master")
+def list_master_schedules(
+    equipment_type_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    svc = TestRequestScheduleService(db)
+
+    return svc.list_master_schedules(
+        organization_id=(
+            current_user.organization_id
+        ),
+        equipment_type_id=equipment_type_id,
+    )
+
+
+# ============================================================
+# GET MASTER SCHEDULE
+# ============================================================
+
+@router.get("/master/{schedule_id}")
+def get_master_schedule(
+    schedule_id: UUID,
     db: Session = Depends(get_db),
 ):
-    """
-    Get template schedule.
-    """
 
     svc = TestRequestScheduleService(db)
 
-    return svc.get_schedule(
-        test_request_id=test_request_id
+    return svc.get_master_schedule(
+        schedule_id=schedule_id,
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# UPDATE SCHEDULE
-# ─────────────────────────────────────────────────────────────
+# ============================================================
+# UPDATE MASTER SCHEDULE
+# ============================================================
 
-@router.put(
-    "/{test_request_id}",
-    response_model=TestRequestScheduleResponse,
-)
-def update_schedule(
-    test_request_id: UUID,
+@router.put("/master/{schedule_id}")
+def update_master_schedule(
+    schedule_id: UUID,
     data: TestRequestScheduleUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Update template schedule.
-    """
 
     svc = TestRequestScheduleService(db)
 
-    return svc.update_schedule(
-        test_request_id=test_request_id,
-        frequency=data.frequency.value if data.frequency else None,
-        end_date=data.end_date,
-        advance_days=data.advance_days,
-        is_active=data.is_active,
-        modified_by=current_user.id,
+    return svc.update_master_schedule(
+        schedule_id=schedule_id,
+        data=data.dict(exclude_unset=True),
+        user_id=current_user.id,
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# DELETE / DEACTIVATE SCHEDULE
-# ─────────────────────────────────────────────────────────────
+# ============================================================
+# DELETE MASTER SCHEDULE
+# ============================================================
 
-@router.delete("/{test_request_id}")
-def delete_schedule(
-    test_request_id: UUID,
+@router.delete("/master/{schedule_id}")
+def delete_master_schedule(
+    schedule_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Soft delete schedule.
-    """
 
     svc = TestRequestScheduleService(db)
 
-    return svc.delete_schedule(
-        test_request_id=test_request_id,
-        modified_by=current_user.id,
+    return svc.delete_master_schedule(
+        schedule_id=schedule_id,
+        user_id=current_user.id,
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# PAUSE SCHEDULE
-# ─────────────────────────────────────────────────────────────
+# ============================================================
+# OPERATIONAL SCHEDULES
+# equipment_id != NULL
+# ============================================================
 
-@router.patch(
-    "/{test_request_id}/pause",
-    response_model=TestRequestScheduleResponse,
-)
-def pause_schedule(
-    test_request_id: UUID,
+
+# ============================================================
+# LIST OPERATIONAL SCHEDULES
+# ============================================================
+
+@router.get("/operational/{equipment_id}")
+def list_operational_schedules(
+    equipment_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
-    """
-    Pause schedule.
-    """
 
     svc = TestRequestScheduleService(db)
 
-    return svc.update_schedule(
-        test_request_id=test_request_id,
-        frequency=None,
-        end_date=None,
-        advance_days=None,
-        is_active=False,
-        modified_by=current_user.id,
+    return svc.list_operational_schedules(
+        equipment_id=equipment_id,
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# RESUME SCHEDULE
-# ─────────────────────────────────────────────────────────────
-
-@router.patch(
-    "/{test_request_id}/resume",
-    response_model=TestRequestScheduleResponse,
-)
-def resume_schedule(
-    test_request_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Resume schedule.
-    """
-
-    svc = TestRequestScheduleService(db)
-
-    return svc.update_schedule(
-        test_request_id=test_request_id,
-        frequency=None,
-        end_date=None,
-        advance_days=None,
-        is_active=True,
-        modified_by=current_user.id,
-    )
-
-
-# ─────────────────────────────────────────────────────────────
-# GET SCHEDULE LOGS
-# ─────────────────────────────────────────────────────────────
+# ============================================================
+# GET OPERATIONAL SCHEDULE
+# ============================================================
 
 @router.get(
-    "/{test_request_id}/logs",
-    response_model=List[TestRequestScheduleLogResponse],
+    "/operational/{equipment_id}/{schedule_id}"
+)
+def get_operational_schedule(
+    equipment_id: UUID,
+    schedule_id: UUID,
+    db: Session = Depends(get_db),
+):
+
+    svc = TestRequestScheduleService(db)
+
+    return svc.get_operational_schedule(
+        schedule_id=schedule_id,
+        equipment_id=equipment_id,
+    )
+
+
+# ============================================================
+# UPDATE OPERATIONAL SCHEDULE
+# ============================================================
+
+@router.put(
+    "/operational/{equipment_id}/{schedule_id}"
+)
+def update_operational_schedule(
+    equipment_id: UUID,
+    schedule_id: UUID,
+    data: TestRequestScheduleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    svc = TestRequestScheduleService(db)
+
+    return svc.update_operational_schedule(
+        schedule_id=schedule_id,
+        equipment_id=equipment_id,
+        data=data.dict(exclude_unset=True),
+        user_id=current_user.id,
+    )
+
+
+# ============================================================
+# PAUSE OPERATIONAL SCHEDULE
+# ============================================================
+
+@router.patch(
+    "/operational/{equipment_id}/{schedule_id}/pause"
+)
+def pause_operational_schedule(
+    equipment_id: UUID,
+    schedule_id: UUID,
+    reason: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    svc = TestRequestScheduleService(db)
+
+    return svc.pause_operational_schedule(
+        schedule_id=schedule_id,
+        equipment_id=equipment_id,
+        user_id=current_user.id,
+        reason=reason,
+    )
+
+
+# ============================================================
+# RESUME OPERATIONAL SCHEDULE
+# ============================================================
+
+@router.patch(
+    "/operational/{equipment_id}/{schedule_id}/resume"
+)
+def resume_operational_schedule(
+    equipment_id: UUID,
+    schedule_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    svc = TestRequestScheduleService(db)
+
+    return svc.resume_operational_schedule(
+        schedule_id=schedule_id,
+        equipment_id=equipment_id,
+        user_id=current_user.id,
+    )
+
+
+# ============================================================
+# DELETE OPERATIONAL SCHEDULE
+# ============================================================
+
+@router.delete(
+    "/operational/{equipment_id}/{schedule_id}"
+)
+def delete_operational_schedule(
+    equipment_id: UUID,
+    schedule_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    svc = TestRequestScheduleService(db)
+
+    return svc.delete_operational_schedule(
+        schedule_id=schedule_id,
+        equipment_id=equipment_id,
+        user_id=current_user.id,
+    )
+
+
+# ============================================================
+# RUN NOW
+# ============================================================
+
+@router.post(
+    "/operational/{equipment_id}/{schedule_id}/run"
+)
+def run_now(
+    equipment_id: UUID,
+    schedule_id: UUID,
+    db: Session = Depends(get_db),
+):
+
+    svc = TestRequestScheduleService(db)
+
+    schedule = (
+        svc.get_operational_schedule(
+            schedule_id=schedule_id,
+            equipment_id=equipment_id,
+        )
+    )
+
+    return svc.create_one_ticket(
+        db=db,
+        schedule=schedule,
+        now=svc._utc_now(),
+    )
+
+
+# ============================================================
+# LOGS
+# ============================================================
+
+@router.get(
+    "/operational/{equipment_id}/{schedule_id}/logs"
 )
 def get_schedule_logs(
-    test_request_id: UUID,
+    equipment_id: UUID,
+    schedule_id: UUID,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
-    """
-    Get schedule execution logs.
-    """
 
     svc = TestRequestScheduleService(db)
 
-    return svc.get_logs(
-        test_request_id=test_request_id,
-        skip=skip,
-        limit=limit,
+    schedule = (
+        svc.get_operational_schedule(
+            schedule_id=schedule_id,
+            equipment_id=equipment_id,
+        )
+    )
+
+    return (
+        db.query(schedule.logs.__class__)
+        .filter(
+            schedule.logs.__class__.schedule_id
+                == schedule.id
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
     )

@@ -185,6 +185,13 @@ def create_equipment(
     db.commit()
     db.refresh(equipment)
 
+    try:
+        from services.test_request_schedule_service import TestRequestScheduleService
+        TestRequestScheduleService.instantiate_equipment_schedules(db, equipment, current_user.id)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"[WARN] instantiate_equipment_schedules failed: {exc}")
 
     try:
         from services.notification_service import NotificationService

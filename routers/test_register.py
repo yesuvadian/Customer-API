@@ -30,7 +30,7 @@ Access
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -50,7 +50,7 @@ router = APIRouter(
 
 class TemplateCreateBody(BaseModel):
     equipment_type_id: int
-    organization_id: UUID
+    organization_id: Optional[UUID] = None   # falls back to current_user.organization_id
     frequency: str                       # ScheduleFrequency value
 
     title: Optional[str] = None          # auto-generated from test_type if omitted
@@ -172,7 +172,10 @@ def create_template(
     Role required: EE TLSS, Department Head, Admin, or SuperAdmin.
     """
     svc = TestRegisterService(db)
-    return svc.create_template(body.model_dump(), current_user)
+    data = body.model_dump()
+    if not data.get('organization_id'):
+        data['organization_id'] = current_user.organization_id
+    return svc.create_template(data, current_user)
 
 
 # ── Get single template ────────────────────────────────────────────────────────
@@ -229,38 +232,32 @@ def deactivate_template(
 
 @router.post(
     "/commission/{equipment_id}",
-    summary="Commission equipment — run scheduler immediately for one unit",
+    summary="Commission equipment — instantiate operational schedules for one unit",
 )
 def commission_equipment(
     equipment_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Trigger the scheduler immediately for a single equipment unit.
-    Generates tickets for any template schedules that are currently due.
-    """
-    svc = TestRegisterService(db)
-    return svc.commission_equipment(equipment_id, current_user)
+    from services.test_request_schedule_service import TestRequestScheduleService
+    from models import Equipment
+    equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found.")
+    TestRequestScheduleService.instantiate_equipment_schedules(db, equipment, current_user.id)
+    return {"message": "Operational schedules instantiated.", "equipment_id": str(equipment_id)}
 
 
 @router.post(
     "/run-scheduler",
-    summary="Run the schedule engine — generate due tickets for all equipment",
+    summary="Run the daily scheduler — generate due tickets for all equipment",
 )
 def run_scheduler(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Scans all active template schedules. For each schedule whose
-    next_run_date - advance_days <= today, creates a TestingRequest ticket
-    (status=submitted) for every active equipment unit of that type.
-    Advances next_run_date after each template is processed.
-    Idempotent: skips equipment that already has an open ticket for that test.
-    """
-    svc = TestRegisterService(db)
-    return svc.run_scheduler()
+    from services.test_request_schedule_service import TestRequestScheduleService
+    return TestRequestScheduleService.run_daily_scheduler(db)
 
 
 # ── ALERT reschedule ───────────────────────────────────────────────────────────
