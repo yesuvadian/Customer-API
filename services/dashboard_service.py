@@ -30,6 +30,8 @@ from models import (
     ProcurementRequest,
     Recommendation,
     RequestCategory,
+    RepairWorkflow,
+    RepairStageInstance,
     TestingRequest, TestingRequestStatus,
     TestResult,
     OrgRole, OrgUserRole,
@@ -245,6 +247,7 @@ class DashboardService:
                              "Maintenance compliance", "green"),
             self._taqc_kpi(),
             self._failure_registry_kpi(),
+            self._pending_attribution_kpi(),
         ]
 
     def _total_active_requests_kpi(self) -> Dict:
@@ -456,6 +459,33 @@ class DashboardService:
             "colour": colour,
         }
 
+    def _pending_attribution_kpi(self) -> Dict:
+        """Count of completed-but-delayed stage instances awaiting vendor/KPTCL attribution."""
+        from sqlalchemy import func as sqlfunc
+        q = (
+            self.db.query(sqlfunc.count(RepairStageInstance.id))
+            .join(RepairWorkflow, RepairWorkflow.id == RepairStageInstance.workflow_id)
+            .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+            .filter(
+                RepairStageInstance.delay_days > 0,
+                RepairStageInstance.delay_attribution.is_(None),
+                RepairStageInstance.completed_at.isnot(None),
+                RepairWorkflow.status != "cancelled",
+            )
+        )
+        if self.org_id:
+            q = q.filter(Equipment.organization_id == self.org_id)
+        count = q.scalar() or 0
+        return {
+            "label": "Pending delay attribution",
+            "value": count,
+            "display": str(count),
+            "sub": "Delayed repair stages awaiting vendor / KPTCL attribution",
+            "trend": None,
+            "trend_dir": "up" if count > 0 else "neutral",
+            "colour": "amber" if count > 0 else "green",
+        }
+
     # ══════════════════════════════════════════════════════════════════════════
     # Panel Widgets
     # ══════════════════════════════════════════════════════════════════════════
@@ -635,55 +665,215 @@ class DashboardService:
         return _cached(key, self._compute_repair_progress)
 
     def _compute_repair_progress(self) -> List[Dict]:
-        rows = self._org_filter(
-            self.db.query(TestingRequest).filter(
-                TestingRequest.request_category == RequestCategory.repair_lifecycle,
-                TestingRequest.status.in_(OPEN_STATUSES),
-                TestingRequest.is_multi_session.is_(True),
-                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
-            )
-        ).order_by(TestingRequest.cts.desc()).limit(10).all()
+        from collections import defaultdict
+
+        # Active + recently completed workflows (exclude cancelled)
+        q = (
+            self.db.query(RepairWorkflow)
+            .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+            .filter(RepairWorkflow.status != "cancelled")
+        )
+        if self.org_id:
+            q = q.filter(Equipment.organization_id == self.org_id)
+        workflows = q.order_by(RepairWorkflow.started_at.desc()).limit(10).all()
+
+        if not workflows:
+            return []
+
+        wf_ids = [wf.id for wf in workflows]
+
+        # Batch-load all stage instances for these workflows (avoids N+1)
+        instances = (
+            self.db.query(RepairStageInstance)
+            .filter(RepairStageInstance.workflow_id.in_(wf_ids))
+            .all()
+        )
+        inst_by_wf: Dict[Any, List] = defaultdict(list)
+        for inst in instances:
+            inst_by_wf[inst.workflow_id].append(inst)
 
         result = []
-        now = _now()
-        for req in rows:
-            sessions       = req.test_sessions or []
-            total_planned  = req.total_sessions_planned or max(len(sessions), 1)
-            completed_sess = sum(1 for s in sessions if s.status == "completed")
-            pct            = round(completed_sess / total_planned * 100)
+        for wf in workflows:
+            insts = inst_by_wf[wf.id]
+            completed_count = sum(1 for i in insts if i.status == "completed")
 
-            # Current / latest active session
-            active = next((s for s in sorted(sessions, key=lambda s: s.session_number, reverse=True)
-                           if s.status in ("in_progress", "completed")), None)
-            current_stage = active.session_number if active else 0
-            current_name  = active.session_name  if active else "Not started"
+            # Delay aggregations from real contracted-date tracking
+            vendor_delay = sum(
+                (i.delay_days or 0) for i in insts
+                if i.delay_attribution == "vendor" and (i.delay_days or 0) > 0
+            )
+            kptcl_delay = sum(
+                (i.delay_days or 0) for i in insts
+                if i.delay_attribution == "kptcl" and (i.delay_days or 0) > 0
+            )
+            pending_attr = sum(
+                1 for i in insts
+                if (i.delay_days or 0) > 0
+                and i.delay_attribution is None
+                and i.completed_at is not None
+            )
 
-            delay_text = ""
-            if active and active.scheduled_date:
-                sd = _make_tz(active.scheduled_date)
-                if sd < now and active.status != "completed":
-                    delay_text = f"Vendor delay: +{(now - sd).days} days attributable"
-            if not delay_text and active:
+            pct = wf.progress or 0
+            ueic = (wf.equipment.ueic if wf.equipment else None) or wf.workflow_number
+            current_name = (
+                wf.current_stage.name if wf.current_stage else
+                ("Completed" if wf.status == "completed" else "Pending")
+            )
+
+            # Human-readable delay summary (backward-compatible field)
+            if vendor_delay > 0:
+                delay_text = f"Vendor delay: +{vendor_delay} days"
+            elif pending_attr > 0:
+                delay_text = f"{pending_attr} stage(s) pending attribution"
+            elif kptcl_delay > 0:
+                delay_text = f"KPTCL delay: +{kptcl_delay} days"
+            else:
                 delay_text = "On schedule"
 
-            ueic = (req.equipment.ueic if req.equipment
-                    else (req.equipment_type.name if req.equipment_type else req.title))
+            timeliness_status = (
+                "delayed" if vendor_delay > 0 or kptcl_delay > 0 else
+                "pending_attribution" if pending_attr > 0 else
+                "on_time"
+            )
 
-            failure_date = _make_tz(req.requested_date or req.cts)
             result.append({
-                "id": str(req.id),
+                "id": str(wf.id),
+                "workflow_number": wf.workflow_number,
                 "ueic": ueic,
-                "title": req.title,
-                "request_number": req.request_number,
-                "current_stage": current_stage,
+                "title": wf.workflow_number,
+                "current_stage": completed_count,
                 "current_stage_name": current_name,
-                "total_stages": total_planned,
-                "completed_stages": completed_sess,
+                "total_stages": len(insts),
+                "completed_stages": completed_count,
                 "pct": pct,
                 "delay_text": delay_text,
-                "failure_date": failure_date.isoformat() if failure_date else None,
+                # ── Structured timeliness fields (new) ──
+                "vendor_delay_days": vendor_delay,
+                "kptcl_delay_days": kptcl_delay,
+                "pending_attribution": pending_attr,
+                "contracted_completion": (
+                    wf.contracted_completion.isoformat()
+                    if wf.contracted_completion else None
+                ),
+                "timeliness_status": timeliness_status,
+                "failure_date": wf.started_at.isoformat() if wf.started_at else None,
             })
         return result
+
+    # ── Repair timeliness summary (SEE / CEE / admin) ───────────────────────
+
+    def repair_timeliness(self) -> Dict:
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="repair_timeliness")
+        return _cached(key, self._compute_repair_timeliness)
+
+    def _compute_repair_timeliness(self) -> Dict:
+        from collections import defaultdict
+
+        _empty = {
+            "total_active": 0, "on_time": 0, "delayed": 0,
+            "pending_attribution": 0, "total_vendor_delay_days": 0,
+            "total_kptcl_delay_days": 0, "pending_attribution_stages": 0,
+            "by_workflow": [],
+        }
+
+        q = (
+            self.db.query(RepairWorkflow)
+            .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+            .filter(RepairWorkflow.status != "cancelled")
+        )
+        if self.org_id:
+            q = q.filter(Equipment.organization_id == self.org_id)
+        workflows = q.all()
+
+        if not workflows:
+            return _empty
+
+        wf_ids = [wf.id for wf in workflows]
+        instances = (
+            self.db.query(RepairStageInstance)
+            .filter(RepairStageInstance.workflow_id.in_(wf_ids))
+            .all()
+        )
+        inst_by_wf: Dict[Any, List] = defaultdict(list)
+        for inst in instances:
+            inst_by_wf[inst.workflow_id].append(inst)
+
+        total_active       = len(workflows)
+        on_time_count      = 0
+        delayed_count      = 0
+        pending_attr_wfs   = 0
+        total_vendor_days  = 0
+        total_kptcl_days   = 0
+        total_pending_stgs = 0
+        by_workflow        = []
+
+        for wf in workflows:
+            insts = inst_by_wf[wf.id]
+
+            vendor_delay = sum(
+                (i.delay_days or 0) for i in insts
+                if i.delay_attribution == "vendor" and (i.delay_days or 0) > 0
+            )
+            kptcl_delay = sum(
+                (i.delay_days or 0) for i in insts
+                if i.delay_attribution == "kptcl" and (i.delay_days or 0) > 0
+            )
+            pending_attr = sum(
+                1 for i in insts
+                if (i.delay_days or 0) > 0
+                and i.delay_attribution is None
+                and i.completed_at is not None
+            )
+
+            total_vendor_days  += vendor_delay
+            total_kptcl_days   += kptcl_delay
+            total_pending_stgs += pending_attr
+
+            if vendor_delay > 0 or kptcl_delay > 0:
+                delayed_count += 1
+                timeliness = "delayed"
+            elif pending_attr > 0:
+                pending_attr_wfs += 1
+                timeliness = "pending_attribution"
+            else:
+                on_time_count += 1
+                timeliness = "on_time"
+
+            # Only surface problem workflows in the detail list
+            if timeliness != "on_time":
+                ueic = (wf.equipment.ueic if wf.equipment else None) or wf.workflow_number
+                by_workflow.append({
+                    "workflow_id":               str(wf.id),
+                    "workflow_number":            wf.workflow_number,
+                    "ueic":                       ueic,
+                    "vendor_delay_days":          vendor_delay,
+                    "kptcl_delay_days":           kptcl_delay,
+                    "pending_attribution_stages": pending_attr,
+                    "timeliness_status":          timeliness,
+                    "contracted_completion": (
+                        wf.contracted_completion.isoformat()
+                        if wf.contracted_completion else None
+                    ),
+                })
+
+        # Delayed first, then pending attribution; alphabetical within each group
+        by_workflow.sort(
+            key=lambda r: (
+                0 if r["timeliness_status"] == "delayed" else 1,
+                r["workflow_number"],
+            )
+        )
+
+        return {
+            "total_active":              total_active,
+            "on_time":                   on_time_count,
+            "delayed":                   delayed_count,
+            "pending_attribution":       pending_attr_wfs,
+            "total_vendor_delay_days":   total_vendor_days,
+            "total_kptcl_delay_days":    total_kptcl_days,
+            "pending_attribution_stages": total_pending_stgs,
+            "by_workflow":               by_workflow[:15],
+        }
 
     # ── Maintenance overdue list ─────────────────────────────────────────────
 
@@ -935,13 +1125,13 @@ class DashboardService:
         WIDGETS: Dict[str, List[str]] = {
             "admin": [
                 "kpi_cards", "overdue_tests", "active_alerts",
-                "flagged_equipment", "repair_progress",
+                "flagged_equipment", "repair_progress", "repair_timeliness",
                 "maintenance_overdue", "procurement_pipeline",
                 "open_remediation", "failure_registry", "taqc_inspections",
             ],
             "see_cee": [
                 "kpi_cards", "overdue_tests", "active_alerts",
-                "flagged_equipment", "repair_progress",
+                "flagged_equipment", "repair_progress", "repair_timeliness",
                 "procurement_pipeline", "open_remediation",
                 "failure_registry", "taqc_inspections",
             ],

@@ -117,6 +117,21 @@ def get_flagged_equipment(
 
 # ── Repair progress ────────────────────────────────────────────────────────
 
+@router.get("/repair-timeliness")
+def get_repair_timeliness(
+    org_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Vendor delay summary across all active repair workflows.
+    Returns aggregate counts (total, on_time, delayed, pending_attribution)
+    plus total vendor / KPTCL delay days and a list of problem workflows.
+    Visible to: admin, see_cee.
+    """
+    return _svc(db, current_user, org_id).repair_timeliness()
+
+
 @router.get("/repair-progress")
 def get_repair_progress(
     org_id: Optional[UUID] = Query(None),
@@ -181,7 +196,7 @@ async def get_full_dashboard(
 
     # Run all widget computations in parallel using a thread pool
     loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(max_workers=8)
+    executor = ThreadPoolExecutor(max_workers=12)
     
     tasks = []
     
@@ -196,12 +211,18 @@ async def get_full_dashboard(
         tasks.append(("flagged_equipment", loop.run_in_executor(executor, svc.flagged_equipment)))
     if "repair_progress" in permitted:
         tasks.append(("repair_progress", loop.run_in_executor(executor, svc.repair_progress)))
+    if "repair_timeliness" in permitted:
+        tasks.append(("repair_timeliness", loop.run_in_executor(executor, svc.repair_timeliness)))
     if "maintenance_overdue" in permitted:
         tasks.append(("maintenance_overdue", loop.run_in_executor(executor, svc.maintenance_overdue)))
     if "procurement_pipeline" in permitted:
         tasks.append(("procurement", loop.run_in_executor(executor, svc.procurement_pipeline)))
     if "open_remediation" in permitted:
         tasks.append(("open_remediation", loop.run_in_executor(executor, svc.open_remediation_list)))
+    if "failure_registry" in permitted:
+        tasks.append(("failure_registry", loop.run_in_executor(executor, svc.failure_registry_list)))
+    if "taqc_inspections" in permitted:
+        tasks.append(("taqc_inspections", loop.run_in_executor(executor, svc.taqc_inspections_list)))
     
     # Await all tasks in parallel
     results = {}
@@ -221,10 +242,13 @@ async def get_full_dashboard(
         "overdue_tests": results.get("overdue_tests", None),
         "active_alerts": results.get("active_alerts", []),
         "flagged_equipment": results.get("flagged_equipment", []),
-        "repair_progress":   results.get("repair_progress", []),
+        "repair_progress":    results.get("repair_progress", []),
+        "repair_timeliness":  results.get("repair_timeliness", None),
         "maintenance_overdue": results.get("maintenance_overdue", None),
         "procurement":       results.get("procurement", None),
         "open_remediation":  results.get("open_remediation", None),
+        "failure_registry":  results.get("failure_registry", None),
+        "taqc_inspections":  results.get("taqc_inspections", None),
     }
 
 
