@@ -9,48 +9,48 @@
 
 ### Department Users (password: `TestDept@123`)
 
-All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{dept}@kptcl.com`
+All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{dept}@utility.com`
 
 | Role | Email prefix | North | South | Mysuru | OrgRole |
 |---|---|---|---|---|---|
-| Org Admin | `orgadmin` | `orgadmin.north@kptcl.com` | `orgadmin.south@kptcl.com` | `orgadmin.mysuru@kptcl.com` | `Org Admin` |
-| Dept Head | `depthead` | `depthead.north@kptcl.com` | `depthead.south@kptcl.com` | `depthead.mysuru@kptcl.com` | `Dept Head` |
-| Originator | `originator` | `originator.north@kptcl.com` | `originator.south@kptcl.com` | `originator.mysuru@kptcl.com` | `Originator` |
-| Tester | `tester` | `tester.north@kptcl.com` | `tester.south@kptcl.com` | `tester.mysuru@kptcl.com` | `Tester` |
-| Test Assigner | `assigner` | `assigner.north@kptcl.com` | `assigner.south@kptcl.com` | `assigner.mysuru@kptcl.com` | `Test Assigner` |
-| Technical Approver | `techapprover` | `techapprover.north@kptcl.com` | `techapprover.south@kptcl.com` | `techapprover.mysuru@kptcl.com` | `Technical Approver` |
-| Finance Approver | `financeapprover` | `financeapprover.north@kptcl.com` | `financeapprover.south@kptcl.com` | `financeapprover.mysuru@kptcl.com` | `Finance Approver` |
-| EE TLSS | `eetlss` | `eetlss.north@kptcl.com` | `eetlss.south@kptcl.com` | `eetlss.mysuru@kptcl.com` | `EE TLSS` |
-| TA&QC Officer | `taqc` | `taqc.north@kptcl.com` | `taqc.south@kptcl.com` | `taqc.mysuru@kptcl.com` | `TA&QC Officer` |
-| Section Head | `sectionhead` | `sectionhead.north@kptcl.com` | `sectionhead.south@kptcl.com` | `sectionhead.mysuru@kptcl.com` | `Section Head` |
+| Org Admin | `orgadmin` | `orgadmin.north@utility.com` | `orgadmin.south@utility.com` | `orgadmin.mysuru@utility.com` | `Org Admin` |
+| Dept Head | `depthead` | `depthead.north@utility.com` | `depthead.south@utility.com` | `depthead.mysuru@utility.com` | `Dept Head` |
+| Originator | `originator` | `originator.north@utility.com` | `originator.south@utility.com` | `originator.mysuru@utility.com` | `Originator` |
+| Tester | `tester` | `tester.north@utility.com` | `tester.south@utility.com` | `tester.mysuru@utility.com` | `Tester` |
+| Test Assigner | `assigner` | `assigner.north@utility.com` | `assigner.south@utility.com` | `assigner.mysuru@utility.com` | `Test Assigner` |
+| Technical Approver | `techapprover` | `techapprover.north@utility.com` | `techapprover.south@utility.com` | `techapprover.mysuru@utility.com` | `Technical Approver` |
+| Finance Approver | `financeapprover` | `financeapprover.north@utility.com` | `financeapprover.south@utility.com` | `financeapprover.mysuru@utility.com` | `Finance Approver` |
+| EE TLSS | `eetlss` | `eetlss.north@utility.com` | `eetlss.south@utility.com` | `eetlss.mysuru@utility.com` | `EE TLSS` |
+| TA&QC Officer | `taqc` | `taqc.north@utility.com` | `taqc.south@utility.com` | `taqc.mysuru@utility.com` | `TA&QC Officer` |
+| Section Head | `sectionhead` | `sectionhead.north@utility.com` | `sectionhead.south@utility.com` | `sectionhead.mysuru@utility.com` | `Section Head` |
 
 > **30 users total** — 10 roles × 3 departments. Seeded by `seed_dept_filter_users()` in `seed.py`.
 >
 > **Key UI test logins**:
-> - `orgadmin.north@kptcl.com` / `TestDept@123` — full org-wide menu, all screens visible
-> - `originator.north@kptcl.com` / `TestDept@123` — create TRs, FRs; dept-scoped lists
-> - `tester.north@kptcl.com` / `TestDept@123` — accept/start/submit results; multi-session forms
-> - `assigner.north@kptcl.com` / `TestDept@123` — assignment queue + approve FR Pass-1 + Pass-2
-> - `techapprover.north@kptcl.com` / `TestDept@123` — approve test results, recommendations
-> - `financeapprover.north@kptcl.com` / `TestDept@123` — procurement approval queue
-> - `eetlss.north@kptcl.com` / `TestDept@123` — repair workflows, escalation, EE dashboard
-> - `taqc.north@kptcl.com` / `TestDept@123` — TA&QC inspections, annual audit
+> - `orgadmin.north@utility.com` / `TestDept@123` — full org-wide menu, all screens visible
+> - `originator.north@utility.com` / `TestDept@123` — create TRs, FRs; dept-scoped lists
+> - `tester.north@utility.com` / `TestDept@123` — accept/start/submit results; multi-session forms
+> - `assigner.north@utility.com` / `TestDept@123` — assignment queue + approve FR Pass-1 + Pass-2
+> - `techapprover.north@utility.com` / `TestDept@123` — approve test results, recommendations
+> - `financeapprover.north@utility.com` / `TestDept@123` — procurement approval queue
+> - `eetlss.north@utility.com` / `TestDept@123` — repair workflows, escalation, EE dashboard
+> - `taqc.north@utility.com` / `TestDept@123` — TA&QC inspections, annual audit
 
 ### Hierarchy Users (password: `TestDept@123`)
 
 | Email | Role | Scope |
 |---|---|---|
-| `ee.circle@kptcl.com` | EE Circle | Sees all leaf divisions under circle |
-| `see.circle@kptcl.com` | SEE Circle | Sees all leaf divisions under circle |
-| `cee.zone@kptcl.com` | CEE Zone | Sees full subtree under zone |
-| `see.zone@kptcl.com` | SEE Zone | Sees full subtree under zone |
+| `ee.circle@utility.com` | EE Circle | Sees all leaf divisions under circle |
+| `see.circle@utility.com` | SEE Circle | Sees all leaf divisions under circle |
+| `cee.zone@utility.com` | CEE Zone | Sees full subtree under zone |
+| `see.zone@utility.com` | SEE Zone | Sees full subtree under zone |
 
 ### Platform / KPTCL Admins (password: `admin123`)
 
 | Email | Role Key | Scope |
 |---|---|---|
-| `orgadmin@kptcl.com` | KptclAdmin | All organizations |
-| `originator@kptcl.com` | KptclOriginator | All organizations |
+| `orgadmin@utility.com` | KptclAdmin | All organizations |
+| `originator@utility.com` | KptclOriginator | All organizations |
 
 ---
 
@@ -222,7 +222,7 @@ All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{de
 #### User scenarios — Create mode
 
 **Scenario 1 — Standard test type (e.g. Transformer Oil Test)**
-1. Originator logs in as `originator.north@kptcl.com`
+1. Originator logs in as `originator.north@utility.com`
 2. Taps **+** FAB on TR-1 → TR-2 form opens
 3. Selects Equipment → selects Category `Testing` → selects test type `Transformer Oil Test`
 4. Multi-session section appears with a toggle switch (default OFF)
@@ -232,16 +232,15 @@ All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{de
 
 **Scenario 2 — Cumulative test type (Circuit Breaker Operations Count)**
 1. Originator selects Category `Testing` → selects `Circuit Breaker Operations Count`
-2. Multi-session switch **automatically turns ON** and is **greyed out** (not togglable)
-3. Label beneath the switch reads: *"Required for cumulative tracking — always on"*
-4. User can still change Number of Sessions and Days Between Sessions
-5. Taps **Create** → TR is created with `is_multi_session=true` and `is_cumulative=true` stamped by the server
+2. The multi-session section **disappears entirely** — no toggle, no session count, no interval fields
+3. Originator fills in Priority, Due Date, Description → taps **Create**
+4. Server automatically stamps the TR with `is_multi_session=true` and `is_cumulative=true` — no user action required
 
 **Scenario 3 — Calibration test type (Protection Relay Calibration)**
 1. Originator selects Category `Testing` → selects `Protection Relay Calibration and History`
-2. Multi-session switch **automatically turns ON** and is **greyed out**
-3. Label reads: *"Required for calibration lifecycle — always on"*
-4. Taps **Create** → TR is created with `is_multi_session=true` and `is_calibration=true` stamped by the server
+2. The multi-session section **disappears entirely** — no toggle shown
+3. Originator fills remaining fields → taps **Create**
+4. Server automatically stamps the TR with `is_multi_session=true` and `is_calibration=true` — no user action required
 
 **Scenario 4 — Repair Lifecycle category**
 1. Originator selects Category `Repair`
@@ -254,12 +253,12 @@ All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{de
 
 **Scenario 5 — Reopening a cumulative draft**
 1. Originator taps a `draft` TR that was created with `Circuit Breaker Operations Count`
-2. Form reopens; multi-session switch is **still locked ON** and shows *"Required for cumulative tracking — always on"*
-3. User cannot toggle it off
+2. Form reopens; the multi-session section is **not shown** — same as create mode
+3. No switch to accidentally toggle; `is_multi_session=true` remains on the record
 
 **Scenario 6 — Reopening a calibration draft**
 1. Originator taps a `draft` TR created with `Protection Relay Calibration and History`
-2. Multi-session switch is **locked ON**, label reads *"Required for calibration lifecycle — always on"*
+2. Multi-session section is **not shown** — same as create mode
 3. No way to accidentally disable multi-session
 
 **Scenario 7 — Reopening a standard multi-session draft**
@@ -279,7 +278,7 @@ All 10 roles exist for **each** of the 3 departments. Email pattern: `{role}.{de
 | Scheduled Date | Date picker | No |
 | Due Date | Date picker | Yes (required to submit) |
 | Description | Multi-line text | No |
-| Multi-session toggle | Switch — freely togglable for standard types; locked ON for cumulative/calibration; hidden for repair | — |
+| Multi-session toggle | Switch — freely togglable for standard types; **hidden** for cumulative/calibration (backend auto-enables); hidden for repair | — |
 | Number of Sessions | Stepper (min 1) | When multi-session ON |
 | Days Between Sessions | Stepper (min 1) | When multi-session ON |
 
@@ -361,9 +360,9 @@ Each field is rendered based on `type`:
 #### When shown
 The sessions panel appears on TR-3 when `is_multi_session=true` on the TR.  
 This is set when:
-- The test type has `enable_calibration=true` (Protection Relay Cal, Tri-vector Meter Cal)
-- The test type has `enable_cumulative=true` (Circuit Breaker Operations, OLTC Operations)
-- The tester explicitly enables multi-session during create
+- The test type has `enable_calibration=true` (Protection Relay Cal, Tri-vector Meter Cal) — **backend sets this automatically, no user action needed**
+- The test type has `enable_cumulative=true` (Circuit Breaker Operations, OLTC Operations) — **backend sets this automatically, no user action needed**
+- The originator explicitly enables multi-session during create (standard test types only)
 
 #### Sessions list
 | Element | Value |
@@ -480,9 +479,9 @@ POST /testing_requests/{id}/results/structured
 | `NOT_CALIBRATED` | No calibration result on record | Grey |
 
 #### How calibration is triggered
-1. Tester creates a TR with a calibration test type (e.g., `Protection Relay Calibration and History`)
-   - `is_calibration=true` is stamped on the TR (set by the server from `enable_calibration` flag)
-   - `is_multi_session=true` is forced in the UI (via `_forceMultiSession`)
+1. Originator creates a TR with a calibration test type (e.g., `Protection Relay Calibration and History`)
+   - The multi-session section is **not shown** in the form — no toggle visible
+   - Server automatically sets `is_calibration=true` and `is_multi_session=true` from the test type's template (`enable_calibration` flag)
 2. Tester submits structured results using template_key `protection_relay_calibration` or `tri_vector_meter_calibration`
 3. `CalibrationService` finds the result, computes state from `DATE_ADD` rule
 4. CAL-1 screen fetches `/calibration/lifecycle?equipment_id={id}` and shows the result
@@ -520,9 +519,9 @@ POST /testing_requests/{id}/results/structured
 | `UNKNOWN` | No readings on record | Grey |
 
 #### How cumulative tracking works
-1. Tester creates a TR with a cumulative test type (e.g., `Circuit Breaker Operations Count`)
-   - `is_cumulative=true` stamped on the TR
-   - `is_multi_session=true` forced in the UI
+1. Originator creates a TR with a cumulative test type (e.g., `Circuit Breaker Operations Count`)
+   - The multi-session section is **not shown** in the form — no toggle visible
+   - Server automatically sets `is_cumulative=true` and `is_multi_session=true` from the test type's template (`enable_cumulative` flag)
 2. Tester creates **separate sessions** for each reading (session_number must be unique)
 3. Each reading is submitted as structured result with `test_session_id=<session_uuid>` and `template_key=circuit_breaker_operations`
 4. `CumulativeService` computes `cumulative_diff` = difference between successive readings (requires ≥ 2 readings with distinct session IDs)
@@ -769,14 +768,14 @@ Dropdown from `GET .../stages/{stage_id}/eligible-users` → confirm → `POST .
 
 | Login email | Password | Role | What they do in Annual Audit |
 |---|---|---|---|
-| `taqc.north@kptcl.com` | `TestDept@123` | TA&QC Officer | Create inspection + observation · Fill & approve stage 1 · Review & approve/reject stage 4 · Close stage 5 |
-| `wfcoordinator.north@kptcl.com` | `TestDept@123` | Workflow Coordinator | Fill & approve stage 2 · Assign stages 3 / 4 / 5 to officers |
-| `aeemaint.north@kptcl.com` | `TestDept@123` | AEE Maintenance | Fill compliance evidence & submit stage 3 |
-| `orgadmin@kptcl.com` | `admin123` | Org Admin | Full read/write across all annual audit screens |
+| `taqc.north@utility.com` | `TestDept@123` | TA&QC Officer | Create inspection + observation · Fill & approve stage 1 · Review & approve/reject stage 4 · Close stage 5 |
+| `wfcoordinator.north@utility.com` | `TestDept@123` | Workflow Coordinator | Fill & approve stage 2 · Assign stages 3 / 4 / 5 to officers |
+| `aeemaint.north@utility.com` | `TestDept@123` | AEE Maintenance | Fill compliance evidence & submit stage 3 |
+| `orgadmin@utility.com` | `admin123` | Org Admin | Full read/write across all annual audit screens |
 
 ---
 
-### Role: TA&QC Officer (`taqc.north@kptcl.com`)
+### Role: TA&QC Officer (`taqc.north@utility.com`)
 
 **Menu items visible**: Annual Audits · Audit Queue · TA&QC Inspections · Equipment · Notifications
 
@@ -879,7 +878,7 @@ Dropdown from `GET .../stages/{stage_id}/eligible-users` → confirm → `POST .
 
 ---
 
-### Role: Workflow Coordinator (`wfcoordinator.north@kptcl.com`)
+### Role: Workflow Coordinator (`wfcoordinator.north@utility.com`)
 
 **Menu items visible**: Annual Audits · Audit Queue · Notifications
 
@@ -915,14 +914,14 @@ Dropdown from `GET .../stages/{stage_id}/eligible-users` → confirm → `POST .
 
 1. Open the observation (stage chip = blue **COMPLIANCE SUBMISSION**).
 2. **Actions** shows **Assign** button (WfCoordinator is the `assignment_role` for stage 3).
-3. Tap **Assign** → dropdown shows eligible `AEE Maintenance` users → select `aeemaint.north@kptcl.com` → tap **Assign**.
+3. Tap **Assign** → dropdown shows eligible `AEE Maintenance` users → select `aeemaint.north@utility.com` → tap **Assign**.
 4. Stage 3 is now assigned; WfCoordinator's actions disappear — AeeMaint must act next.
 
 > WfCoordinator also assigns stages 4 (COMPLIANCE_REVIEW → TaqcOfficer) and 5 (OBSERVATION_CLOSURE → TaqcOfficer) after each preceding stage completes.
 
 ---
 
-### Role: AEE Maintenance (`aeemaint.north@kptcl.com`)
+### Role: AEE Maintenance (`aeemaint.north@utility.com`)
 
 **Menu items visible**: Annual Audits · Notifications
 
@@ -1138,9 +1137,9 @@ next_action=replacement → PR- procurement request
 KPTCL (organisation)
 └── Bangalore Zone (BLR_ZONE)         ← cee.zone / see.zone
     └── Bangalore Transmission Circle (BLR_CIRCLE)  ← ee.circle / see.circle
-        ├── RT North Division (RT_NORTH)   ← *.north@kptcl.com
-        ├── RT South Division (RT_SOUTH)   ← *.south@kptcl.com
-        └── Mysuru Division (MYSURU)       ← *.mysuru@kptcl.com
+        ├── RT North Division (RT_NORTH)   ← *.north@utility.com
+        ├── RT South Division (RT_SOUTH)   ← *.south@utility.com
+        └── Mysuru Division (MYSURU)       ← *.mysuru@utility.com
 ```
 
 ### Scope Rules
@@ -1169,22 +1168,22 @@ KPTCL (organisation)
 
 ## 13. Multi-Session — Calibration & Cumulative User Scenarios
 
-### Which test types force multi-session ON
+### Which test types auto-enable multi-session
 
-| Test Type | Behaviour when selected |
+| Test Type | What the user sees |
 |---|---|
-| Protection Relay Calibration and History | Switch locked ON — *"Required for calibration lifecycle — always on"* |
-| Electronic Tri-vector Meter Calibration | Switch locked ON — *"Required for calibration lifecycle — always on"* |
-| Circuit Breaker Operations Count | Switch locked ON — *"Required for cumulative tracking — always on"* |
-| OLTC Operations Count | Switch locked ON — *"Required for cumulative tracking — always on"* |
-| Any other test type | Switch freely togglable by user |
-| Any `repair_lifecycle` category | Multi-session section hidden — not applicable |
+| Protection Relay Calibration and History | Multi-session section **not shown** — backend sets `is_multi_session=true` automatically |
+| Electronic Tri-vector Meter Calibration | Multi-session section **not shown** — backend sets `is_multi_session=true` automatically |
+| Circuit Breaker Operations Count | Multi-session section **not shown** — backend sets `is_multi_session=true` automatically |
+| OLTC Operations Count | Multi-session section **not shown** — backend sets `is_multi_session=true` automatically |
+| Any other test type | Toggle visible and freely togglable by user |
+| Any `repair_lifecycle` category | Multi-session section hidden — stage engine manages data capture |
 
 ---
 
 ### Cumulative test — end-to-end user flow
 
-**Login**: `tester.north@kptcl.com`
+**Login**: `tester.north@utility.com`
 
 1. **Originator** creates TR with test type `Circuit Breaker Operations Count`
    - Multi-session switch auto-locks ON
@@ -1206,7 +1205,7 @@ KPTCL (organisation)
    - System computes cumulative diff: 4750 − 4500 = **250 operations**
    - Cumulative total increments on CUM-1 screen
 
-6. **CUM-1 screen** (`cumulative.north@kptcl.com` or OrgAdmin) shows updated count vs threshold
+6. **CUM-1 screen** (`cumulative.north@utility.com` or OrgAdmin) shows updated count vs threshold
    - If count ≥ threshold → status badge turns **CRITICAL** (red)
 
 > **Common mistake**: If the tester submits both readings under the same session, the second reading overwrites the first — diff = 0, no cumulative increment. Always use a separate session per reading.
@@ -1215,7 +1214,7 @@ KPTCL (organisation)
 
 ### Calibration test — end-to-end user flow
 
-**Login**: `tester.north@kptcl.com`
+**Login**: `tester.north@utility.com`
 
 1. **Originator** creates TR with test type `Protection Relay Calibration and History`
    - Multi-session switch locks ON automatically
@@ -1235,17 +1234,17 @@ KPTCL (organisation)
 
 ---
 
-### Multi-session switch — what the user sees
+### Multi-session section — what the user sees
 
-| Situation | Switch appearance | Label |
-|---|---|---|
-| Standard test type, multi-session OFF | Toggle is OFF, enabled | *"Spread test across multiple days/sessions"* |
-| Standard test type, multi-session ON | Toggle is ON, enabled | *"Spread test across multiple days/sessions"* |
-| Cumulative test type selected | Toggle is ON, **greyed out** (not tappable) | *"Required for cumulative tracking — always on"* |
-| Calibration test type selected | Toggle is ON, **greyed out** (not tappable) | *"Required for calibration lifecycle — always on"* |
-| Repair lifecycle category | Multi-session row **not shown** | — |
+| Situation | What appears in the form |
+|---|---|
+| Standard test type, multi-session OFF | Toggle visible — OFF, freely togglable. Label: *"Spread test across multiple days/sessions"* |
+| Standard test type, multi-session ON | Toggle visible — ON, freely togglable. Session count + interval steppers appear below |
+| Cumulative test type selected | Multi-session section **not shown at all** — backend handles it silently |
+| Calibration test type selected | Multi-session section **not shown at all** — backend handles it silently |
+| Repair lifecycle category | Multi-session section **not shown** — stage engine manages data capture |
 
-When multi-session is ON (any reason), the form expands to show:
+When multi-session toggle is ON (standard test types only), the form expands to show:
 - **Number of Sessions** — stepper, minimum 1
 - **Days Between Sessions** — stepper, minimum 1
 
@@ -1253,12 +1252,12 @@ When multi-session is ON (any reason), the form expands to show:
 
 ### Reopening a saved draft — expected behaviour
 
-| Draft type | Switch on reopen |
+| Draft type | Multi-session section on reopen |
 |---|---|
-| Created with cumulative test type | Locked ON, correct label shown |
-| Created with calibration test type | Locked ON, correct label shown |
-| Created with standard type, multi-session ON | ON, freely togglable |
-| Created with standard type, multi-session OFF | OFF, freely togglable |
+| Created with cumulative test type | Section **not shown** — same as create mode |
+| Created with calibration test type | Section **not shown** — same as create mode |
+| Created with standard type, multi-session ON | Toggle visible — ON, freely togglable |
+| Created with standard type, multi-session OFF | Toggle visible — OFF, freely togglable |
 
 ---
 
