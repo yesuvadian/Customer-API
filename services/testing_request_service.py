@@ -118,6 +118,8 @@ class TestingRequestService:
             session_interval_days=data.get("session_interval_days"),
             is_cumulative=is_cumulative,
             is_calibration=is_calibration,
+            is_schedule_template=data.get("is_schedule_template", False),
+            source_schedule_id=data.get("source_schedule_id"),
         )
         self.db.add(request)
         self.db.commit()
@@ -125,7 +127,10 @@ class TestingRequestService:
         return request
 
     def get_request(self, request_id: UUID) -> TestingRequest:
-        request = self.db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+        request = self.db.query(TestingRequest).filter(
+    TestingRequest.id == request_id,
+    TestingRequest.is_schedule_template.is_(False),
+).first()
         if not request:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Testing request not found")
         return request
@@ -141,8 +146,12 @@ class TestingRequestService:
         organization_id: Optional[UUID] = None,
         department_id: Optional[UUID] = None,
         department_ids: Optional[List[UUID]] = None,  # subtree list (overrides department_id)
+        equipment_id: Optional[UUID] = None,
     ) -> List[TestingRequest]:
-        query = self.db.query(TestingRequest)
+        query = (
+            self.db.query(TestingRequest)
+            .filter(TestingRequest.is_schedule_template.is_(False))
+        )
         if status_filter:
             query = query.filter(TestingRequest.status == status_filter)
         if category_filter:
@@ -153,6 +162,8 @@ class TestingRequestService:
             query = query.filter(TestingRequest.assigned_tester_id == tester_id)
         if organization_id:
             query = query.filter(TestingRequest.organization_id == organization_id)
+        if equipment_id:
+            query = query.filter(TestingRequest.equipment_id == equipment_id)
         # department_ids (subtree) takes priority over single department_id
         if department_ids is not None:
             query = query.filter(TestingRequest.department_id.in_(department_ids))
@@ -168,12 +179,16 @@ class TestingRequestService:
         status_filter: Optional[str] = None,
     ) -> List[TestingRequest]:
         """Return requests where user is originator OR assigned tester."""
-        query = self.db.query(TestingRequest).filter(
-            or_(
-                TestingRequest.originator_id == user_id,
-                TestingRequest.assigned_tester_id == user_id,
-            )
+        query = (
+    self.db.query(TestingRequest)
+    .filter(TestingRequest.is_schedule_template.is_(False))
+    .filter(
+        or_(
+            TestingRequest.originator_id == user_id,
+            TestingRequest.assigned_tester_id == user_id,
         )
+    )
+)
         if status_filter:
             query = query.filter(TestingRequest.status == status_filter)
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
@@ -206,6 +221,11 @@ class TestingRequestService:
 
     def submit_request(self, request_id: UUID, modified_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
+        if request.is_schedule_template:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Template requests cannot be submitted",
+            )
         if request.status != TestingRequestStatus.draft:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -234,6 +254,11 @@ class TestingRequestService:
 
     def assign_tester(self, request_id: UUID, tester_id: UUID, assigned_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
+        if request.is_schedule_template:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Template requests cannot be assigned",
+            )
         if request.status != TestingRequestStatus.submitted:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -262,7 +287,10 @@ class TestingRequestService:
 
     def get_stats(self, user_id: UUID = None, organization_id: UUID = None) -> dict:
         """Return counts by testing request status."""
-        query = self.db.query(TestingRequest)
+        query = (
+    self.db.query(TestingRequest)
+    .filter(TestingRequest.is_schedule_template.is_(False))
+)
         if organization_id:
             query = query.filter(TestingRequest.organization_id == organization_id)
         elif user_id:

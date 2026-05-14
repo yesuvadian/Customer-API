@@ -234,6 +234,7 @@ def list_testing_requests(
     originator_id: Optional[UUID] = None,
     tester_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
+    equipment_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -268,6 +269,7 @@ def list_testing_requests(
         organization_id=organization_id,
         department_id=department_id if dept_ids is None else None,
         department_ids=dept_ids,
+        equipment_id=equipment_id,
     )
     return [_enrich(r) for r in requests]
 

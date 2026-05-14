@@ -486,7 +486,7 @@ class RepairWorkflowService:
         self._check_can_assign_stage(coordinator_id, stage_id)
 
         instance = self._get_instance(workflow_id, stage_id)
-        if instance.status not in ("pending", "not_started"):
+        if instance.status in ("completed", "rejected"):
             raise ValueError(f"Stage is already '{instance.status}' — cannot reassign.")
 
         # Resolve assignee's role name for display
@@ -569,6 +569,21 @@ class RepairWorkflowService:
         # Submitter must be the assigned user OR have can_edit for this stage
         if instance.assigned_user_id and str(instance.assigned_user_id) != str(user_id):
             self._check_stage_rbac(stage_id, user_id)
+
+        # Validate required fields at submit time (not at save/draft time)
+        tmpl_link = (
+            self.db.query(RepairStageTemplate)
+            .filter(RepairStageTemplate.stage_id == stage_id)
+            .first()
+        )
+        if tmpl_link and tmpl_link.template_id:
+            data_row = (
+                self.db.query(RepairStageData)
+                .filter(RepairStageData.stage_instance_id == instance.id)
+                .first()
+            )
+            saved_data = data_row.form_data if data_row else {}
+            self._validate_form_data(tmpl_link.template_id, saved_data or {})
 
         instance.status = "submitted"
         if remarks:
@@ -1062,16 +1077,21 @@ class RepairWorkflowService:
 
         # Roles allowed to receive assignments
         role_ids = [
-            r.role_id
-            for r in (
-                self.db.query(RepairStageRole)
-                .filter(
-                    RepairStageRole.stage_id == stage_id,
-                    RepairStageRole.can_edit.is_(True),
-                )
-                .all()
-            )
-        ]
+    r.role_id
+    for r in (
+        self.db.query(RepairStageRole)
+        .join(
+            OrgRole,
+            OrgRole.id == RepairStageRole.role_id,
+        )
+        .filter(
+            RepairStageRole.stage_id == stage_id,
+            RepairStageRole.can_edit.is_(True),
+            OrgRole.organization_id == current_user.organization_id,
+        )
+        .all()
+    )
+]
 
         if not role_ids:
             raise ValueError(
@@ -1247,14 +1267,6 @@ class RepairWorkflowService:
 
         self._check_stage_rbac(stage_id, user_id)
 
-        tmpl_link = (
-            self.db.query(RepairStageTemplate)
-            .filter(RepairStageTemplate.stage_id == stage_id)
-            .first()
-        )
-        if tmpl_link and tmpl_link.template_id:
-            self._validate_form_data(tmpl_link.template_id, form_data)
-
         instance = self._get_instance(workflow_id, stage_id)
         if not instance:
             raise ValueError("Stage instance not found.")
@@ -1268,6 +1280,7 @@ class RepairWorkflowService:
             merged = {**(data_row.form_data or {}), **form_data}
             data_row.form_data = merged
         else:
+            merged = form_data
             data_row = RepairStageData(
                 stage_instance_id=instance.id,
                 form_data=form_data,
@@ -1275,6 +1288,7 @@ class RepairWorkflowService:
             )
             self.db.add(data_row)
 
+        # Save is always a draft — required-field validation happens at submit time
         self.db.commit()
         self._log_audit(workflow_id, stage_id, "saved", user_id, "Form data saved")
         return {"message": "Stage data saved successfully", "stage_id": str(stage_id)}

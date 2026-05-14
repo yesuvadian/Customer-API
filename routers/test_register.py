@@ -30,13 +30,13 @@ Access
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User
+from models import CategoryDetails, CategoryMaster, User
 from services.test_register_service import TestRegisterService
 
 router = APIRouter(
@@ -49,11 +49,12 @@ router = APIRouter(
 # ── Request schemas ────────────────────────────────────────────────────────────
 
 class TemplateCreateBody(BaseModel):
-    title: str
     equipment_type_id: int
-    organization_id: UUID
+    organization_id: Optional[UUID] = None   # falls back to current_user.organization_id
     frequency: str                       # ScheduleFrequency value
 
+    title: Optional[str] = None          # auto-generated from test_type if omitted
+    test_type_id: Optional[int] = None   # CategoryDetails PK
     description: Optional[str] = None
     department_id: Optional[UUID] = None
     template_key: Optional[str] = None
@@ -61,8 +62,6 @@ class TemplateCreateBody(BaseModel):
     notes: Optional[str] = None
     advance_days: int = 15
 
-    responsible_role_id: Optional[UUID] = None
-    reviewing_role_id: Optional[UUID] = None
     revised_periodicity_days: Optional[int] = None
     oem_reference: Optional[str] = None
 
@@ -77,8 +76,6 @@ class TemplateUpdateBody(BaseModel):
 
     frequency: Optional[str] = None
     advance_days: Optional[int] = None
-    responsible_role_id: Optional[UUID] = None
-    reviewing_role_id: Optional[UUID] = None
     revised_periodicity_days: Optional[int] = None
     oem_reference: Optional[str] = None
     is_active: Optional[bool] = None
@@ -107,6 +104,56 @@ def list_templates(
     )
 
 
+# ── Test types lookup ──────────────────────────────────────────────────────────
+
+@router.get("/test-types", summary="List test types grouped by equipment type")
+def list_test_types(db: Session = Depends(get_db)):
+    rows = (
+        db.query(CategoryDetails, CategoryMaster)
+        .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
+        .filter(
+            CategoryDetails.category_type == "test",
+            CategoryDetails.is_active.is_(True),
+            CategoryMaster.is_active.is_(True),
+        )
+        .order_by(CategoryMaster.name, CategoryDetails.name)
+        .all()
+    )
+    return [
+        {
+            "id": detail.id,
+            "name": detail.name,
+            "equipment_type_id": detail.category_master_id,
+            "equipment_type_name": master.name,
+        }
+        for detail, master in rows
+    ]
+
+
+@router.get("/maintenance-types", summary="List maintenance types grouped by equipment type")
+def list_maintenance_types(db: Session = Depends(get_db)):
+    rows = (
+        db.query(CategoryDetails, CategoryMaster)
+        .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
+        .filter(
+            CategoryDetails.category_type == "maintenance",
+            CategoryDetails.is_active.is_(True),
+            CategoryMaster.is_active.is_(True),
+        )
+        .order_by(CategoryMaster.name, CategoryDetails.name)
+        .all()
+    )
+    return [
+        {
+            "id": detail.id,
+            "name": detail.name,
+            "equipment_type_id": detail.category_master_id,
+            "equipment_type_name": master.name,
+        }
+        for detail, master in rows
+    ]
+
+
 # ── Create template ────────────────────────────────────────────────────────────
 
 @router.post("/", status_code=status.HTTP_201_CREATED, summary="Create a test register template")
@@ -121,7 +168,10 @@ def create_template(
     Role required: EE TLSS, Department Head, Admin, or SuperAdmin.
     """
     svc = TestRegisterService(db)
-    return svc.create_template(body.model_dump(), current_user)
+    data = body.model_dump()
+    if not data.get('organization_id'):
+        data['organization_id'] = current_user.organization_id
+    return svc.create_template(data, current_user)
 
 
 # ── Get single template ────────────────────────────────────────────────────────
@@ -178,23 +228,32 @@ def deactivate_template(
 
 @router.post(
     "/commission/{equipment_id}",
-    status_code=status.HTTP_201_CREATED,
-    summary="Commission equipment — clone templates to live requests",
+    summary="Commission equipment — instantiate operational schedules for one unit",
 )
 def commission_equipment(
     equipment_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Manually trigger commissioning for an equipment unit.
-    Finds all active register templates matching equipment.equipment_type_id
-    and creates a live TestingRequest + TestRequestSchedule for each.
+    from services.test_request_schedule_service import TestRequestScheduleService
+    from models import Equipment
+    equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found.")
+    TestRequestScheduleService.instantiate_equipment_schedules(db, equipment, current_user.id)
+    return {"message": "Operational schedules instantiated.", "equipment_id": str(equipment_id)}
 
-    This is also called automatically from the equipment creation endpoint.
-    """
-    svc = TestRegisterService(db)
-    return svc.commission_equipment(equipment_id, current_user)
+
+@router.post(
+    "/run-scheduler",
+    summary="Run the daily scheduler — generate due tickets for all equipment",
+)
+def run_scheduler(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from services.test_request_schedule_service import TestRequestScheduleService
+    return TestRequestScheduleService.run_daily_scheduler(db)
 
 
 # ── ALERT reschedule ───────────────────────────────────────────────────────────

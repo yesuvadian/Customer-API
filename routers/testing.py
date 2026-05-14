@@ -552,19 +552,25 @@ def get_test_template_by_key(
     data = copy.deepcopy(tmpl.template_data or {})
     if "key" not in data:
         data["key"] = tmpl.template_key
-    # Append Overall Assessment sections (template-driven).
-    # Use current user's org_id so org-specific overall assessment edits
-    # are picked up even when the main template is global (org_id=None).
-    # Deduplicate field keys to prevent a double overall_result dropdown.
-    try:
-        overall = svc.get_overall_assessment(org_id=current_user.organization_id)
-        overall_sections = (overall.template_data or {}).get("sections", [])
-        data.setdefault("sections", [])
-        data["sections"].extend(
-            _deduplicated_overall_sections(data["sections"], copy.deepcopy(overall_sections))
-        )
-    except Exception:
-        pass
+    # Direct-submission templates (failure_registry, taqc_inspection) are
+    # reporter forms — they have their own Outcome section and must NOT get
+    # the tester's Overall Assessment / Outcome & Scheduling sections appended.
+    _DIRECT_SUBMISSION_KEYS = {"failure_registry", "taqc_inspection"}
+
+    if template_key not in _DIRECT_SUBMISSION_KEYS:
+        # Append Overall Assessment sections (template-driven).
+        # Use current user's org_id so org-specific overall assessment edits
+        # are picked up even when the main template is global (org_id=None).
+        # Deduplicate field keys to prevent a double overall_result dropdown.
+        try:
+            overall = svc.get_overall_assessment(org_id=current_user.organization_id)
+            overall_sections = (overall.template_data or {}).get("sections", [])
+            data.setdefault("sections", [])
+            data["sections"].extend(
+                _deduplicated_overall_sections(data["sections"], copy.deepcopy(overall_sections))
+            )
+        except Exception:
+            pass
     return data
 
 

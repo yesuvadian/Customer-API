@@ -31,8 +31,7 @@ def test_model_cols():
     assert hasattr(req, "is_schedule_template"),  "is_schedule_template missing from TestingRequest"
     assert hasattr(req, "is_direct_submission"),   "is_direct_submission missing from TestingRequest"
     sched = TestRequestSchedule()
-    for col in ("revised_periodicity_days", "oem_reference",
-                "responsible_role_id", "reviewing_role_id"):
+    for col in ("revised_periodicity_days", "oem_reference"):
         assert hasattr(sched, col), f"{col} missing from TestRequestSchedule"
 
 
@@ -75,11 +74,9 @@ def test_templates_seeded():
     for t in templates:
         sched = db.query(TestRequestSchedule).filter_by(test_request_id=t.id).first()
         assert sched, f"No schedule for template: {t.title}"
-        assert sched.responsible_role_id, f"responsible_role_id missing: {t.title}"
-        assert sched.reviewing_role_id,   f"reviewing_role_id missing: {t.title}"
 
 
-check("15 register templates seeded with roles", test_templates_seeded)
+check("15 register templates seeded", test_templates_seeded)
 
 
 # ── 5. Template breakdown by equipment type ───────────────────────────────────

@@ -2300,7 +2300,11 @@ class TestingRequest(Base):
     # Notes
     notes = Column(Text, nullable=True)
     rejection_reason = Column(Text, nullable=True)
-
+    source_schedule_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("public.test_request_schedules.id"),
+    nullable=True,
+)
     # Audit
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -2323,45 +2327,355 @@ class TestingRequest(Base):
     source_failure = relationship("TestingRequest", foreign_keys=[source_failure_id], remote_side="TestingRequest.id")
 
 
-# ------------------------------
-# TestRequestSchedule Model
-# ------------------------------
+# ============================================================
+# TEST REQUEST SCHEDULE MODEL
+# ============================================================
+
 class TestRequestSchedule(Base):
+
     __tablename__ = "test_request_schedules"
-    __table_args__ = {"schema": "public"}
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    test_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False, unique=True)
-    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    __table_args__ = (
 
-    frequency = Column(Enum(ScheduleFrequency), nullable=False)
-    start_date = Column(DateTime(timezone=True), nullable=False)  # = first request's due_date
-    end_date = Column(DateTime(timezone=True), nullable=True)
-    next_run_date = Column(DateTime(timezone=True), nullable=False)  # first request due_date + frequency
-    last_run_date = Column(DateTime(timezone=True), nullable=True)
-    advance_days = Column(Integer, default=1, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
+        UniqueConstraint(
+            "equipment_id",
+            "test_type_id",
+            name="uq_equipment_test_schedule"
+        ),
 
-    # Test Register columns — populated only on template-derived schedules
-    revised_periodicity_days = Column(Integer, nullable=True)  # overrides frequency after ALERT result
-    oem_reference = Column(Text, nullable=True)                # OEM/IS standard clause that mandates this test
-    responsible_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
-    reviewing_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+        {"schema": "public"},
+    )
 
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
-    cts = Column(DateTime(timezone=True), server_default=func.now())
-    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # ============================================================
+    # PRIMARY
+    # ============================================================
 
-    # Relationships
-    test_request = relationship("TestingRequest", foreign_keys=[test_request_id])
-    organization = relationship("Organization", foreign_keys=[organization_id])
-    creator = relationship("User", foreign_keys=[created_by])
-    responsible_role = relationship("OrgRole", foreign_keys=[responsible_role_id])
-    reviewing_role = relationship("OrgRole", foreign_keys=[reviewing_role_id])
-    logs = relationship("TestRequestScheduleLog", back_populates="schedule", cascade="all, delete-orphan")
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
 
+    # ============================================================
+    # ORGANIZATION
+    # ============================================================
 
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.organizations.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    # ============================================================
+    # MASTER TARGET
+    # NULL FOR OPERATIONAL
+    # ============================================================
+
+    equipment_type_id = Column(
+        Integer,
+        ForeignKey(
+            "public.CategoryMaster.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    # ============================================================
+    # OPERATIONAL TARGET
+    # NULL = MASTER SCHEDULE
+    # NOT NULL = OPERATIONAL SCHEDULE
+    # ============================================================
+
+    equipment_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.equipment.id",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    # ============================================================
+    # TEST DEFINITION
+    # ============================================================
+
+    test_type_id = Column(
+        Integer,
+        ForeignKey(
+            "public.CategoryDetails.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    title = Column(
+        Text,
+        nullable=False,
+    )
+
+    description = Column(
+        Text,
+        nullable=True,
+    )
+
+    request_category = Column(
+        Enum(RequestCategory),
+        nullable=True,
+    )
+
+    priority = Column(
+        String,
+        nullable=True,
+    )
+
+    notes = Column(
+        Text,
+        nullable=True,
+    )
+
+    assigned_tester_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    # ============================================================
+    # TRANSFORMER FIELDS
+    # ============================================================
+
+    transformer_type = Column(
+        Text,
+        nullable=True,
+    )
+
+    transformer_rating = Column(
+        Text,
+        nullable=True,
+    )
+
+    # ============================================================
+    # LOCATION FIELDS
+    # ============================================================
+
+    zone = Column(Text, nullable=True)
+
+    ce_circle = Column(Text, nullable=True)
+
+    se_division = Column(Text, nullable=True)
+
+    ee_subdivision = Column(Text, nullable=True)
+
+    aee_section = Column(Text, nullable=True)
+
+    ae_je = Column(Text, nullable=True)
+
+    # ============================================================
+    # SCHEDULING
+    # ============================================================
+
+    frequency = Column(
+        Enum(ScheduleFrequency),
+        nullable=False,
+    )
+
+    start_date = Column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    end_date = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    next_run_date = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    last_run_date = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    advance_days = Column(
+        Integer,
+        default=1,
+        nullable=False,
+    )
+
+    is_active = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    # ============================================================
+    # TEST REGISTER / OEM
+    # ============================================================
+
+    revised_periodicity_days = Column(
+        Integer,
+        nullable=True,
+    )
+
+    oem_reference = Column(
+        Text,
+        nullable=True,
+    )
+
+    # ============================================================
+    # EXECUTION TRACKING
+    # ============================================================
+
+    last_success_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    last_failure_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    consecutive_failures = Column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    # ============================================================
+    # PAUSE CONTROL
+    # ============================================================
+
+    paused_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    paused_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    pause_reason = Column(
+        Text,
+        nullable=True,
+    )
+
+    # ============================================================
+    # SOFT DELETE
+    # ============================================================
+
+    is_deleted = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    deleted_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    deleted_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    # ============================================================
+    # AUDIT
+    # ============================================================
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    modified_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    cts = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    mts = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # ============================================================
+    # RELATIONSHIPS
+    # ============================================================
+
+    organization = relationship(
+        "Organization",
+        foreign_keys=[organization_id],
+    )
+
+    equipment_type = relationship(
+        "CategoryMaster",
+        foreign_keys=[equipment_type_id],
+    )
+
+    equipment = relationship(
+        "Equipment",
+        foreign_keys=[equipment_id],
+    )
+
+    test_type = relationship(
+        "CategoryDetails",
+        foreign_keys=[test_type_id],
+    )
+
+    assigned_tester = relationship(
+        "User",
+        foreign_keys=[assigned_tester_id],
+    )
+
+    creator = relationship(
+        "User",
+        foreign_keys=[created_by],
+    )
+
+   
+
+    logs = relationship(
+        "TestRequestScheduleLog",
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+    )
 # ------------------------------
 # TestRequestScheduleLog Model
 # ------------------------------

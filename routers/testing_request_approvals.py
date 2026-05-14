@@ -10,7 +10,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from database import get_db
-from models import User, TestingRequest, OrgRole, OrgUserRole, OrgRolePermission, TestingRequestStatus, TesterRoleModuleRequirement
+from models import RequestCategory, User, TestingRequest, OrgRole, OrgUserRole, OrgRolePermission, TestingRequestStatus, TesterRoleModuleRequirement
 from schemas import (
     TestingRequestOut,
     ApproverTesterSelection,
@@ -72,7 +72,9 @@ def get_pending_approvals(
         joinedload(TestingRequest.assigned_tester),
         joinedload(TestingRequest.organization),
     ).filter(
-        TestingRequest.status == TestingRequestStatus.submitted  # Using submitted for testing (pending_approval requires migration)
+        TestingRequest.status == TestingRequestStatus.submitted,
+        TestingRequest.request_category != RequestCategory.repair_lifecycle
+          # Using submitted for testing (pending_approval requires migration)
     )
 
     # Filter by organization if user belongs to one
@@ -362,7 +364,11 @@ def approve_and_assign_tester(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Testing request not found"
         )
-
+    if testing_request.request_category == RequestCategory.repair_lifecycle:
+        raise HTTPException(
+            status_code=400,
+            detail="Only test requests can enter approval workflow"
+        )
     # Validate state
     # Using submitted for testing (pending_approval requires migration)
     if testing_request.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:

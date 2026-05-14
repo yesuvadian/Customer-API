@@ -1,12 +1,17 @@
+# ============================================================
+# services/test_request_schedule_service.py
+# ============================================================
+
 from datetime import datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
-from typing import List, Optional
+from typing import Optional, List
 from uuid import UUID
 
-from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from fastapi import HTTPException
+from sqlalchemy.orm import Session, joinedload
 
 from models import (
+    Equipment,
     TestingRequest,
     TestingRequestStatus,
     TestRequestSchedule,
@@ -14,280 +19,1143 @@ from models import (
     ScheduleFrequency,
     ScheduleLogStatus,
 )
+
 from utils.common_service import UTCDateTimeMixin
 
 
-def _advance_date(current: datetime, frequency: ScheduleFrequency) -> datetime:
-    """Return the next run date based on frequency."""
+# ============================================================
+# DATE ADVANCE
+# ============================================================
+
+def _advance_date(
+    current: datetime,
+    frequency: ScheduleFrequency,
+) -> datetime:
+
     if frequency == ScheduleFrequency.daily:
         return current + timedelta(days=1)
+
     elif frequency == ScheduleFrequency.weekly:
         return current + timedelta(weeks=1)
+
     elif frequency == ScheduleFrequency.biweekly:
         return current + timedelta(weeks=2)
+
     elif frequency == ScheduleFrequency.monthly:
         return current + relativedelta(months=1)
+
     elif frequency == ScheduleFrequency.quarterly:
         return current + relativedelta(months=3)
+
     elif frequency == ScheduleFrequency.semi_annual:
         return current + relativedelta(months=6)
+
     elif frequency == ScheduleFrequency.yearly:
         return current + relativedelta(years=1)
+
     elif frequency == ScheduleFrequency.triennial:
         return current + relativedelta(years=3)
+
     return current
 
+
+# ============================================================
+# SERVICE
+# ============================================================
 
 class TestRequestScheduleService(UTCDateTimeMixin):
 
     def __init__(self, db: Session):
         self.db = db
 
-    # ── Create ───────────────────────────────────────────────────────────────
-    def create_schedule(
+    # ============================================================
+    # CREATE MASTER SCHEDULE
+    # equipment_id = NULL
+    # ============================================================
+
+    def create_master_schedule(
         self,
-        test_request_id: UUID,
+        organization_id: UUID,
+        equipment_type_id: int,
+        test_type_id: int,
+        title: str,
+        description: Optional[str],
         frequency: str,
-        end_date: Optional[datetime],
         advance_days: int,
         created_by: UUID,
-    ) -> TestRequestSchedule:
-        # Validate the test request exists
-        req = self.db.query(TestingRequest).filter(
-            TestingRequest.id == test_request_id
-        ).first()
-        if not req:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Test request not found"
-            )
+        request_category=None,
+        priority=None,
+        notes=None,
+        assigned_tester_id=None,
+        transformer_type=None,
+        transformer_rating=None,
+        zone=None,
+        ce_circle=None,
+        se_division=None,
+        ee_subdivision=None,
+        aee_section=None,
+        ae_je=None,
+        revised_periodicity_days=None,
+        oem_reference=None,
+        end_date=None,
+    ):
 
-        # Only one schedule per request
-        existing = self.db.query(TestRequestSchedule).filter(
-            TestRequestSchedule.test_request_id == test_request_id
-        ).first()
+        existing = (
+            self.db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.equipment_id.is_(None),
+
+                TestRequestSchedule.organization_id
+                    == organization_id,
+
+                TestRequestSchedule.equipment_type_id
+                    == equipment_type_id,
+
+                TestRequestSchedule.test_type_id
+                    == test_type_id,
+
+                TestRequestSchedule.is_deleted == False,
+            )
+            .first()
+        )
+
         if existing:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A schedule already exists for this test request. Use update to modify it."
+                status_code=400,
+                detail=(
+                    "Master schedule already exists "
+                    "for this test type."
+                ),
             )
 
         freq_enum = ScheduleFrequency(frequency)
 
-        # start_date = the original request's due_date (or today if not set)
-        start_date = req.due_date or self._utc_now()
-
-        # next_run_date = start_date advanced by one frequency period
-        next_run_date = _advance_date(start_date, freq_enum)
+        now = self._utc_now()
 
         schedule = TestRequestSchedule(
-            test_request_id=test_request_id,
-            organization_id=req.organization_id,
+
+            # MASTER
+            equipment_id=None,
+
+            organization_id=organization_id,
+
+            equipment_type_id=equipment_type_id,
+
+            test_type_id=test_type_id,
+
+            title=title,
+
+            description=description,
+
+            request_category=request_category,
+
+            priority=priority,
+
+            notes=notes,
+
+            assigned_tester_id=assigned_tester_id,
+
+            transformer_type=transformer_type,
+
+            transformer_rating=transformer_rating,
+
+            zone=zone,
+
+            ce_circle=ce_circle,
+
+            se_division=se_division,
+
+            ee_subdivision=ee_subdivision,
+
+            aee_section=aee_section,
+
+            ae_je=ae_je,
+
             frequency=freq_enum,
-            start_date=start_date,
+
+            start_date=now,
+
+            next_run_date=_advance_date(
+                now,
+                freq_enum,
+            ),
+
             end_date=end_date,
-            next_run_date=next_run_date,
+
             advance_days=advance_days,
+
+            revised_periodicity_days=(
+                revised_periodicity_days
+            ),
+
+            oem_reference=oem_reference,
+
             is_active=True,
+
             created_by=created_by,
         )
+
         self.db.add(schedule)
+
         self.db.commit()
+
         self.db.refresh(schedule)
+
         return schedule
 
-    # ── Get ──────────────────────────────────────────────────────────────────
-    def get_schedule(self, test_request_id: UUID) -> TestRequestSchedule:
-        schedule = self.db.query(TestRequestSchedule).filter(
-            TestRequestSchedule.test_request_id == test_request_id
-        ).first()
-        if not schedule:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No schedule found for this test request"
+    # ============================================================
+    # ONBOARD EQUIPMENT SCHEDULES
+    # ============================================================
+
+    @staticmethod
+    def instantiate_equipment_schedules(
+        db: Session,
+        equipment,
+        user_id: UUID,
+    ):
+
+        templates = (
+            db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.is_active.is_(True),
+
+                TestRequestSchedule.is_deleted == False,
+
+                # MASTER ONLY
+                TestRequestSchedule.equipment_id.is_(None),
+
+                TestRequestSchedule.equipment_type_id
+                    == equipment.equipment_type_id,
             )
-        return schedule
-
-    # ── Update ───────────────────────────────────────────────────────────────
-    def update_schedule(
-        self,
-        test_request_id: UUID,
-        frequency: Optional[str],
-        end_date: Optional[datetime],
-        advance_days: Optional[int],
-        is_active: Optional[bool],
-        modified_by: UUID,
-    ) -> TestRequestSchedule:
-        schedule = self.get_schedule(test_request_id)
-
-        if frequency is not None:
-            schedule.frequency = ScheduleFrequency(frequency)
-            # Recalculate next_run_date from start_date with new frequency
-            schedule.next_run_date = _advance_date(schedule.start_date, schedule.frequency)
-
-        if end_date is not None:
-            schedule.end_date = end_date
-
-        if advance_days is not None:
-            schedule.advance_days = advance_days
-
-        if is_active is not None:
-            schedule.is_active = is_active
-
-        schedule.modified_by = modified_by
-        schedule.mts = self._utc_now()
-
-        self.db.commit()
-        self.db.refresh(schedule)
-        return schedule
-
-    # ── Delete ───────────────────────────────────────────────────────────────
-    def delete_schedule(self, test_request_id: UUID) -> bool:
-        schedule = self.get_schedule(test_request_id)
-        self.db.delete(schedule)
-        self.db.commit()
-        return True
-
-    # ── Logs ─────────────────────────────────────────────────────────────────
-    def get_logs(
-        self,
-        test_request_id: UUID,
-        skip: int = 0,
-        limit: int = 50,
-    ) -> List[TestRequestScheduleLog]:
-        schedule = self.get_schedule(test_request_id)
-        return (
-            self.db.query(TestRequestScheduleLog)
-            .filter(TestRequestScheduleLog.schedule_id == schedule.id)
-            .order_by(TestRequestScheduleLog.run_date.desc())
-            .offset(skip)
-            .limit(limit)
             .all()
         )
 
-    # ── Shared ticket-creation logic ─────────────────────────────────────────
+        now = datetime.now(timezone.utc)
+        new_schedules = []
+
+        for template in templates:
+
+            existing = (
+                db.query(TestRequestSchedule)
+                .filter(
+                    TestRequestSchedule.equipment_id
+                        == equipment.id,
+
+                    TestRequestSchedule.test_type_id
+                        == template.test_type_id,
+
+                    TestRequestSchedule.is_deleted == False,
+                )
+                .first()
+            )
+
+            if existing:
+                continue
+
+            operational_schedule = TestRequestSchedule(
+
+                # OPERATIONAL
+                equipment_id=equipment.id,
+
+                organization_id=equipment.organization_id,
+
+                equipment_type_id=(
+                    template.equipment_type_id
+                ),
+
+                test_type_id=(
+                    template.test_type_id
+                ),
+
+                title=template.title,
+
+                description=template.description,
+
+                request_category=(
+                    template.request_category
+                ),
+
+                priority=template.priority,
+
+                notes=template.notes,
+
+                assigned_tester_id=(
+                    template.assigned_tester_id
+                ),
+
+                transformer_type=(
+                    template.transformer_type
+                ),
+
+                transformer_rating=(
+                    template.transformer_rating
+                ),
+
+                zone=template.zone,
+
+                ce_circle=template.ce_circle,
+
+                se_division=template.se_division,
+
+                ee_subdivision=(
+                    template.ee_subdivision
+                ),
+
+                aee_section=template.aee_section,
+
+                ae_je=template.ae_je,
+
+                frequency=template.frequency,
+
+                start_date=now,
+
+                next_run_date=_advance_date(now, template.frequency),
+
+                end_date=template.end_date,
+
+                advance_days=(
+                    template.advance_days
+                ),
+
+                revised_periodicity_days=(
+                    template.revised_periodicity_days
+                ),
+
+                oem_reference=(
+                    template.oem_reference
+                ),
+
+                is_active=True,
+
+                created_by=user_id,
+            )
+
+            db.add(operational_schedule)
+            new_schedules.append(operational_schedule)
+
+        db.commit()
+
+        # Apply same trigger check as daily scheduler — create ticket now if due
+        for sched in new_schedules:
+            db.refresh(sched)
+            try:
+                TestRequestScheduleService.create_one_ticket(db, sched, now)
+            except Exception as e:
+                print(f"[WARN] create_one_ticket on onboard failed for schedule {sched.id}: {e}")
+
+
+    # ============================================================
+    # CREATE ONE TICKET
+    # ============================================================
+
     @staticmethod
     def create_one_ticket(
         db: Session,
-        schedule: "TestRequestSchedule",
-        template: "TestingRequest",
+        schedule: TestRequestSchedule,
         now: datetime,
     ) -> bool:
-        """
-        Clone a schedule template into a real submitted TestingRequest and advance
-        next_run_date.  Returns True on success, False on failure.
 
-        Called by both run_daily_scheduler() and workflow_dispatch_service when the
-        start date is already within advance_days (immediate first-ticket creation).
-        """
-        from services.testing_request_service import TestingRequestService
+        from services.testing_request_service import (
+            TestingRequestService
+        )
 
         try:
-            svc = TestingRequestService(db)
-            new_data = {
-                "title": template.title,
-                "description": template.description,
-                "transformer_type": template.transformer_type,
-                "transformer_rating": template.transformer_rating,
-                "manufacturer": template.manufacturer,
-                "serial_number": template.serial_number,
-                "equipment_type_id": template.equipment_type_id,
-                "test_type_id": template.test_type_id,
-                "organization_id": template.organization_id,
-                "department_id": template.department_id,
-                "zone": template.zone,
-                "ce_circle": template.ce_circle,
-                "se_division": template.se_division,
-                "ee_subdivision": template.ee_subdivision,
-                "aee_section": template.aee_section,
-                "ae_je": template.ae_je,
-                "assigned_tester_id": template.assigned_tester_id,
-                "priority": template.priority,
-                "notes": template.notes,
-                "requested_date": now,
-                "due_date": schedule.next_run_date,
-            }
-            new_request = svc.create_request(new_data, originator_id=template.originator_id)
 
-            # Mark as submitted (same as manual flow)
-            new_request.status = TestingRequestStatus.submitted
+            schedule = (
+                db.query(TestRequestSchedule)
+                .filter(
+                    TestRequestSchedule.id
+                        == schedule.id
+                )
+                .with_for_update()
+                .first()
+            )
+
+            if not schedule:
+                return False
+
+            if not schedule.is_active:
+                return False
+
+            from models import Equipment
+            equipment = (
+                db.query(Equipment)
+                .filter(Equipment.id == schedule.equipment_id)
+                .first()
+            )
+
+            if not equipment:
+                raise Exception(
+                    "Equipment not found."
+                )
+
+            trigger_date = (
+                schedule.next_run_date
+                - timedelta(
+                    days=schedule.advance_days
+                )
+            )
+
+            if now.date() < trigger_date.date():
+                return False
+
+            existing_generated = (
+                db.query(TestingRequest)
+                .filter(
+                    TestingRequest.source_schedule_id
+                        == schedule.id,
+
+                    TestingRequest.due_date
+                        == schedule.next_run_date,
+                )
+                .first()
+            )
+
+            if existing_generated:
+                return True
+
+            svc = TestingRequestService(db)
+
+            new_data = {
+
+                "title": schedule.title,
+
+                "description": (
+                    schedule.description
+                ),
+
+                "request_category": (
+                    schedule.request_category
+                ),
+
+                "test_type_id": (
+                    schedule.test_type_id
+                ),
+
+                "priority": (
+                    schedule.priority
+                ),
+
+                "notes": schedule.notes,
+
+                "assigned_tester_id": (
+                    schedule.assigned_tester_id
+                ),
+
+                "equipment_id": equipment.id,
+
+                "equipment_type_id": (
+                    equipment.equipment_type_id
+                ),
+
+                "manufacturer": (
+                    equipment.manufacturer
+                ),
+
+                "serial_number": (
+                    equipment.factory_serial_number
+                ),
+
+                "transformer_type": (
+                    schedule.transformer_type
+                ),
+
+                "transformer_rating": (
+                    schedule.transformer_rating
+                ),
+
+                "organization_id": (
+                    equipment.organization_id
+                ),
+
+                "department_id": (
+                    equipment.department_id
+                ),
+
+                "zone": schedule.zone,
+
+                "ce_circle": (
+                    schedule.ce_circle
+                ),
+
+                "se_division": (
+                    schedule.se_division
+                ),
+
+                "ee_subdivision": (
+                    schedule.ee_subdivision
+                ),
+
+                "aee_section": (
+                    schedule.aee_section
+                ),
+
+                "ae_je": schedule.ae_je,
+
+                "requested_date": now,
+
+                "due_date": (
+                    schedule.next_run_date
+                ),
+
+                "is_schedule_template": False,
+
+                "source_schedule_id": (
+                    schedule.id
+                ),
+            }
+
+            new_request = svc.create_request(
+                new_data,
+                originator_id=(
+                    schedule.created_by
+                ),
+            )
+
+            new_request.status = (
+                TestingRequestStatus.submitted
+            )
+
             db.flush()
 
             log_entry = TestRequestScheduleLog(
                 schedule_id=schedule.id,
                 run_date=now,
                 status=ScheduleLogStatus.success,
-                generated_request_id=new_request.id,
+                generated_request_id=(
+                    new_request.id
+                ),
             )
+
             db.add(log_entry)
 
-            # Advance next_run_date
-            schedule.next_run_date = _advance_date(schedule.next_run_date, schedule.frequency)
+            schedule.next_run_date = (
+                _advance_date(
+                    schedule.next_run_date,
+                    schedule.frequency,
+                )
+            )
+
             schedule.last_run_date = now
 
-            # Deactivate if past end_date
-            if schedule.end_date and schedule.next_run_date > schedule.end_date:
-                schedule.is_active = False
+            schedule.last_success_at = now
+
+            schedule.consecutive_failures = 0
 
             db.commit()
+
             return True
 
         except Exception as e:
+
             db.rollback()
+
             log_entry = TestRequestScheduleLog(
                 schedule_id=schedule.id,
                 run_date=now,
                 status=ScheduleLogStatus.failed,
                 error_message=str(e),
             )
+
             db.add(log_entry)
+
+            schedule.last_failure_at = now
+
+            schedule.consecutive_failures += 1
+
+            if (
+                schedule.consecutive_failures
+                >= 5
+            ):
+                schedule.is_active = False
+
             db.commit()
+
             return False
 
-    # ── Scheduler job (called daily by APScheduler) ───────────────────────────
+    # ============================================================
+    # DAILY SCHEDULER
+    # ============================================================
+
     @staticmethod
-    def run_daily_scheduler(db: Session) -> dict:
-        """
-        Called once daily. For every active schedule where today >= next_run_date - advance_days,
-        clone the template test request and advance next_run_date.
-        """
+    def run_daily_scheduler(
+        db: Session,
+    ) -> dict:
+
         try:
-            from config import SCHEDULE_ADVANCE_DAYS as _adv
+            from config import (
+                SCHEDULE_ADVANCE_DAYS as _adv
+            )
         except Exception:
             _adv = 15
 
         now = datetime.now(timezone.utc)
+
         created_count = 0
         failed_count = 0
 
-        # Fetch schedules whose next_run_date falls within the maximum advance window.
-        # The per-schedule trigger check below refines this to the actual advance_days value.
         due_schedules = (
             db.query(TestRequestSchedule)
+            .options(
+                joinedload(
+                    TestRequestSchedule.equipment
+                )
+            )
             .filter(
                 TestRequestSchedule.is_active == True,
-                TestRequestSchedule.next_run_date <= now + timedelta(days=_adv + 1),
+
+                TestRequestSchedule.is_deleted == False,
+
+                # OPERATIONAL ONLY
+                TestRequestSchedule.equipment_id
+                    .isnot(None),
+
+                TestRequestSchedule.next_run_date
+                    <= now + timedelta(
+                        days=_adv + 1
+                    ),
             )
             .all()
         )
 
         for schedule in due_schedules:
-            # Check if today >= next_run_date - advance_days (per-schedule granularity)
-            trigger_date = schedule.next_run_date - timedelta(days=schedule.advance_days)
-            if now.date() < trigger_date.date():
-                continue
 
-            # Deactivate expired schedules
-            if schedule.end_date and now > schedule.end_date:
-                schedule.is_active = False
-                db.commit()
-                continue
+            success = (
+                TestRequestScheduleService
+                .create_one_ticket(
+                    db=db,
+                    schedule=schedule,
+                    now=now,
+                )
+            )
 
-            template: TestingRequest = schedule.test_request
-            success = TestRequestScheduleService.create_one_ticket(db, schedule, template, now)
             if success:
                 created_count += 1
             else:
                 failed_count += 1
 
-        return {"created": created_count, "failed": failed_count}
+        return {
+            "created": created_count,
+            "failed": failed_count,
+        }
+    
+
+    # ============================================================
+    # MASTER SCHEDULES
+    # equipment_id = NULL
+    # ============================================================
+
+    def create_master_schedule(
+        self,
+        data: dict,
+        user_id: UUID,
+    ):
+
+        existing = (
+            self.db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.equipment_id.is_(None),
+
+                TestRequestSchedule.organization_id
+                    == data["organization_id"],
+
+                TestRequestSchedule.equipment_type_id
+                    == data["equipment_type_id"],
+
+                TestRequestSchedule.test_type_id
+                    == data["test_type_id"],
+
+                TestRequestSchedule.is_deleted == False,
+            )
+            .first()
+        )
+
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Master schedule already exists."
+                ),
+            )
+
+        schedule = TestRequestSchedule(
+
+            # MASTER
+            equipment_id=None,
+
+            organization_id=(
+                data["organization_id"]
+            ),
+
+            equipment_type_id=(
+                data["equipment_type_id"]
+            ),
+
+            test_type_id=(
+                data["test_type_id"]
+            ),
+
+            title=data["title"],
+
+            description=data.get(
+                "description"
+            ),
+
+            request_category=data.get(
+                "request_category"
+            ),
+
+            priority=data.get(
+                "priority"
+            ),
+
+            notes=data.get(
+                "notes"
+            ),
+
+            assigned_tester_id=data.get(
+                "assigned_tester_id"
+            ),
+
+            transformer_type=data.get(
+                "transformer_type"
+            ),
+
+            transformer_rating=data.get(
+                "transformer_rating"
+            ),
+
+            zone=data.get("zone"),
+
+            ce_circle=data.get(
+                "ce_circle"
+            ),
+
+            se_division=data.get(
+                "se_division"
+            ),
+
+            ee_subdivision=data.get(
+                "ee_subdivision"
+            ),
+
+            aee_section=data.get(
+                "aee_section"
+            ),
+
+            ae_je=data.get("ae_je"),
+
+            frequency=data["frequency"],
+
+            start_date=datetime.now(timezone.utc),
+
+            next_run_date=_advance_date(
+                datetime.now(timezone.utc),
+                ScheduleFrequency(data["frequency"]),
+            ),
+
+            end_date=data.get(
+                "end_date"
+            ),
+
+            advance_days=data.get(
+                "advance_days",
+                1,
+            ),
+
+            revised_periodicity_days=(
+                data.get(
+                    "revised_periodicity_days"
+                )
+            ),
+
+            oem_reference=data.get(
+                "oem_reference"
+            ),
+
+            is_active=True,
+
+            created_by=user_id,
+        )
+
+        self.db.add(schedule)
+
+        self.db.commit()
+
+        self.db.refresh(schedule)
+
+        return schedule
+
+    # ============================================================
+    # LIST MASTER SCHEDULES
+    # ============================================================
+
+    def list_master_schedules(
+        self,
+        organization_id: Optional[UUID] = None,
+        equipment_type_id: Optional[int] = None,
+    ):
+
+        query = (
+            self.db.query(TestRequestSchedule)
+            .options(
+                joinedload(
+                    TestRequestSchedule
+                    .equipment_type
+                ),
+                joinedload(
+                    TestRequestSchedule
+                    .test_type
+                ),
+            )
+            .filter(
+                TestRequestSchedule.equipment_id
+                    .is_(None),
+
+                TestRequestSchedule.is_deleted
+                    == False,
+            )
+        )
+
+        if organization_id:
+            query = query.filter(
+                TestRequestSchedule
+                .organization_id
+                    == organization_id
+            )
+
+        if equipment_type_id:
+            query = query.filter(
+                TestRequestSchedule
+                .equipment_type_id
+                    == equipment_type_id
+            )
+
+        return query.all()
+
+    # ============================================================
+    # GET MASTER SCHEDULE
+    # ============================================================
+
+    def get_master_schedule(
+        self,
+        schedule_id: UUID,
+    ):
+
+        schedule = (
+            self.db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.id
+                    == schedule_id,
+
+                TestRequestSchedule.equipment_id
+                    .is_(None),
+
+                TestRequestSchedule.is_deleted
+                    == False,
+            )
+            .first()
+        )
+
+        if not schedule:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Master schedule not found."
+                ),
+            )
+
+        return schedule
+
+    # ============================================================
+    # UPDATE MASTER SCHEDULE
+    # ============================================================
+
+    def update_master_schedule(
+        self,
+        schedule_id: UUID,
+        data: dict,
+        user_id: UUID,
+    ):
+
+        schedule = self.get_master_schedule(
+            schedule_id
+        )
+
+        for key, value in data.items():
+
+            if hasattr(schedule, key):
+                setattr(schedule, key, value)
+
+        schedule.modified_by = user_id
+
+        schedule.mts = self._utc_now()
+
+        self.db.commit()
+
+        self.db.refresh(schedule)
+
+        return schedule
+
+    # ============================================================
+    # DELETE MASTER SCHEDULE
+    # ============================================================
+
+    def delete_master_schedule(
+        self,
+        schedule_id: UUID,
+        user_id: UUID,
+    ):
+
+        schedule = self.get_master_schedule(
+            schedule_id
+        )
+
+        schedule.is_deleted = True
+
+        schedule.deleted_at = self._utc_now()
+
+        schedule.deleted_by = user_id
+
+        schedule.modified_by = user_id
+
+        schedule.mts = self._utc_now()
+
+        schedule.is_active = False
+
+        self.db.commit()
+
+        return {
+            "message": (
+                "Master schedule deleted."
+            )
+        }
+
+    # ============================================================
+    # OPERATIONAL SCHEDULES
+    # equipment_id != NULL
+    # ============================================================
+
+    def list_operational_schedules(
+        self,
+        equipment_id: UUID,
+    ):
+
+        return (
+            self.db.query(TestRequestSchedule)
+            .options(
+                joinedload(
+                    TestRequestSchedule
+                    .test_type
+                ),
+            )
+            .filter(
+                TestRequestSchedule.equipment_id
+                    == equipment_id,
+
+                TestRequestSchedule.is_deleted
+                    == False,
+            )
+            .all()
+        )
+
+    # ============================================================
+    # GET OPERATIONAL SCHEDULE
+    # ============================================================
+
+    def get_operational_schedule(
+        self,
+        schedule_id: UUID,
+        equipment_id: UUID,
+    ):
+
+        schedule = (
+            self.db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.id
+                    == schedule_id,
+
+                TestRequestSchedule.equipment_id
+                    == equipment_id,
+
+                TestRequestSchedule.is_deleted
+                    == False,
+            )
+            .first()
+        )
+
+        if not schedule:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Operational schedule "
+                    "not found."
+                ),
+            )
+
+        return schedule
+
+    # ============================================================
+    # UPDATE OPERATIONAL SCHEDULE
+    # ============================================================
+
+    def update_operational_schedule(
+        self,
+        schedule_id: UUID,
+        equipment_id: UUID,
+        data: dict,
+        user_id: UUID,
+    ):
+
+        schedule = (
+            self.get_operational_schedule(
+                schedule_id,
+                equipment_id,
+            )
+        )
+
+        protected_fields = [
+
+            "id",
+
+            "equipment_id",
+
+            "organization_id",
+
+            "equipment_type_id",
+
+            "test_type_id",
+
+            "created_by",
+
+            "cts",
+        ]
+
+        for key, value in data.items():
+
+            if key in protected_fields:
+                continue
+
+            if hasattr(schedule, key):
+                setattr(schedule, key, value)
+
+        schedule.modified_by = user_id
+
+        schedule.mts = self._utc_now()
+
+        self.db.commit()
+
+        self.db.refresh(schedule)
+
+        return schedule
+
+    # ============================================================
+    # PAUSE OPERATIONAL SCHEDULE
+    # ============================================================
+
+    def pause_operational_schedule(
+        self,
+        schedule_id: UUID,
+        equipment_id: UUID,
+        user_id: UUID,
+        reason: Optional[str] = None,
+    ):
+
+        schedule = (
+            self.get_operational_schedule(
+                schedule_id,
+                equipment_id,
+            )
+        )
+
+        schedule.is_active = False
+
+        schedule.paused_at = self._utc_now()
+
+        schedule.paused_by = user_id
+
+        schedule.pause_reason = reason
+
+        schedule.modified_by = user_id
+
+        self.db.commit()
+
+        return {
+            "message": (
+                "Operational schedule paused."
+            )
+        }
+
+    # ============================================================
+    # RESUME OPERATIONAL SCHEDULE
+    # ============================================================
+
+    def resume_operational_schedule(
+        self,
+        schedule_id: UUID,
+        equipment_id: UUID,
+        user_id: UUID,
+    ):
+
+        schedule = (
+            self.get_operational_schedule(
+                schedule_id,
+                equipment_id,
+            )
+        )
+
+        schedule.is_active = True
+
+        schedule.paused_at = None
+
+        schedule.paused_by = None
+
+        schedule.pause_reason = None
+
+        schedule.consecutive_failures = 0
+
+        schedule.modified_by = user_id
+
+        self.db.commit()
+
+        return {
+            "message": (
+                "Operational schedule resumed."
+            )
+        }
+
+    # ============================================================
+    # DELETE OPERATIONAL SCHEDULE
+    # ============================================================
+
+    def delete_operational_schedule(
+        self,
+        schedule_id: UUID,
+        equipment_id: UUID,
+        user_id: UUID,
+    ):
+
+        schedule = (
+            self.get_operational_schedule(
+                schedule_id,
+                equipment_id,
+            )
+        )
+
+        schedule.is_deleted = True
+
+        schedule.deleted_at = self._utc_now()
+
+        schedule.deleted_by = user_id
+
+        schedule.modified_by = user_id
+
+        schedule.is_active = False
+
+        self.db.commit()
+
+        return {
+            "message": (
+                "Operational schedule deleted."
+            )
+        }

@@ -1,0 +1,7 @@
+{
+  "Observation Reporting":  "audit_stage_observation_reporting",
+  "Observation Assignment": "audit_stage_observation_assignment",
+  "Compliance Submission":  "audit_stage_compliance_submission",
+  "Compliance Review":      "audit_stage_compliance_review",
+  "Observation Closure":    "audit_stage_observation_closure"
+}
