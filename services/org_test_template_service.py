@@ -425,6 +425,8 @@ class OrgTestTemplateService:
                 .first()
             )
             if existing:
+                existing.template_data = template_data
+                existing.template_key = template_key
                 continue
 
             self.db.add(OrgTestTemplate(

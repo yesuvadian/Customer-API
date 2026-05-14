@@ -134,8 +134,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "sld_bay",          "label": "SLD of Bay",              "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -210,8 +210,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -258,8 +258,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -304,8 +304,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -349,8 +349,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -394,8 +394,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -441,8 +441,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -487,8 +487,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -534,8 +534,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -580,8 +580,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -624,8 +624,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -668,8 +668,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -710,8 +710,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -756,8 +756,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -799,8 +799,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -843,8 +843,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -890,8 +890,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -937,8 +937,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -985,8 +985,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
