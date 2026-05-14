@@ -72,10 +72,6 @@ class EquipmentScheduleInstantiationService:
 
                 oem_reference=template.oem_reference,
 
-                responsible_role_id=template.responsible_role_id,
-
-                reviewing_role_id=template.reviewing_role_id,
-
                 is_active=True,
 
                 created_by=user_id,

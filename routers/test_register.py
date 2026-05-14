@@ -62,8 +62,6 @@ class TemplateCreateBody(BaseModel):
     notes: Optional[str] = None
     advance_days: int = 15
 
-    responsible_role_id: Optional[UUID] = None
-    reviewing_role_id: Optional[UUID] = None
     revised_periodicity_days: Optional[int] = None
     oem_reference: Optional[str] = None
 
@@ -78,8 +76,6 @@ class TemplateUpdateBody(BaseModel):
 
     frequency: Optional[str] = None
     advance_days: Optional[int] = None
-    responsible_role_id: Optional[UUID] = None
-    reviewing_role_id: Optional[UUID] = None
     revised_periodicity_days: Optional[int] = None
     oem_reference: Optional[str] = None
     is_active: Optional[bool] = None

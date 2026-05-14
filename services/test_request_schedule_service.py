@@ -97,8 +97,6 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         ae_je=None,
         revised_periodicity_days=None,
         oem_reference=None,
-        responsible_role_id=None,
-        reviewing_role_id=None,
         end_date=None,
     ):
 
@@ -191,14 +189,6 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             ),
 
             oem_reference=oem_reference,
-
-            responsible_role_id=(
-                responsible_role_id
-            ),
-
-            reviewing_role_id=(
-                reviewing_role_id
-            ),
 
             is_active=True,
 
@@ -337,14 +327,6 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
                 oem_reference=(
                     template.oem_reference
-                ),
-
-                responsible_role_id=(
-                    template.responsible_role_id
-                ),
-
-                reviewing_role_id=(
-                    template.reviewing_role_id
                 ),
 
                 is_active=True,
@@ -783,14 +765,6 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
             oem_reference=data.get(
                 "oem_reference"
-            ),
-
-            responsible_role_id=data.get(
-                "responsible_role_id"
-            ),
-
-            reviewing_role_id=data.get(
-                "reviewing_role_id"
             ),
 
             is_active=True,

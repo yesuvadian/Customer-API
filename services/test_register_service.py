@@ -26,8 +26,6 @@ Template data shape
     start_date          ← set to now() during template creation (placeholder)
     next_run_date       ← same (overwritten on commission)
     advance_days        ← how many days before due_date to trigger a live clone
-    responsible_role_id ← OrgRole that performs the test
-    reviewing_role_id   ← OrgRole that approves the result
     revised_periodicity_days ← override interval when evaluation = ALERT
     oem_reference       ← IS / OEM standard clause
 """
@@ -138,10 +136,6 @@ class TestRegisterService:
                     "end_date": schedule.end_date.isoformat() if schedule.end_date else None,
                     "revised_periodicity_days": schedule.revised_periodicity_days,
                     "oem_reference": schedule.oem_reference,
-                    "responsible_role_id": str(schedule.responsible_role_id) if schedule.responsible_role_id else None,
-                    "responsible_role_name": getattr(schedule.responsible_role, "name", None),
-                    "reviewing_role_id": str(schedule.reviewing_role_id) if schedule.reviewing_role_id else None,
-                    "reviewing_role_name": getattr(schedule.reviewing_role, "name", None),
                     "is_active": schedule.is_active,
                 }
                 if schedule else None
@@ -233,7 +227,6 @@ class TestRegisterService:
         Required keys: equipment_type_id, organization_id, frequency
         Optional keys: title (auto-generated from test_type_id if omitted),
                        test_type_id, template_key, priority, notes, advance_days,
-                       responsible_role_id, reviewing_role_id,
                        revised_periodicity_days, oem_reference
         """
         self._require_write_access(creator)
@@ -299,8 +292,6 @@ class TestRegisterService:
             next_run_date=now + self._freq_delta(freq),
             advance_days=data.get("advance_days", 15),
             is_active=True,
-            responsible_role_id=data.get("responsible_role_id"),
-            reviewing_role_id=data.get("reviewing_role_id"),
             revised_periodicity_days=data.get("revised_periodicity_days"),
             oem_reference=data.get("oem_reference"),
             created_by=creator.id,
@@ -328,8 +319,7 @@ class TestRegisterService:
 
         # Schedule-level fields
         if sched and any(k in data for k in (
-            "frequency", "advance_days", "responsible_role_id", "reviewing_role_id",
-            "revised_periodicity_days", "oem_reference", "is_active",
+            "frequency", "advance_days", "revised_periodicity_days", "oem_reference", "is_active",
         )):
             if "frequency" in data:
                 try:
@@ -339,8 +329,7 @@ class TestRegisterService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Invalid frequency '{data['frequency']}'.",
                     )
-            for field in ("advance_days", "responsible_role_id", "reviewing_role_id",
-                          "revised_periodicity_days", "oem_reference", "is_active"):
+            for field in ("advance_days", "revised_periodicity_days", "oem_reference", "is_active"):
                 if field in data:
                     setattr(sched, field, data[field])
             sched.modified_by = editor.id
