@@ -188,11 +188,23 @@ class RepairStageDefinition(Base):
 
     is_mandatory = Column(Boolean, default=True)
 
+    workflow_definition_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflow_definitions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     created_at = Column(DateTime, server_default=func.now())
 
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # relationships
+    workflow_definition = relationship(
+        "RepairWorkflowDefinition",
+        foreign_keys=[workflow_definition_id],
+    )
+
     stage_instances = relationship(
         "RepairStageInstance",
         back_populates="stage",

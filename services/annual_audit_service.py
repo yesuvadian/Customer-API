@@ -20,6 +20,7 @@ from models import (
     RepairStageDefinition,
     RepairStageInstance,
     RepairWorkflow,
+    RepairWorkflowDefinition,
     TAQCAnnualInspection,
     TAQCObservation,
     User,
@@ -424,14 +425,18 @@ class AnnualAuditService:
         observation: TAQCObservation,
         user: User,
     ) -> RepairWorkflow:
-        stages = (
-            self.db.query(RepairStageDefinition)
-            .filter(RepairStageDefinition.code.in_(ANNUAL_AUDIT_STAGE_CODES))
-            .order_by(RepairStageDefinition.sequence)
-            .all()
+        wf_def = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter_by(workflow_code=ANNUAL_AUDIT_WORKFLOW_CODE, is_active=True)
+            .first()
         )
-        if len(stages) != len(ANNUAL_AUDIT_STAGE_CODES):
-            raise ValueError("Annual Audit workflow stages are not configured. Run seed_annual_audit_stages(db) first.")
+        if not wf_def:
+            raise ValueError(
+                "Annual Audit workflow definition not found. Run seed.py first."
+            )
+        stages = self.workflow._get_stages_for_definition(wf_def.id)
+        if not stages:
+            raise ValueError("Annual Audit workflow stages are not configured. Run seed.py first.")
 
         first_stage = stages[0]
         workflow = RepairWorkflow(
