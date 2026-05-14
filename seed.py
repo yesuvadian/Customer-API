@@ -18,7 +18,7 @@ from models import (
     ReportDefinition,
     # Repair Workflow
     RepairStageDefinition, RepairStageTemplate, RepairStageRole,
-    RepairStageTransition, OrgTestTemplate,
+    RepairStageTransition, RepairWorkflowDefinition, OrgTestTemplate,
     # Notification config tables
     NotificationEventCatalogue, NotificationRoutingRule, NotificationScheduleRule,
     # Schedule
@@ -7000,6 +7000,28 @@ def run_seed():
         print(f"[OK] Annual Audit templates: {n3} seeded.")
         from seed_annual_audit import seed_annual_audit_stages
         seed_annual_audit_stages(session)
+        # Ensure the ANNUAL_AUDIT workflow definition exists and all its stage
+        # rows carry the correct workflow_definition_id.
+        _aa_def = session.query(RepairWorkflowDefinition).filter_by(workflow_code="ANNUAL_AUDIT").first()
+        if not _aa_def:
+            _aa_def = RepairWorkflowDefinition(
+                id=uuid.uuid4(),
+                workflow_code="ANNUAL_AUDIT",
+                name="Annual Audit Workflow",
+                is_active=True,
+            )
+            session.add(_aa_def)
+            session.flush()
+        from seed_annual_audit import STAGES as _AA_STAGES
+        _aa_codes = [s["code"] for s in _AA_STAGES]
+        _aa_stages = session.query(RepairStageDefinition).filter(
+            RepairStageDefinition.code.in_(_aa_codes)
+        ).all()
+        for _s in _aa_stages:
+            if _s.workflow_definition_id != _aa_def.id:
+                _s.workflow_definition_id = _aa_def.id
+        session.flush()
+        print(f"[OK] RepairWorkflowDefinition ANNUAL_AUDIT: {_aa_def.id} ({len(_aa_stages)} stages linked)")
         n4 = seed_cumulative_template(session)
         print(f"[OK] Cumulative / Operations Tracking template: {n4} seeded.")
         n5 = seed_calibration_template(session)
@@ -7550,6 +7572,19 @@ def seed_workflow(session):
     }
     CODE_TO_NAME = {v: k for k, v in NAME_TO_CODE.items()}
 
+    # ── 0. Workflow definition ────────────────────────────────────────────────
+    wf_def = session.query(RepairWorkflowDefinition).filter_by(workflow_code="BREAKDOWN").first()
+    if not wf_def:
+        wf_def = RepairWorkflowDefinition(
+            id=uuid.uuid4(),
+            workflow_code="BREAKDOWN",
+            name="Transformer Repair Workflow",
+            is_active=True,
+        )
+        session.add(wf_def)
+        session.flush()
+    print(f"[OK] RepairWorkflowDefinition BREAKDOWN: {wf_def.id}")
+
     # ── 1. Templates ──────────────────────────────────────────────────────────
     template_map = {}   # key → UUID
     for key, t in templates_raw.items():
@@ -7576,6 +7611,8 @@ def seed_workflow(session):
         code = NAME_TO_CODE.get(name, name.upper().replace(" ", "_"))
         existing = session.query(RepairStageDefinition).filter_by(code=code).first()
         if existing:
+            if existing.workflow_definition_id != wf_def.id:
+                existing.workflow_definition_id = wf_def.id
             stage_map[name] = existing.id
             code_map[code]  = existing.id
             continue
@@ -7587,6 +7624,7 @@ def seed_workflow(session):
             weight=s.get("weight", 10),
             is_active=True,
             is_mandatory=True,
+            workflow_definition_id=wf_def.id,
         )
         session.add(stage)
         session.flush()

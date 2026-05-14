@@ -39,11 +39,13 @@ from models import (
     RepairStageTemplate,
     RepairStageTransition,
     RepairWorkflow,
+    RepairWorkflowDefinition,
     OrgTestTemplate,
     User,
 )
 
 UPLOAD_DIR = os.path.join("uploads", "repair")
+REPAIR_WORKFLOW_CODE = "BREAKDOWN"
 
 
 class RepairWorkflowService:
@@ -57,6 +59,33 @@ class RepairWorkflowService:
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc)
+
+    def _get_workflow_definition(self, workflow_code: str) -> RepairWorkflowDefinition:
+        defn = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter(
+                RepairWorkflowDefinition.workflow_code == workflow_code,
+                RepairWorkflowDefinition.is_active.is_(True),
+            )
+            .first()
+        )
+        if not defn:
+            raise ValueError(
+                f"No active workflow definition found for code '{workflow_code}'. "
+                "Run the migration and seed scripts first."
+            )
+        return defn
+
+    def _get_stages_for_definition(self, workflow_definition_id) -> list:
+        return (
+            self.db.query(RepairStageDefinition)
+            .filter(
+                RepairStageDefinition.workflow_definition_id == workflow_definition_id,
+                RepairStageDefinition.is_active.is_(True),
+            )
+            .order_by(RepairStageDefinition.sequence)
+            .all()
+        )
 
     def _user_org_role_ids(self, user_id: UUID) -> list:
         rows = (
@@ -378,16 +407,13 @@ class RepairWorkflowService:
                 "An active repair workflow already exists for this equipment."
             )
 
-        stages = (
-            self.db.query(RepairStageDefinition)
-            .filter(RepairStageDefinition.is_active.is_(True))
-            .order_by(RepairStageDefinition.sequence)
-            .all()
-        )
+        wf_def = self._get_workflow_definition(REPAIR_WORKFLOW_CODE)
+        stages = self._get_stages_for_definition(wf_def.id)
 
         if not stages:
             raise ValueError(
-                "No active stage definitions found. Configure stages first."
+                f"No active stages found for workflow definition '{REPAIR_WORKFLOW_CODE}'. "
+                "Run seed.py (seed_workflow) and the backfill script first."
             )
 
         first_stage = stages[0]
@@ -912,11 +938,26 @@ class RepairWorkflowService:
             raise ValueError("Workflow not found.")
         result = self._workflow_to_dict(workflow)
 
-        instances = (
-            self.db.query(RepairStageInstance)
-            .filter(RepairStageInstance.workflow_id == workflow_id)
-            .all()
-        )
+        wf_code = workflow.workflow_code or REPAIR_WORKFLOW_CODE
+        try:
+            wf_def = self._get_workflow_definition(wf_code)
+            instances = (
+                self.db.query(RepairStageInstance)
+                .join(RepairStageDefinition, RepairStageDefinition.id == RepairStageInstance.stage_id)
+                .filter(
+                    RepairStageInstance.workflow_id == workflow_id,
+                    RepairStageDefinition.workflow_definition_id == wf_def.id,
+                )
+                .all()
+            )
+        except ValueError:
+            # Definition not yet seeded — fall back so the UI still works before migration runs
+            instances = (
+                self.db.query(RepairStageInstance)
+                .filter(RepairStageInstance.workflow_id == workflow_id)
+                .all()
+            )
+
         stage_details = []
         for inst in instances:
             stage = self.db.query(RepairStageDefinition).filter(
