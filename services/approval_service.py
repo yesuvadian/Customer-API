@@ -6,7 +6,10 @@ from sqlalchemy.orm import Session
 
 from datetime import datetime, timezone
 
+from sqlalchemy.orm import joinedload
+
 from models import (
+    NextActionType,
     Recommendation,
     RecommendationType,
     RequestCategory,
@@ -23,18 +26,64 @@ class ApprovalService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_pending_approvals(self, skip: int = 0, limit: int = 100) -> List[Recommendation]:
+    def get_pending_approvals(self, skip: int = 0, limit: int = 100) -> list:
         # Auto-create recommendations for orphaned test_submitted requests
         self._auto_create_recommendations_for_orphaned()
 
-        return (
+        recs = (
             self.db.query(Recommendation)
+            .options(
+                joinedload(Recommendation.testing_request).joinedload(TestingRequest.equipment),
+                joinedload(Recommendation.testing_request).joinedload(TestingRequest.department),
+                joinedload(Recommendation.testing_request).joinedload(TestingRequest.originator),
+                joinedload(Recommendation.submitter),
+            )
             .filter(Recommendation.approval_status == "pending")
             .order_by(Recommendation.cts.desc())
             .offset(skip)
             .limit(limit)
             .all()
         )
+
+        result = []
+        for rec in recs:
+            tr = rec.testing_request
+
+            # Resolve display names
+            def _name(user):
+                if not user:
+                    return None
+                return f"{user.firstname or ''} {user.lastname or ''}".strip() or user.email
+
+            data = {
+                # ── Recommendation core ──────────────────────────────────────
+                "id": str(rec.id),
+                "testing_request_id": str(rec.testing_request_id),
+                "organization_id": str(rec.organization_id) if rec.organization_id else None,
+                "recommendation_type": rec.recommendation_type.value if rec.recommendation_type else None,
+                "summary": rec.summary,
+                "detailed_notes": rec.detailed_notes,
+                "next_action": rec.next_action.value if rec.next_action else None,
+                "schedule_frequency": rec.schedule_frequency.value if rec.schedule_frequency else None,
+                "test_types": rec.test_types,
+                "replacement_products": rec.replacement_products,
+                "approval_status": rec.approval_status,
+                "submitted_by": str(rec.submitted_by) if rec.submitted_by else None,
+                "submitted_by_name": _name(rec.submitter),
+                "submitted_at": rec.submitted_at.isoformat() if rec.submitted_at else None,
+                "cts": rec.cts.isoformat() if rec.cts else None,
+                "mts": rec.mts.isoformat() if rec.mts else None,
+                # ── Testing request context (for list card display) ───────────
+                "request_number": tr.request_number if tr else None,
+                "title": tr.title if tr else None,
+                "request_category": tr.request_category.value if (tr and tr.request_category) else None,
+                "equipment_ueic": tr.equipment.ueic if (tr and tr.equipment) else None,
+                "department_name": tr.department.name if (tr and tr.department) else None,
+                "originator_name": _name(tr.originator) if tr else None,
+            }
+            result.append(data)
+
+        return result
 
     def _auto_create_recommendations_for_orphaned(self):
         """Find test_submitted requests without recommendations and auto-create them."""
@@ -203,6 +252,8 @@ class ApprovalService:
             "detailed_notes": rec.detailed_notes,
             "next_action": rec.next_action.value if rec.next_action else None,
             "schedule_frequency": rec.schedule_frequency.value if rec.schedule_frequency else None,
+            "test_types": rec.test_types,           # [{id, name}] from FR wizard
+            "replacement_products": rec.replacement_products,
             "approval_status": rec.approval_status,
             "approved_by": str(rec.approved_by) if rec.approved_by else None,
             "approved_at": rec.approved_at.isoformat() if rec.approved_at else None,
@@ -212,7 +263,6 @@ class ApprovalService:
             "submitted_at": rec.submitted_at.isoformat() if rec.submitted_at else None,
             "cts": rec.cts.isoformat() if rec.cts else None,
             "mts": rec.mts.isoformat() if rec.mts else None,
-            "replacement_products": rec.replacement_products,
             "testing_request": request_info,
             "test_results": test_results,
         }
@@ -276,12 +326,13 @@ class ApprovalService:
 
         # ── next_action dispatch (new flow) ───────────────────────────────────
         dispatch_result = {}
-        if request and rec.next_action is not None:
+        if request and rec.next_action is not None and rec.next_action != NextActionType.none:
             try:
                 from services.workflow_dispatch_service import WorkflowDispatchService
                 dispatch_result = WorkflowDispatchService(self.db).dispatch(request, rec, approver_id)
             except Exception as _d:
-                print(f"[WARN] next_action dispatch failed: {_d}")
+                import traceback
+                print(f"[WARN] next_action dispatch failed: {_d}\n{traceback.format_exc()}")
 
         return {
             "id": str(rec.id),

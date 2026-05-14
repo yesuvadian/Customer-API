@@ -29,7 +29,7 @@ def get_approval_stats(
     return service.get_approval_stats(approver_id=current_user.id)
 
 
-@router.get("/pending", response_model=List[RecommendationResponse])
+@router.get("/pending")
 def get_pending_approvals(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
