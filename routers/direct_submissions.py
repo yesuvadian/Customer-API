@@ -36,7 +36,7 @@ router = APIRouter(
 # ── Request / Response schemas ─────────────────────────────────────────────
 
 class DirectSubmitBody(BaseModel):
-    request_category: str          # "failure_registry" | "taqc_inspection"
+    request_category: str
     template_key: str
     title: str
     test_data: dict
@@ -46,12 +46,25 @@ class DirectSubmitBody(BaseModel):
     organization_id: Optional[UUID] = None
     department_id: Optional[UUID] = None
 
+    # AUTO FILLED EQUIPMENT DETAILS
+    manufacturer: Optional[str] = None
+    serial_number: Optional[str] = None
+    transformer_type: Optional[str] = None
+    transformer_rating: Optional[str] = None
+
+    # TEST TYPE
+    test_type_id: Optional[int] = None
+    test_type_name: Optional[str] = None
+
+    # EQUIPMENT TYPE
+    equipment_type_id: Optional[int] = None
+    equipment_type_name: Optional[str] = None
+
     # result
-    overall_result: Optional[str] = None   # default by category if omitted
+    overall_result: Optional[str] = None
     remarks: Optional[str] = None
     notes: Optional[str] = None
     priority: str = "normal"
-
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
 

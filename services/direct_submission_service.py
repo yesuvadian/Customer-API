@@ -13,6 +13,7 @@ can review without any prior assignment or testing step.
 """
 
 from datetime import datetime, timezone
+from unicodedata import category
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -69,7 +70,7 @@ _ALLOWED_ROLES: dict[RequestCategory, set[str]] = {
 
 class DirectSubmissionService:
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session): 
         self.db = db
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -125,144 +126,245 @@ class DirectSubmissionService:
         self,
         data: dict,
         submitter: User,
-    ) -> dict:
+        ) -> dict:
         """
-        Creates a TestingRequest (status=under_approval, is_direct_submission=True)
-        and a linked TestResult in one atomic transaction.
-
-        Required keys in `data`:
-          request_category   str  — "failure_registry" | "taqc_inspection"
-          template_key       str
-          title              str
-          test_data          dict
-
-        Optional keys:
-          equipment_id       UUID str
-          organization_id    UUID str
-          department_id      UUID str
-          overall_result     str   — default "fail" for failure_registry, "advisory" for taqc
-          remarks            str
-          notes              str
-          priority           str   — default "normal"
+        Creates a TestingRequest + TestResult in one transaction.
         """
+
         raw_category = data.get("request_category", "")
+
         try:
             category = RequestCategory(raw_category)
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid request_category: {raw_category}. "
-                       "Accepted: failure_registry, taqc_inspection",
+                detail=f"Invalid request_category: {raw_category}",
             )
 
         if category not in _PREFIX:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Category '{raw_category}' is not a direct-submission category.",
+                detail=f"Category '{raw_category}' is not supported.",
             )
 
+        # ROLE ACCESS
         self._check_role_access(submitter, category)
 
         now = self._utc_now()
         request_number = self._generate_request_number(category)
 
-        # Default overall_result by category
+        # DEFAULT RESULT
         default_result = (
-            "fail" if category == RequestCategory.failure_registry else "advisory"
+            "fail"
+            if category == RequestCategory.failure_registry
+            else "advisory"
         )
 
-        # Resolve org/dept — prefer body, fall back to submitter's own values
-        org_id  = data.get("organization_id") or getattr(submitter, "organization_id", None)
-        dept_id = data.get("department_id")    or getattr(submitter, "department_id",   None)
+        # ORG / DEPT
+        org_id = (
+            data.get("organization_id")
+            or getattr(submitter, "organization_id", None)
+        )
 
-        # ── TestingRequest ────────────────────────────────────────────────────
-        # failure_registry → submitted  (goes to Test Assigner queue for initial_approve)
-        # taqc_inspection  → under_approval (no assignment step; direct to TechApprover)
+        dept_id = (
+            data.get("department_id")
+            or getattr(submitter, "department_id", None)
+        )
+
+        # STATUS
         initial_status = (
             TestingRequestStatus.submitted
             if category == RequestCategory.failure_registry
             else TestingRequestStatus.under_approval
         )
 
+        # SAFE TYPE CONVERSION
+        equipment_type_id = data.get("equipment_type_id")
+        test_type_id = data.get("test_type_id")
+
+        try:
+            if equipment_type_id is not None:
+                equipment_type_id = int(equipment_type_id)
+        except Exception:
+            equipment_type_id = None
+
+        try:
+            if test_type_id is not None:
+                test_type_id = int(test_type_id)
+        except Exception:
+            test_type_id = None
+
+        print("========== DIRECT SUBMISSION PAYLOAD ==========")
+        print(data)
+
+    # ─────────────────────────────────────────────
+    # TESTING REQUEST
+    # ─────────────────────────────────────────────
         req = TestingRequest(
             request_number=request_number,
+
             title=data.get("title") or request_number,
             description=data.get("description"),
+
+            # CATEGORY
             request_category=category,
+
+            # EQUIPMENT FK
             equipment_id=data.get("equipment_id"),
+
+            # AUTO FILLED EQUIPMENT DETAILS
+            transformer_type=data.get("transformer_type"),
+            transformer_rating=data.get("transformer_rating"),
+            manufacturer=data.get("manufacturer"),
+            serial_number=data.get("serial_number"),
+
+            # IDS
+            equipment_type_id=equipment_type_id,
+            test_type_id=test_type_id,
+
+            # ORG
             organization_id=org_id,
             department_id=dept_id,
+
+            # OTHER
             priority=data.get("priority", "normal"),
             notes=data.get("notes"),
+
+            # STATUS
             status=initial_status,
             is_direct_submission=True,
+
+            # USER
             originator_id=submitter.id,
             created_by=submitter.id,
+
             requested_date=now,
         )
-        self.db.add(req)
-        self.db.flush()  # get req.id without committing
 
-        # ── TestResult ────────────────────────────────────────────────────────
+        self.db.add(req)
+        self.db.flush()
+
+        # ─────────────────────────────────────────────
+        # TEST DATA ENRICHMENT
+        # ─────────────────────────────────────────────
+        test_data = data.get("test_data", {})
+
+        if not isinstance(test_data, dict):
+            test_data = {}
+
+        # STORE EQUIPMENT DETAILS ALSO INSIDE JSON
+        test_data["manufacturer"] = data.get("manufacturer")
+        test_data["serial_number"] = data.get("serial_number")
+        test_data["transformer_type"] = data.get("transformer_type")
+        test_data["transformer_rating"] = data.get("transformer_rating")
+
+        test_data["equipment_type_id"] = equipment_type_id
+        test_data["equipment_type_name"] = data.get("equipment_type_name")
+
+        test_data["test_type_id"] = test_type_id
+        test_data["test_type_name"] = data.get("test_type_name")
+
+        print("========== FINAL TEST DATA ==========")
+        print(test_data)
+
+        # ─────────────────────────────────────────────
+        # TEST RESULT
+        # ─────────────────────────────────────────────
         result = TestResult(
             testing_request_id=req.id,
-            template_key=data.get("template_key", category.value),
-            test_name=data.get("title") or category.value.replace("_", " ").title(),
+
+            template_key=data.get(
+                "template_key",
+                category.value,
+            ),
+
+            test_name=(
+                data.get("title")
+                or category.value.replace("_", " ").title()
+            ),
+
             test_category=category.value,
-            test_data=data.get("test_data", {}),
-            overall_result=data.get("overall_result") or default_result,
+
+            test_data=test_data,
+
+            overall_result=(
+                data.get("overall_result")
+                or default_result
+            ),
+
             remarks=data.get("remarks"),
+
             tested_by=submitter.id,
             tested_at=now,
         )
+
         self.db.add(result)
         self.db.flush()
 
-        # ── Recommendation ─────────────────────────────────────────────────────
-        # failure_registry: NO recommendation yet — it goes to Test Assigner queue
-        #   first (initial_approve), which spawns a child TR. The recommendation
-        #   is only created after the child TR's tester submits results.
-        # taqc_inspection: create recommendation immediately so TechApprover queue
-        #   receives it (no tester assignment step for TAQC).
+        # ─────────────────────────────────────────────
+        # RECOMMENDATION
+        # ─────────────────────────────────────────────
         if category != RequestCategory.failure_registry:
+
             _result_to_rec_type = {
-                "pass":             RecommendationType.pass_test,
+                "pass": RecommendationType.pass_test,
                 "conditional_pass": RecommendationType.conditional,
-                "fail":             RecommendationType.fail,
-                "advisory":         RecommendationType.conditional,
-                "retest":           RecommendationType.retest,
+                "fail": RecommendationType.fail,
+                "advisory": RecommendationType.conditional,
+                "retest": RecommendationType.retest,
             }
+
             rec_type = _result_to_rec_type.get(
-                (data.get("overall_result") or default_result).lower(),
+                (
+                    data.get("overall_result")
+                    or default_result
+                ).lower(),
                 RecommendationType.conditional,
             )
+
             rec = Recommendation(
                 testing_request_id=req.id,
+
                 organization_id=org_id,
+
                 recommendation_type=rec_type,
+
                 summary=(
-                    f"[Direct Submission] {category.value.replace('_',' ').title()} — "
+                    f"[Direct Submission] "
+                    f"{category.value.replace('_', ' ').title()} — "
                     f"{data.get('title', req.request_number)}"
                 ),
+
                 detailed_notes=data.get("remarks"),
+
                 approval_status="pending",
+
                 submitted_by=submitter.id,
                 submitted_at=now,
+
                 created_by=submitter.id,
             )
+
             self.db.add(rec)
 
+        # ─────────────────────────────────────────────
+        # COMMIT
+        # ─────────────────────────────────────────────
         self.db.commit()
+
         self.db.refresh(req)
         self.db.refresh(result)
 
-        # Notify approvers that a new submission is pending
+        # NOTIFICATION
         try:
             from services.notification_service import NotificationService
-            NotificationService(self.db).notify_request_submitted(req)
-        except Exception as _n:
-            print(f"[WARN] request_submitted notification failed: {_n}")
 
+            NotificationService(self.db).notify_request_submitted(req)
+
+        except Exception as e:
+            print(f"[WARN] Notification failed: {e}")
+
+        # RESPONSE
         return {
             "request_id": str(req.id),
             "result_id": str(result.id),
@@ -271,7 +373,6 @@ class DirectSubmissionService:
             "status": req.status.value,
             "submitted_at": now.isoformat(),
         }
-
     # ── list submissions ──────────────────────────────────────────────────────
 
     def _get_user_scope(self, user: User):
