@@ -4,12 +4,15 @@ Workflow Dispatch Service
 Called after Technical Approver approves a recommendation.
 Reads recommendation.next_action and creates the appropriate downstream ticket:
 
-  test          → TestingRequest        (TR- prefix, submitted follow-up test)
-  maintenance   → TestRequestSchedule  (MN- prefix, recurring maintenance)
-  inspection    → TestRequestSchedule  (IN- prefix, recurring inspection)
+  test          → TestRequestSchedule  (recurring test schedule via TestRequestScheduleService)
+  maintenance   → TestRequestSchedule  (recurring maintenance schedule)
+  inspection    → TestRequestSchedule  (recurring inspection schedule)
   repair_cycle  → RepairWorkflow       (10-stage repair lifecycle)
   replacement   → ProcurementRequest   (finance approval queue)
   none          → nothing (TR marked approved/complete)
+
+All schedules use TestRequestScheduleService — operational schedules linked
+directly to the equipment (equipment_id), trigger checked immediately on creation.
 """
 
 from datetime import datetime, timezone
@@ -65,9 +68,9 @@ class WorkflowDispatchService:
                     tr.equipment_id = equip_id
                     result["equipment_id"] = str(equip_id)
                     # Auto-create MN and IN schedules for the newly commissioned equipment
-                    mn_num = self._create_schedule(tr, rec, approver_id, prefix="MN",
+                    mn_num = self._create_schedule(tr, rec, approver_id,
                                                    category=RequestCategory.maintenance)
-                    in_num = self._create_schedule(tr, rec, approver_id, prefix="IN",
+                    in_num = self._create_schedule(tr, rec, approver_id,
                                                    category=RequestCategory.inspection)
                     result["mn_schedule"] = mn_num
                     result["in_schedule"] = in_num
@@ -81,7 +84,7 @@ class WorkflowDispatchService:
                 self.db.commit()
 
         elif action == NextActionType.maintenance:
-            number = self._create_schedule(tr, rec, approver_id, prefix="MN",
+            number = self._create_schedule(tr, rec, approver_id,
                                            category=RequestCategory.maintenance)
             tr.status = TestingRequestStatus.outcome_active
             tr.completed_at = datetime.now(timezone.utc)
@@ -91,7 +94,7 @@ class WorkflowDispatchService:
             result["status"] = "outcome_active"
 
         elif action == NextActionType.inspection:
-            number = self._create_schedule(tr, rec, approver_id, prefix="IN",
+            number = self._create_schedule(tr, rec, approver_id,
                                            category=RequestCategory.inspection)
             tr.status = TestingRequestStatus.outcome_active
             tr.completed_at = datetime.now(timezone.utc)
@@ -101,8 +104,13 @@ class WorkflowDispatchService:
             result["status"] = "outcome_active"
 
         elif action == NextActionType.test:
-            tr_number = self._create_followup_test(tr, rec, approver_id)
-            result["created"] = tr_number
+            number = self._create_schedule(tr, rec, approver_id,
+                                           category=RequestCategory.test)
+            tr.status = TestingRequestStatus.outcome_active
+            tr.completed_at = datetime.now(timezone.utc)
+            tr.modified_by = approver_id
+            self.db.commit()
+            result["created"] = number
             result["status"] = "outcome_active"
 
         elif action == NextActionType.repair_cycle:
@@ -127,61 +135,6 @@ class WorkflowDispatchService:
     # ─────────────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────────────
-
-    def _create_followup_test(
-        self,
-        tr: TestingRequest,
-        rec: Recommendation,
-        approver_id: UUID,
-    ) -> str:
-        """
-        Create a follow-up TestingRequest (TR-) from an approved FR outcome.
-        The new request is submitted immediately — not a schedule template.
-        The originating FR is marked outcome_active.
-        Returns the new request_number.
-        """
-        from services.testing_request_service import TestingRequestService
-
-        now = datetime.now(timezone.utc)
-        svc = TestingRequestService(self.db)
-
-        new_tr = svc.create_request(
-            data={
-                "title":             f"[Follow-up Test] {tr.title}",
-                "description":       (
-                    f"Follow-up test raised from FR approval.\n"
-                    f"Source FR: {tr.request_number}\n"
-                    f"Recommendation: {rec.summary or ''}"
-                ),
-                "request_category":  RequestCategory.test.value,
-                "equipment_id":      str(tr.equipment_id) if tr.equipment_id else None,
-                "equipment_type_id": tr.equipment_type_id,
-                "test_type_id":      tr.test_type_id,
-                "organization_id":   str(tr.organization_id) if tr.organization_id else None,
-                "department_id":     str(tr.department_id) if tr.department_id else None,
-                "priority":          tr.priority or "normal",
-                "requested_date":    now,
-            },
-            originator_id=tr.originator_id,
-        )
-
-        # Submit immediately — tester can pick it up like a normal TR
-        new_tr.status           = TestingRequestStatus.submitted
-        new_tr.source_failure_id = tr.id      # traceability: follow-up → FR
-        new_tr.created_by       = approver_id
-        self.db.flush()
-
-        # Mark the originating FR as outcome_active (terminal)
-        tr.status       = TestingRequestStatus.outcome_active
-        tr.completed_at = now
-        tr.modified_by  = approver_id
-        self.db.commit()
-
-        print(
-            f"[Dispatch] Follow-up test {new_tr.request_number} created "
-            f"from FR {tr.request_number}"
-        )
-        return new_tr.request_number
 
     def _commission_equipment(
         self,
@@ -254,113 +207,100 @@ class WorkflowDispatchService:
             print(f"[Dispatch] WARN: equipment commissioning failed for TR {tr.request_number}: {e}")
             return None
 
-    def _generate_number(self, prefix: str) -> str:
-        """Generate ticket number like MN-20260501-0003."""
-        from sqlalchemy import func
-        today = datetime.now(timezone.utc).strftime("%Y%m%d")
-        count = (
-            self.db.query(func.count(TestingRequest.id))
-            .filter(TestingRequest.request_number.like(f"{prefix}-{today}-%"))
-            .scalar()
-        ) or 0
-        return f"{prefix}-{today}-{(count + 1):04d}"
-
     def _create_schedule(
         self,
         tr: TestingRequest,
         rec: Recommendation,
         approver_id: UUID,
-        prefix: str,
         category: RequestCategory,
     ) -> str:
-        """Create a TestingRequest (template) + TestRequestSchedule for recurring work."""
-        now = datetime.now(timezone.utc)
-        number = self._generate_number(prefix)
+        """
+        Create an operational TestRequestSchedule for recurring work triggered by
+        an approved FR/TR recommendation.  Uses the same flow as equipment onboarding
+        (equipment_id-based operational schedule + immediate trigger check).
 
-        freq = rec.schedule_frequency or ScheduleFrequency.yearly
-
-        # Use dates stored on the testing request (set from form's outcome_start_date /
-        # outcome_due_date at submit time).  Fall back to now if not provided.
-        effective_start = tr.scheduled_start_date or now
-        effective_due   = tr.due_date or now
-
-        # Create the template TR (is_schedule_template=True)
-        sched_tr = TestingRequest(
-            request_number=number,
-            title=f"[{prefix}] {tr.title}",
-            description=(
-                f"Auto-created from approved recommendation.\n"
-                f"Source TR: {tr.request_number}\n"
-                f"Frequency: {freq.value}"
-            ),
-            request_category=category,
-            equipment_id=tr.equipment_id,
-            equipment_type_id=tr.equipment_type_id,
-            test_type_id=tr.test_type_id,
-            organization_id=tr.organization_id,
-            department_id=tr.department_id,
-            priority=tr.priority or "normal",
-            status=TestingRequestStatus.draft,
-            is_schedule_template=True,
-            source_failure_id=tr.id,
-            originator_id=tr.originator_id,
-            created_by=approver_id,
-            requested_date=tr.requested_date or now,
-            scheduled_start_date=effective_start,
-            due_date=effective_due,
+        Returns the schedule UUID as a string.
+        """
+        from services.test_request_schedule_service import (
+            TestRequestScheduleService,
+            _advance_date,
         )
-        self.db.add(sched_tr)
-        self.db.flush()
 
-        # Advance days: how many days before next_run_date the daily scheduler fires.
-        # Controlled by SCHEDULE_ADVANCE_DAYS in .env (default 15).
+        now = datetime.now(timezone.utc)
+        freq = rec.schedule_frequency or ScheduleFrequency.yearly
+        effective_start = tr.scheduled_start_date or now
+
+        # Guard: equipment_id is required for operational schedules
+        if not tr.equipment_id:
+            print(
+                f"[Dispatch] WARN: cannot create operational schedule for TR "
+                f"{tr.request_number} — no equipment_id"
+            )
+            return ""
+
+        # Idempotency: don't create duplicate schedule for same equipment + test type
+        existing = (
+            self.db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.equipment_id == tr.equipment_id,
+                TestRequestSchedule.test_type_id == tr.test_type_id,
+                TestRequestSchedule.is_deleted == False,
+            )
+            .first()
+        )
+        if existing:
+            print(
+                f"[Dispatch] Operational schedule already exists "
+                f"(id={existing.id}) for equipment {tr.equipment_id} "
+                f"test_type {tr.test_type_id} — skipping create"
+            )
+            return str(existing.id)
+
         try:
             from config import SCHEDULE_ADVANCE_DAYS as _adv
         except Exception:
             _adv = 15
 
-        # Create schedule — start_date = tester-supplied start, next_run_date = due date
         schedule = TestRequestSchedule(
-            test_request_id=sched_tr.id,
+            equipment_id=tr.equipment_id,
+            equipment_type_id=tr.equipment_type_id,
+            test_type_id=tr.test_type_id,
             organization_id=tr.organization_id,
+            title=tr.title,
+            request_category=category,
             frequency=freq,
             start_date=effective_start,
-            next_run_date=effective_due,
+            next_run_date=_advance_date(effective_start, freq),
             advance_days=_adv,
             is_active=True,
             created_by=approver_id,
         )
         self.db.add(schedule)
+        self.db.flush()   # populate schedule.id
+
         print(
-            f"[Dispatch] Created {prefix} schedule {number} "
-            f"(freq={freq.value}, start={effective_start.date()}, due={effective_due.date()})"
+            f"[Dispatch] Created operational schedule id={schedule.id} "
+            f"(category={category.value}, freq={freq.value}, "
+            f"start={effective_start.date()}, "
+            f"next_run={schedule.next_run_date.date()})"
         )
 
-        # ── Immediate first-ticket creation ──────────────────────────────────
-        # If the tester-supplied start date is today or within advance_days, don't
-        # wait for the midnight scheduler — create the first ticket right now.
-        days_until = (effective_start.date() - now.date()).days
-        if days_until <= _adv:
-            try:
-                from services.test_request_schedule_service import TestRequestScheduleService
-                self.db.flush()  # ensure schedule.id is populated
-                created = TestRequestScheduleService.create_one_ticket(
-                    db=self.db,
-                    schedule=schedule,
-                    template=sched_tr,
-                    now=now,
-                )
-                if created:
-                    print(
-                        f"[Dispatch] First {prefix} ticket created immediately "
-                        f"(start={effective_start.date()}, advance_days={_adv})"
-                    )
-                else:
-                    print(f"[Dispatch] WARN: immediate first-ticket creation failed for {number}")
-            except Exception as _e:
-                print(f"[Dispatch] WARN: immediate ticket creation raised: {_e}")
+        # Immediate first-ticket trigger (same logic as onboarding)
+        try:
+            self.db.refresh(schedule)
+            created = TestRequestScheduleService.create_one_ticket(
+                db=self.db,
+                schedule=schedule,
+                now=now,
+            )
+            if created:
+                print(f"[Dispatch] First ticket created immediately for schedule {schedule.id}")
+            else:
+                print(f"[Dispatch] First ticket deferred (outside advance window) for schedule {schedule.id}")
+        except Exception as _e:
+            print(f"[Dispatch] WARN: immediate ticket creation raised: {_e}")
 
-        return number
+        return str(schedule.id)
 
     def _start_repair_workflow(
         self,
