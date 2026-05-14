@@ -356,25 +356,6 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
         db.commit()
 
-        # Immediately generate the first ticket for short-cycle schedules
-        # (advance_days <= 15, e.g. quarterly). Longer cycles are handled
-        # by the daily scheduler.
-        now = datetime.now(timezone.utc)
-        operational = (
-            db.query(TestRequestSchedule)
-            .filter(
-                TestRequestSchedule.equipment_id == equipment.id,
-                TestRequestSchedule.is_active.is_(True),
-                TestRequestSchedule.is_deleted == False,
-                TestRequestSchedule.advance_days <= 15,
-            )
-            .all()
-        )
-        for sched in operational:
-            try:
-                TestRequestScheduleService.create_one_ticket(db, sched, now)
-            except Exception as _e:
-                print(f"[WARN] create_one_ticket for schedule {sched.id}: {_e}")
 
     # ============================================================
     # CREATE ONE TICKET
