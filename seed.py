@@ -1391,6 +1391,13 @@ def seed_modules(session):
                 "Execution: stage-role RBAC driven; each stage locks to authorized roles only.",
  "path": "repair-workflows",
  "group_name": "Field Operations"},
+# ✅ TESTING SCHEDULES MODULE (SRS §5.1.2)
+{"name": "Testing Schedules",
+ "description": "SRS §5.1.2 — Automated periodic test ticket generation: master schedule templates "
+                "and operational schedules per equipment. Org-admin manages master set; "
+                "operational schedules auto-created on equipment commissioning.",
+ "path": "testing_schedules",
+ "group_name": "Condition Monitoring"},
     ]
 
     module_ids = {}
@@ -5315,6 +5322,47 @@ _MASTER_SCHEDULE_SEED = {
 }
 
 
+def seed_schedule_module_permissions(session):
+    """
+    Ensure 'Testing Schedules' module exists and all is_org_admin OrgRoles
+    across every organization have full access to it. Idempotent.
+    """
+    mod = session.query(Module).filter_by(name="Testing Schedules").first()
+    if not mod:
+        print("[WARN] 'Testing Schedules' module not found — run seed_modules first.")
+        return 0
+
+    admin_roles = (
+        session.query(OrgRole).filter_by(is_org_admin=True, is_active=True).all()
+    )
+
+    granted = 0
+    for role in admin_roles:
+        existing = (
+            session.query(OrgRolePermission)
+            .filter_by(org_role_id=role.id, module_id=mod.id)
+            .first()
+        )
+        if existing:
+            existing.can_view = existing.can_add = existing.can_edit = True
+            existing.can_delete = existing.can_approve = existing.can_assign = True
+            existing.can_export = existing.can_import = True
+        else:
+            session.add(OrgRolePermission(
+                id=uuid.uuid4(),
+                org_role_id=role.id,
+                module_id=mod.id,
+                can_view=True, can_add=True, can_edit=True,
+                can_delete=True, can_approve=True, can_assign=True,
+                can_export=True, can_import=True,
+            ))
+            granted += 1
+
+    session.commit()
+    print(f"[OK] Testing Schedules: full access granted/updated for {len(admin_roles)} org-admin role(s) ({granted} new).")
+    return granted
+
+
 def seed_master_schedules(session, org):
     """Create master TestRequestSchedule rows for all 6 equipment types."""
     from datetime import timezone
@@ -7000,6 +7048,13 @@ def run_seed():
             import traceback
             print(f"[WARN] Master schedule seed failed (non-fatal): {_e}")
             traceback.print_exc()
+
+        # Testing Schedules module — full access for org-admin roles
+        print("\n--- Testing Schedules Module Permissions ---")
+        try:
+            seed_schedule_module_permissions(session)
+        except Exception as _e:
+            print(f"[WARN] Schedule module permissions failed (non-fatal): {_e}")
 
         # Zoho Import Mapping (after KPTCL org + departments exist)
         seed_zoho_import_mapping(session, kptcl_org)
