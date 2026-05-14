@@ -742,11 +742,12 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
             frequency=data["frequency"],
 
-            start_date=data["start_date"],
+            start_date=datetime.now(timezone.utc),
 
-            next_run_date=data[
-                "next_run_date"
-            ],
+            next_run_date=_advance_date(
+                datetime.now(timezone.utc),
+                ScheduleFrequency(data["frequency"]),
+            ),
 
             end_date=data.get(
                 "end_date"
