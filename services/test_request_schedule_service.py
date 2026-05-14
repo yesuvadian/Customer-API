@@ -318,8 +318,11 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     timezone.utc
                 ),
 
-                next_run_date=(
-                    template.next_run_date
+                # Commission immediately: set next_run_date to now so the
+                # first ticket is created on the same day as onboarding.
+                # The scheduler will advance it after the ticket is generated.
+                next_run_date=datetime.now(
+                    timezone.utc
                 ),
 
                 end_date=template.end_date,
@@ -352,6 +355,23 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             db.add(operational_schedule)
 
         db.commit()
+
+        # Immediately generate the first ticket for each operational schedule.
+        now = datetime.now(timezone.utc)
+        operational = (
+            db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.equipment_id == equipment.id,
+                TestRequestSchedule.is_active.is_(True),
+                TestRequestSchedule.is_deleted == False,
+            )
+            .all()
+        )
+        for sched in operational:
+            try:
+                TestRequestScheduleService.create_one_ticket(db, sched, now)
+            except Exception as _e:
+                print(f"[WARN] create_one_ticket for schedule {sched.id}: {_e}")
 
     # ============================================================
     # CREATE ONE TICKET
