@@ -363,11 +363,6 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
             schedule = (
                 db.query(TestRequestSchedule)
-                .options(
-                    joinedload(
-                        TestRequestSchedule.equipment
-                    )
-                )
                 .filter(
                     TestRequestSchedule.id
                         == schedule.id
@@ -382,7 +377,12 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             if not schedule.is_active:
                 return False
 
-            equipment = schedule.equipment
+            from models import Equipment
+            equipment = (
+                db.query(Equipment)
+                .filter(Equipment.id == schedule.equipment_id)
+                .first()
+            )
 
             if not equipment:
                 raise Exception(
