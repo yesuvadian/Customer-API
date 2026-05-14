@@ -118,6 +118,8 @@ class TestingRequestService:
             session_interval_days=data.get("session_interval_days"),
             is_cumulative=is_cumulative,
             is_calibration=is_calibration,
+            is_schedule_template=data.get("is_schedule_template", False),
+            source_schedule_id=data.get("source_schedule_id"),
         )
         self.db.add(request)
         self.db.commit()

@@ -230,6 +230,9 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             .all()
         )
 
+        now = datetime.now(timezone.utc)
+        new_schedules = []
+
         for template in templates:
 
             existing = (
@@ -304,16 +307,9 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
                 frequency=template.frequency,
 
-                start_date=datetime.now(
-                    timezone.utc
-                ),
+                start_date=now,
 
-                # Commission immediately: set next_run_date to now so the
-                # first ticket is created on the same day as onboarding.
-                # The scheduler will advance it after the ticket is generated.
-                next_run_date=datetime.now(
-                    timezone.utc
-                ),
+                next_run_date=_advance_date(now, template.frequency),
 
                 end_date=template.end_date,
 
@@ -335,8 +331,17 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             )
 
             db.add(operational_schedule)
+            new_schedules.append(operational_schedule)
 
         db.commit()
+
+        # Apply same trigger check as daily scheduler — create ticket now if due
+        for sched in new_schedules:
+            db.refresh(sched)
+            try:
+                TestRequestScheduleService.create_one_ticket(db, sched, now)
+            except Exception as e:
+                print(f"[WARN] create_one_ticket on onboard failed for schedule {sched.id}: {e}")
 
 
     # ============================================================
@@ -1106,6 +1111,8 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         schedule.paused_by = None
 
         schedule.pause_reason = None
+
+        schedule.consecutive_failures = 0
 
         schedule.modified_by = user_id
 
