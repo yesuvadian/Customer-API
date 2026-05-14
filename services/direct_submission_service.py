@@ -1,15 +1,18 @@
 """
 direct_submission_service.py
 ────────────────────────────
-Handles direct-submission modules that bypass the normal tester-assignment
-flow:
+Handles direct-submission modules that bypass the normal tester-assignment flow:
 
   • Failure Registry  (RequestCategory.failure_registry, prefix FR-)
   • TA&QC Inspection  (RequestCategory.taqc_inspection,  prefix TQ-)
 
-Both create a TestingRequest + TestResult in one atomic transaction and
-immediately place the record in the under_approval queue so the approver
-can review without any prior assignment or testing step.
+FR flow:
+  1. TestingRequest created (status=submitted, is_direct_submission=True)
+     form_data = { <dynamic template fields>, "recommendation": { ...snapshot + id } }
+  2. Recommendation row created (drives WorkflowDispatchService after approval)
+  No TestResult at submission time — test results come via TestRequestScheduleService.
+
+TAQC flow: TR + TestResult + Recommendation (direct to TechApprover queue).
 """
 
 from datetime import datetime, timezone
@@ -20,12 +23,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from models import (
+    NextActionType,
+    Recommendation,
+    RecommendationType,
+    RequestCategory,
+    ScheduleFrequency,
     TestingRequest,
     TestingRequestStatus,
     TestResult,
-    RequestCategory,
-    Recommendation,
-    RecommendationType,
     User,
     Equipment,
     OrgRole,
@@ -40,30 +45,26 @@ _PREFIX = {
     RequestCategory.taqc_inspection: "TQ",
 }
 
-# Roles allowed to submit each category.
-# These match BOTH global roles (Admin/SuperAdmin) and org-level role names.
-_ALLOWED_ROLES: dict[RequestCategory, set[str]] = {
-    RequestCategory.failure_registry: {
-        # Global roles
-        "Admin", "SuperAdmin",
-        # KPTCL org roles — field staff who witness/record failures
-        "Field Staff", "Field Tester",
-        "AEE", "AEE Maintenance",
-        "EE TLSS",
-        "TA&QC Officer",
-        "Originator",
-        # Supervisory who may also file
-        "Department Head", "Test Assigner",
-    },
-    RequestCategory.taqc_inspection: {
-        # Global roles
-        "Admin", "SuperAdmin",
-        # KPTCL org roles for TA&QC
-        "TA&QC Officer",
-        "AEE Maintenance",
-        "EE TLSS",
-        "Department Head",
-    },
+# Wizard label → enum maps (FR recommendation wizard sends capitalised strings)
+_WIZARD_REC_TYPE = {
+    "Pass":        RecommendationType.pass_test,
+    "Fail":        RecommendationType.fail,
+    "Conditional": RecommendationType.conditional,
+    "Retest":      RecommendationType.retest,
+}
+_WIZARD_ACTION = {
+    "None":        NextActionType.none,
+    "Test":        NextActionType.test,
+    "Maintenance": NextActionType.maintenance,
+    "Inspection":  NextActionType.inspection,
+    "Repair":      NextActionType.repair_cycle,
+    "Procurement": NextActionType.replacement,
+}
+_WIZARD_FREQ = {
+    "Monthly":   ScheduleFrequency.monthly,
+    "Quarterly": ScheduleFrequency.quarterly,
+    "Bi-Annual": ScheduleFrequency.semi_annual,
+    "Yearly":    ScheduleFrequency.yearly,
 }
 
 
@@ -87,38 +88,6 @@ class DirectSubmissionService:
         )
         return f"{prefix}-{today}-{(count + 1):04d}"
 
-    def _check_role_access(
-        self, user: User, category: RequestCategory
-    ) -> None:
-        """Raise 403 if the user does not have a permitted role for this category.
-        Checks both global user_roles and org_user_roles (org-level roles).
-        """
-        from models import Role, UserRole, OrgRole, OrgUserRole
-
-        # 1. Global roles (admin@relu.com, superadmin@system.com)
-        global_roles = (
-            self.db.query(Role.name)
-            .join(UserRole, UserRole.role_id == Role.id)
-            .filter(UserRole.user_id == user.id)
-            .all()
-        )
-        # 2. Org-level roles (KPTCL users: ee.tlss@kptcl.com, aee.maintenance@kptcl.com …)
-        org_roles = (
-            self.db.query(OrgRole.name)
-            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
-            .filter(OrgUserRole.user_id == user.id)
-            .all()
-        )
-
-        user_role_names = {r[0] for r in global_roles} | {r[0] for r in org_roles}
-        allowed = _ALLOWED_ROLES.get(category, set())
-
-        if not user_role_names.intersection(allowed):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Your role ({', '.join(user_role_names) or 'none'}) is not permitted to submit {category.value} records.",
-            )
-
     # ── main operation ────────────────────────────────────────────────────────
 
     def create_direct_submission(
@@ -127,23 +96,25 @@ class DirectSubmissionService:
         submitter: User,
     ) -> dict:
         """
-        Creates a TestingRequest (status=under_approval, is_direct_submission=True)
-        and a linked TestResult in one atomic transaction.
+        FR:   Creates TestingRequest (status=submitted) with form_data storing
+              the dynamic template fields + a recommendation snapshot (including
+              the Recommendation row id). No TestResult — results come later via
+              TestRequestScheduleService after the Test Assigner approves.
+
+        TAQC: Creates TestingRequest (status=under_approval) + TestResult +
+              Recommendation in one atomic transaction.
 
         Required keys in `data`:
           request_category   str  — "failure_registry" | "taqc_inspection"
-          template_key       str
           title              str
-          test_data          dict
+          test_data          dict — FR: dynamic template fields + wizard outcome fields
 
-        Optional keys:
-          equipment_id       UUID str
-          organization_id    UUID str
-          department_id      UUID str
-          overall_result     str   — default "fail" for failure_registry, "advisory" for taqc
-          remarks            str
-          notes              str
-          priority           str   — default "normal"
+        FR optional:
+          equipment_id, organization_id, department_id, priority, notes
+          replacement_products  list  — from the wizard product picker
+
+        TAQC optional:
+          template_key, overall_result, remarks
         """
         raw_category = data.get("request_category", "")
         try:
@@ -161,23 +132,12 @@ class DirectSubmissionService:
                 detail=f"Category '{raw_category}' is not a direct-submission category.",
             )
 
-        self._check_role_access(submitter, category)
-
         now = self._utc_now()
-        request_number = self._generate_request_number(category)
-
-        # Default overall_result by category
-        default_result = (
-            "fail" if category == RequestCategory.failure_registry else "advisory"
-        )
-
-        # Resolve org/dept — prefer body, fall back to submitter's own values
         org_id  = data.get("organization_id") or getattr(submitter, "organization_id", None)
         dept_id = data.get("department_id")    or getattr(submitter, "department_id",   None)
+        _td     = data.get("test_data") or {}
 
         # ── TestingRequest ────────────────────────────────────────────────────
-        # failure_registry → submitted  (goes to Test Assigner queue for initial_approve)
-        # taqc_inspection  → under_approval (no assignment step; direct to TechApprover)
         initial_status = (
             TestingRequestStatus.submitted
             if category == RequestCategory.failure_registry
@@ -185,8 +145,8 @@ class DirectSubmissionService:
         )
 
         req = TestingRequest(
-            request_number=request_number,
-            title=data.get("title") or request_number,
+            request_number=self._generate_request_number(category),
+            title=data.get("title") or f"{category.value.replace('_',' ').title()} Report",
             description=data.get("description"),
             request_category=category,
             equipment_id=data.get("equipment_id"),
@@ -201,62 +161,80 @@ class DirectSubmissionService:
             requested_date=now,
         )
         self.db.add(req)
-        self.db.flush()  # get req.id without committing
-
-        # ── TestResult ────────────────────────────────────────────────────────
-        result = TestResult(
-            testing_request_id=req.id,
-            template_key=data.get("template_key", category.value),
-            test_name=data.get("title") or category.value.replace("_", " ").title(),
-            test_category=category.value,
-            test_data=data.get("test_data", {}),
-            overall_result=data.get("overall_result") or default_result,
-            remarks=data.get("remarks"),
-            tested_by=submitter.id,
-            tested_at=now,
-        )
-        self.db.add(result)
         self.db.flush()
 
-        # ── Recommendation ─────────────────────────────────────────────────────
-        # failure_registry: NO recommendation yet — it goes to Test Assigner queue
-        #   first (initial_approve), which spawns a child TR. The recommendation
-        #   is only created after the child TR's tester submits results.
-        # taqc_inspection: create recommendation immediately so TechApprover queue
-        #   receives it (no tester assignment step for TAQC).
-        if category != RequestCategory.failure_registry:
-            _result_to_rec_type = {
-                "pass":             RecommendationType.pass_test,
-                "conditional_pass": RecommendationType.conditional,
-                "fail":             RecommendationType.fail,
-                "advisory":         RecommendationType.conditional,
-                "retest":           RecommendationType.retest,
+        # ── Recommendation ────────────────────────────────────────────────────
+        if category == RequestCategory.failure_registry:
+            rec_type    = _WIZARD_REC_TYPE.get(_td.get("recommendation_type", ""), RecommendationType.fail)
+            next_action = _WIZARD_ACTION.get(_td.get("next_action", ""))
+            sched_freq  = _WIZARD_FREQ.get(_td.get("outcome_frequency", ""))
+            repl_prods  = data.get("replacement_products") or []
+            summary     = _td.get("outcome_summary") or f"[FR] {req.request_number}"
+            detailed    = _td.get("outcome_notes") or data.get("remarks")
+        else:
+            _result_map = {
+                "pass": RecommendationType.pass_test, "conditional_pass": RecommendationType.conditional,
+                "fail": RecommendationType.fail, "advisory": RecommendationType.conditional,
+                "retest": RecommendationType.retest,
             }
-            rec_type = _result_to_rec_type.get(
-                (data.get("overall_result") or default_result).lower(),
-                RecommendationType.conditional,
-            )
-            rec = Recommendation(
+            rec_type    = _result_map.get((data.get("overall_result") or "advisory").lower(), RecommendationType.conditional)
+            next_action = None
+            sched_freq  = None
+            repl_prods  = []
+            summary     = f"[Direct Submission] {category.value.replace('_',' ').title()} — {req.request_number}"
+            detailed    = data.get("remarks")
+
+        rec = Recommendation(
+            testing_request_id=req.id,
+            organization_id=org_id,
+            recommendation_type=rec_type,
+            next_action=next_action,
+            schedule_frequency=sched_freq,
+            replacement_products=repl_prods,
+            summary=summary,
+            detailed_notes=detailed,
+            approval_status="pending",
+            submitted_by=submitter.id,
+            submitted_at=now,
+            created_by=submitter.id,
+        )
+        self.db.add(rec)
+        self.db.flush()  # get rec.id
+
+        # ── FR: store template fields + recommendation snapshot in form_data ──
+        if category == RequestCategory.failure_registry:
+            req.form_data = {
+                **_td,
+                "recommendation": {
+                    "id":                  str(rec.id),
+                    "recommendation_type": _td.get("recommendation_type"),
+                    "next_action":         _td.get("next_action"),
+                    "schedule_frequency":  _td.get("outcome_frequency"),
+                    "summary":             summary,
+                    "notes":               detailed,
+                    "replacement_products": repl_prods,
+                },
+            }
+
+        # ── TAQC: TestResult (form data lives here for TAQC) ─────────────────
+        result = None
+        if category == RequestCategory.taqc_inspection:
+            result = TestResult(
                 testing_request_id=req.id,
-                organization_id=org_id,
-                recommendation_type=rec_type,
-                summary=(
-                    f"[Direct Submission] {category.value.replace('_',' ').title()} — "
-                    f"{data.get('title', req.request_number)}"
-                ),
-                detailed_notes=data.get("remarks"),
-                approval_status="pending",
-                submitted_by=submitter.id,
-                submitted_at=now,
-                created_by=submitter.id,
+                template_key=data.get("template_key", category.value),
+                test_name=data.get("title") or category.value.replace("_", " ").title(),
+                test_category=category.value,
+                test_data=_td,
+                overall_result=data.get("overall_result") or "advisory",
+                remarks=data.get("remarks"),
+                tested_by=submitter.id,
+                tested_at=now,
             )
-            self.db.add(rec)
+            self.db.add(result)
 
         self.db.commit()
         self.db.refresh(req)
-        self.db.refresh(result)
 
-        # Notify approvers that a new submission is pending
         try:
             from services.notification_service import NotificationService
             NotificationService(self.db).notify_request_submitted(req)
@@ -264,12 +242,12 @@ class DirectSubmissionService:
             print(f"[WARN] request_submitted notification failed: {_n}")
 
         return {
-            "request_id": str(req.id),
-            "result_id": str(result.id),
-            "request_number": req.request_number,
+            "request_id":       str(req.id),
+            "recommendation_id": str(rec.id),
+            "request_number":   req.request_number,
             "request_category": category.value,
-            "status": req.status.value,
-            "submitted_at": now.isoformat(),
+            "status":           req.status.value,
+            "submitted_at":     now.isoformat(),
         }
 
     # ── list submissions ──────────────────────────────────────────────────────
@@ -403,13 +381,17 @@ class DirectSubmissionService:
 
     @staticmethod
     def _serialize(req: TestingRequest) -> dict:
-        # Pull the first (and typically only) TestResult for direct submissions
+        # FR: data lives in req.form_data (no TestResult)
+        # TAQC: data lives in the linked TestResult
         result = req.test_results[0] if req.test_results else None
 
         eq = req.equipment
         eq_type_name = None
         if eq and eq.equipment_type:
             eq_type_name = getattr(eq.equipment_type, "name", None)
+
+        is_fr = getattr(req.request_category, "value", None) == "failure_registry"
+        form_data = req.form_data or {}
 
         return {
             "id": str(req.id),
@@ -432,17 +414,17 @@ class DirectSubmissionService:
                 if req.originator else "-"
             ),
 
-            # Use "cts" key to match Flutter client expectations
             "cts": req.cts.isoformat() if req.cts else None,
-
             "notes": req.notes,
 
-            # TestResult fields — populated for all direct submissions
-            "test_data": result.test_data if result else {},
+            # FR: form_data holds template fields + recommendation snapshot
+            # TAQC: form_data is empty; test_data/overall_result come from TestResult
+            "form_data":     form_data if is_fr else {},
+            "test_data":     result.test_data if result else {},
             "overall_result": result.overall_result if result else None,
-            "remarks": result.remarks if result else None,
+            "remarks":       result.remarks if result else None,
 
-            # Attachment metadata (file_data itself is not serialised here)
+            # Attachment metadata
             "has_attachment": bool(result and result.file_data),
             "attachment_name": result.file_name if result else None,
             "attachment_size": result.file_size if result else None,

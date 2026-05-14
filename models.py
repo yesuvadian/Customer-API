@@ -2297,6 +2297,7 @@ class TestingRequest(Base):
 
     # Direct submission (Failure Registry / TA&QC — no tester assignment step)
     is_direct_submission = Column(Boolean, default=False)  # True = filler IS the submitter
+    form_data = Column(JSONB, nullable=True)               # FR: template fields + recommendation snapshot
 
     # Failure Registry → Repair Lifecycle traceability
     # Populated when approve_recommendation() auto-creates a repair_lifecycle TR from an FR- record
