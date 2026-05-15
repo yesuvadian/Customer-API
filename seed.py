@@ -3076,8 +3076,7 @@ def seed_role_templates(session):
             "permissions_template": (
                 _full(org_modules) +
                 _approve(approvals_module) +
-                _approve(testing_request_approvals_module) +
-                _readonly(schedule_compliance_module)
+                _approve(testing_request_approvals_module)
             ),
         },
         # ── 3. Originator — procurement + testing requests + equipment + repair ─
@@ -3146,8 +3145,7 @@ def seed_role_templates(session):
                 _approve(recommendations_module) +
                 _approve(approvals_module) +
                 _readonly(equipment_module) +
-                _approve(repair_workflows_module) +
-                _readonly(schedule_compliance_module)
+                _approve(repair_workflows_module)
             ),
         },
         # ── 8. Purchaser — procurement + repair view ───────────────────────────
@@ -3191,8 +3189,7 @@ def seed_role_templates(session):
                 _readonly(testing_requests_module) +
                 _approve(approvals_module) +
                 _readonly(recommendations_module) +
-                _readwrite(repair_workflows_module) +
-                _readonly(schedule_compliance_module)
+                _readwrite(repair_workflows_module)
             ),
         },
 
@@ -3211,8 +3208,7 @@ def seed_role_templates(session):
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
                 _readonly(procurement_modules) +
-                _approve(repair_workflows_module) +
-                _readonly(schedule_compliance_module)
+                _approve(repair_workflows_module)
             ),
         },
 
@@ -3230,8 +3226,7 @@ def seed_role_templates(session):
                 _readonly(vendor_documents_module) +
                 _readonly(recommendations_module) +
                 _readonly(testing_requests_module) +
-                _approve(repair_workflows_module) +
-                _readonly(schedule_compliance_module)
+                _approve(repair_workflows_module)
             ),
         },
 
@@ -3248,8 +3243,7 @@ def seed_role_templates(session):
                 _readwrite(testing_requests_module) +
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
-                _readwrite(repair_workflows_module) +
-                _readonly(schedule_compliance_module)
+                _readwrite(repair_workflows_module)
             ),
         },
 
@@ -3270,8 +3264,7 @@ def seed_role_templates(session):
                 _approve(testing_request_approvals_module) +
                 _readonly(vendor_documents_module) +
                 _readonly(equipment_module) +
-                _approve(repair_workflows_module) +
-                _readonly(schedule_compliance_module)
+                _approve(repair_workflows_module)
             ),
         },
 
@@ -3291,8 +3284,7 @@ def seed_role_templates(session):
                 _readonly(procurement_modules) +
                 _readonly(vendor_documents_module) +
                 _readonly(equipment_module) +
-                _approve(repair_workflows_module) +
-                _readonly(schedule_compliance_module)
+                _approve(repair_workflows_module)
             ),
         },
 
@@ -3310,8 +3302,7 @@ def seed_role_templates(session):
                 _readwrite(equipment_module) +
                 _readonly(testing_requests_module) +
                 _readonly(recommendations_module) +
-                _approve(repair_workflows_module) +
-                _readonly(schedule_compliance_module)
+                _approve(repair_workflows_module)
             ),
         },
 
@@ -3326,8 +3317,7 @@ def seed_role_templates(session):
             "permissions_template": (
                 _readwrite(dashboard_module) +
                 _readwrite(repair_workflows_module) +
-                _readonly(testing_requests_module) +
-                _readonly(schedule_compliance_module)
+                _readonly(testing_requests_module)
             ),
         },
 
@@ -5406,18 +5396,26 @@ def seed_schedule_module_permissions(session):
     return granted
 
 
-def seed_schedule_compliance_module_permissions(session):
+def seed_schedule_compliance_module_permissions(session, org=None):
     """
-    Grant 'Schedule Compliance' module access to existing OrgRoles across all orgs.
+    Grant 'Schedule Compliance' module access to OrgRoles belonging to *org*.
+    This module is KPTCL-specific — pass the KPTCL Organization object.
     Idempotent — inserts missing rows and updates existing ones.
 
     Access matrix:
-      is_org_admin roles      → full access (can_view + all flags)
-      Field / supervisory roles (by name) → can_view only
+      is_org_admin roles              → full access (all flags)
+      Named field / supervisory roles → can_view only
     """
     mod = session.query(Module).filter_by(name="Schedule Compliance").first()
     if not mod:
         print("[WARN] 'Schedule Compliance' module not found — run seed_modules first.")
+        return 0
+
+    if org is None:
+        # Fall back to KPTCL by display_name so the function is safe to call standalone
+        org = session.query(Organization).filter_by(display_name="KPTCL").first()
+    if org is None:
+        print("[WARN] seed_schedule_compliance_module_permissions: KPTCL org not found — skipped.")
         return 0
 
     # Roles that get can_view only (read-only compliance tracker)
@@ -5431,14 +5429,19 @@ def seed_schedule_compliance_module_permissions(session):
         "CEE RT&R&D",
         "Department Head",
         "Workflow Coordinator",
-        "Admin",          # catch-all — also covered by all_module_ids in template
+        "Admin",
         "Org Admin",
     }
 
-    all_org_roles = session.query(OrgRole).filter(OrgRole.is_active.is_(True)).all()
+    # Only roles belonging to the KPTCL org
+    kptcl_roles = (
+        session.query(OrgRole)
+        .filter(OrgRole.organization_id == org.id, OrgRole.is_active.is_(True))
+        .all()
+    )
 
     granted = 0
-    for role in all_org_roles:
+    for role in kptcl_roles:
         is_admin = role.is_org_admin
         is_named = role.name in READONLY_ROLE_NAMES
         if not is_admin and not is_named:
@@ -5483,8 +5486,8 @@ def seed_schedule_compliance_module_permissions(session):
 
     session.commit()
     print(
-        f"[OK] Schedule Compliance: permissions seeded for {len(all_org_roles)} org role(s) "
-        f"({granted} new rows inserted)."
+        f"[OK] Schedule Compliance (KPTCL): permissions seeded for {len(kptcl_roles)} role(s) "
+        f"in org '{org.display_name}' ({granted} new rows inserted)."
     )
     return granted
 
@@ -7291,10 +7294,10 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Schedule module permissions failed (non-fatal): {_e}")
 
-        # Schedule Compliance module — full access for org-admin roles
-        print("\n--- Schedule Compliance Module Permissions ---")
+        # Schedule Compliance module — KPTCL-only (pass kptcl_org to scope it)
+        print("\n--- Schedule Compliance Module Permissions (KPTCL) ---")
         try:
-            seed_schedule_compliance_module_permissions(session)
+            seed_schedule_compliance_module_permissions(session, org=kptcl_org)
         except Exception as _e:
             print(f"[WARN] Schedule Compliance module permissions failed (non-fatal): {_e}")
 
