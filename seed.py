@@ -1398,6 +1398,13 @@ def seed_modules(session):
                 "operational schedules auto-created on equipment commissioning.",
  "path": "testing_schedules",
  "group_name": "Condition Monitoring"},
+# ✅ SCHEDULE COMPLIANCE MODULE
+{"name": "Schedule Compliance",
+ "description": "Visual compliance tracker — shows per-equipment test schedule status "
+                "(overdue, due-imminent, due-soon, ok) with filter by equipment type, "
+                "substation, and compliance band. Accessible to EE TLSS, AEE, org-admin.",
+ "path": "schedule_compliance",
+ "group_name": "Condition Monitoring"},
     ]
 
     module_ids = {}
@@ -2998,8 +3005,9 @@ def seed_role_templates(session):
     testing_request_approvals_module = [mid for mid in [modules_by_name.get("Testing Request Approvals")] if mid]
     recommendations_module   = [mid for mid in [modules_by_name.get("Recommendations")] if mid]
     approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
-    workflows_module         = [mid for mid in [modules_by_name.get("Workflows")] if mid]
-    repair_workflows_module  = [mid for mid in [modules_by_name.get("Repair Workflows")] if mid]
+    workflows_module          = [mid for mid in [modules_by_name.get("Workflows")] if mid]
+    repair_workflows_module   = [mid for mid in [modules_by_name.get("Repair Workflows")] if mid]
+    schedule_compliance_module = [mid for mid in [modules_by_name.get("Schedule Compliance")] if mid]
 
     dashboard_module = [mid for mid in [modules_by_name.get("Dashboard")] if mid]
 
@@ -3068,7 +3076,8 @@ def seed_role_templates(session):
             "permissions_template": (
                 _full(org_modules) +
                 _approve(approvals_module) +
-                _approve(testing_request_approvals_module)
+                _approve(testing_request_approvals_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
         # ── 3. Originator — procurement + testing requests + equipment + repair ─
@@ -3137,7 +3146,8 @@ def seed_role_templates(session):
                 _approve(recommendations_module) +
                 _approve(approvals_module) +
                 _readonly(equipment_module) +
-                _approve(repair_workflows_module)
+                _approve(repair_workflows_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
         # ── 8. Purchaser — procurement + repair view ───────────────────────────
@@ -3181,7 +3191,8 @@ def seed_role_templates(session):
                 _readonly(testing_requests_module) +
                 _approve(approvals_module) +
                 _readonly(recommendations_module) +
-                _readwrite(repair_workflows_module)
+                _readwrite(repair_workflows_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
 
@@ -3200,7 +3211,8 @@ def seed_role_templates(session):
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
                 _readonly(procurement_modules) +
-                _approve(repair_workflows_module)
+                _approve(repair_workflows_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
 
@@ -3218,7 +3230,8 @@ def seed_role_templates(session):
                 _readonly(vendor_documents_module) +
                 _readonly(recommendations_module) +
                 _readonly(testing_requests_module) +
-                _approve(repair_workflows_module)
+                _approve(repair_workflows_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
 
@@ -3235,7 +3248,8 @@ def seed_role_templates(session):
                 _readwrite(testing_requests_module) +
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
-                _readwrite(repair_workflows_module)
+                _readwrite(repair_workflows_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
 
@@ -3256,7 +3270,8 @@ def seed_role_templates(session):
                 _approve(testing_request_approvals_module) +
                 _readonly(vendor_documents_module) +
                 _readonly(equipment_module) +
-                _approve(repair_workflows_module)
+                _approve(repair_workflows_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
 
@@ -3276,7 +3291,8 @@ def seed_role_templates(session):
                 _readonly(procurement_modules) +
                 _readonly(vendor_documents_module) +
                 _readonly(equipment_module) +
-                _approve(repair_workflows_module)
+                _approve(repair_workflows_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
 
@@ -3294,7 +3310,8 @@ def seed_role_templates(session):
                 _readwrite(equipment_module) +
                 _readonly(testing_requests_module) +
                 _readonly(recommendations_module) +
-                _approve(repair_workflows_module)
+                _approve(repair_workflows_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
 
@@ -3309,7 +3326,8 @@ def seed_role_templates(session):
             "permissions_template": (
                 _readwrite(dashboard_module) +
                 _readwrite(repair_workflows_module) +
-                _readonly(testing_requests_module)
+                _readonly(testing_requests_module) +
+                _readonly(schedule_compliance_module)
             ),
         },
 
@@ -5388,6 +5406,89 @@ def seed_schedule_module_permissions(session):
     return granted
 
 
+def seed_schedule_compliance_module_permissions(session):
+    """
+    Grant 'Schedule Compliance' module access to existing OrgRoles across all orgs.
+    Idempotent — inserts missing rows and updates existing ones.
+
+    Access matrix:
+      is_org_admin roles      → full access (can_view + all flags)
+      Field / supervisory roles (by name) → can_view only
+    """
+    mod = session.query(Module).filter_by(name="Schedule Compliance").first()
+    if not mod:
+        print("[WARN] 'Schedule Compliance' module not found — run seed_modules first.")
+        return 0
+
+    # Roles that get can_view only (read-only compliance tracker)
+    READONLY_ROLE_NAMES = {
+        "EE TLSS",
+        "AEE Maintenance",
+        "SEE W&M",
+        "EE RT",
+        "SEE RT",
+        "CEE Transmission Zone",
+        "CEE RT&R&D",
+        "Department Head",
+        "Workflow Coordinator",
+        "Admin",          # catch-all — also covered by all_module_ids in template
+        "Org Admin",
+    }
+
+    all_org_roles = session.query(OrgRole).filter(OrgRole.is_active.is_(True)).all()
+
+    granted = 0
+    for role in all_org_roles:
+        is_admin = role.is_org_admin
+        is_named = role.name in READONLY_ROLE_NAMES
+        if not is_admin and not is_named:
+            continue  # skip roles that shouldn't see this module
+
+        existing = (
+            session.query(OrgRolePermission)
+            .filter_by(org_role_id=role.id, module_id=mod.id)
+            .first()
+        )
+
+        if is_admin:
+            # Full access for org-admin roles
+            if existing:
+                existing.can_view = existing.can_add = existing.can_edit = True
+                existing.can_delete = existing.can_approve = existing.can_assign = True
+                existing.can_export = existing.can_import = True
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mod.id,
+                    can_view=True, can_add=True, can_edit=True,
+                    can_delete=True, can_approve=True, can_assign=True,
+                    can_export=True, can_import=True,
+                ))
+                granted += 1
+        else:
+            # Read-only for field / supervisory roles
+            if existing:
+                existing.can_view = True  # ensure can_view is set at minimum
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mod.id,
+                    can_view=True, can_add=False, can_edit=False,
+                    can_delete=False, can_approve=False, can_assign=False,
+                    can_export=False, can_import=False,
+                ))
+                granted += 1
+
+    session.commit()
+    print(
+        f"[OK] Schedule Compliance: permissions seeded for {len(all_org_roles)} org role(s) "
+        f"({granted} new rows inserted)."
+    )
+    return granted
+
+
 def seed_approval_role_permissions(session):
     """
     Ensure 'Technical Approver' and 'Org Admin' roles have can_view + can_approve
@@ -7189,6 +7290,13 @@ def run_seed():
             seed_schedule_module_permissions(session)
         except Exception as _e:
             print(f"[WARN] Schedule module permissions failed (non-fatal): {_e}")
+
+        # Schedule Compliance module — full access for org-admin roles
+        print("\n--- Schedule Compliance Module Permissions ---")
+        try:
+            seed_schedule_compliance_module_permissions(session)
+        except Exception as _e:
+            print(f"[WARN] Schedule Compliance module permissions failed (non-fatal): {_e}")
 
         # Approval module permissions — Technical Approver + Org Admin across all orgs
         # Grants can_view + can_approve on Approvals (module 48) and
