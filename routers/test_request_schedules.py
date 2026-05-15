@@ -311,6 +311,7 @@ def run_now(
         db=db,
         schedule=schedule,
         now=svc._utc_now(),
+        force_run=True,
     )
 
 

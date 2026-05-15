@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -61,10 +62,14 @@ _WIZARD_ACTION = {
     "Procurement": NextActionType.replacement,
 }
 _WIZARD_FREQ = {
-    "Monthly":   ScheduleFrequency.monthly,
-    "Quarterly": ScheduleFrequency.quarterly,
-    "Bi-Annual": ScheduleFrequency.semi_annual,
-    "Yearly":    ScheduleFrequency.yearly,
+    "daily":       ScheduleFrequency.daily,
+    "weekly":      ScheduleFrequency.weekly,
+    "biweekly":    ScheduleFrequency.biweekly,
+    "monthly":     ScheduleFrequency.monthly,
+    "quarterly":   ScheduleFrequency.quarterly,
+    "semi_annual": ScheduleFrequency.semi_annual,
+    "yearly":      ScheduleFrequency.yearly,
+    "triennial":   ScheduleFrequency.triennial,
 }
 
 
@@ -139,7 +144,7 @@ class DirectSubmissionService:
 
         # ── TestingRequest ────────────────────────────────────────────────────
         initial_status = (
-            TestingRequestStatus.submitted
+            TestingRequestStatus.under_approval  # FR goes straight to Tech Approver queue
             if category == RequestCategory.failure_registry
             else TestingRequestStatus.under_approval
         )
@@ -190,6 +195,7 @@ class DirectSubmissionService:
             recommendation_type=rec_type,
             next_action=next_action,
             schedule_frequency=sched_freq,
+            test_types=_td.get("test_types") or None,
             replacement_products=repl_prods,
             summary=summary,
             detailed_notes=detailed,
@@ -209,12 +215,14 @@ class DirectSubmissionService:
                     "id":                  str(rec.id),
                     "recommendation_type": _td.get("recommendation_type"),
                     "next_action":         _td.get("next_action"),
+                    "test_types":          _td.get("test_types", []),
                     "schedule_frequency":  _td.get("outcome_frequency"),
                     "summary":             summary,
                     "notes":               detailed,
                     "replacement_products": repl_prods,
                 },
             }
+            flag_modified(req, "form_data")
 
         # ── TAQC: TestResult (form data lives here for TAQC) ─────────────────
         result = None
@@ -255,37 +263,10 @@ class DirectSubmissionService:
     def _get_user_scope(self, user: User):
         """
         Return (is_org_admin: bool, department_id: UUID | None).
-        Mirrors the scope logic used by testing_request_service so that
-        direct-submission lists are dept-filtered consistently.
+        Delegates to shared get_user_dept_scope() in utils.common_service.
         """
-        is_org_admin = (
-            self.db.query(OrgRole)
-            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
-            .filter(
-                OrgUserRole.user_id == user.id,
-                OrgUserRole.is_active.is_(True),
-                OrgRole.is_org_admin.is_(True),
-            )
-            .first()
-        ) is not None
-
-        if is_org_admin:
-            return True, None
-
-        user_dept_role = (
-            self.db.query(OrgUserRole)
-            .filter(
-                OrgUserRole.user_id == user.id,
-                OrgUserRole.is_active.is_(True),
-                OrgUserRole.department_id.isnot(None),
-            )
-            .first()
-        )
-        if user_dept_role and user_dept_role.department_id:
-            return False, user_dept_role.department_id
-
-        # Fallback to user.department_id
-        return False, user.department_id
+        from utils.common_service import get_user_dept_scope
+        return get_user_dept_scope(self.db, user.id, None)
 
     def list_submissions(
         self,

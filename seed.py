@@ -3055,14 +3055,21 @@ def seed_role_templates(session):
             "default_module_id": admin_dashboard_module_id,
             "permissions_template": _full(all_module_ids),
         },
-        # ── 2. Org Admin — manages org structure only ─────────────────────────
+        # ── 2. Org Admin — manages org structure + approvals ──────────────────
         {
             "name": "Org Admin",
-            "description": "Manages organization structure: users, roles, and departments. No access to testing or procurement.",
+            "description": (
+                "Manages organization structure: users, roles, and departments. "
+                "Also reviews and approves Failure Registry recommendations."
+            ),
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": _full(org_modules),
+            "permissions_template": (
+                _full(org_modules) +
+                _approve(approvals_module) +
+                _approve(testing_request_approvals_module)
+            ),
         },
         # ── 3. Originator — procurement + testing requests + equipment + repair ─
         {
@@ -3303,6 +3310,24 @@ def seed_role_templates(session):
                 _readwrite(dashboard_module) +
                 _readwrite(repair_workflows_module) +
                 _readonly(testing_requests_module)
+            ),
+        },
+
+        # ── 18. Technical Approver — reviews FR recommendations / triggers dispatch ─
+        {
+            "name": "Technical Approver",
+            "description": (
+                "Reviews and approves Failure Registry recommendations. "
+                "Triggers WorkflowDispatchService to create test schedules, "
+                "repair workflows, or procurement requests."
+            ),
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": see_dashboard_module_id,
+            "permissions_template": (
+                _approve(approvals_module) +
+                _approve(testing_request_approvals_module)
             ),
         },
     ]
@@ -5363,6 +5388,93 @@ def seed_schedule_module_permissions(session):
     return granted
 
 
+def seed_approval_role_permissions(session):
+    """
+    Ensure 'Technical Approver' and 'Org Admin' roles have can_view + can_approve
+    on the 'Approvals' and 'Testing Request Approvals' modules across every org.
+
+    Idempotent — inserts missing rows and updates existing ones so re-running
+    seed.py always brings permissions to the correct state.
+
+    Equivalent to running this SQL once per org:
+        INSERT INTO public.org_role_permissions
+            (id, org_role_id, module_id,
+             can_view, can_add, can_edit, can_delete,
+             can_approve, can_assign, can_export, can_import)
+        VALUES
+            (gen_random_uuid(), '<tech_approver_role_id>', <approvals_mod_id>,
+             true, false, false, false, true, true, true, false),
+            (gen_random_uuid(), '<tech_approver_role_id>', <tr_approvals_mod_id>,
+             true, false, false, false, true, true, true, false),
+            (gen_random_uuid(), '<org_admin_role_id>',    <approvals_mod_id>,
+             true, false, false, false, true, true, true, false),
+            (gen_random_uuid(), '<org_admin_role_id>',    <tr_approvals_mod_id>,
+             true, false, false, false, true, true, true, false)
+        ON CONFLICT (org_role_id, module_id) DO NOTHING;
+    """
+    approvals_mod = session.query(Module).filter_by(path="approvals", is_active=True).first()
+    tr_approvals_mod = session.query(Module).filter_by(path="testing_request_approvals", is_active=True).first()
+
+    if not approvals_mod:
+        print("[WARN] seed_approval_role_permissions: 'Approvals' module not found — skipping")
+        return 0
+    if not tr_approvals_mod:
+        print("[WARN] seed_approval_role_permissions: 'Testing Request Approvals' module not found — skipping")
+        return 0
+
+    target_role_names = ["Technical Approver", "Org Admin"]
+    target_modules = [approvals_mod, tr_approvals_mod]
+
+    inserted = 0
+    updated = 0
+
+    for role_name in target_role_names:
+        roles = session.query(OrgRole).filter_by(name=role_name, is_active=True).all()
+        for role in roles:
+            for mod in target_modules:
+                existing = (
+                    session.query(OrgRolePermission)
+                    .filter_by(org_role_id=role.id, module_id=mod.id)
+                    .first()
+                )
+                if existing:
+                    # Ensure correct values even if row was created without approve
+                    changed = False
+                    if not existing.can_view:
+                        existing.can_view = True; changed = True
+                    if not existing.can_approve:
+                        existing.can_approve = True; changed = True
+                    if changed:
+                        updated += 1
+                else:
+                    session.add(OrgRolePermission(
+                        id=uuid.uuid4(),
+                        org_role_id=role.id,
+                        module_id=mod.id,
+                        can_view=True,
+                        can_add=False,
+                        can_edit=False,
+                        can_delete=False,
+                        can_approve=True,
+                        can_assign=True,
+                        can_export=True,
+                        can_import=False,
+                    ))
+                    inserted += 1
+                    print(
+                        f"  [+] Granted: {role_name} "
+                        f"(org={role.organization_id}) → {mod.name}"
+                    )
+
+    session.commit()
+    print(
+        f"[OK] Approval role permissions: "
+        f"{inserted} row(s) inserted, {updated} row(s) updated "
+        f"across {len(target_role_names)} role name(s)."
+    )
+    return inserted
+
+
 def seed_master_schedules(session, org):
     """Create master TestRequestSchedule rows for all 6 equipment types."""
     from datetime import timezone
@@ -7078,6 +7190,15 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Schedule module permissions failed (non-fatal): {_e}")
 
+        # Approval module permissions — Technical Approver + Org Admin across all orgs
+        # Grants can_view + can_approve on Approvals (module 48) and
+        # Testing Request Approvals (module 49) so the FR 2-step flow works.
+        print("\n--- Approval Role Permissions (FR flow) ---")
+        try:
+            seed_approval_role_permissions(session)
+        except Exception as _e:
+            print(f"[WARN] Approval role permissions failed (non-fatal): {_e}")
+
         # Zoho Import Mapping (after KPTCL org + departments exist)
         seed_zoho_import_mapping(session, kptcl_org)
         seed_notifications_module_and_permissions(session)
@@ -7572,6 +7693,20 @@ def seed_workflow(session):
     }
     CODE_TO_NAME = {v: k for k, v in NAME_TO_CODE.items()}
 
+    # Default contractual duration (calendar days) per stage — used for Work Award pre-fill
+    DEFAULT_DURATION_DAYS = {
+        "FAILURE_REPORT":   3,
+        "COMMITTEE_REVIEW": 2,
+        "VENDOR_ASSIGNMENT": 1,
+        "LIFTING":           1,
+        "JOINT_INSPECTION":  2,
+        "ESTIMATE":          3,
+        "QA":                3,
+        "FINAL_INSPECTION":  2,
+        "DISPATCH":          1,
+        "COMMISSIONING":     2,
+    }
+
     # ── 0. Workflow definition ────────────────────────────────────────────────
     wf_def = session.query(RepairWorkflowDefinition).filter_by(workflow_code="BREAKDOWN").first()
     if not wf_def:
@@ -7610,9 +7745,12 @@ def seed_workflow(session):
         name = s["name"]
         code = NAME_TO_CODE.get(name, name.upper().replace(" ", "_"))
         existing = session.query(RepairStageDefinition).filter_by(code=code).first()
+        duration = DEFAULT_DURATION_DAYS.get(code)
         if existing:
             if existing.workflow_definition_id != wf_def.id:
                 existing.workflow_definition_id = wf_def.id
+            if duration is not None and existing.default_duration_days != duration:
+                existing.default_duration_days = duration
             stage_map[name] = existing.id
             code_map[code]  = existing.id
             continue
@@ -7625,6 +7763,7 @@ def seed_workflow(session):
             is_active=True,
             is_mandatory=True,
             workflow_definition_id=wf_def.id,
+            default_duration_days=duration,
         )
         session.add(stage)
         session.flush()

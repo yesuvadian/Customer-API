@@ -309,7 +309,11 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
                 start_date=now,
 
-                next_run_date=_advance_date(now, template.frequency),
+                # Set next_run_date = now so the trigger check in
+                # create_one_ticket passes immediately on commissioning.
+                # create_one_ticket will advance it to now + frequency
+                # after the first ticket is created.
+                next_run_date=now,
 
                 end_date=template.end_date,
 
@@ -353,6 +357,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         db: Session,
         schedule: TestRequestSchedule,
         now: datetime,
+        force_run: bool = False,
     ) -> bool:
 
         from services.testing_request_service import (
@@ -395,8 +400,8 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     days=schedule.advance_days
                 )
             )
-
-            if now.date() < trigger_date.date():
+            if not force_run:        
+             if now.date() < trigger_date.date():
                 return False
 
             existing_generated = (
@@ -549,6 +554,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         except Exception as e:
 
             db.rollback()
+            print("RUN NOW ERROR:", str(e))
 
             log_entry = TestRequestScheduleLog(
                 schedule_id=schedule.id,

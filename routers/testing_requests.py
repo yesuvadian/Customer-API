@@ -13,7 +13,8 @@ from schemas import (
     TestingRequestAssign,
     TestingRequestResponse,
 )
-from services.testing_request_service import TestingRequestService, get_dept_subtree_ids
+from services.testing_request_service import TestingRequestService
+from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
 
 router = APIRouter(
     prefix="/testing_requests",

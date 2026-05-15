@@ -28,6 +28,19 @@ def create_user(user: schemas.UserRegistor, db: Session = Depends(get_db)):
 def read_current_user(current_user: schemas.User = Depends(get_current_user)):
     return current_user
 
+@router.post("/logout", status_code=status.HTTP_200_OK, response_model=None)
+def logout_user(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    refresh_token: str | None = None
+):
+    """
+    Logout the current user by revoking sessions via UserService.
+    """
+    revoked_count = user_service_instance.logout_user(db, current_user.id, refresh_token)
+    return {"detail": f"Logged out ({revoked_count} session(s) revoked)"}
+
+
 @router.get("/{user_id}", response_model=schemas.User)
 def read_user(user_id: str, db: Session = Depends(get_db)):
     """Fetch a user by ID."""
@@ -58,22 +71,6 @@ def delete_user_endpoint(user_id: str, db: Session = Depends(get_db)):
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
     return db_user
-
-@router.post("/logout", status_code=status.HTTP_200_OK, response_model=None)
-def logout_user(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-    refresh_token: str | None = None
-):
-    """
-    Logout the current user by revoking sessions via UserService.
-    """
-    revoked_count = user_service_instance.logout_user(db, current_user.id, refresh_token)
-
-    if revoked_count == 0:
-        raise HTTPException(status_code=404, detail="No active session found")
-
-    return {"detail": f"{revoked_count} session(s) successfully logged out"}
 
 @router.get("/filter_by_product_search/", response_model=list[schemas.User])
 def filter_users_by_product_details(
