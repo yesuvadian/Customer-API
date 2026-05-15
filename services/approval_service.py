@@ -325,8 +325,10 @@ class ApprovalService:
                 print(f"[WARN] recommendation_approved notification failed: {_n}")
 
         # ── next_action dispatch (new flow) ───────────────────────────────────
+        # Always dispatch — even next_action=none needs the dispatch service to
+        # close/complete the TestingRequest (FR: closed, TAQC: commissioned).
         dispatch_result = {}
-        if request and rec.next_action is not None and rec.next_action != NextActionType.none:
+        if request:
             try:
                 from services.workflow_dispatch_service import WorkflowDispatchService
                 dispatch_result = WorkflowDispatchService(self.db).dispatch(request, rec, approver_id)
@@ -496,10 +498,14 @@ class ApprovalService:
         rec.approval_notes = notes
         rec.modified_by = approver_id
 
-        # Move TR to under_review so tester can revise and resubmit
+        # For FR records, rejection is final → set rejected.
+        # For standard TRs, move to under_review so the tester can revise and resubmit.
         request = self.db.query(TestingRequest).filter(TestingRequest.id == rec.testing_request_id).first()
         if request:
-            request.status = TestingRequestStatus.under_review
+            if request.request_category == RequestCategory.failure_registry:
+                request.status = TestingRequestStatus.rejected
+            else:
+                request.status = TestingRequestStatus.under_review
             request.rejection_reason = notes
             request.modified_by = approver_id
 

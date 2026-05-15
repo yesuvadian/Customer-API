@@ -363,6 +363,35 @@ def get_tickets_trend(
     return _svc(db, current_user, org_id, dept_id).tickets_created_vs_completed(year=year)
 
 
+# ── Operations charts — combined endpoint (single round-trip) ─────────────
+
+@router.get("/operations-charts")
+def get_operations_charts(
+    year: Optional[int] = Query(None, description="4-digit year, defaults to current year"),
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns both projected-tickets and tickets-trend in a single call so
+    the Flutter client only needs one round-trip to render both charts.
+
+    Response shape:
+    ```json
+    {
+      "projected_tickets": { "year": 2026, "total": 84, "months": [...] },
+      "tickets_trend":     { "year": 2026, "months": [...] }
+    }
+    ```
+    """
+    svc = _svc(db, current_user, org_id, dept_id)
+    return {
+        "projected_tickets": svc.projected_tickets_by_month(year=year),
+        "tickets_trend":     svc.tickets_created_vs_completed(year=year),
+    }
+
+
 # ── Cache invalidation ─────────────────────────────────────────────────────
 
 @router.post("/invalidate-cache")

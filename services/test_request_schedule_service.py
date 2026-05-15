@@ -309,7 +309,11 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
                 start_date=now,
 
-                next_run_date=_advance_date(now, template.frequency),
+                # Set next_run_date = now so the trigger check in
+                # create_one_ticket passes immediately on commissioning.
+                # create_one_ticket will advance it to now + frequency
+                # after the first ticket is created.
+                next_run_date=now,
 
                 end_date=template.end_date,
 
