@@ -29,11 +29,11 @@ from models import (
 # ---------------------------------------------------------------------------
 
 STAGES = [
-    {"code": "OBSERVATION_REPORTING",  "name": "Observation Reporting",  "sequence": 2100},
-    {"code": "OBSERVATION_ASSIGNMENT", "name": "Observation Assignment", "sequence": 2110},
-    {"code": "COMPLIANCE_SUBMISSION",  "name": "Compliance Submission",  "sequence": 2120},
-    {"code": "COMPLIANCE_REVIEW",      "name": "Compliance Review",      "sequence": 2130},
-    {"code": "OBSERVATION_CLOSURE",    "name": "Observation Closure",    "sequence": 2140},
+    {"code": "OBSERVATION_REPORTING",  "name": "Observation Reporting",  "sequence": 2100, "default_duration_days": 3},
+    {"code": "OBSERVATION_ASSIGNMENT", "name": "Observation Assignment", "sequence": 2110, "default_duration_days": 1},
+    {"code": "COMPLIANCE_SUBMISSION",  "name": "Compliance Submission",  "sequence": 2120, "default_duration_days": 7},
+    {"code": "COMPLIANCE_REVIEW",      "name": "Compliance Review",      "sequence": 2130, "default_duration_days": 3},
+    {"code": "OBSERVATION_CLOSURE",    "name": "Observation Closure",    "sequence": 2140, "default_duration_days": 2},
 ]
 
 # (from_code, action, to_code | None for terminal)
@@ -98,11 +98,14 @@ def seed_annual_audit_stages(db) -> int:
     inserted  = 0
 
     for s in STAGES:
+        duration = s.get("default_duration_days")
         existing = db.query(RepairStageDefinition).filter_by(code=s["code"]).first()
         if existing:
-            # Keep name/sequence in sync
+            # Keep name/sequence/duration in sync
             existing.name     = s["name"]
             existing.sequence = s["sequence"]
+            if duration is not None and existing.default_duration_days != duration:
+                existing.default_duration_days = duration
             stage_map[s["name"]] = existing.id
             code_map[s["code"]]  = existing.id
             continue
@@ -114,6 +117,7 @@ def seed_annual_audit_stages(db) -> int:
             weight=20,
             is_active=True,
             is_mandatory=True,
+            default_duration_days=duration,
         )
         db.add(stage)
         db.flush()

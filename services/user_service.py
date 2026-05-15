@@ -104,23 +104,23 @@ class UserService(UTCDateTimeMixin):
             db.commit()
         return db_user
     @staticmethod
-    def logout_user(db: Session, user_id: str, refresh_token: str | None = None) -> int:
+    def logout_user(db: Session, user_id, refresh_token: str | None = None) -> int:
         """
         Revoke active sessions for the user.
         If refresh_token is provided, only that session is revoked.
-        Returns the number of sessions revoked.
+        Returns the number of sessions revoked (0 is valid — idempotent).
         """
         now = UTCDateTimeMixin._utc_now()
 
-        query = db.query(UserSession).filter(UserSession.user_id == user_id)
+        query = db.query(UserSession).filter(
+            UserSession.user_id == user_id,
+            UserSession.revoked_at.is_(None),   # only active sessions
+        )
 
         if refresh_token:
             query = query.filter(UserSession.refresh_token == refresh_token)
 
         sessions = query.all()
-
-        if not sessions:
-            return 0
 
         for session in sessions:
             session.revoked_at = now

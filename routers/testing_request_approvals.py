@@ -261,15 +261,19 @@ def initial_approve_fr(
     current_user: User = Depends(get_current_user)
 ):
     """
-    FR Pass 1 — Test Assigner approves a Failure Registry ticket.
+    FR Pass 1 — Test Assigner reviews and forwards a Failure Registry ticket to
+    the Technical Approver queue.
 
     Side effects:
-    • FR status → approved (terminal for FR)
-    • Auto-creates a new TestingRequest (category=test, status=submitted)
-      in the same department → lands immediately in Test Assigner queue for Pass 2.
+    • FR status → under_approval
+    • The linked Recommendation (approval_status=pending) becomes visible in
+      GET /approvals/pending for the Technical Approver.
+
+    The Technical Approver then approves via PUT /approvals/{rec_id}/approve,
+    which triggers WorkflowDispatchService to create the TestRequestSchedule /
+    RepairWorkflow / ProcurementRequest.
     """
     from models import RequestCategory, TestingRequestStatus
-    from datetime import datetime, timezone
 
     fr = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
     if not fr:
@@ -287,55 +291,21 @@ def initial_approve_fr(
             detail=f"FR must be in 'submitted' state, currently: {fr.status.value}"
         )
 
-    # Mark FR as approved
-    fr.status = TestingRequestStatus.approved
+    fr.status = TestingRequestStatus.under_approval
     fr.modified_by = current_user.id
-    db.flush()
-
-    # Auto-create child TR (category=test) in same dept as approver
-    from sqlalchemy import func
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
-    count = (
-        db.query(func.count(TestingRequest.id))
-        .filter(TestingRequest.request_number.like(f"TR-{today}-%"))
-        .scalar()
-    ) or 0
-    tr_number = f"TR-{today}-{(count + 1):04d}"
-
-    child_tr = TestingRequest(
-        request_number=tr_number,
-        title=f"[Test] {fr.title}",
-        description=(
-            f"Auto-created from Failure Registry approval.\n"
-            f"Source FR: {fr.request_number}"
-        ),
-        request_category=RequestCategory.test,
-        equipment_id=fr.equipment_id,
-        equipment_type_id=fr.equipment_type_id,
-        test_type_id=fr.test_type_id,
-        organization_id=fr.organization_id,
-        department_id=current_user.department_id or fr.department_id,
-        priority=fr.priority or "normal",
-        status=TestingRequestStatus.submitted,
-        source_failure_id=fr.id,
-        originator_id=fr.originator_id,
-        created_by=current_user.id,
-        requested_date=datetime.now(timezone.utc),
-    )
-    db.add(child_tr)
     db.commit()
 
-    print(f"[FR initial-approve] FR {fr.request_number} approved → TR {tr_number} created (dept={child_tr.department_id})")
+    print(f"[FR initial-approve] FR {fr.request_number} → under_approval (by {current_user.id})")
 
     return ApprovalResponse(
         success=True,
-        message=f"FR approved. Test request {tr_number} created and queued for assignment.",
+        message="FR forwarded to Technical Approver queue.",
         testing_request_id=str(fr.id),
         assigned_tester_id=None,
         assigned_tester_email=None,
         new_status=fr.status,
-        child_tr_id=str(child_tr.id),
-        child_tr_number=tr_number,
+        child_tr_id=None,
+        child_tr_number=None,
     )
 
 

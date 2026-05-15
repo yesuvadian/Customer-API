@@ -195,6 +195,8 @@ class RepairStageDefinition(Base):
         index=True,
     )
 
+    default_duration_days = Column(Integer, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
 
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -274,6 +276,11 @@ class RepairWorkflow(Base):
 
     cancelled_at = Column(DateTime)
 
+    work_award_at = Column(DateTime, nullable=True)
+    work_award_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    vendor_name = Column(String(255), nullable=True)
+    contracted_completion = Column(Date, nullable=True)
+
     created_by = Column(
         UUID(as_uuid=True),
         ForeignKey("public.users.id"),
@@ -326,6 +333,11 @@ class RepairWorkflow(Base):
     modifier = relationship(
         "User",
         foreign_keys=[modified_by],
+    )
+
+    work_award_officer = relationship(
+        "User",
+        foreign_keys=[work_award_by],
     )
 
     stage_instances = relationship(
@@ -389,6 +401,13 @@ class RepairStageInstance(Base):
 
     remarks = Column(Text)
 
+    contracted_date = Column(Date, nullable=True)
+    delay_days = Column(Integer, nullable=True)
+    delay_attribution = Column(String(20), nullable=True)
+    delay_reason = Column(Text, nullable=True)
+    delay_attributed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    delay_attributed_at = Column(DateTime, nullable=True)
+
     created_by = Column(
         UUID(as_uuid=True),
         ForeignKey("public.users.id"),
@@ -442,6 +461,11 @@ class RepairStageInstance(Base):
     modifier = relationship(
         "User",
         foreign_keys=[modified_by],
+    )
+
+    delay_attributed_officer = relationship(
+        "User",
+        foreign_keys=[delay_attributed_by],
     )
 
     data_entries = relationship(
@@ -2297,6 +2321,7 @@ class TestingRequest(Base):
 
     # Direct submission (Failure Registry / TA&QC — no tester assignment step)
     is_direct_submission = Column(Boolean, default=False)  # True = filler IS the submitter
+    form_data = Column(JSONB, nullable=True)               # FR: template fields + recommendation snapshot
 
     # Failure Registry → Repair Lifecycle traceability
     # Populated when approve_recommendation() auto-creates a repair_lifecycle TR from an FR- record
@@ -2972,6 +2997,7 @@ class Recommendation(Base):
     # Next action dispatch — set by Tester when submitting result
     next_action = Column(Enum(NextActionType), nullable=True)
     schedule_frequency = Column(Enum(ScheduleFrequency), nullable=True)  # for maintenance/inspection
+    test_types = Column(JSONB, nullable=True)  # [{id, name}] — recommended test types from FR wizard
 
     # Approval
     approval_status = Column(String(20), default="pending")

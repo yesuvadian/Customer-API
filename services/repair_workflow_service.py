@@ -654,6 +654,10 @@ class RepairWorkflowService:
         instance.completed_at = self._utc_now()
         instance.completed_by = user_id
 
+        # Auto-compute delay against contracted_date if Work Award was recorded
+        from services.repair_timeliness_service import RepairTimelinessService
+        RepairTimelinessService(self.db).compute_delay(instance)
+
         self._log_audit(workflow_id, current_stage_id, action_label, user_id, remarks)
 
         transition = (

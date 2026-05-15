@@ -189,7 +189,7 @@ def build_user_privileges(db: Session, user_id) -> dict:
                 "can_import",
                 "can_export",
             ]:
-                filtered_privileges[mod_name][key] |= getattr(priv, key, False)
+                filtered_privileges[mod_name][key] |= bool(getattr(priv, key, None) or False)
     except Exception as e:
         print(f"[INFO] Old role system not available in build_user_privileges: {e}")
         db.rollback()
@@ -235,7 +235,7 @@ def build_user_privileges(db: Session, user_id) -> dict:
                 "can_approve",
                 "can_assign",
             ]:
-                filtered_privileges[mod_name][key] |= getattr(priv, key, False)
+                filtered_privileges[mod_name][key] |= bool(getattr(priv, key, None) or False)
 
     return filtered_privileges
 

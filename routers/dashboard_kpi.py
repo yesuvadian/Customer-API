@@ -37,23 +37,58 @@ router = APIRouter(
 )
 
 
-def _svc(db: Session, current_user: User, org_id: Optional[UUID] = None) -> DashboardService:
-    """Build service scoped to the caller's org (or explicit org_id for multi-org admins)."""
+def _svc(
+    db: Session,
+    current_user: User,
+    org_id: Optional[UUID] = None,
+    dept_id: Optional[UUID] = None,
+) -> DashboardService:
+    """
+    Build a DashboardService scoped to:
+      - org_id  : resolved from user's OrgUserRole if not explicitly supplied
+      - dept_id : resolved from user's OrgUserRole.department_id or User.department_id
+                  then expanded to the full subtree (dept + all descendants)
+
+    Passing dept_id explicitly (e.g. from a query param) overrides the auto-resolved value,
+    allowing admin overrides.
+    """
+    from models import OrgUserRole, OrgRole
+    from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
+
+    # ── Resolve org ────────────────────────────────────────────────────────
     resolved_org = org_id
-    if resolved_org is None:
-        # Use the organisation from the user's first active OrgUserRole
-        from models import OrgUserRole, OrgRole
-        row = (
-            db.query(OrgUserRole)
-            .filter(OrgUserRole.user_id == current_user.id,
-                    OrgUserRole.is_active.is_(True))
-            .first()
-        )
-        if row:
-            role = db.query(OrgRole).filter(OrgRole.id == row.org_role_id).first()
-            if role:
-                resolved_org = role.organization_id
-    return DashboardService(db, org_id=resolved_org)
+    row = (
+        db.query(OrgUserRole)
+        .filter(OrgUserRole.user_id == current_user.id,
+                OrgUserRole.is_active.is_(True))
+        .first()
+    )
+    if resolved_org is None and row:
+        role = db.query(OrgRole).filter(OrgRole.id == row.org_role_id).first()
+        if role:
+            resolved_org = role.organization_id
+
+    # ── Resolve dept via shared utility ───────────────────────────────────
+    # Explicit ?dept_id= param wins (admin override).
+    # Otherwise: get_user_dept_scope resolves OrgUserRole.department_id →
+    # User.department_id → None (org-wide for org admins).
+    resolved_dept = dept_id
+    if resolved_dept is None:
+        is_org_admin, scoped_dept = get_user_dept_scope(db, current_user.id, resolved_org)
+        if not is_org_admin:
+            resolved_dept = scoped_dept
+
+    # ── Expand root dept to full subtree via recursive CTE ────────────────
+    dept_ids = None
+    if resolved_dept:
+        dept_ids = get_dept_subtree_ids(db, resolved_dept)
+
+    return DashboardService(
+        db,
+        org_id=resolved_org,
+        dept_id=resolved_dept,
+        dept_ids=dept_ids,
+    )
 
 
 # ── Role view ──────────────────────────────────────────────────────────────
@@ -61,11 +96,12 @@ def _svc(db: Session, current_user: User, org_id: Optional[UUID] = None) -> Dash
 @router.get("/role-view")
 def get_role_view(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Returns which dashboard view type this user sees and which widgets are permitted."""
-    svc = _svc(db, current_user, org_id)
+    svc = _svc(db, current_user, org_id, dept_id)
     return svc.role_view(current_user.id)
 
 
@@ -74,11 +110,12 @@ def get_role_view(
 @router.get("/kpi")
 def get_kpi_cards(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Return all 6 KPI cards for the current user's role."""
-    return _svc(db, current_user, org_id).all_kpi_cards()
+    return _svc(db, current_user, org_id, dept_id).all_kpi_cards()
 
 
 # ── Overdue tests ──────────────────────────────────────────────────────────
@@ -86,10 +123,11 @@ def get_kpi_cards(
 @router.get("/overdue-tests")
 def get_overdue_tests(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _svc(db, current_user, org_id).overdue_tests_breakdown()
+    return _svc(db, current_user, org_id, dept_id).overdue_tests_breakdown()
 
 
 # ── Active alerts feed ─────────────────────────────────────────────────────
@@ -98,10 +136,11 @@ def get_overdue_tests(
 def get_active_alerts(
     limit: int = Query(10, ge=1, le=50),
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _svc(db, current_user, org_id).active_alerts(limit=limit)
+    return _svc(db, current_user, org_id, dept_id).active_alerts(limit=limit)
 
 
 # ── Flagged equipment ──────────────────────────────────────────────────────
@@ -109,21 +148,39 @@ def get_active_alerts(
 @router.get("/flagged-equipment")
 def get_flagged_equipment(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _svc(db, current_user, org_id).flagged_equipment()
+    return _svc(db, current_user, org_id, dept_id).flagged_equipment()
 
 
 # ── Repair progress ────────────────────────────────────────────────────────
 
-@router.get("/repair-progress")
-def get_repair_progress(
+@router.get("/repair-timeliness")
+def get_repair_timeliness(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _svc(db, current_user, org_id).repair_progress()
+    """
+    Vendor delay summary across all active repair workflows.
+    Returns aggregate counts (total, on_time, delayed, pending_attribution)
+    plus total vendor / KPTCL delay days and a list of problem workflows.
+    Visible to: admin, see_cee.
+    """
+    return _svc(db, current_user, org_id, dept_id).repair_timeliness()
+
+
+@router.get("/repair-progress")
+def get_repair_progress(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _svc(db, current_user, org_id, dept_id).repair_progress()
 
 
 # ── Maintenance overdue ────────────────────────────────────────────────────
@@ -131,10 +188,11 @@ def get_repair_progress(
 @router.get("/maintenance-overdue")
 def get_maintenance_overdue(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _svc(db, current_user, org_id).maintenance_overdue()
+    return _svc(db, current_user, org_id, dept_id).maintenance_overdue()
 
 
 # ── Procurement pipeline ───────────────────────────────────────────────────
@@ -142,10 +200,11 @@ def get_maintenance_overdue(
 @router.get("/procurement")
 def get_procurement(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _svc(db, current_user, org_id).procurement_pipeline()
+    return _svc(db, current_user, org_id, dept_id).procurement_pipeline()
 
 
 # ── Open remediation ───────────────────────────────────────────────────────
@@ -153,10 +212,11 @@ def get_procurement(
 @router.get("/open-remediation")
 def get_open_remediation(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _svc(db, current_user, org_id).open_remediation_list()
+    return _svc(db, current_user, org_id, dept_id).open_remediation_list()
 
 
 # ── Full dashboard (all widgets in one call) ───────────────────────────────
@@ -164,24 +224,27 @@ def get_open_remediation(
 @router.get("/full")
 async def get_full_dashboard(
     org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Single endpoint that returns every widget.
     Flutter calls this once on load — role_view controls which sections to render.
+    dept_id is auto-resolved from the user's OrgUserRole / User profile;
+    pass ?dept_id= explicitly only for admin overrides.
     Optimized to run all widget methods in parallel for better performance.
     """
     from concurrent.futures import ThreadPoolExecutor
     import asyncio
-    
-    svc = _svc(db, current_user, org_id)
+
+    svc = _svc(db, current_user, org_id, dept_id)
     role_info = svc.role_view(current_user.id)
     permitted = set(role_info["permitted_widgets"])
 
     # Run all widget computations in parallel using a thread pool
     loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(max_workers=8)
+    executor = ThreadPoolExecutor(max_workers=12)
     
     tasks = []
     
@@ -196,12 +259,21 @@ async def get_full_dashboard(
         tasks.append(("flagged_equipment", loop.run_in_executor(executor, svc.flagged_equipment)))
     if "repair_progress" in permitted:
         tasks.append(("repair_progress", loop.run_in_executor(executor, svc.repair_progress)))
+    if "repair_timeliness" in permitted:
+        tasks.append(("repair_timeliness", loop.run_in_executor(executor, svc.repair_timeliness)))
     if "maintenance_overdue" in permitted:
         tasks.append(("maintenance_overdue", loop.run_in_executor(executor, svc.maintenance_overdue)))
     if "procurement_pipeline" in permitted:
         tasks.append(("procurement", loop.run_in_executor(executor, svc.procurement_pipeline)))
     if "open_remediation" in permitted:
         tasks.append(("open_remediation", loop.run_in_executor(executor, svc.open_remediation_list)))
+    if "failure_registry" in permitted:
+        tasks.append(("failure_registry", loop.run_in_executor(executor, svc.failure_registry_list)))
+    if "taqc_inspections" in permitted:
+        tasks.append(("taqc_inspections", loop.run_in_executor(executor, svc.taqc_inspections_list)))
+    # Chart widgets — always included regardless of role
+    tasks.append(("projected_tickets", loop.run_in_executor(executor, svc.projected_tickets_by_month)))
+    tasks.append(("tickets_trend", loop.run_in_executor(executor, svc.tickets_created_vs_completed)))
     
     # Await all tasks in parallel
     results = {}
@@ -221,11 +293,74 @@ async def get_full_dashboard(
         "overdue_tests": results.get("overdue_tests", None),
         "active_alerts": results.get("active_alerts", []),
         "flagged_equipment": results.get("flagged_equipment", []),
-        "repair_progress":   results.get("repair_progress", []),
+        "repair_progress":    results.get("repair_progress", []),
+        "repair_timeliness":  results.get("repair_timeliness", None),
         "maintenance_overdue": results.get("maintenance_overdue", None),
         "procurement":       results.get("procurement", None),
         "open_remediation":  results.get("open_remediation", None),
+        "failure_registry":  results.get("failure_registry", None),
+        "taqc_inspections":  results.get("taqc_inspections", None),
+        "projected_tickets": results.get("projected_tickets", None),
+        "tickets_trend":     results.get("tickets_trend", None),
     }
+
+
+# ── Projected tickets by month ─────────────────────────────────────────────
+
+@router.get("/projected-tickets")
+def get_projected_tickets(
+    year: Optional[int] = Query(None, description="4-digit year, defaults to current year"),
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Project how many operational schedule tickets will fire each month of the year.
+
+    Uses every active operational schedule (equipment_id IS NOT NULL) and walks
+    their frequency forward from next_run_date to count projected tickets per month.
+
+    Response shape:
+    ```json
+    {
+      "year": 2026,
+      "total": 84,
+      "months": [
+        {"month": 1, "label": "Jan", "count": 12, "by_category": {"maintenance": 8, "test": 4}},
+        ...
+      ]
+    }
+    ```
+    """
+    return _svc(db, current_user, org_id, dept_id).projected_tickets_by_month(year=year)
+
+
+# ── Created vs Completed month-wise ────────────────────────────────────────
+
+@router.get("/tickets-trend")
+def get_tickets_trend(
+    year: Optional[int] = Query(None, description="4-digit year, defaults to current year"),
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Month-by-month bar chart data: tickets created vs tickets completed.
+
+    Response shape:
+    ```json
+    {
+      "year": 2026,
+      "months": [
+        {"month": 1, "label": "Jan", "created": 8, "completed": 5},
+        ...
+      ]
+    }
+    ```
+    """
+    return _svc(db, current_user, org_id, dept_id).tickets_created_vs_completed(year=year)
 
 
 # ── Cache invalidation ─────────────────────────────────────────────────────

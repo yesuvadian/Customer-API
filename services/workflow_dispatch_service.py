@@ -84,33 +84,36 @@ class WorkflowDispatchService:
                 self.db.commit()
 
         elif action == NextActionType.maintenance:
-            number = self._create_schedule(tr, rec, approver_id,
-                                           category=RequestCategory.maintenance)
+            numbers = self._create_schedules_for_action(
+                tr, rec, approver_id, category=RequestCategory.maintenance
+            )
             tr.status = TestingRequestStatus.outcome_active
             tr.completed_at = datetime.now(timezone.utc)
             tr.modified_by = approver_id
             self.db.commit()
-            result["created"] = number
+            result["created"] = numbers
             result["status"] = "outcome_active"
 
         elif action == NextActionType.inspection:
-            number = self._create_schedule(tr, rec, approver_id,
-                                           category=RequestCategory.inspection)
+            numbers = self._create_schedules_for_action(
+                tr, rec, approver_id, category=RequestCategory.inspection
+            )
             tr.status = TestingRequestStatus.outcome_active
             tr.completed_at = datetime.now(timezone.utc)
             tr.modified_by = approver_id
             self.db.commit()
-            result["created"] = number
+            result["created"] = numbers
             result["status"] = "outcome_active"
 
         elif action == NextActionType.test:
-            number = self._create_schedule(tr, rec, approver_id,
-                                           category=RequestCategory.test)
+            numbers = self._create_schedules_for_action(
+                tr, rec, approver_id, category=RequestCategory.test
+            )
             tr.status = TestingRequestStatus.outcome_active
             tr.completed_at = datetime.now(timezone.utc)
             tr.modified_by = approver_id
             self.db.commit()
-            result["created"] = number
+            result["created"] = numbers
             result["status"] = "outcome_active"
 
         elif action == NextActionType.repair_cycle:
@@ -207,12 +210,36 @@ class WorkflowDispatchService:
             print(f"[Dispatch] WARN: equipment commissioning failed for TR {tr.request_number}: {e}")
             return None
 
+    def _create_schedules_for_action(
+        self,
+        tr: TestingRequest,
+        rec: Recommendation,
+        approver_id: UUID,
+        category: RequestCategory,
+    ) -> list[str]:
+        """
+        Create one operational schedule per recommended test type.
+        Falls back to tr.test_type_id (single) when no test_types list is present.
+        Returns list of schedule ids/numbers created.
+        """
+        test_types: list[dict] = rec.test_types or []
+        if test_types:
+            return [
+                self._create_schedule(tr, rec, approver_id, category=category,
+                                      test_type_id=int(t["id"]) if t.get("id") is not None else None)
+                for t in test_types
+            ]
+        # Legacy / TAQC path — single test_type_id on the TR
+        return [self._create_schedule(tr, rec, approver_id, category=category,
+                                      test_type_id=tr.test_type_id)]
+
     def _create_schedule(
         self,
         tr: TestingRequest,
         rec: Recommendation,
         approver_id: UUID,
         category: RequestCategory,
+        test_type_id: Optional[int] = None,
     ) -> str:
         """
         Create an operational TestRequestSchedule for recurring work triggered by
@@ -238,12 +265,34 @@ class WorkflowDispatchService:
             )
             return ""
 
+        # Guard: test_type_id is NOT NULL in test_request_schedules
+        if test_type_id is None:
+            print(
+                f"[Dispatch] WARN: cannot create operational schedule for TR "
+                f"{tr.request_number} — test_type_id is None (no test type on rec.test_types or TR)"
+            )
+            return ""
+
+        # Resolve equipment_type_id — FR TRs don't carry this directly; load from Equipment
+        equipment_type_id = tr.equipment_type_id
+        if not equipment_type_id:
+            from models import Equipment as _Equip
+            eq = self.db.query(_Equip).filter(_Equip.id == tr.equipment_id).first()
+            equipment_type_id = eq.equipment_type_id if eq else None
+
+        if not equipment_type_id:
+            print(
+                f"[Dispatch] WARN: cannot create operational schedule for TR "
+                f"{tr.request_number} — equipment_type_id is None"
+            )
+            return ""
+
         # Idempotency: don't create duplicate schedule for same equipment + test type
         existing = (
             self.db.query(TestRequestSchedule)
             .filter(
                 TestRequestSchedule.equipment_id == tr.equipment_id,
-                TestRequestSchedule.test_type_id == tr.test_type_id,
+                TestRequestSchedule.test_type_id == test_type_id,
                 TestRequestSchedule.is_deleted == False,
             )
             .first()
@@ -252,7 +301,7 @@ class WorkflowDispatchService:
             print(
                 f"[Dispatch] Operational schedule already exists "
                 f"(id={existing.id}) for equipment {tr.equipment_id} "
-                f"test_type {tr.test_type_id} — skipping create"
+                f"test_type {test_type_id} — skipping create"
             )
             return str(existing.id)
 
@@ -263,8 +312,8 @@ class WorkflowDispatchService:
 
         schedule = TestRequestSchedule(
             equipment_id=tr.equipment_id,
-            equipment_type_id=tr.equipment_type_id,
-            test_type_id=tr.test_type_id,
+            equipment_type_id=equipment_type_id,
+            test_type_id=test_type_id,
             organization_id=tr.organization_id,
             title=tr.title,
             request_category=category,
