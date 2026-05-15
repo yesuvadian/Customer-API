@@ -45,7 +45,6 @@ from models import (
 )
 
 UPLOAD_DIR = os.path.join("uploads", "repair")
-REPAIR_WORKFLOW_CODE = "BREAKDOWN"
 
 
 class RepairWorkflowService:
@@ -59,33 +58,6 @@ class RepairWorkflowService:
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc)
-
-    def _get_workflow_definition(self, workflow_code: str) -> RepairWorkflowDefinition:
-        defn = (
-            self.db.query(RepairWorkflowDefinition)
-            .filter(
-                RepairWorkflowDefinition.workflow_code == workflow_code,
-                RepairWorkflowDefinition.is_active.is_(True),
-            )
-            .first()
-        )
-        if not defn:
-            raise ValueError(
-                f"No active workflow definition found for code '{workflow_code}'. "
-                "Run the migration and seed scripts first."
-            )
-        return defn
-
-    def _get_stages_for_definition(self, workflow_definition_id) -> list:
-        return (
-            self.db.query(RepairStageDefinition)
-            .filter(
-                RepairStageDefinition.workflow_definition_id == workflow_definition_id,
-                RepairStageDefinition.is_active.is_(True),
-            )
-            .order_by(RepairStageDefinition.sequence)
-            .all()
-        )
 
     def _user_org_role_ids(self, user_id: UUID) -> list:
         rows = (
@@ -407,22 +379,47 @@ class RepairWorkflowService:
                 "An active repair workflow already exists for this equipment."
             )
 
-        wf_def = self._get_workflow_definition(REPAIR_WORKFLOW_CODE)
-        stages = self._get_stages_for_definition(wf_def.id)
+        # GET WORKFLOW DEFINITION
+        workflow_definition = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter(
+                RepairWorkflowDefinition.workflow_code
+                == "BREAKDOWN"
+            )
+            .first()
+        )
+
+        if not workflow_definition:
+            raise ValueError(
+                "BREAKDOWN workflow definition not found."
+            )
+
+        # GET ONLY BREAKDOWN STAGES
+        stages = (
+            self.db.query(RepairStageDefinition)
+            .filter(
+                RepairStageDefinition.workflow_definition_id
+                == workflow_definition.id,
+                RepairStageDefinition.is_active.is_(True),
+            )
+            .order_by(RepairStageDefinition.sequence)
+            .all()
+        )
 
         if not stages:
             raise ValueError(
-                f"No active stages found for workflow definition '{REPAIR_WORKFLOW_CODE}'. "
-                "Run seed.py (seed_workflow) and the backfill script first."
+                "No active BREAKDOWN stages found."
             )
 
         first_stage = stages[0]
 
-        # GENERATE NUMBER
+        # GENERATE WORKFLOW NUMBER
         workflow_number = self.generate_workflow_number()
 
+        # CREATE WORKFLOW
         workflow = RepairWorkflow(
             workflow_number=workflow_number,
+            workflow_code="BREAKDOWN",
             equipment_id=equipment_id,
             source_failure_id=source_failure_id,
             current_stage_id=first_stage.id,
@@ -438,7 +435,7 @@ class RepairWorkflowService:
 
         first_stage_instance = None
 
-        # Create stage instances
+        # CREATE STAGE INSTANCES
         for s in stages:
 
             is_first = s.id == first_stage.id
@@ -465,7 +462,7 @@ class RepairWorkflowService:
             else None
         )
 
-        # Assignment queue
+        # CREATE ASSIGNMENT QUEUE
         self.db.add(
             RepairAssignmentQueue(
                 workflow_id=workflow.id,
@@ -474,12 +471,13 @@ class RepairWorkflowService:
             )
         )
 
-        # Equipment status update
+        # UPDATE EQUIPMENT STATUS
         equipment.status = EquipmentStatus.under_repair
 
         self.db.commit()
         self.db.refresh(workflow)
 
+        # LOG AUDIT
         self._log_audit(
             workflow.id,
             first_stage.id,
@@ -653,10 +651,6 @@ class RepairWorkflowService:
         instance.status = "completed"
         instance.completed_at = self._utc_now()
         instance.completed_by = user_id
-
-        # Auto-compute delay against contracted_date if Work Award was recorded
-        from services.repair_timeliness_service import RepairTimelinessService
-        RepairTimelinessService(self.db).compute_delay(instance)
 
         self._log_audit(workflow_id, current_stage_id, action_label, user_id, remarks)
 
@@ -942,26 +936,11 @@ class RepairWorkflowService:
             raise ValueError("Workflow not found.")
         result = self._workflow_to_dict(workflow)
 
-        wf_code = workflow.workflow_code or REPAIR_WORKFLOW_CODE
-        try:
-            wf_def = self._get_workflow_definition(wf_code)
-            instances = (
-                self.db.query(RepairStageInstance)
-                .join(RepairStageDefinition, RepairStageDefinition.id == RepairStageInstance.stage_id)
-                .filter(
-                    RepairStageInstance.workflow_id == workflow_id,
-                    RepairStageDefinition.workflow_definition_id == wf_def.id,
-                )
-                .all()
-            )
-        except ValueError:
-            # Definition not yet seeded — fall back so the UI still works before migration runs
-            instances = (
-                self.db.query(RepairStageInstance)
-                .filter(RepairStageInstance.workflow_id == workflow_id)
-                .all()
-            )
-
+        instances = (
+            self.db.query(RepairStageInstance)
+            .filter(RepairStageInstance.workflow_id == workflow_id)
+            .all()
+        )
         stage_details = []
         for inst in instances:
             stage = self.db.query(RepairStageDefinition).filter(
@@ -1548,28 +1527,80 @@ class RepairWorkflowService:
             entry.completed_at = self._utc_now()
 
     def _recalculate_progress(self, workflow: RepairWorkflow) -> None:
+
+        # Get workflow definition using workflow_code
+        workflow_definition = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter(
+                RepairWorkflowDefinition.workflow_code
+                == workflow.workflow_code
+            )
+            .first()
+        )
+
+        if not workflow_definition:
+            workflow.progress = 0
+            return
+
+        # Get only stages belonging to this workflow
         stages = (
             self.db.query(RepairStageDefinition)
-            .filter(RepairStageDefinition.is_active.is_(True))
+            .filter(
+                RepairStageDefinition.workflow_definition_id
+                == workflow_definition.id,
+                RepairStageDefinition.is_active.is_(True),
+            )
+            .order_by(RepairStageDefinition.sequence)
             .all()
         )
-        stage_map = {s.id: s for s in stages}
-        total_weight = sum(s.weight for s in stages)
+
+        if not stages:
+            workflow.progress = 0
+            return
+
+        # Create stage map
+        stage_map = {
+            str(stage.id): stage
+            for stage in stages
+        }
+
+        # Total workflow weight
+        total_weight = sum(
+            stage.weight or 0
+            for stage in stages
+        )
+
         if total_weight == 0:
             workflow.progress = 0
             return
 
+        # Fetch workflow instances
         instances = (
             self.db.query(RepairStageInstance)
-            .filter(RepairStageInstance.workflow_id == workflow.id)
+            .filter(
+                RepairStageInstance.workflow_id
+                == workflow.id
+            )
             .all()
         )
-        completed_weight = sum(
-            stage_map[inst.stage_id].weight
-            for inst in instances
-            if inst.status == "completed" and inst.stage_id in stage_map
+
+        # Calculate completed weight
+        completed_weight = 0
+
+        for inst in instances:
+
+            if (
+                inst.status == "completed"
+                and str(inst.stage_id) in stage_map
+            ):
+                completed_weight += (
+                    stage_map[str(inst.stage_id)].weight or 0
+                )
+
+        # Calculate percentage
+        workflow.progress = int(
+            (completed_weight / total_weight) * 100
         )
-        workflow.progress = int(completed_weight / total_weight * 100)
 
     def _log_audit(
         self,
