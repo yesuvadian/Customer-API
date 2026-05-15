@@ -1608,46 +1608,46 @@ def seed_privileges(session, role_ids, module_ids):
     testing_privileges = [
         # ORIGINATOR — dashboard + procurement + testing requests (no Testing itself)
         {
-            "role": "Originator", "module": "Testing Requests",
+            "role": "Asset Data Officer", "module": "Testing Requests",
             "can_view": True, "can_add": True, "can_edit": True,
             "can_delete": True, "can_search": True, "can_assign": True
         },
         # Removed: Validation Requests privilege (module not implemented)
-        {"role": "Originator", "module": "Dashboard", "can_view": True},
+        {"role": "Asset Data Officer","module": "Dashboard", "can_view": True},
         # Originator — Procurement modules (full add/edit)
-        {"role": "Originator", "module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Originator", "module": "RQ with Vendor",      "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Originator", "module": "Request Product",     "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Originator", "module": "Quotes",              "can_view": True},
-        {"role": "Originator", "module": "Sales Orders",        "can_view": True},
-        {"role": "Originator", "module": "Invoices",            "can_view": True},
-        {"role": "Originator", "module": "Retainer Invoices",   "can_view": True},
-        {"role": "Originator", "module": "Payments Made",       "can_view": True},
-        {"role": "Originator", "module": "Statements",          "can_view": True},
-        {"role": "Originator", "module": "Enquiry",             "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "Contact Us",          "can_view": True},
+        {"role": "Asset Data Officer","module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Asset Data Officer","module": "RQ with Vendor",      "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Asset Data Officer","module": "Request Product",     "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Asset Data Officer","module": "Quotes",              "can_view": True},
+        {"role": "Asset Data Officer","module": "Sales Orders",        "can_view": True},
+        {"role": "Asset Data Officer","module": "Invoices",            "can_view": True},
+        {"role": "Asset Data Officer","module": "Retainer Invoices",   "can_view": True},
+        {"role": "Asset Data Officer","module": "Payments Made",       "can_view": True},
+        {"role": "Asset Data Officer","module": "Statements",          "can_view": True},
+        {"role": "Asset Data Officer","module": "Enquiry",             "can_view": True, "can_add": True},
+        {"role": "Asset Data Officer","module": "Contact Us",          "can_view": True},
 
         # FIELD TESTER — view Testing Requests, full on Testing
-        {"role": "Field Tester", "module": "Testing Requests", "can_view": True},
+        {"role": "Test Engineer", "module": "Testing Requests", "can_view": True},
         {
-            "role": "Field Tester", "module": "Testing",
+            "role": "Test Engineer", "module": "Testing",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
 
         # LAB TESTER — same as Field Tester
-        {"role": "Lab Tester", "module": "Testing Requests", "can_view": True},
+        {"role": "Test Engineer", "module": "Testing Requests", "can_view": True},
         {
-            "role": "Lab Tester", "module": "Testing",
+            "role": "Test Engineer", "module": "Testing",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
 
         # TEST ASSIGNER (Approver) — approve/assign on Testing Request Approvals
         {
-            "role": "Test Assigner", "module": "Testing Request Approvals",
+            "role": "Test & Work Coordinator", "module": "Testing Request Approvals",
             "can_view": True, "can_approve": True, "can_assign": True
         },
-        {"role": "Test Assigner", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "Test Assigner", "module": "Dashboard", "can_view": True},
+        {"role": "Test & Work Coordinator", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Test & Work Coordinator", "module": "Dashboard", "can_view": True},
 
         # DOC-VIEWER — view only for Vendor Documents
         {
@@ -1657,26 +1657,26 @@ def seed_privileges(session, role_ids, module_ids):
         },
 
         # DEPARTMENT HEAD — approve on Recommendations + Approvals
-        {"role": "Department Head", "module": "Dashboard", "can_view": True},
-        {"role": "Department Head", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "Department Head", "module": "Recommendations",
+        {"role": "Reviewing Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Reviewing Officer", "module": "Recommendations",
          "can_view": True, "can_approve": True},
-        {"role": "Department Head", "module": "Approvals",
+        {"role": "Reviewing Officer", "module": "Approvals",
          "can_view": True, "can_approve": True},
 
         # PURCHASER — dashboard + full procurement
-        {"role": "Purchaser", "module": "Dashboard",            "can_view": True},
-        {"role": "Purchaser", "module": "Request Quote",        "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Purchaser", "module": "RQ with Vendor",       "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Purchaser", "module": "Request Product",      "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Purchaser", "module": "Quotes",               "can_view": True},
-        {"role": "Purchaser", "module": "Sales Orders",         "can_view": True},
-        {"role": "Purchaser", "module": "Invoices",             "can_view": True},
-        {"role": "Purchaser", "module": "Retainer Invoices",    "can_view": True},
-        {"role": "Purchaser", "module": "Payments Made",        "can_view": True},
-        {"role": "Purchaser", "module": "Statements",           "can_view": True},
-        {"role": "Purchaser", "module": "Enquiry",              "can_view": True, "can_add": True},
-        {"role": "Purchaser", "module": "Contact Us",           "can_view": True},
+        {"role": "Procurement Officer", "module": "Dashboard",            "can_view": True},
+        {"role": "Procurement Officer", "module": "Request Quote",        "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Procurement Officer", "module": "RQ with Vendor",       "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Procurement Officer", "module": "Request Product",      "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Procurement Officer", "module": "Quotes",               "can_view": True},
+        {"role": "Procurement Officer", "module": "Sales Orders",         "can_view": True},
+        {"role": "Procurement Officer", "module": "Invoices",             "can_view": True},
+        {"role": "Procurement Officer", "module": "Retainer Invoices",    "can_view": True},
+        {"role": "Procurement Officer", "module": "Payments Made",        "can_view": True},
+        {"role": "Procurement Officer", "module": "Statements",           "can_view": True},
+        {"role": "Procurement Officer", "module": "Enquiry",              "can_view": True, "can_add": True},
+        {"role": "Procurement Officer", "module": "Contact Us",           "can_view": True},
 
         # TESTER MAPPING — Admin full, Originator view-only
         {
@@ -1684,148 +1684,148 @@ def seed_privileges(session, role_ids, module_ids):
             "can_view": True, "can_add": True, "can_edit": True,
             "can_delete": True, "can_search": True
         },
-        {"role": "Originator", "module": "Tester Mapping", "can_view": True},
+        {"role": "Asset Data Officer","module": "Tester Mapping", "can_view": True},
 
         # TEST TEMPLATE MANAGEMENT — Admin full (via bulk), Originator view-only
-        {"role": "Originator", "module": "Test Template Management", "can_view": True},
+        {"role": "Asset Data Officer","module": "Test Template Management", "can_view": True},
 
         # ✅ EQUIPMENT ASSET REGISTER — role-based access
         {
-            "role": "Originator", "module": "Equipment",
+            "role": "Asset Data Officer", "module": "Equipment",
             "can_view": True, "can_add": True, "can_edit": True,
             "can_search": True
         },
-        {"role": "Field Tester", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "Lab Tester", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "Test Assigner", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "Department Head", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Test Engineer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Test Engineer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Test & Work Coordinator", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Reviewing Officer", "module": "Equipment", "can_view": True, "can_search": True},
 
         # ✅ SRS DESIGNATION ROLES — Permissions per role hierarchy
         # AEE Maintenance — Field supervisor
-        {"role": "AEE Maintenance", "module": "Dashboard", "can_view": True},
-        {"role": "AEE Maintenance", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True, "can_assign": True},
-        {"role": "AEE Maintenance", "module": "Testing", "can_view": True, "can_add": True},
-        {"role": "AEE Maintenance", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
-        {"role": "AEE Maintenance", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "AEE Maintenance", "module": "Notifications", "can_view": True},
-        {"role": "AEE Maintenance", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Maintenance Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Maintenance Officer", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True, "can_assign": True},
+        {"role": "Maintenance Officer", "module": "Testing", "can_view": True, "can_add": True},
+        {"role": "Maintenance Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "Maintenance Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Maintenance Officer", "module": "Notifications", "can_view": True},
+        {"role": "Maintenance Officer", "module": "Reports", "can_view": True, "can_export": True},
 
         # EE TLSS — Primary reviewer (most critical role)
         # NOTE: Does NOT have Testing Request Approvals access (not applicable for this role)
-        {"role": "EE TLSS", "module": "Dashboard", "can_view": True},
-        {"role": "EE TLSS", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "EE TLSS", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "EE TLSS", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "EE TLSS", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "EE TLSS", "module": "Notifications", "can_view": True},
-        {"role": "EE TLSS", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "EE TLSS", "module": "Request Quote", "can_view": True},
-        {"role": "EE TLSS", "module": "Quotes", "can_view": True},
-        {"role": "EE TLSS", "module": "Sales Orders", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer", "module": "Notifications", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer", "module": "Request Quote", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Quotes", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Sales Orders", "can_view": True},
 
         # SEE W&M — Circle supervisor (equivalent to Test Assigner in SRS)
-        {"role": "SEE W&M", "module": "Dashboard", "can_view": True},
-        {"role": "SEE W&M", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "SEE W&M", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "SEE W&M", "module": "Testing", "can_view": True},
-        {"role": "SEE W&M", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "SEE W&M", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "SEE W&M", "module": "Notifications", "can_view": True},
-        {"role": "SEE W&M", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "SEE W&M", "module": "Request Quote", "can_view": True, "can_add": True},
-        {"role": "SEE W&M", "module": "Quotes", "can_view": True, "can_approve": True},
-        {"role": "SEE W&M", "module": "Vendor Directory", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Supervisory Officer", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Supervisory Officer", "module": "Testing", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Supervisory Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer", "module": "Notifications", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer", "module": "Request Quote", "can_view": True, "can_add": True},
+        {"role": "Supervisory Officer", "module": "Quotes", "can_view": True, "can_approve": True},
+        {"role": "Supervisory Officer", "module": "Vendor Directory", "can_view": True},
 
         # EE RT — Research & Testing engineer
-        {"role": "EE RT", "module": "Dashboard", "can_view": True},
-        {"role": "EE RT", "module": "Testing Requests", "can_view": True, "can_add": True, "can_approve": True, "can_assign": True},
-        {"role": "EE RT", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "EE RT", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
-        {"role": "EE RT", "module": "Test Template Management", "can_view": True, "can_edit": True},
-        {"role": "EE RT", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "EE RT", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Testing Requests", "can_view": True, "can_add": True, "can_approve": True, "can_assign": True},
+        {"role": "Reviewing Officer", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "Reviewing Officer", "module": "Test Template Management", "can_view": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer", "module": "Reports", "can_view": True, "can_export": True},
 
         # SEE RT — Senior Research & Testing
-        {"role": "SEE RT", "module": "Dashboard", "can_view": True},
-        {"role": "SEE RT", "module": "Testing Requests", "can_view": True},
-        {"role": "SEE RT", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True, "can_export": True},
-        {"role": "SEE RT", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "SEE RT", "module": "Test Template Management", "can_view": True, "can_edit": True},
-        {"role": "SEE RT", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "SEE RT", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "SEE RT", "module": "Vendor Directory", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Testing Requests", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True, "can_export": True},
+        {"role": "Supervisory Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Supervisory Officer", "module": "Test Template Management", "can_view": True, "can_edit": True},
+        {"role": "Supervisory Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer", "module": "Vendor Directory", "can_view": True},
 
         # CEE Transmission Zone — Zone management
-        {"role": "CEE Transmission Zone", "module": "Dashboard", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "CEE Transmission Zone", "module": "Testing", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
-        {"role": "CEE Transmission Zone", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "CEE Transmission Zone", "module": "Notifications", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "CEE Transmission Zone", "module": "Request Quote", "can_view": True, "can_approve": True},
-        {"role": "CEE Transmission Zone", "module": "Quotes", "can_view": True, "can_approve": True},
-        {"role": "CEE Transmission Zone", "module": "Sales Orders", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "Vendor Directory", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Dashboard", "can_view": True},
+        {"role": "Senior Management Approver", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Senior Management Approver", "module": "Testing", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver", "module": "Notifications", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver", "module": "Request Quote", "can_view": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Quotes", "can_view": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Sales Orders", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Vendor Directory", "can_view": True},
 
         # CEE RT&R&D — Research & Development chief
-        {"role": "CEE RT&R&D", "module": "Dashboard", "can_view": True},
-        {"role": "CEE RT&R&D", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "CEE RT&R&D", "module": "Testing", "can_view": True},
-        {"role": "CEE RT&R&D", "module": "Testing Request Approvals", "can_view": True},
-        {"role": "CEE RT&R&D", "module": "Test Template Management", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True},
-        {"role": "CEE RT&R&D", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "CEE RT&R&D", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "CEE RT&R&D", "module": "Vendor Directory", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Dashboard", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Senior Management Approver", "module": "Testing", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Testing Request Approvals", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Test Template Management", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True},
+        {"role": "Senior Management Approver", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Senior Management Approver", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver", "module": "Vendor Directory", "can_view": True},
 
         # ✅ EE TLSS DASHBOARD — role-based access
         # All operational roles can view the dashboard; it auto-renders the
         # correct widget set based on the user's OrgRole inside dashboard_service.py.
-        {"role": "Originator",      "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Field Tester",    "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Lab Tester",      "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Test Assigner",   "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Department Head", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Purchaser",       "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Asset Data Officer",     "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Test Engineer",    "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Test Engineer",      "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Test & Work Coordinator",   "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Procurement Officer",       "module": "EE TLSS Dashboard", "can_view": True},
 
         # ✅ NOTIFICATIONS — all active roles can view their own notification centre
-        {"role": "Originator",      "module": "Notifications", "can_view": True},
-        {"role": "Field Tester",    "module": "Notifications", "can_view": True},
-        {"role": "Lab Tester",      "module": "Notifications", "can_view": True},
-        {"role": "Test Assigner",   "module": "Notifications", "can_view": True},
-        {"role": "Department Head", "module": "Notifications", "can_view": True},
-        {"role": "Purchaser",       "module": "Notifications", "can_view": True},
+        {"role": "Asset Data Officer",     "module": "Notifications", "can_view": True},
+        {"role": "Test Engineer",    "module": "Notifications", "can_view": True},
+        {"role": "Test Engineer",      "module": "Notifications", "can_view": True},
+        {"role": "Test & Work Coordinator",   "module": "Notifications", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Notifications", "can_view": True},
+        {"role": "Procurement Officer",       "module": "Notifications", "can_view": True},
         {"role": "Vendor",          "module": "Notifications", "can_view": True},
 
         # ✅ REPORTING SUITE — view + export for all operational roles
-        {"role": "Originator",      "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Field Tester",    "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Lab Tester",      "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Test Assigner",   "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Department Head", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Purchaser",       "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Asset Data Officer",     "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",    "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",      "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Test & Work Coordinator",   "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Procurement Officer",       "module": "Reports", "can_view": True, "can_export": True},
 
         # ✅ FAILURE REGISTRY — Stage 2 (SRS Sec 3.3.3)
         # Accessible to field-level and supervisory roles; TA&QC can also submit.
-        {"role": "AEE Maintenance",         "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "EE TLSS",                 "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "EE RT",                   "module": "Failure Registry", "can_view": True, "can_add": True, "can_search": True},
-        {"role": "SEE W&M",                 "module": "Failure Registry", "can_view": True, "can_search": True},
-        {"role": "SEE RT",                  "module": "Failure Registry", "can_view": True, "can_search": True},
-        {"role": "CEE Transmission Zone",   "module": "Failure Registry", "can_view": True, "can_search": True},
-        {"role": "CEE RT&R&D",             "module": "Failure Registry", "can_view": True, "can_search": True},
-        {"role": "Field Tester",            "module": "Failure Registry", "can_view": True, "can_add": True},
-        {"role": "Lab Tester",              "module": "Failure Registry", "can_view": True, "can_add": True},
+        {"role": "Maintenance Officer",         "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer",                 "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer",                   "module": "Failure Registry", "can_view": True, "can_add": True, "can_search": True},
+        {"role": "Supervisory Officer",                 "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer",                  "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver",   "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver",             "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "Test Engineer",            "module": "Failure Registry", "can_view": True, "can_add": True},
+        {"role": "Test Engineer",              "module": "Failure Registry", "can_view": True, "can_add": True},
 
         # ✅ TA&QC INSPECTIONS — Stage 10 (SRS Sec 6)
         # Restricted to TA&QC Officers and supervisory roles.
-        {"role": "EE RT",                   "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "SEE RT",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "CEE RT&R&D",             "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_approve": True},
-        {"role": "EE TLSS",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
-        {"role": "SEE W&M",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
-        {"role": "CEE Transmission Zone",   "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+        {"role": "Reviewing Officer",                   "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Supervisory Officer",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Senior Management Approver",             "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Reviewing Officer",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver",   "module": "TA&QC Inspections", "can_view": True, "can_search": True},
 
         # ✅ REPAIR WORKFLOWS — Transformer repair lifecycle (10 stages)
         # Stage-level RBAC is enforced in the service layer via RepairStageRole.
@@ -1833,20 +1833,20 @@ def seed_privileges(session, role_ids, module_ids):
         # Config endpoints (PUT /repair-workflows/config/*) require is_org_admin.
 
         # All stage-acting roles: can view + add (save data) + approve (advance/reject)
-        {"role": "AEE Maintenance",         "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Maintenance Officer",         "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
         {"role": "TRC Member",              "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "CEE RT&R&D",             "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "CEE Transmission Zone",   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",             "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
         {"role": "Vendor",                  "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
         {"role": "Inspection Engineer",     "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
         {"role": "Finance Officer",         "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
         {"role": "QA Team",                 "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "EE RT",                   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
-        {"role": "SEE RT",                  "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Reviewing Officer",                   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Supervisory Officer",                  "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
 
         # Supervisory roles: view + export only (no stage actions)
-        {"role": "EE TLSS",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
-        {"role": "SEE W&M",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -3066,13 +3066,17 @@ def seed_role_templates(session):
             "default_module_id": admin_dashboard_module_id,
             "permissions_template": _full(all_module_ids),
         },
-        # ── 2. Org Admin — manages org structure + approvals ──────────────────
+
+        # ════════════════════════════════════════════════════════════════════
+        # NEW FUNCTIONAL ROLES  (KPTCL v2 designation mapping)
+        # Old name kept in rename_from so idempotent re-seed renames in-place.
+        # ════════════════════════════════════════════════════════════════════
+
+        # ── 2. System Administrator (was: Org Admin) ──────────────────────────
         {
-            "name": "Org Admin",
-            "description": (
-                "Manages organization structure: users, roles, and departments. "
-                "Also reviews and approves Failure Registry recommendations."
-            ),
+            "name": "System Administrator",
+            "rename_from": "System Administrator",
+            "description": "Manages organisation structure: users, roles and departments. Reviews and approves Failure Registry recommendations.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3082,9 +3086,11 @@ def seed_role_templates(session):
                 _approve(testing_request_approvals_module)
             ),
         },
-        # ── 3. Originator — procurement + testing requests + equipment + repair ─
+
+        # ── 3. Asset Data Officer (was: Originator) ───────────────────────────
         {
-            "name": "Originator",
+            "name": "Asset Data Officer",
+            "rename_from": "Asset Data Officer",
             "description": "Creates testing requests and raises procurement. Can start repair workflows.",
             "is_org_admin": False,
             "is_dept_admin": False,
@@ -3097,166 +3103,12 @@ def seed_role_templates(session):
                 _readwrite(repair_workflows_module)
             ),
         },
-        # ── 4. Test Assigner (Approver) — testing request approvals + equipment view
-        {
-            "name": "Test Assigner",
-            "description": "Approves testing requests and assigns testers. Access to Testing Request Approvals module and view equipment register.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _approve(testing_request_approvals_module) +
-                _readonly(equipment_module)
-            ),
-        },
-        # ── 5. Field Tester — testing + repair stage execution ────────────────
-        {
-            "name": "Field Tester",
-            "description": "Performs on-site transformer testing and repair stage execution.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _readonly(testing_requests_module) +
-                _readwrite(testing_module) +
-                _readonly(equipment_module) +
-                _readwrite(repair_workflows_module)
-            ),
-        },
-        # ── 6. Lab Tester — lab testing + repair stage execution ──────────────
-        {
-            "name": "Lab Tester",
-            "description": "Performs laboratory testing and repair stage execution.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _readonly(testing_requests_module) +
-                _readwrite(testing_module) +
-                _readonly(equipment_module) +
-                _readwrite(repair_workflows_module)
-            ),
-        },
-        # ── 7. Department Head — recommendations + approvals + repair approve ─
-        {
-            "name": "Department Head",
-            "description": "Reviews and approves recommendations from testers. Can approve repair workflow stages.",
-            "is_org_admin": False,
-            "is_dept_admin": True,
-            "auto_provision": True,
-            "permissions_template": (
-                _approve(recommendations_module) +
-                _approve(approvals_module) +
-                _readonly(equipment_module) +
-                _approve(repair_workflows_module)
-            ),
-        },
-        # ── 8. Purchaser — procurement + repair view ───────────────────────────
-        {
-            "name": "Purchaser",
-            "description": "Manages procurement activities. Read-only access to repair workflows (procurement stage).",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _readwrite(dashboard_module) +
-                _readwrite(procurement_modules) +
-                _readwrite(repair_workflows_module)
-            ),
-        },
 
-        # ── 9. Doc Viewer — verifies uploaded documents ───────────────────────
+        # ── 4. Maintenance Officer (was: AEE Maintenance) ─────────────────────
         {
-            "name": "doc-viewer",
-            "description": "Verifies vendor uploaded documents. Access to Vendor Documents module only.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": _readonly(vendor_documents_module),
-        },
-
-        # ── 9b. Finance Approver — procurement approval queue ─────────────────
-        {
-            "name": "Finance Approver",
-            "description": "Reviews and approves / rejects replacement procurement requests "
-                           "raised after Technical Approver approves a replacement recommendation.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _approve(procurement_approvals_module) +
-                _readonly(dashboard_module)
-            ),
-        },
-
-        # ── 9c. TA&QC Officer — annual inspections ────────────────────────────
-        {
-            "name": "TA&QC Officer",
-            "description": "Technical Assurance & Quality Control Officer. "
-                           "Performs annual substation inspections and records observations.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _readwrite(taqc_inspections_module) +
-                _readonly(failure_registry_module) +
-                _readonly(dashboard_module)
-            ),
-        },
-
-        # ── 9d. Tester — generic testing role ────────────────────────────────
-        {
-            "name": "Tester",
-            "description": "Generic testing role. Can view testing requests and submit test results.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _readonly(testing_requests_module) +
-                _readwrite(testing_module) +
-                _readonly(equipment_module)
-            ),
-        },
-
-        # ── 9e. Section Head — departmental oversight ─────────────────────────
-        {
-            "name": "Section Head",
-            "description": "Section-level supervisor. Reviews failure registry and testing requests "
-                           "within their section.",
-            "is_org_admin": False,
-            "is_dept_admin": True,
-            "auto_provision": True,
-            "permissions_template": (
-                _readonly(testing_requests_module) +
-                _readonly(failure_registry_module) +
-                _readonly(recommendations_module) +
-                _readonly(dashboard_module)
-            ),
-        },
-
-        # ── 9f. Dept Head — department-level admin (alias for Department Head) ─
-        {
-            "name": "Dept Head",
-            "description": "Department-level admin — same access as Department Head.",
-            "is_org_admin": False,
-            "is_dept_admin": True,
-            "auto_provision": True,
-            "permissions_template": (
-                _approve(recommendations_module) +
-                _approve(approvals_module) +
-                _readonly(equipment_module) +
-                _approve(repair_workflows_module)
-            ),
-        },
-
-        # ═══════════════════════════════════════════════════════════════════════════
-        # SRS-SPECIFIED DESIGNATION ROLES (SEACMS-AI v1.3 Section 2.3)
-        # ═══════════════════════════════════════════════════════════════════════════
-
-        # ── 10. AEE Maintenance — Field supervisor + repair stage executor ─────
-        {
-            "name": "AEE Maintenance",
-            "description": "Assistant Executive Engineer - Field-level maintenance responsible officer. Key repair workflow actor.",
+            "name": "Maintenance Officer",
+            "rename_from": "Maintenance Officer",
+            "description": "Field-level maintenance responsible officer. Key repair workflow actor.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3270,64 +3122,69 @@ def seed_role_templates(session):
             ),
         },
 
-        # ── 11. EE TLSS — Primary reviewer + repair stage approver ───────────
+        # ── 5. Test Engineer (was: Field Tester, Lab Tester, Tester) ──────────
         {
-            "name": "EE TLSS",
-            "description": "Executive Engineer - Transmission Line & Substation primary reviewer. Approves repair workflow stages.",
+            "name": "Test Engineer",
+            "rename_from": "Field Tester",
+            "description": "Performs on-site and laboratory transformer testing and repair stage execution.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "default_module_id": ee_tlss_dashboard_module_id,
             "permissions_template": (
-                _readwrite(dashboard_module) +
-                _readwrite(testing_requests_module) +
-                _approve(testing_request_approvals_module) +
-                _readwrite(testing_module) +
-                _readonly(equipment_module) +
-                _readonly(procurement_modules) +
-                _approve(repair_workflows_module)
-            ),
-        },
-
-        # ── 12. SEE W&M — Circle supervisor + repair stage approver ──────────
-        {
-            "name": "SEE W&M",
-            "description": "Superintending Engineer - Works & Maintenance circle supervisor. Approves repair workflow stages.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": see_dashboard_module_id,
-            "permissions_template": (
-                _readonly(dashboard_module) +
-                _approve(approvals_module) +
-                _readonly(vendor_documents_module) +
-                _readonly(recommendations_module) +
                 _readonly(testing_requests_module) +
-                _approve(repair_workflows_module)
-            ),
-        },
-
-        # ── 13. EE RT — R&D engineer + repair stage executor ─────────────────
-        {
-            "name": "EE RT",
-            "description": "Executive Engineer - Research & Testing. Executes repair workflow testing stages.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": ee_tlss_dashboard_module_id,
-            "permissions_template": (
-                _readonly(dashboard_module) +
-                _readwrite(testing_requests_module) +
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
                 _readwrite(repair_workflows_module)
             ),
         },
 
-        # ── 14. SEE RT — Senior R&D + repair stage approver ──────────────────
+        # ── 6. Test & Work Coordinator (was: Test Assigner + AEE duties) ──────
         {
-            "name": "SEE RT",
-            "description": "Superintending Engineer - Research & Testing. Approves repair workflow testing stages.",
+            "name": "Test & Work Coordinator",
+            "rename_from": "Test Assigner",
+            "description": "Approves testing requests, assigns testers, and coordinates field maintenance work.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _approve(testing_request_approvals_module) +
+                _readonly(equipment_module) +
+                _readonly(dashboard_module) +
+                _readonly(testing_requests_module) +
+                _approve(approvals_module) +
+                _readonly(recommendations_module) +
+                _readwrite(repair_workflows_module)
+            ),
+        },
+
+        # ── 7. Reviewing Officer (was: Dept Head, EE RT, EE TLSS, Technical Approver) ─
+        {
+            "name": "Reviewing Officer",
+            "rename_from": "Reviewing Officer",
+            "description": "Reviews and approves recommendations, testing requests and repair workflow stages. Covers EE-level designation responsibilities.",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": True,
+            "default_module_id": ee_tlss_dashboard_module_id,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _approve(approvals_module) +
+                _approve(recommendations_module) +
+                _readwrite(testing_requests_module) +
+                _approve(testing_request_approvals_module) +
+                _readwrite(testing_module) +
+                _readonly(equipment_module) +
+                _readonly(procurement_modules) +
+                _approve(repair_workflows_module) +
+                _readonly(failure_registry_module)
+            ),
+        },
+
+        # ── 8. Supervisory Officer (was: SEE W&M, SEE RT) ─────────────────────
+        {
+            "name": "Supervisory Officer",
+            "rename_from": "Supervisory Officer",
+            "description": "Circle-level supervisor. Approves repair workflow stages. Covers SEE-level designation responsibilities.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3335,7 +3192,7 @@ def seed_role_templates(session):
             "permissions_template": (
                 _readonly(dashboard_module) +
                 _approve(approvals_module) +
-                # Testing Requests: view only — SEE RT is a tester, not an originator
+                _readonly(recommendations_module) +
                 _readonly(testing_requests_module) +
                 _readwrite(testing_module) +
                 _approve(testing_request_approvals_module) +
@@ -3345,10 +3202,11 @@ def seed_role_templates(session):
             ),
         },
 
-        # ── 15. CEE Transmission Zone — Zone management + repair final approver
+        # ── 9. Senior Management Approver (was: CEE RT&R&D, CEE Transmission Zone) ─
         {
-            "name": "CEE Transmission Zone",
-            "description": "Chief Engineer Executive - Transmission zone management. Final approver for repair workflows.",
+            "name": "Senior Management Approver",
+            "rename_from": "Senior Management Approver",
+            "description": "Zone-level management. Final approver for all workflows. Covers CEE-level designation responsibilities.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
@@ -3356,37 +3214,36 @@ def seed_role_templates(session):
             "permissions_template": (
                 _readwrite(dashboard_module) +
                 _approve(approvals_module) +
-                _readonly(recommendations_module) +
-                _readonly(testing_requests_module) +
-                _readonly(procurement_modules) +
-                _readonly(vendor_documents_module) +
-                _readonly(equipment_module) +
-                _approve(repair_workflows_module)
-            ),
-        },
-
-        # ── 16. CEE RT&R&D — R&D chief + repair final approver ───────────────
-        {
-            "name": "CEE RT&R&D",
-            "description": "Chief Engineer Executive - Research Testing & R&D. Final approver for repair workflow R&D stages.",
-            "is_org_admin": False,
-            "is_dept_admin": True,
-            "auto_provision": True,
-            "default_module_id": cee_dashboard_module_id,
-            "permissions_template": (
-                _readonly(dashboard_module) +
                 _full(testing_module) +
                 _readwrite(equipment_module) +
                 _readonly(testing_requests_module) +
+                _readonly(procurement_modules) +
+                _readonly(vendor_documents_module) +
                 _readonly(recommendations_module) +
                 _approve(repair_workflows_module)
             ),
         },
 
-        # ── 17. Workflow Coordinator — assigns users to repair workflow stages ──
+        # ── 10. TA&QC Inspector (was: TA&QC Officer) ──────────────────────────
         {
-            "name": "Workflow Coordinator",
-            "description": "Assigns users to transformer repair workflow stages and manages the assignment queue",
+            "name": "TA&QC Inspector",
+            "rename_from": "TA&QC Inspector",
+            "description": "Technical Assurance & Quality Control Inspector. Performs annual substation inspections.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite(taqc_inspections_module) +
+                _readonly(failure_registry_module) +
+                _readonly(dashboard_module)
+            ),
+        },
+
+        # ── 11. Transformer Repair Coordinator (was: Workflow Coordinator) ─────
+        {
+            "name": "Transformer Repair Coordinator",
+            "rename_from": "Transformer Repair Coordinator",
+            "description": "Assigns users to transformer repair workflow stages and manages the assignment queue.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3398,22 +3255,78 @@ def seed_role_templates(session):
             ),
         },
 
-        # ── 18. Technical Approver — reviews FR recommendations / triggers dispatch ─
+        # ── 12. Procurement Officer (was: Purchaser) ──────────────────────────
         {
-            "name": "Technical Approver",
-            "description": (
-                "Reviews and approves Failure Registry recommendations. "
-                "Triggers WorkflowDispatchService to create test schedules, "
-                "repair workflows, or procurement requests."
-            ),
+            "name": "Procurement Officer",
+            "rename_from": "Procurement Officer",
+            "description": "Manages procurement activities. Read-only access to repair workflows.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "default_module_id": see_dashboard_module_id,
             "permissions_template": (
-                _approve(approvals_module) +
-                _approve(testing_request_approvals_module)
+                _readwrite(dashboard_module) +
+                _readwrite(procurement_modules) +
+                _readwrite(repair_workflows_module)
             ),
+        },
+
+        # ── 13. Procurement Approver (was: Finance Approver) ──────────────────
+        {
+            "name": "Procurement Approver",
+            "rename_from": "Procurement Approver",
+            "description": "Reviews and approves replacement procurement requests.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _approve(procurement_approvals_module) +
+                _readonly(dashboard_module)
+            ),
+        },
+
+        # ── 14. AI / Analytics User (new) ─────────────────────────────────────
+        {
+            "name": "AI / Analytics User",
+            "description": "Read-only access to dashboards, test results and equipment data for analytics.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": admin_dashboard_module_id,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _readonly(testing_module) +
+                _readonly(equipment_module) +
+                _readonly(testing_requests_module) +
+                _readonly(recommendations_module)
+            ),
+        },
+
+        # ── 15. Read-Only Auditor / MIS User (new) ────────────────────────────
+        {
+            "name": "Read-Only Auditor / MIS User",
+            "description": "Broad read-only access for audit and management information purposes.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _readonly(testing_requests_module) +
+                _readonly(testing_module) +
+                _readonly(equipment_module) +
+                _readonly(recommendations_module) +
+                _readonly(failure_registry_module) +
+                _readonly(procurement_modules)
+            ),
+        },
+
+        # ── 16. doc-viewer — verifies vendor uploaded documents ───────────────
+        {
+            "name": "doc-viewer",
+            "description": "Verifies vendor uploaded documents. Access to Vendor Documents module only.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": _readonly(vendor_documents_module),
         },
     ]
 
@@ -3421,7 +3334,13 @@ def seed_role_templates(session):
     updated_count = 0
 
     for template_data in templates_data:
+        rename_from = template_data.pop("rename_from", None)
         existing = session.query(RoleTemplate).filter_by(name=template_data["name"]).first()
+        if not existing and rename_from:
+            existing = session.query(RoleTemplate).filter_by(name=rename_from).first()
+            if existing:
+                existing.name = template_data["name"]
+                print(f"  [RENAME] RoleTemplate '{rename_from}' -> '{template_data['name']}'")
 
         if existing:
             existing.description = template_data["description"]
@@ -3822,22 +3741,27 @@ def seed_sample_organization(session):
 
     tester_roles_config = [
         {
-            "name": "Field Tester",
-            "description": "Field tester role with exact module permissions for tester assignment"
+            "name": "Test Engineer",
+            "description": "Test Engineer role with exact module permissions for tester assignment"
         },
-        {
-            "name": "Lab Tester",
-            "description": "Laboratory tester role with exact module permissions for tester assignment"
-        }
     ]
 
     tester_roles = []
     for role_config in tester_roles_config:
-        # Check if role already exists
+        # Check if role already exists (also check old names for rename support)
         existing_role = session.query(OrgRole).filter_by(
             organization_id=org.id,
             name=role_config["name"]
         ).first()
+        if not existing_role:
+            # Try legacy names
+            for old_name in ("Field Tester", "Lab Tester"):
+                existing_role = session.query(OrgRole).filter_by(
+                    organization_id=org.id, name=old_name
+                ).first()
+                if existing_role:
+                    existing_role.name = role_config["name"]
+                    break
 
         if existing_role:
             role = existing_role
@@ -3886,7 +3810,7 @@ def seed_sample_organization(session):
         {
             "email": "fieldtester1@sampleorg.com",
             "password": "Tester123!",
-            "role_name": "Field Tester",
+            "role_name": "Test Engineer",
             "firstname": "Field",
             "lastname": "Tester One",
             "phone": "9999999001"
@@ -3894,7 +3818,7 @@ def seed_sample_organization(session):
         {
             "email": "fieldtester2@sampleorg.com",
             "password": "Tester123!",
-            "role_name": "Field Tester",
+            "role_name": "Test Engineer",
             "firstname": "Field",
             "lastname": "Tester Two",
             "phone": "9999999002"
@@ -3902,7 +3826,7 @@ def seed_sample_organization(session):
         {
             "email": "labtester1@sampleorg.com",
             "password": "Tester123!",
-            "role_name": "Lab Tester",
+            "role_name": "Test Engineer",
             "firstname": "Lab",
             "lastname": "Tester One",
             "phone": "9999999003"
@@ -3910,7 +3834,7 @@ def seed_sample_organization(session):
         {
             "email": "labtester2@sampleorg.com",
             "password": "Tester123!",
-            "role_name": "Lab Tester",
+            "role_name": "Test Engineer",
             "firstname": "Lab",
             "lastname": "Tester Two",
             "phone": "9999999004"
@@ -3976,43 +3900,43 @@ def seed_sample_organization(session):
 
     other_users_config = [
         {
-            "email": "originator@sampleorg.com",
+            "email": "assetdataofficer@sampleorg.com",
             "password": "Originator123!",
-            "role_name": "Originator",
+            "role_name": "Asset Data Officer",
             "firstname": "Sample",
-            "lastname": "Originator",
+            "lastname": "Asset Officer",
             "phone": "9999999010"
         },
         {
-            "email": "testassigner@sampleorg.com",
+            "email": "testworkcoordinator@sampleorg.com",
             "password": "Assigner123!",
-            "role_name": "Test Assigner",
-            "firstname": "Test",
-            "lastname": "Assigner",
+            "role_name": "Test & Work Coordinator",
+            "firstname": "Test Work",
+            "lastname": "Coordinator",
             "phone": "9999999011"
         },
         {
-            "email": "depthead@sampleorg.com",
+            "email": "reviewingofficer@sampleorg.com",
             "password": "DeptHead123!",
-            "role_name": "Department Head",
-            "firstname": "Department",
-            "lastname": "Head",
+            "role_name": "Reviewing Officer",
+            "firstname": "Reviewing",
+            "lastname": "Officer",
             "phone": "9999999012"
         },
         {
-            "email": "purchaser@sampleorg.com",
+            "email": "procurementofficer@sampleorg.com",
             "password": "Purchaser123!",
-            "role_name": "Purchaser",
-            "firstname": "Sample",
-            "lastname": "Purchaser",
+            "role_name": "Procurement Officer",
+            "firstname": "Procurement",
+            "lastname": "Officer",
             "phone": "9999999013"
         },
         {
-            "email": "orgadmin@sampleorg.com",
+            "email": "sysadmin@sampleorg.com",
             "password": "OrgAdmin123!",
-            "role_name": "Org Admin",
-            "firstname": "Org",
-            "lastname": "Admin",
+            "role_name": "System Administrator",
+            "firstname": "System",
+            "lastname": "Administrator",
             "phone": "9999999014"
         },
         {
@@ -4150,7 +4074,7 @@ def seed_kptcl_organization(session):
                 "firstname": "AEE",
                 "lastname": "Maintenance",
                 "phone": "+91-9900000010",
-                "role_name": "AEE Maintenance",
+                "role_name": "Maintenance Officer",
                 "employee_id": "KPTCL-AEE-M-001",
             },
             {
@@ -4159,7 +4083,7 @@ def seed_kptcl_organization(session):
                 "firstname": "EE",
                 "lastname": "TLSS",
                 "phone": "+91-9900000011",
-                "role_name": "EE TLSS",
+                "role_name": "Reviewing Officer",
                 "employee_id": "KPTCL-EE-TLSS-001",
             },
             {
@@ -4168,7 +4092,7 @@ def seed_kptcl_organization(session):
                 "firstname": "SEE",
                 "lastname": "W&M",
                 "phone": "+91-9900000012",
-                "role_name": "SEE W&M",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-WM-001",
             },
             {
@@ -4177,7 +4101,7 @@ def seed_kptcl_organization(session):
                 "firstname": "EE",
                 "lastname": "RT",
                 "phone": "+91-9900000013",
-                "role_name": "EE RT",
+                "role_name": "Reviewing Officer",
                 "employee_id": "KPTCL-EE-RT-001",
             },
             {
@@ -4186,7 +4110,7 @@ def seed_kptcl_organization(session):
                 "firstname": "SEE",
                 "lastname": "RT",
                 "phone": "+91-9900000014",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-001",
                 "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
                 "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
@@ -4195,10 +4119,10 @@ def seed_kptcl_organization(session):
             {
                 "email": "see.rt.bangalore@utility.com",
                 "password": "admin123",
-                "firstname": "SEE RT",
+                "firstname": "Supervisory Officer",
                 "lastname": "Bangalore",
                 "phone": "+91-9900000020",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-BLR-001",
                 "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
                 "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
@@ -4206,10 +4130,10 @@ def seed_kptcl_organization(session):
             {
                 "email": "see.rt.hubli@utility.com",
                 "password": "admin123",
-                "firstname": "SEE RT",
+                "firstname": "Supervisory Officer",
                 "lastname": "Hubli",
                 "phone": "+91-9900000021",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-HBL-001",
                 "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
                 "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
@@ -4217,10 +4141,10 @@ def seed_kptcl_organization(session):
             {
                 "email": "see.rt.mysore@utility.com",
                 "password": "admin123",
-                "firstname": "SEE RT",
+                "firstname": "Supervisory Officer",
                 "lastname": "Mysore",
                 "phone": "+91-9900000022",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-MYS-001",
                 "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
                 "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
@@ -4228,10 +4152,10 @@ def seed_kptcl_organization(session):
             {
                 "email": "see.rt.gulbarga@utility.com",
                 "password": "admin123",
-                "firstname": "SEE RT",
+                "firstname": "Supervisory Officer",
                 "lastname": "Gulbarga",
                 "phone": "+91-9900000023",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-GLB-001",
                 "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
                 "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
@@ -4242,7 +4166,7 @@ def seed_kptcl_organization(session):
                 "firstname": "CEE",
                 "lastname": "Transmission Zone",
                 "phone": "+91-9900000015",
-                "role_name": "CEE Transmission Zone",
+                "role_name": "Senior Management Approver",
                 "employee_id": "KPTCL-CEE-TZ-001",
             },
             {
@@ -4251,25 +4175,25 @@ def seed_kptcl_organization(session):
                 "firstname": "CEE",
                 "lastname": "RT&R&D",
                 "phone": "+91-9900000016",
-                "role_name": "CEE RT&R&D",
+                "role_name": "Senior Management Approver",
                 "employee_id": "KPTCL-CEE-RTRD-001",
             },
             {
                 "email": "field.tester@utility.com",
                 "password": "Tester123!",
                 "firstname": "Field",
-                "lastname": "Tester",
+                "lastname": "Test Engineer",
                 "phone": "+91-9900000017",
-                "role_name": "Field Tester",
+                "role_name": "Test Engineer",
                 "employee_id": "KPTCL-FT-001",
             },
             {
                 "email": "lab.tester@utility.com",
                 "password": "Tester123!",
                 "firstname": "Lab",
-                "lastname": "Tester",
+                "lastname": "Test Engineer",
                 "phone": "+91-9900000018",
-                "role_name": "Lab Tester",
+                "role_name": "Test Engineer",
                 "employee_id": "KPTCL-LT-001",
             },
             {
@@ -4278,7 +4202,7 @@ def seed_kptcl_organization(session):
                 "firstname": "Workflow",
                 "lastname": "Coordinator",
                 "phone": "+91-9900000019",
-                "role_name": "Workflow Coordinator",
+                "role_name": "Transformer Repair Coordinator",
                 "employee_id": "KPTCL-WFC-001",
             },
         ]
@@ -4418,9 +4342,9 @@ def seed_kptcl_organization(session):
         # Save specific roles for user assignment
         if role.is_org_admin:
             org_admin_role = role
-        elif template.name == "Originator":
+        elif template.name == "Asset Data Officer":
             engineer_role = role
-        elif template.name == "Tester":
+        elif template.name == "Test Engineer":
             tester_role = role
 
         # Create permissions from template
@@ -4461,9 +4385,9 @@ def seed_kptcl_organization(session):
             "email": "originator@utility.com",
             "password": "admin123",
             "firstname": "KPTCL",
-            "lastname": "Originator",
+            "lastname": "Asset Data Officer",
             "phone": "+91-9900000002",
-            "role_name": "Originator",
+            "role_name": "Asset Data Officer",
             "employee_id": "KPTCL-ORIG-001",
         },
         {
@@ -4472,7 +4396,7 @@ def seed_kptcl_organization(session):
             "firstname": "KPTCL Test",
             "lastname": "Assigner",
             "phone": "+91-9900000005",
-            "role_name": "Test Assigner",
+            "role_name": "Test & Work Coordinator",
             "employee_id": "KPTCL-TA-001",
         },
         {
@@ -4481,16 +4405,16 @@ def seed_kptcl_organization(session):
             "firstname": "Department",
             "lastname": "Head",
             "phone": "+91-9900000004",
-            "role_name": "Department Head",
+            "role_name": "Reviewing Officer",
             "employee_id": "KPTCL-DH-001",
         },
         {
             "email": "purchaser@utility.com",
             "password": "admin123",
             "firstname": "KPTCL",
-            "lastname": "Purchaser",
+            "lastname": "Procurement Officer",
             "phone": "+91-9900000006",
-            "role_name": "Purchaser",
+            "role_name": "Procurement Officer",
             "employee_id": "KPTCL-PUR-001",
         },
         {
@@ -4509,7 +4433,7 @@ def seed_kptcl_organization(session):
             "firstname": "AEE",
             "lastname": "Maintenance",
             "phone": "+91-9900000010",
-            "role_name": "AEE Maintenance",
+            "role_name": "Maintenance Officer",
             "employee_id": "KPTCL-AEE-M-001",
         },
         {
@@ -4518,7 +4442,7 @@ def seed_kptcl_organization(session):
             "firstname": "EE",
             "lastname": "TLSS",
             "phone": "+91-9900000011",
-            "role_name": "EE TLSS",
+            "role_name": "Reviewing Officer",
             "employee_id": "KPTCL-EE-TLSS-001",
         },
         {
@@ -4527,7 +4451,7 @@ def seed_kptcl_organization(session):
             "firstname": "SEE",
             "lastname": "W&M",
             "phone": "+91-9900000012",
-            "role_name": "SEE W&M",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-WM-001",
         },
         {
@@ -4536,7 +4460,7 @@ def seed_kptcl_organization(session):
             "firstname": "EE",
             "lastname": "RT",
             "phone": "+91-9900000013",
-            "role_name": "EE RT",
+            "role_name": "Reviewing Officer",
             "employee_id": "KPTCL-EE-RT-001",
         },
         {
@@ -4545,7 +4469,7 @@ def seed_kptcl_organization(session):
             "firstname": "SEE",
             "lastname": "RT",
             "phone": "+91-9900000014",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-001",
             "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
             "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
@@ -4554,10 +4478,10 @@ def seed_kptcl_organization(session):
         {
             "email": "see.rt.bangalore@utility.com",
             "password": "admin123",
-            "firstname": "SEE RT",
+            "firstname": "Supervisory Officer",
             "lastname": "Bangalore",
             "phone": "+91-9900000020",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-BLR-001",
             "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
             "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
@@ -4565,10 +4489,10 @@ def seed_kptcl_organization(session):
         {
             "email": "see.rt.hubli@utility.com",
             "password": "admin123",
-            "firstname": "SEE RT",
+            "firstname": "Supervisory Officer",
             "lastname": "Hubli",
             "phone": "+91-9900000021",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-HBL-001",
             "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
             "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
@@ -4576,10 +4500,10 @@ def seed_kptcl_organization(session):
         {
             "email": "see.rt.mysore@utility.com",
             "password": "admin123",
-            "firstname": "SEE RT",
+            "firstname": "Supervisory Officer",
             "lastname": "Mysore",
             "phone": "+91-9900000022",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-MYS-001",
             "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
             "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
@@ -4587,10 +4511,10 @@ def seed_kptcl_organization(session):
         {
             "email": "see.rt.gulbarga@utility.com",
             "password": "admin123",
-            "firstname": "SEE RT",
+            "firstname": "Supervisory Officer",
             "lastname": "Gulbarga",
             "phone": "+91-9900000023",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-GLB-001",
             "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
             "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
@@ -4601,7 +4525,7 @@ def seed_kptcl_organization(session):
             "firstname": "CEE",
             "lastname": "Transmission Zone",
             "phone": "+91-9900000015",
-            "role_name": "CEE Transmission Zone",
+            "role_name": "Senior Management Approver",
             "employee_id": "KPTCL-CEE-TZ-001",
         },
         {
@@ -4610,7 +4534,7 @@ def seed_kptcl_organization(session):
             "firstname": "CEE",
             "lastname": "RT&R&D",
             "phone": "+91-9900000016",
-            "role_name": "CEE RT&R&D",
+            "role_name": "Senior Management Approver",
             "employee_id": "KPTCL-CEE-RTRD-001",
         },
     ]
@@ -4681,22 +4605,26 @@ def seed_kptcl_organization(session):
 
     tester_roles_config = [
         {
-            "name": "Field Tester",
-            "description": "Field tester role with exact module permissions for tester assignment"
+            "name": "Test Engineer",
+            "description": "Test Engineer role with exact module permissions for tester assignment"
         },
-        {
-            "name": "Lab Tester",
-            "description": "Laboratory tester role with exact module permissions for tester assignment"
-        }
     ]
 
     tester_roles = []
     for role_config in tester_roles_config:
-        # Check if role already exists
+        # Check if role already exists (also support legacy rename from Field/Lab Tester)
         existing_role = session.query(OrgRole).filter_by(
             organization_id=org.id,
             name=role_config["name"]
         ).first()
+        if not existing_role:
+            for old_name in ("Field Tester", "Lab Tester"):
+                existing_role = session.query(OrgRole).filter_by(
+                    organization_id=org.id, name=old_name
+                ).first()
+                if existing_role:
+                    existing_role.name = role_config["name"]
+                    break
 
         if existing_role:
             role = existing_role
@@ -4748,37 +4676,21 @@ def seed_kptcl_organization(session):
 
     tester_users_config = [
         {
-            "email": "fieldtester1@utility.com",
+            "email": "testengineer1@utility.com",
             "password": "Tester123!",
-            "role_name": "Field Tester",
-            "firstname": "KPTCL Field",
-            "lastname": "Tester One",
+            "role_name": "Test Engineer",
+            "firstname": "KPTCL Test",
+            "lastname": "Engineer One",
             "phone": "9999999101"
         },
         {
-            "email": "fieldtester2@utility.com",
+            "email": "testengineer2@utility.com",
             "password": "Tester123!",
-            "role_name": "Field Tester",
-            "firstname": "KPTCL Field",
-            "lastname": "Tester Two",
+            "role_name": "Test Engineer",
+            "firstname": "KPTCL Test",
+            "lastname": "Engineer Two",
             "phone": "9999999102"
         },
-        {
-            "email": "labtester1@utility.com",
-            "password": "Tester123!",
-            "role_name": "Lab Tester",
-            "firstname": "KPTCL Lab",
-            "lastname": "Tester One",
-            "phone": "9999999103"
-        },
-        {
-            "email": "labtester2@utility.com",
-            "password": "Tester123!",
-            "role_name": "Lab Tester",
-            "firstname": "KPTCL Lab",
-            "lastname": "Tester Two",
-            "phone": "9999999104"
-        }
     ]
 
     created_users = 0
@@ -4883,7 +4795,7 @@ def seed_notifications_module_and_permissions(session):
     # ─────────────────────────────────────────────────────────────
     org_admin_role = session.query(OrgRole).filter_by(
         organization_id=kptcl_org.id,
-        name="Org Admin",
+        name="System Administrator",
         is_active=True
     ).first()
 
@@ -5497,17 +5409,22 @@ def seed_schedule_compliance_module_permissions(session, org=None):
 
     # Roles that get can_view only (read-only compliance tracker)
     READONLY_ROLE_NAMES = {
-        "EE TLSS",
-        "AEE Maintenance",
-        "SEE W&M",
-        "EE RT",
-        "SEE RT",
-        "CEE Transmission Zone",
-        "CEE RT&R&D",
-        "Department Head",
-        "Workflow Coordinator",
+        # New functional roles
+        "System Administrator",
+        "Asset Data Officer",
+        "Maintenance Officer",
+        "Test Engineer",
+        "Test & Work Coordinator",
+        "Reviewing Officer",
+        "Supervisory Officer",
+        "Senior Management Approver",
+        "TA&QC Inspector",
+        "Transformer Repair Coordinator",
+        "Procurement Officer",
+        "Procurement Approver",
+        "AI / Analytics User",
+        "Read-Only Auditor / MIS User",
         "Admin",
-        "Org Admin",
     }
 
     # Only roles belonging to the KPTCL org
@@ -5603,7 +5520,7 @@ def seed_approval_role_permissions(session):
         print("[WARN] seed_approval_role_permissions: 'Testing Request Approvals' module not found — skipping")
         return 0
 
-    target_role_names = ["Technical Approver", "Org Admin"]
+    target_role_names = ["Reviewing Officer", "System Administrator"]
     target_modules = [approvals_mod, tr_approvals_mod]
 
     inserted = 0
@@ -5693,31 +5610,28 @@ def seed_missing_role_permissions(session, org=None):
 
     # permission_sets: role_name → list of (module_name, can_view, can_add, can_edit, can_approve, can_assign, can_export)
     ROLE_PERMS = {
-        "Finance Approver": [
+        "Procurement Approver": [
             ("Procurement Approvals", True, False, False, True,  True,  True),
             ("Dashboard",             True, False, False, False, False, False),
         ],
-        "TA&QC Officer": [
+        "TA&QC Inspector": [
             ("TA&QC Inspections", True, True,  True,  False, False, True),
             ("Failure Registry",  True, False, False, False, False, False),
             ("Dashboard",         True, False, False, False, False, False),
         ],
-        "Tester": [
+        "Test Engineer": [
             ("Testing Requests", True, False, False, False, False, False),
             ("Testing",          True, True,  True,  False, False, True),
             ("Equipment",        True, False, False, False, False, False),
         ],
-        "Section Head": [
-            ("Testing Requests", True, False, False, False, False, False),
-            ("Failure Registry", True, False, False, False, False, False),
-            ("Recommendations",  True, False, False, False, False, False),
-            ("Dashboard",        True, False, False, False, False, False),
-        ],
-        "Dept Head": [
+        "Reviewing Officer": [
             ("Recommendations",   True, False, False, True, True, True),
             ("Approvals",         True, False, False, True, True, True),
             ("Equipment",         True, False, False, False, False, False),
             ("Repair Workflows",  True, False, False, True, True, True),
+            ("Testing Requests",  True, False, False, False, False, False),
+            ("Failure Registry",  True, False, False, False, False, False),
+            ("Dashboard",         True, False, False, False, False, False),
         ],
     }
 
@@ -6571,8 +6485,8 @@ def seed_tr_workflows(session):
                                      color="#F44336", requires_comment=True, order=1)
 
         # Permissions
-        _permission(fr_wf.id, t_init_approve, "Test Assigner")
-        _permission(fr_wf.id, t_fr_reject,    "Test Assigner")
+        _permission(fr_wf.id, t_init_approve, "Test & Work Coordinator")
+        _permission(fr_wf.id, t_fr_reject,    "Test & Work Coordinator")
 
         session.commit()
         print("  [OK] failure_registry workflow seeded.")
@@ -6643,24 +6557,24 @@ def seed_tr_workflows(session):
                                     requires_comment=True, order=1)
 
         # ── Permissions ────────────────────────────────────────────────────────
-        _permission(tr_wf.id, t_assign,       "Test Assigner")
-        _permission(tr_wf.id, t_tr_reject,    "Test Assigner")
-        _permission(tr_wf.id, t_accept,       "Tester")
-        _permission(tr_wf.id, t_accept,       "Field Tester")
-        _permission(tr_wf.id, t_accept,       "Lab Tester")
-        _permission(tr_wf.id, t_submit_result,"Tester")
-        _permission(tr_wf.id, t_submit_result,"Field Tester")
-        _permission(tr_wf.id, t_submit_result,"Lab Tester")
+        _permission(tr_wf.id, t_assign,       "Test & Work Coordinator")
+        _permission(tr_wf.id, t_tr_reject,    "Test & Work Coordinator")
+        _permission(tr_wf.id, t_accept,       "Test Engineer")
+        _permission(tr_wf.id, t_accept,       "Test Engineer")
+        _permission(tr_wf.id, t_accept,       "Test Engineer")
+        _permission(tr_wf.id, t_submit_result,"Test Engineer")
+        _permission(tr_wf.id, t_submit_result,"Test Engineer")
+        _permission(tr_wf.id, t_submit_result,"Test Engineer")
 
         for t_appr in [t_approve_maint, t_approve_insp, t_approve_rl,
                        t_approve_none, t_approve_repl, t_tech_reject]:
-            _permission(tr_wf.id, t_appr, "Technical Approver")
+            _permission(tr_wf.id, t_appr, "Reviewing Officer")
 
-        _permission(tr_wf.id, t_resubmit,    "Tester")
-        _permission(tr_wf.id, t_resubmit,    "Field Tester")
-        _permission(tr_wf.id, t_resubmit,    "Lab Tester")
-        _permission(tr_wf.id, t_fin_approve, "Finance Approver")
-        _permission(tr_wf.id, t_fin_reject,  "Finance Approver")
+        _permission(tr_wf.id, t_resubmit,    "Test Engineer")
+        _permission(tr_wf.id, t_resubmit,    "Test Engineer")
+        _permission(tr_wf.id, t_resubmit,    "Test Engineer")
+        _permission(tr_wf.id, t_fin_approve, "Procurement Approver")
+        _permission(tr_wf.id, t_fin_reject,  "Procurement Approver")
 
         session.commit()
         print("  [OK] testing_request workflow seeded.")
@@ -6699,19 +6613,19 @@ def seed_tr_workflows(session):
                                     "resubmit", "Resubmit", color="#FF5722", order=0)
 
         # Permissions
-        _permission(taqc_wf.id, t_q_assign,    "Test Assigner")
-        _permission(taqc_wf.id, t_q_reject,    "Test Assigner")
-        _permission(taqc_wf.id, t_q_accept,    "Tester")
-        _permission(taqc_wf.id, t_q_accept,    "Field Tester")
-        _permission(taqc_wf.id, t_q_accept,    "Lab Tester")
-        _permission(taqc_wf.id, t_q_submit_ec, "Tester")
-        _permission(taqc_wf.id, t_q_submit_ec, "Field Tester")
-        _permission(taqc_wf.id, t_q_submit_ec, "Lab Tester")
-        _permission(taqc_wf.id, t_q_approve,   "Technical Approver")
-        _permission(taqc_wf.id, t_q_tech_rej,  "Technical Approver")
-        _permission(taqc_wf.id, t_q_resubmit,  "Tester")
-        _permission(taqc_wf.id, t_q_resubmit,  "Field Tester")
-        _permission(taqc_wf.id, t_q_resubmit,  "Lab Tester")
+        _permission(taqc_wf.id, t_q_assign,    "Test & Work Coordinator")
+        _permission(taqc_wf.id, t_q_reject,    "Test & Work Coordinator")
+        _permission(taqc_wf.id, t_q_accept,    "Test Engineer")
+        _permission(taqc_wf.id, t_q_accept,    "Test Engineer")
+        _permission(taqc_wf.id, t_q_accept,    "Test Engineer")
+        _permission(taqc_wf.id, t_q_submit_ec, "Test Engineer")
+        _permission(taqc_wf.id, t_q_submit_ec, "Test Engineer")
+        _permission(taqc_wf.id, t_q_submit_ec, "Test Engineer")
+        _permission(taqc_wf.id, t_q_approve,   "Reviewing Officer")
+        _permission(taqc_wf.id, t_q_tech_rej,  "Reviewing Officer")
+        _permission(taqc_wf.id, t_q_resubmit,  "Test Engineer")
+        _permission(taqc_wf.id, t_q_resubmit,  "Test Engineer")
+        _permission(taqc_wf.id, t_q_resubmit,  "Test Engineer")
 
         session.commit()
         print("  [OK] taqc_inspection workflow seeded.")
@@ -6740,7 +6654,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when equipment is retired and a replacement unit is commissioned.",
             context_vars=["old_ueic", "new_ueic", "equipment_type", "department",
                           "reason_type", "reason", "replaced_by", "replaced_on"],
-            default_roles=["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
+            default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
         ),
         # ── Evaluation ────────────────────────────────────────────────────────
         dict(
@@ -6750,7 +6664,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a test evaluation result is CRITICAL (per test template thresholds).",
             context_vars=["equipment", "ueic", "test_type", "result", "dept",
                           "eval.overall", "eval.evaluated_at", "report.retriepdf"],
-            default_roles=["EE TLSS", "SEE W&M", "CEE Transmission Zone", "AEE Maintenance"],
+            default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
         ),
         dict(
             event_type="eval_alert",
@@ -6759,7 +6673,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a test evaluation result is ALERT (per test template thresholds).",
             context_vars=["equipment", "ueic", "test_type", "result", "dept",
                           "eval.overall", "eval.evaluated_at", "report.retriepdf"],
-            default_roles=["EE TLSS", "AEE Maintenance"],
+            default_roles=["Reviewing Officer", "Maintenance Officer"],
         ),
         # ── Test Workflow ─────────────────────────────────────────────────────
         dict(
@@ -6769,7 +6683,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when an originator submits a new test request.",
             context_vars=["request.number", "request.title", "request.priority",
                           "request.submitted_by", "equipment.ueic", "equipment.department"],
-            default_roles=["EE TLSS", "Department Head"],
+            default_roles=["Reviewing Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="tester_assigned",
@@ -6778,7 +6692,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a test request is assigned to a field/lab tester.",
             context_vars=["request.number", "request.title", "request.assigned_to",
                           "request.due_date", "equipment.ueic"],
-            default_roles=["Tester", "AEE Maintenance"],
+            default_roles=["Test Engineer", "Maintenance Officer"],
         ),
         dict(
             event_type="tester_declined",
@@ -6786,7 +6700,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Test Workflow",
             description="Fired when a tester declines an assignment — notifies the Test Assigner.",
             context_vars=["request.number", "tester_name", "reason"],
-            default_roles=["TestAssigner", "EE TLSS"],
+            default_roles=["TestAssigner", "Reviewing Officer"],
         ),
         dict(
             event_type="test_submitted",
@@ -6795,7 +6709,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a tester submits test results for review.",
             context_vars=["request.number", "request.title", "request.submitted_by",
                           "equipment.ueic", "eval.overall", "report.retriepdf"],
-            default_roles=["EE TLSS", "Department Head"],
+            default_roles=["Reviewing Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="recommendation_approved",
@@ -6803,7 +6717,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Test Workflow",
             description="Fired when a technical approver approves a recommendation.",
             context_vars=["request.number", "recommendation_type", "product_count"],
-            default_roles=["Originator", "AEE Maintenance"],
+            default_roles=["Asset Data Officer", "Maintenance Officer"],
         ),
         dict(
             event_type="recommendation_rejected",
@@ -6811,7 +6725,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Test Workflow",
             description="Fired when a technical approver rejects a recommendation.",
             context_vars=["request.number", "reason"],
-            default_roles=["Tester", "Originator"],
+            default_roles=["Test Engineer", "Asset Data Officer"],
         ),
         # ── Scheduling ────────────────────────────────────────────────────────
         dict(
@@ -6821,7 +6735,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired 15 days before a scheduled test is due (SRS §8.2 #1).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
-            default_roles=["AEE Maintenance", "EE TLSS"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="due_reminder_final",
@@ -6830,7 +6744,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Final reminder fired 7 days before a scheduled test is due (SRS §8.2 #2).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
-            default_roles=["AEE Maintenance", "EE TLSS", "Department Head"],
+            default_roles=["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="overdue_alert",
@@ -6839,7 +6753,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a scheduled test passes its due date without completion (SRS §8.2 #3).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_overdue"],
-            default_roles=["EE TLSS", "AEE Maintenance", "SEE W&M"],
+            default_roles=["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
         ),
         dict(
             event_type="overdue_escalation",
@@ -6848,7 +6762,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Escalation fired when a test is more than 7 days overdue (SRS §8.2 #4).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "days_overdue", "equipment.department"],
-            default_roles=["SEE W&M", "CEE Transmission Zone"],
+            default_roles=["Supervisory Officer", "Senior Management Approver"],
         ),
         # ── Recommendations / Procurement ─────────────────────────────────────
         dict(
@@ -6857,7 +6771,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Recommendations",
             description="Fired when a procurement request is created — notifies Finance Approvers.",
             context_vars=["request.number", "pr_number", "title"],
-            default_roles=["FinanceApprover", "Department Head"],
+            default_roles=["FinanceApprover", "Reviewing Officer"],
         ),
         dict(
             event_type="procurement_decision",
@@ -6865,7 +6779,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Recommendations",
             description="Fired when Finance approves or rejects a procurement request.",
             context_vars=["request.number", "pr_number", "decision", "notes"],
-            default_roles=["Originator", "TechApprover", "EE TLSS"],
+            default_roles=["Asset Data Officer", "TechApprover", "Reviewing Officer"],
         ),
         # ── Equipment ─────────────────────────────────────────────────────────
         dict(
@@ -6874,7 +6788,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment",
             description="Fired when a new equipment unit is commissioned into the register.",
             context_vars=["equipment", "equipment_type", "department", "manufacturer", "commissioned_by"],
-            default_roles=["AEE Maintenance", "EE TLSS"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="equipment_retired",
@@ -6882,7 +6796,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment",
             description="Fired when an equipment unit is decommissioned / retired.",
             context_vars=["equipment", "equipment_type", "department", "reason", "retired_by"],
-            default_roles=["AEE Maintenance", "EE TLSS", "Department Head"],
+            default_roles=["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="design_problem_alert",
@@ -6890,7 +6804,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment",
             description="Fired when a systemic design problem is identified for a make/model.",
             context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
-            default_roles=["CEE Transmission Zone", "EE TLSS", "Department Head"],
+            default_roles=["Senior Management Approver", "Reviewing Officer", "Reviewing Officer"],
         ),
         # ── Repair Lifecycle ──────────────────────────────────────────────────
         dict(
@@ -6899,7 +6813,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair",
             description="Fired each time the repair workflow advances to the next stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["AEE Maintenance", "TRC Member"],
+            default_roles=["Maintenance Officer", "TRC Member"],
         ),
         dict(
             event_type="repair_delay",
@@ -6907,7 +6821,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair",
             description="Fired when a repair stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["AEE Maintenance", "CEE Transmission Zone"],
+            default_roles=["Maintenance Officer", "Senior Management Approver"],
         ),
         dict(
             event_type="overhaul_recommended",
@@ -6915,7 +6829,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair",
             description="Fired when the repair workflow reaches completion — overhaul is done.",
             context_vars=["equipment", "equipment_type", "department", "operation_count", "operation_threshold"],
-            default_roles=["AEE Maintenance", "CEE Transmission Zone", "Department Head"],
+            default_roles=["Maintenance Officer", "Senior Management Approver", "Reviewing Officer"],
         ),
         # ── Failure Registry ──────────────────────────────────────────────────
         dict(
@@ -6924,7 +6838,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Failure Registry",
             description="Fired when a Failure Registry submission is rejected by an approver.",
             context_vars=["fr_number", "reason"],
-            default_roles=["Originator"],
+            default_roles=["Asset Data Officer"],
         ),
         # ── Reports ───────────────────────────────────────────────────────────
         dict(
@@ -6934,7 +6848,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired on the first working day of the month — distributes the monthly MIS report.",
             context_vars=["report_month", "tests_completed", "critical_count", "overdue_count",
                           "report_pdf_url", "report_xls_url"],
-            default_roles=["SEE W&M", "CEE Transmission Zone", "Department Head"],
+            default_roles=["Supervisory Officer", "Senior Management Approver", "Reviewing Officer"],
         ),
     ]
 
@@ -7495,7 +7409,7 @@ def run_seed():
             print(f"[WARN] Approval role permissions failed (non-fatal): {_e}")
 
         # Backfill permissions for roles that had no template or name mismatch:
-        # Finance Approver, TA&QC Officer, Tester, Section Head, Dept Head
+        # Procurement Approver, TA&QC Inspector, Test Engineer, Reviewing Officer
         print("\n--- Missing Role Permissions Backfill (KPTCL) ---")
         try:
             seed_missing_role_permissions(session, org=kptcl_org)
@@ -7715,7 +7629,7 @@ def seed_zoho_import_mapping(session, kptcl_org):
 
     # Find the Originator org role for KPTCL
     originator_role = session.query(OrgRole).filter_by(
-        organization_id=kptcl_org.id, name="Originator"
+        organization_id=kptcl_org.id, name="Asset Data Officer"
     ).first()
 
     if not originator_role:
@@ -8168,26 +8082,18 @@ def seed_workflow(session):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _DFT_ROLES = [
-    ("Org Admin",              False, True),
-    ("Dept Head",              False, True),
-    ("Originator",             False, False),
-    ("Tester",                 False, False),
-    ("Test Assigner",          False, False),
-    ("Technical Approver",     False, False),
-    ("Finance Approver",       False, False),
-    ("EE TLSS",                False, False),
-    ("TA&QC Officer",          False, False),
-    ("Section Head",           False, True),
-    ("AEE Maintenance",        False, False),
-    ("SEE W&M",                False, False),
-    ("EE RT",                  False, False),
-    ("SEE RT",                 False, False),
-    ("CEE Transmission Zone",  False, False),
-    ("CEE RT&R&D",             False, False),
-    ("Purchaser",              False, False),
-    ("Field Tester",           False, False),
-    ("Lab Tester",             False, False),
-    ("Workflow Coordinator",   False, False),
+    ("System Administrator",              False, True),
+    ("Asset Data Officer",                False, False),
+    ("Maintenance Officer",               False, False),
+    ("Test Engineer",                     False, False),
+    ("Test & Work Coordinator",           False, False),
+    ("Reviewing Officer",                 False, True),
+    ("Supervisory Officer",               False, False),
+    ("Senior Management Approver",        False, True),
+    ("TA&QC Inspector",                   False, False),
+    ("Transformer Repair Coordinator",    False, False),
+    ("Procurement Officer",               False, False),
+    ("Procurement Approver",              False, False),
 ]
 
 _DFT_DEPTS = [
@@ -8197,112 +8103,72 @@ _DFT_DEPTS = [
 ]
 
 _DFT_ROLE_EMAIL = {
-    "Org Admin":              "orgadmin",
-    "Dept Head":              "depthead",
-    "Originator":             "originator",
-    "Tester":                 "tester",
-    "Test Assigner":          "assigner",
-    "Technical Approver":     "techapprover",
-    "Finance Approver":       "financeapprover",
-    "EE TLSS":                "eetlss",
-    "TA&QC Officer":          "taqc",
-    "Section Head":           "sectionhead",
-    "AEE Maintenance":        "aeemaint",
-    "SEE W&M":                "seewm",
-    "EE RT":                  "eert",
-    "SEE RT":                 "seert",
-    "CEE Transmission Zone":  "ceezone",
-    "CEE RT&R&D":             "ceertrd",
-    "Purchaser":              "purchaser",
-    "Field Tester":           "fieldtester",
-    "Lab Tester":             "labtester",
-    "Workflow Coordinator":   "wfcoordinator",
+    "System Administrator":             "sysadmin",
+    "Asset Data Officer":               "assetofficer",
+    "Maintenance Officer":              "maintoff",
+    "Test Engineer":                    "testengineer",
+    "Test & Work Coordinator":          "testcoord",
+    "Reviewing Officer":                "reviewoff",
+    "Supervisory Officer":              "supervoff",
+    "Senior Management Approver":       "seniormgmt",
+    "TA&QC Inspector":                  "taqc",
+    "Transformer Repair Coordinator":   "repaircoord",
+    "Procurement Officer":              "procoff",
+    "Procurement Approver":             "procappr",
 }
 
 _DFT_ROLE_FNAME = {
-    "Org Admin":              "Admin",
-    "Dept Head":              "DeptHead",
-    "Originator":             "Originator",
-    "Tester":                 "Tester",
-    "Test Assigner":          "Assigner",
-    "Technical Approver":     "TechApprover",
-    "Finance Approver":       "FinApprover",
-    "EE TLSS":                "EETLSS",
-    "TA&QC Officer":          "TAQC",
-    "Section Head":           "SectionHead",
-    "AEE Maintenance":        "AEE",
-    "SEE W&M":                "SEE",
-    "EE RT":                  "EERT",
-    "SEE RT":                 "SEERT",
-    "CEE Transmission Zone":  "CEEZone",
-    "CEE RT&R&D":             "CEERTRD",
-    "Purchaser":              "Purchaser",
-    "Field Tester":           "FieldTester",
-    "Lab Tester":             "LabTester",
-    "Workflow Coordinator":   "WFCoord",
+    "System Administrator":             "SysAdmin",
+    "Asset Data Officer":               "AssetOfficer",
+    "Maintenance Officer":              "MaintOfficer",
+    "Test Engineer":                    "TestEngineer",
+    "Test & Work Coordinator":          "TestCoordinator",
+    "Reviewing Officer":                "ReviewOfficer",
+    "Supervisory Officer":              "SupervOfficer",
+    "Senior Management Approver":       "SeniorMgmt",
+    "TA&QC Inspector":                  "TAQCInspector",
+    "Transformer Repair Coordinator":   "RepairCoord",
+    "Procurement Officer":              "ProcOfficer",
+    "Procurement Approver":             "ProcApprover",
 }
 
 _DFT_PHONE = {
-    ("north",  "Org Admin"):              "9900001001",
-    ("north",  "Dept Head"):              "9900001002",
-    ("north",  "Originator"):             "9900001003",
-    ("north",  "Tester"):                 "9900001004",
-    ("north",  "Test Assigner"):          "9900001005",
-    ("north",  "Technical Approver"):     "9900001006",
-    ("north",  "Finance Approver"):       "9900001007",
-    ("north",  "EE TLSS"):                "9900001008",
-    ("north",  "TA&QC Officer"):          "9900001009",
-    ("north",  "Section Head"):           "9900001010",
-    ("north",  "AEE Maintenance"):        "9900001011",
-    ("north",  "SEE W&M"):                "9900001012",
-    ("north",  "EE RT"):                  "9900001013",
-    ("north",  "SEE RT"):                 "9900001014",
-    ("north",  "CEE Transmission Zone"):  "9900001015",
-    ("north",  "CEE RT&R&D"):             "9900001016",
-    ("north",  "Purchaser"):              "9900001017",
-    ("north",  "Field Tester"):           "9900001018",
-    ("north",  "Lab Tester"):             "9900001019",
-    ("north",  "Workflow Coordinator"):   "9900001020",
-    ("south",  "Org Admin"):              "9900002001",
-    ("south",  "Dept Head"):              "9900002002",
-    ("south",  "Originator"):             "9900002003",
-    ("south",  "Tester"):                 "9900002004",
-    ("south",  "Test Assigner"):          "9900002005",
-    ("south",  "Technical Approver"):     "9900002006",
-    ("south",  "Finance Approver"):       "9900002007",
-    ("south",  "EE TLSS"):                "9900002008",
-    ("south",  "TA&QC Officer"):          "9900002009",
-    ("south",  "Section Head"):           "9900002010",
-    ("south",  "AEE Maintenance"):        "9900002011",
-    ("south",  "SEE W&M"):                "9900002012",
-    ("south",  "EE RT"):                  "9900002013",
-    ("south",  "SEE RT"):                 "9900002014",
-    ("south",  "CEE Transmission Zone"):  "9900002015",
-    ("south",  "CEE RT&R&D"):             "9900002016",
-    ("south",  "Purchaser"):              "9900002017",
-    ("south",  "Field Tester"):           "9900002018",
-    ("south",  "Lab Tester"):             "9900002019",
-    ("south",  "Workflow Coordinator"):   "9900002020",
-    ("mysuru", "Org Admin"):              "9900003001",
-    ("mysuru", "Dept Head"):              "9900003002",
-    ("mysuru", "Originator"):             "9900003003",
-    ("mysuru", "Tester"):                 "9900003004",
-    ("mysuru", "Test Assigner"):          "9900003005",
-    ("mysuru", "Technical Approver"):     "9900003006",
-    ("mysuru", "Finance Approver"):       "9900003007",
-    ("mysuru", "EE TLSS"):                "9900003008",
-    ("mysuru", "TA&QC Officer"):          "9900003009",
-    ("mysuru", "Section Head"):           "9900003010",
-    ("mysuru", "AEE Maintenance"):        "9900003011",
-    ("mysuru", "SEE W&M"):                "9900003012",
-    ("mysuru", "EE RT"):                  "9900003013",
-    ("mysuru", "SEE RT"):                 "9900003014",
-    ("mysuru", "CEE Transmission Zone"):  "9900003015",
-    ("mysuru", "CEE RT&R&D"):             "9900003016",
-    ("mysuru", "Purchaser"):              "9900003017",
-    ("mysuru", "Field Tester"):           "9900003018",
-    ("mysuru", "Lab Tester"):             "9900003019",
-    ("mysuru", "Workflow Coordinator"):   "9900003020",
+    ("north",  "System Administrator"):             "9900001001",
+    ("north",  "Asset Data Officer"):               "9900001002",
+    ("north",  "Maintenance Officer"):              "9900001003",
+    ("north",  "Test Engineer"):                    "9900001004",
+    ("north",  "Test & Work Coordinator"):          "9900001005",
+    ("north",  "Reviewing Officer"):                "9900001006",
+    ("north",  "Supervisory Officer"):              "9900001007",
+    ("north",  "Senior Management Approver"):       "9900001008",
+    ("north",  "TA&QC Inspector"):                  "9900001009",
+    ("north",  "Transformer Repair Coordinator"):   "9900001010",
+    ("north",  "Procurement Officer"):              "9900001011",
+    ("north",  "Procurement Approver"):             "9900001012",
+    ("south",  "System Administrator"):             "9900002001",
+    ("south",  "Asset Data Officer"):               "9900002002",
+    ("south",  "Maintenance Officer"):              "9900002003",
+    ("south",  "Test Engineer"):                    "9900002004",
+    ("south",  "Test & Work Coordinator"):          "9900002005",
+    ("south",  "Reviewing Officer"):                "9900002006",
+    ("south",  "Supervisory Officer"):              "9900002007",
+    ("south",  "Senior Management Approver"):       "9900002008",
+    ("south",  "TA&QC Inspector"):                  "9900002009",
+    ("south",  "Transformer Repair Coordinator"):   "9900002010",
+    ("south",  "Procurement Officer"):              "9900002011",
+    ("south",  "Procurement Approver"):             "9900002012",
+    ("mysuru", "System Administrator"):             "9900003001",
+    ("mysuru", "Asset Data Officer"):               "9900003002",
+    ("mysuru", "Maintenance Officer"):              "9900003003",
+    ("mysuru", "Test Engineer"):                    "9900003004",
+    ("mysuru", "Test & Work Coordinator"):          "9900003005",
+    ("mysuru", "Reviewing Officer"):                "9900003006",
+    ("mysuru", "Supervisory Officer"):              "9900003007",
+    ("mysuru", "Senior Management Approver"):       "9900003008",
+    ("mysuru", "TA&QC Inspector"):                  "9900003009",
+    ("mysuru", "Transformer Repair Coordinator"):   "9900003010",
+    ("mysuru", "Procurement Officer"):              "9900003011",
+    ("mysuru", "Procurement Approver"):             "9900003012",
 }
 
 
@@ -8358,26 +8224,18 @@ def _dft_get_or_create_dept(session, org_id, name, code,
 # Maps dept-filter role names to their default dashboard module path.
 # Must match the Module.path values seeded in seed_modules().
 _DFT_ROLE_MODULE_PATH = {
-    "Org Admin":              "admin_dashboard",
-    "Dept Head":              "see_dashboard",
-    "Section Head":           "see_dashboard",
-    "Technical Approver":     "see_dashboard",
-    "Finance Approver":       "see_dashboard",
-    "SEE W&M":                "see_dashboard",
-    "SEE RT":                 "see_dashboard",
-    "CEE Transmission Zone":  "cee_dashboard",
-    "CEE RT&R&D":             "cee_dashboard",
-    "EE TLSS":                "ee_tlss_dashboard",
-    "EE RT":                  "ee_tlss_dashboard",
-    "TA&QC Officer":          "ee_tlss_dashboard",
-    "Originator":             "aee_dashboard",
-    "Tester":                 "aee_dashboard",
-    "Test Assigner":          "aee_dashboard",
-    "AEE Maintenance":        "aee_dashboard",
-    "Field Tester":           "aee_dashboard",
-    "Lab Tester":             "aee_dashboard",
-    "Purchaser":              "aee_dashboard",
-    "Workflow Coordinator":   "ee_tlss_dashboard",
+    "System Administrator":             "admin_dashboard",
+    "Asset Data Officer":               "aee_dashboard",
+    "Maintenance Officer":              "aee_dashboard",
+    "Test Engineer":                    "aee_dashboard",
+    "Test & Work Coordinator":          "aee_dashboard",
+    "Reviewing Officer":                "ee_tlss_dashboard",
+    "Supervisory Officer":              "see_dashboard",
+    "Senior Management Approver":       "cee_dashboard",
+    "TA&QC Inspector":                  "ee_tlss_dashboard",
+    "Transformer Repair Coordinator":   "ee_tlss_dashboard",
+    "Procurement Officer":              "aee_dashboard",
+    "Procurement Approver":             "see_dashboard",
 }
 
 
@@ -8692,10 +8550,10 @@ def seed_dept_filter_users(session, org=None):
     print("\n[5] Top-level hierarchy users  (circle + zone)")
     _top_level_users = [
         # (email,                   fname,  lname,    role_name,             dept_obj)
-        ("ee.circle@utility.com",   "EE",   "Circle", "EE TLSS",             circle),
-        ("see.circle@utility.com",  "SEE",  "Circle", "Technical Approver",  circle),
-        ("cee.zone@utility.com",    "CEE",  "Zone",   "Org Admin",           zone),
-        ("see.zone@utility.com",    "SEE",  "Zone",   "Technical Approver",  zone),
+        ("ee.circle@utility.com",   "EE",   "Circle", "Reviewing Officer",             circle),
+        ("see.circle@utility.com",  "SEE",  "Circle", "Reviewing Officer",  circle),
+        ("cee.zone@utility.com",    "CEE",  "Zone",   "System Administrator",           zone),
+        ("see.zone@utility.com",    "SEE",  "Zone",   "Reviewing Officer",  zone),
     ]
     for email, fname, lname, role_name, dept_obj in _top_level_users:
         phone = "9000000099"
