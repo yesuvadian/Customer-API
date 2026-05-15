@@ -85,6 +85,7 @@ from routers import (
     direct_submissions,  # NEW: Failure Registry & TA&QC direct-submit modules
     annual_audits,       # Annual Audit observation workflow module
     test_register,       # NEW: Test Register — periodic maintenance catalogue
+    test_schedule_dashboard,  # Test Schedule compliance matrix dashboard
 )
 from routers import cumulative  # Cumulative / Overhaul lifecycle module
 from routers import calibration as calibration_router  # Calibration lifecycle module
@@ -690,6 +691,7 @@ app.include_router(tester_assignment.router)
 app.include_router(org_test_templates.router)
 app.include_router(org_test_templates.browser_router)
 app.include_router(test_request_schedules.router)
+app.include_router(test_schedule_dashboard.router)  # Compliance matrix dashboard
 app.include_router(direct_submissions.router)  # NEW: Failure Registry & TA&QC
 app.include_router(annual_audits.router)       # Annual Audit observations
 app.include_router(test_register.router)       # NEW: Test Register catalogue

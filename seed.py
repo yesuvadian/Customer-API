@@ -1398,6 +1398,13 @@ def seed_modules(session):
                 "operational schedules auto-created on equipment commissioning.",
  "path": "testing_schedules",
  "group_name": "Condition Monitoring"},
+# ✅ SCHEDULE COMPLIANCE MODULE
+{"name": "Schedule Compliance",
+ "description": "Visual compliance tracker — shows per-equipment test schedule status "
+                "(overdue, due-imminent, due-soon, ok) with filter by equipment type, "
+                "substation, and compliance band. Accessible to EE TLSS, AEE, org-admin.",
+ "path": "schedule_compliance",
+ "group_name": "Condition Monitoring"},
     ]
 
     module_ids = {}
@@ -2998,8 +3005,12 @@ def seed_role_templates(session):
     testing_request_approvals_module = [mid for mid in [modules_by_name.get("Testing Request Approvals")] if mid]
     recommendations_module   = [mid for mid in [modules_by_name.get("Recommendations")] if mid]
     approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
-    workflows_module         = [mid for mid in [modules_by_name.get("Workflows")] if mid]
-    repair_workflows_module  = [mid for mid in [modules_by_name.get("Repair Workflows")] if mid]
+    workflows_module          = [mid for mid in [modules_by_name.get("Workflows")] if mid]
+    repair_workflows_module      = [mid for mid in [modules_by_name.get("Repair Workflows")] if mid]
+    schedule_compliance_module   = [mid for mid in [modules_by_name.get("Schedule Compliance")] if mid]
+    procurement_approvals_module = [mid for mid in [modules_by_name.get("Procurement Approvals")] if mid]
+    taqc_inspections_module      = [mid for mid in [modules_by_name.get("TA&QC Inspections")] if mid]
+    failure_registry_module      = [mid for mid in [modules_by_name.get("Failure Registry")] if mid]
 
     dashboard_module = [mid for mid in [modules_by_name.get("Dashboard")] if mid]
 
@@ -3162,6 +3173,80 @@ def seed_role_templates(session):
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": _readonly(vendor_documents_module),
+        },
+
+        # ── 9b. Finance Approver — procurement approval queue ─────────────────
+        {
+            "name": "Finance Approver",
+            "description": "Reviews and approves / rejects replacement procurement requests "
+                           "raised after Technical Approver approves a replacement recommendation.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _approve(procurement_approvals_module) +
+                _readonly(dashboard_module)
+            ),
+        },
+
+        # ── 9c. TA&QC Officer — annual inspections ────────────────────────────
+        {
+            "name": "TA&QC Officer",
+            "description": "Technical Assurance & Quality Control Officer. "
+                           "Performs annual substation inspections and records observations.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite(taqc_inspections_module) +
+                _readonly(failure_registry_module) +
+                _readonly(dashboard_module)
+            ),
+        },
+
+        # ── 9d. Tester — generic testing role ────────────────────────────────
+        {
+            "name": "Tester",
+            "description": "Generic testing role. Can view testing requests and submit test results.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module) +
+                _readonly(equipment_module)
+            ),
+        },
+
+        # ── 9e. Section Head — departmental oversight ─────────────────────────
+        {
+            "name": "Section Head",
+            "description": "Section-level supervisor. Reviews failure registry and testing requests "
+                           "within their section.",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(testing_requests_module) +
+                _readonly(failure_registry_module) +
+                _readonly(recommendations_module) +
+                _readonly(dashboard_module)
+            ),
+        },
+
+        # ── 9f. Dept Head — department-level admin (alias for Department Head) ─
+        {
+            "name": "Dept Head",
+            "description": "Department-level admin — same access as Department Head.",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": True,
+            "permissions_template": (
+                _approve(recommendations_module) +
+                _approve(approvals_module) +
+                _readonly(equipment_module) +
+                _approve(repair_workflows_module)
+            ),
         },
 
         # ═══════════════════════════════════════════════════════════════════════════
@@ -5388,6 +5473,102 @@ def seed_schedule_module_permissions(session):
     return granted
 
 
+def seed_schedule_compliance_module_permissions(session, org=None):
+    """
+    Grant 'Schedule Compliance' module access to OrgRoles belonging to *org*.
+    This module is KPTCL-specific — pass the KPTCL Organization object.
+    Idempotent — inserts missing rows and updates existing ones.
+
+    Access matrix:
+      is_org_admin roles              → full access (all flags)
+      Named field / supervisory roles → can_view only
+    """
+    mod = session.query(Module).filter_by(name="Schedule Compliance").first()
+    if not mod:
+        print("[WARN] 'Schedule Compliance' module not found — run seed_modules first.")
+        return 0
+
+    if org is None:
+        # Fall back to KPTCL by display_name so the function is safe to call standalone
+        org = session.query(Organization).filter_by(display_name="KPTCL").first()
+    if org is None:
+        print("[WARN] seed_schedule_compliance_module_permissions: KPTCL org not found — skipped.")
+        return 0
+
+    # Roles that get can_view only (read-only compliance tracker)
+    READONLY_ROLE_NAMES = {
+        "EE TLSS",
+        "AEE Maintenance",
+        "SEE W&M",
+        "EE RT",
+        "SEE RT",
+        "CEE Transmission Zone",
+        "CEE RT&R&D",
+        "Department Head",
+        "Workflow Coordinator",
+        "Admin",
+        "Org Admin",
+    }
+
+    # Only roles belonging to the KPTCL org
+    kptcl_roles = (
+        session.query(OrgRole)
+        .filter(OrgRole.organization_id == org.id, OrgRole.is_active.is_(True))
+        .all()
+    )
+
+    granted = 0
+    for role in kptcl_roles:
+        is_admin = role.is_org_admin
+        is_named = role.name in READONLY_ROLE_NAMES
+        if not is_admin and not is_named:
+            continue  # skip roles that shouldn't see this module
+
+        existing = (
+            session.query(OrgRolePermission)
+            .filter_by(org_role_id=role.id, module_id=mod.id)
+            .first()
+        )
+
+        if is_admin:
+            # Full access for org-admin roles
+            if existing:
+                existing.can_view = existing.can_add = existing.can_edit = True
+                existing.can_delete = existing.can_approve = existing.can_assign = True
+                existing.can_export = existing.can_import = True
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mod.id,
+                    can_view=True, can_add=True, can_edit=True,
+                    can_delete=True, can_approve=True, can_assign=True,
+                    can_export=True, can_import=True,
+                ))
+                granted += 1
+        else:
+            # Read-only for field / supervisory roles
+            if existing:
+                existing.can_view = True  # ensure can_view is set at minimum
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mod.id,
+                    can_view=True, can_add=False, can_edit=False,
+                    can_delete=False, can_approve=False, can_assign=False,
+                    can_export=False, can_import=False,
+                ))
+                granted += 1
+
+    session.commit()
+    print(
+        f"[OK] Schedule Compliance (KPTCL): permissions seeded for {len(kptcl_roles)} role(s) "
+        f"in org '{org.display_name}' ({granted} new rows inserted)."
+    )
+    return granted
+
+
 def seed_approval_role_permissions(session):
     """
     Ensure 'Technical Approver' and 'Org Admin' roles have can_view + can_approve
@@ -5472,6 +5653,113 @@ def seed_approval_role_permissions(session):
         f"{inserted} row(s) inserted, {updated} row(s) updated "
         f"across {len(target_role_names)} role name(s)."
     )
+    return inserted
+
+
+def seed_missing_role_permissions(session, org=None):
+    """
+    Backfill OrgRolePermission rows for roles that have no template
+    or had a name mismatch in _DFT_ROLES vs seed_role_templates.
+
+    Targets (KPTCL org or all orgs if org=None):
+      Finance Approver  → Procurement Approvals (approve) + Dashboard (view)
+      TA&QC Officer     → TA&QC Inspections (readwrite) + Failure Registry (view) + Dashboard (view)
+      Tester            → Testing Requests (view) + Testing (readwrite) + Equipment (view)
+      Section Head      → Testing Requests (view) + Failure Registry (view) +
+                          Recommendations (view) + Dashboard (view)
+      Dept Head         → Recommendations (approve) + Approvals (approve) +
+                          Equipment (view) + Repair Workflows (approve)
+
+    Idempotent — inserts missing rows, updates existing ones.
+    """
+    def _get_mod(name):
+        return session.query(Module).filter_by(name=name, is_active=True).first()
+
+    mods = {
+        "Procurement Approvals": _get_mod("Procurement Approvals"),
+        "TA&QC Inspections":     _get_mod("TA&QC Inspections"),
+        "Failure Registry":      _get_mod("Failure Registry"),
+        "Dashboard":             _get_mod("Dashboard"),
+        "Testing Requests":      _get_mod("Testing Requests"),
+        "Testing":               _get_mod("Testing"),
+        "Equipment":             _get_mod("Equipment"),
+        "Recommendations":       _get_mod("Recommendations"),
+        "Approvals":             _get_mod("Approvals"),
+        "Repair Workflows":      _get_mod("Repair Workflows"),
+    }
+    missing_mods = [k for k, v in mods.items() if v is None]
+    if missing_mods:
+        print(f"[WARN] seed_missing_role_permissions: modules not found: {missing_mods}")
+
+    # permission_sets: role_name → list of (module_name, can_view, can_add, can_edit, can_approve, can_assign, can_export)
+    ROLE_PERMS = {
+        "Finance Approver": [
+            ("Procurement Approvals", True, False, False, True,  True,  True),
+            ("Dashboard",             True, False, False, False, False, False),
+        ],
+        "TA&QC Officer": [
+            ("TA&QC Inspections", True, True,  True,  False, False, True),
+            ("Failure Registry",  True, False, False, False, False, False),
+            ("Dashboard",         True, False, False, False, False, False),
+        ],
+        "Tester": [
+            ("Testing Requests", True, False, False, False, False, False),
+            ("Testing",          True, True,  True,  False, False, True),
+            ("Equipment",        True, False, False, False, False, False),
+        ],
+        "Section Head": [
+            ("Testing Requests", True, False, False, False, False, False),
+            ("Failure Registry", True, False, False, False, False, False),
+            ("Recommendations",  True, False, False, False, False, False),
+            ("Dashboard",        True, False, False, False, False, False),
+        ],
+        "Dept Head": [
+            ("Recommendations",   True, False, False, True, True, True),
+            ("Approvals",         True, False, False, True, True, True),
+            ("Equipment",         True, False, False, False, False, False),
+            ("Repair Workflows",  True, False, False, True, True, True),
+        ],
+    }
+
+    # Scope to one org or all orgs
+    role_filter = {}
+    if org is not None:
+        role_filter["organization_id"] = org.id
+
+    inserted = 0
+    for role_name, perm_list in ROLE_PERMS.items():
+        roles = session.query(OrgRole).filter_by(name=role_name, is_active=True, **role_filter).all()
+        for role in roles:
+            for (mod_name, cv, ca, ce, capr, cass, cexp) in perm_list:
+                mod = mods.get(mod_name)
+                if mod is None:
+                    continue
+                existing = (
+                    session.query(OrgRolePermission)
+                    .filter_by(org_role_id=role.id, module_id=mod.id)
+                    .first()
+                )
+                if existing:
+                    existing.can_view    = cv
+                    existing.can_add     = ca
+                    existing.can_edit    = ce
+                    existing.can_approve = capr
+                    existing.can_assign  = cass
+                    existing.can_export  = cexp
+                else:
+                    session.add(OrgRolePermission(
+                        id=uuid.uuid4(),
+                        org_role_id=role.id,
+                        module_id=mod.id,
+                        can_view=cv, can_add=ca, can_edit=ce,
+                        can_delete=False, can_approve=capr,
+                        can_assign=cass, can_export=cexp, can_import=False,
+                    ))
+                    inserted += 1
+
+    session.commit()
+    scope = f"org '{org.display_name}'" if org else "all orgs"
+    print(f"[OK] Missing role permissions backfilled for {scope}: {inserted} new row(s) inserted.")
     return inserted
 
 
@@ -7190,6 +7478,13 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Schedule module permissions failed (non-fatal): {_e}")
 
+        # Schedule Compliance module — KPTCL-only (pass kptcl_org to scope it)
+        print("\n--- Schedule Compliance Module Permissions (KPTCL) ---")
+        try:
+            seed_schedule_compliance_module_permissions(session, org=kptcl_org)
+        except Exception as _e:
+            print(f"[WARN] Schedule Compliance module permissions failed (non-fatal): {_e}")
+
         # Approval module permissions — Technical Approver + Org Admin across all orgs
         # Grants can_view + can_approve on Approvals (module 48) and
         # Testing Request Approvals (module 49) so the FR 2-step flow works.
@@ -7198,6 +7493,14 @@ def run_seed():
             seed_approval_role_permissions(session)
         except Exception as _e:
             print(f"[WARN] Approval role permissions failed (non-fatal): {_e}")
+
+        # Backfill permissions for roles that had no template or name mismatch:
+        # Finance Approver, TA&QC Officer, Tester, Section Head, Dept Head
+        print("\n--- Missing Role Permissions Backfill (KPTCL) ---")
+        try:
+            seed_missing_role_permissions(session, org=kptcl_org)
+        except Exception as _e:
+            print(f"[WARN] Missing role permissions backfill failed (non-fatal): {_e}")
 
         # Zoho Import Mapping (after KPTCL org + departments exist)
         seed_zoho_import_mapping(session, kptcl_org)
