@@ -185,6 +185,12 @@ def invalidate_dashboard_cache(org_id: Optional[UUID] = None) -> None:
     RedisCacheService.delete_pattern("dashboard::global::*")
 
 
+# ── Department hierarchy helpers ──────────────────────────────────────────
+# Re-exported for convenience; canonical implementation lives in utils.common_service
+
+from utils.common_service import get_dept_subtree_ids as get_dept_subtree, get_user_dept_scope
+
+
 # ── Utility ────────────────────────────────────────────────────────────────
 
 def _now() -> datetime:
@@ -212,19 +218,28 @@ class DashboardService:
         db: Session,
         org_id: Optional[UUID] = None,
         dept_id: Optional[UUID] = None,
+        dept_ids: Optional[set] = None,
     ):
         self.db = db
         self.org_id = org_id
-        # dept_id is optional: when None → show all departments (org-wide view)
-        # when provided → narrow results to that department only
+        # dept_id  = root department (used for cache key only)
+        # dept_ids = root + all descendants (used for IN filter)
+        # When None → org-wide view (no department restriction)
         self.dept_id = dept_id
+        self.dept_ids = dept_ids if dept_ids is not None else (
+            {dept_id} if dept_id else None
+        )
 
     def _org_filter(self, q, model=TestingRequest):
-        """Apply org-level filter. When dept_id is also set, narrows to that dept."""
+        """
+        Apply org-level filter.
+        When dept_ids is set, narrows to that department subtree
+        (root dept + all descendants) using an IN clause.
+        """
         if self.org_id:
             q = q.filter(model.organization_id == self.org_id)
-        if self.dept_id and hasattr(model, "department_id"):
-            q = q.filter(model.department_id == self.dept_id)
+        if self.dept_ids and hasattr(model, "department_id"):
+            q = q.filter(model.department_id.in_(self.dept_ids))
         return q
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1329,9 +1344,9 @@ class DashboardService:
         """AEE / field-supervisor dashboard data — all DB access centralised here."""
         org_id = self.org_id
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-        dept_id = self.dept_id
-        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
-        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+        dept_ids = self.dept_ids
+        dept_cond_tr = (TestingRequest.department_id.in_(dept_ids)) if dept_ids else true()
+        dept_cond_eq = (Equipment.department_id.in_(dept_ids)) if dept_ids else true()
 
         pending_approvals = (
             self.db.query(func.count(TestingRequest.id))
@@ -1454,9 +1469,9 @@ class DashboardService:
         """EE TLSS condition-monitoring dashboard."""
         org_id = self.org_id
         ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
-        dept_id = self.dept_id
-        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
-        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+        dept_ids = self.dept_ids
+        dept_cond_tr = (TestingRequest.department_id.in_(dept_ids)) if dept_ids else true()
+        dept_cond_eq = (Equipment.department_id.in_(dept_ids)) if dept_ids else true()
 
         total_equipment = (
             self.db.query(func.count(Equipment.id))
@@ -1603,9 +1618,9 @@ class DashboardService:
         """SEE circle-level supervision dashboard."""
         org_id = self.org_id
         ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
-        dept_id = self.dept_id
-        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
-        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+        dept_ids = self.dept_ids
+        dept_cond_tr = (TestingRequest.department_id.in_(dept_ids)) if dept_ids else true()
+        dept_cond_eq = (Equipment.department_id.in_(dept_ids)) if dept_ids else true()
 
         total_equipment = (
             self.db.query(func.count(Equipment.id))
@@ -1683,9 +1698,9 @@ class DashboardService:
     def cee_dashboard(self) -> Dict:
         """CEE zone-level executive dashboard."""
         org_id = self.org_id
-        dept_id = self.dept_id
-        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
-        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+        dept_ids = self.dept_ids
+        dept_cond_tr = (TestingRequest.department_id.in_(dept_ids)) if dept_ids else true()
+        dept_cond_eq = (Equipment.department_id.in_(dept_ids)) if dept_ids else true()
 
         zone_equipment = (
             self.db.query(func.count(Equipment.id))

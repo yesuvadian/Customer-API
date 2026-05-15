@@ -263,37 +263,10 @@ class DirectSubmissionService:
     def _get_user_scope(self, user: User):
         """
         Return (is_org_admin: bool, department_id: UUID | None).
-        Mirrors the scope logic used by testing_request_service so that
-        direct-submission lists are dept-filtered consistently.
+        Delegates to shared get_user_dept_scope() in utils.common_service.
         """
-        is_org_admin = (
-            self.db.query(OrgRole)
-            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
-            .filter(
-                OrgUserRole.user_id == user.id,
-                OrgUserRole.is_active.is_(True),
-                OrgRole.is_org_admin.is_(True),
-            )
-            .first()
-        ) is not None
-
-        if is_org_admin:
-            return True, None
-
-        user_dept_role = (
-            self.db.query(OrgUserRole)
-            .filter(
-                OrgUserRole.user_id == user.id,
-                OrgUserRole.is_active.is_(True),
-                OrgUserRole.department_id.isnot(None),
-            )
-            .first()
-        )
-        if user_dept_role and user_dept_role.department_id:
-            return False, user_dept_role.department_id
-
-        # Fallback to user.department_id
-        return False, user.department_id
+        from utils.common_service import get_user_dept_scope
+        return get_user_dept_scope(self.db, user.id, None)
 
     def list_submissions(
         self,

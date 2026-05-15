@@ -14,27 +14,7 @@ from models import (
     OrgRole, OrgUserRole,
     OrgTestTemplate,
 )
-from utils.common_service import UTCDateTimeMixin
-
-
-def get_dept_subtree_ids(db: Session, dept_id: UUID) -> List[UUID]:
-    """Return dept_id plus all its recursive child department IDs.
-
-    Uses a PostgreSQL recursive CTE to walk the org_departments tree.
-    This allows zone/circle-level users to see TRs from all child depts.
-    """
-    result = db.execute(text("""
-        WITH RECURSIVE dept_tree AS (
-            SELECT id FROM public.org_departments WHERE id = :root_id AND is_active = true
-            UNION ALL
-            SELECT d.id
-            FROM   public.org_departments d
-            JOIN   dept_tree dt ON d.parent_department_id = dt.id
-            WHERE  d.is_active = true
-        )
-        SELECT id FROM dept_tree
-    """), {"root_id": str(dept_id)})
-    return [row[0] for row in result.fetchall()]
+from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
 
 
 class TestingRequestService:
@@ -591,36 +571,7 @@ class TestingRequestService:
     ) -> tuple:
         """Return (is_org_admin: bool, department_id: UUID | None).
 
-        Routes use this to determine whether to apply a department filter
-        and which department to filter by.
+        Delegates to the shared get_user_dept_scope() utility in
+        utils.common_service so the logic is maintained in one place.
         """
-        is_org_admin = (
-            self.db.query(OrgRole)
-            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
-            .filter(
-                OrgUserRole.user_id == user_id,
-                OrgUserRole.is_active.is_(True),
-                OrgRole.is_org_admin.is_(True),
-            )
-            .first()
-        ) is not None
-
-        if is_org_admin:
-            return True, None
-
-        user_dept_role = (
-            self.db.query(OrgUserRole)
-            .filter(
-                OrgUserRole.user_id == user_id,
-                OrgUserRole.is_active.is_(True),
-                OrgUserRole.department_id.isnot(None),
-            )
-            .first()
-        )
-        if user_dept_role and user_dept_role.department_id:
-            return False, user_dept_role.department_id
-
-        # Fallback to user.department_id
-        user = self.db.query(User).filter(User.id == user_id).first()
-        dept_id = user.department_id if user else None
-        return False, dept_id
+        return get_user_dept_scope(self.db, user_id, org_id)
