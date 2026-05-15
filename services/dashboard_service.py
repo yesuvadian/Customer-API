@@ -1112,6 +1112,173 @@ class DashboardService:
             })
         return {"total": total, "overdue": overdue, "items": items}
 
+    # ── Projected tickets by month ───────────────────────────────────────────
+
+    def projected_tickets_by_month(self, year: int | None = None) -> Dict:
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget=f"projected_tickets_{year}")
+        return _cached(key, lambda: self._compute_projected_tickets(year))
+
+    def _compute_projected_tickets(self, year: int | None) -> Dict:
+        """
+        For every active operational schedule (equipment_id IS NOT NULL),
+        project how many tickets will fire in each month of `year` by walking
+        the schedule's frequency from next_run_date forward.
+
+        Returns:
+          {
+            "year": 2026,
+            "months": [
+              {"month": 1, "label": "Jan", "count": 12, "by_category": {...}},
+              ...
+            ],
+            "total": 84
+          }
+        """
+        from models import TestRequestSchedule, ScheduleFrequency
+        from dateutil.relativedelta import relativedelta
+
+        now = _now()
+        target_year = year or now.year
+
+        jan_1 = datetime(target_year, 1, 1, tzinfo=timezone.utc)
+        dec_31 = datetime(target_year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+
+        # Frequency → approximate delta for projection
+        def _delta(freq: ScheduleFrequency):
+            mapping = {
+                ScheduleFrequency.daily:       timedelta(days=1),
+                ScheduleFrequency.weekly:      timedelta(weeks=1),
+                ScheduleFrequency.biweekly:    timedelta(weeks=2),
+                ScheduleFrequency.monthly:     relativedelta(months=1),
+                ScheduleFrequency.quarterly:   relativedelta(months=3),
+                ScheduleFrequency.semi_annual: relativedelta(months=6),
+                ScheduleFrequency.yearly:      relativedelta(years=1),
+                ScheduleFrequency.triennial:   relativedelta(years=3),
+            }
+            return mapping.get(freq, relativedelta(years=1))
+
+        q = self.db.query(TestRequestSchedule).filter(
+            TestRequestSchedule.equipment_id.isnot(None),
+            TestRequestSchedule.is_active.is_(True),
+            TestRequestSchedule.is_deleted.is_(False),
+        )
+        if self.org_id:
+            q = q.filter(TestRequestSchedule.organization_id == self.org_id)
+
+        schedules = q.all()
+
+        # month buckets: {month: {category: count}}
+        buckets: dict[int, dict[str, int]] = {m: {} for m in range(1, 13)}
+
+        for sched in schedules:
+            cat = sched.request_category.value if sched.request_category else "test"
+            delta = _delta(sched.frequency)
+
+            # Start projecting from next_run_date (or start_date if in future)
+            run_date = _make_tz(sched.next_run_date)
+
+            # Walk backwards if next_run_date is after year end — not relevant
+            # Walk forward until end of target year
+            # Cap iterations to avoid infinite loop for daily schedules
+            max_iter = 400
+            itr = 0
+            while run_date <= dec_31 and itr < max_iter:
+                if run_date >= jan_1:
+                    m = run_date.month
+                    buckets[m][cat] = buckets[m].get(cat, 0) + 1
+                run_date = run_date + delta
+                itr += 1
+
+        month_labels = ["Jan","Feb","Mar","Apr","May","Jun",
+                         "Jul","Aug","Sep","Oct","Nov","Dec"]
+        months = []
+        total = 0
+        for m in range(1, 13):
+            count = sum(buckets[m].values())
+            total += count
+            months.append({
+                "month": m,
+                "label": month_labels[m - 1],
+                "count": count,
+                "by_category": buckets[m],
+            })
+
+        return {"year": target_year, "months": months, "total": total}
+
+    # ── Created vs Completed tickets by month ────────────────────────────────
+
+    def tickets_created_vs_completed(self, year: int | None = None) -> Dict:
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget=f"created_vs_completed_{year}")
+        return _cached(key, lambda: self._compute_created_vs_completed(year))
+
+    def _compute_created_vs_completed(self, year: int | None) -> Dict:
+        """
+        Month-by-month count of:
+          - created   : tickets whose cts falls in the month  (is_schedule_template=False)
+          - completed : tickets whose completed_at falls in the month
+
+        Returns:
+          {
+            "year": 2026,
+            "months": [
+              {"month": 1, "label": "Jan", "created": 8, "completed": 5},
+              ...
+            ]
+          }
+        """
+        from sqlalchemy import extract, case
+
+        now = _now()
+        target_year = year or now.year
+
+        # ── Created per month ──────────────────────────────────────────────
+        created_q = (
+            self.db.query(
+                extract("month", TestingRequest.cts).label("month"),
+                func.count(TestingRequest.id).label("cnt"),
+            )
+            .filter(
+                extract("year", TestingRequest.cts) == target_year,
+                TestingRequest.is_schedule_template.is_(False),
+            )
+        )
+        if self.org_id:
+            created_q = created_q.filter(TestingRequest.organization_id == self.org_id)
+        created_q = created_q.group_by("month")
+
+        created_map = {int(row.month): row.cnt for row in created_q.all()}
+
+        # ── Completed per month ────────────────────────────────────────────
+        completed_q = (
+            self.db.query(
+                extract("month", TestingRequest.completed_at).label("month"),
+                func.count(TestingRequest.id).label("cnt"),
+            )
+            .filter(
+                extract("year", TestingRequest.completed_at) == target_year,
+                TestingRequest.completed_at.isnot(None),
+                TestingRequest.is_schedule_template.is_(False),
+            )
+        )
+        if self.org_id:
+            completed_q = completed_q.filter(TestingRequest.organization_id == self.org_id)
+        completed_q = completed_q.group_by("month")
+
+        completed_map = {int(row.month): row.cnt for row in completed_q.all()}
+
+        month_labels = ["Jan","Feb","Mar","Apr","May","Jun",
+                         "Jul","Aug","Sep","Oct","Nov","Dec"]
+        months = []
+        for m in range(1, 13):
+            months.append({
+                "month": m,
+                "label": month_labels[m - 1],
+                "created":   created_map.get(m, 0),
+                "completed": completed_map.get(m, 0),
+            })
+
+        return {"year": target_year, "months": months}
+
     # ── Role view metadata ───────────────────────────────────────────────────
 
     def role_view(self, user_id: UUID) -> Dict:

@@ -223,6 +223,9 @@ async def get_full_dashboard(
         tasks.append(("failure_registry", loop.run_in_executor(executor, svc.failure_registry_list)))
     if "taqc_inspections" in permitted:
         tasks.append(("taqc_inspections", loop.run_in_executor(executor, svc.taqc_inspections_list)))
+    # Chart widgets — always included regardless of role
+    tasks.append(("projected_tickets", loop.run_in_executor(executor, svc.projected_tickets_by_month)))
+    tasks.append(("tickets_trend", loop.run_in_executor(executor, svc.tickets_created_vs_completed)))
     
     # Await all tasks in parallel
     results = {}
@@ -249,7 +252,65 @@ async def get_full_dashboard(
         "open_remediation":  results.get("open_remediation", None),
         "failure_registry":  results.get("failure_registry", None),
         "taqc_inspections":  results.get("taqc_inspections", None),
+        "projected_tickets": results.get("projected_tickets", None),
+        "tickets_trend":     results.get("tickets_trend", None),
     }
+
+
+# ── Projected tickets by month ─────────────────────────────────────────────
+
+@router.get("/projected-tickets")
+def get_projected_tickets(
+    year: Optional[int] = Query(None, description="4-digit year, defaults to current year"),
+    org_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Project how many operational schedule tickets will fire each month of the year.
+
+    Uses every active operational schedule (equipment_id IS NOT NULL) and walks
+    their frequency forward from next_run_date to count projected tickets per month.
+
+    Response shape:
+    ```json
+    {
+      "year": 2026,
+      "total": 84,
+      "months": [
+        {"month": 1, "label": "Jan", "count": 12, "by_category": {"maintenance": 8, "test": 4}},
+        ...
+      ]
+    }
+    ```
+    """
+    return _svc(db, current_user, org_id).projected_tickets_by_month(year=year)
+
+
+# ── Created vs Completed month-wise ────────────────────────────────────────
+
+@router.get("/tickets-trend")
+def get_tickets_trend(
+    year: Optional[int] = Query(None, description="4-digit year, defaults to current year"),
+    org_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Month-by-month bar chart data: tickets created vs tickets completed.
+
+    Response shape:
+    ```json
+    {
+      "year": 2026,
+      "months": [
+        {"month": 1, "label": "Jan", "created": 8, "completed": 5},
+        ...
+      ]
+    }
+    ```
+    """
+    return _svc(db, current_user, org_id).tickets_created_vs_completed(year=year)
 
 
 # ── Cache invalidation ─────────────────────────────────────────────────────
