@@ -1391,15 +1391,15 @@ def seed_modules(session):
                 "Execution: stage-role RBAC driven; each stage locks to authorized roles only.",
  "path": "repair-workflows",
  "group_name": "Field Operations"},
-# ✅ TESTING SCHEDULES MODULE (SRS §5.1.2)
-{"name": "Testing Schedules",
+# ✅ SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
+{"name": "Schedule Templates",
  "description": "SRS §5.1.2 — Automated periodic test ticket generation: master schedule templates "
                 "and operational schedules per equipment. Org-admin manages master set; "
                 "operational schedules auto-created on equipment commissioning.",
  "path": "testing_schedules",
  "group_name": "Condition Monitoring"},
 # ✅ SCHEDULE COMPLIANCE MODULE
-{"name": "Schedule Compliance",
+{"name": "Test Schedules",
  "description": "Visual compliance tracker — shows per-equipment test schedule status "
                 "(overdue, due-imminent, due-soon, ok) with filter by equipment type, "
                 "substation, and compliance band. Accessible to EE TLSS, AEE, org-admin.",
@@ -3007,7 +3007,7 @@ def seed_role_templates(session):
     approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
     workflows_module          = [mid for mid in [modules_by_name.get("Workflows")] if mid]
     repair_workflows_module      = [mid for mid in [modules_by_name.get("Repair Workflows")] if mid]
-    schedule_compliance_module   = [mid for mid in [modules_by_name.get("Schedule Compliance")] if mid]
+    schedule_compliance_module   = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
     procurement_approvals_module = [mid for mid in [modules_by_name.get("Procurement Approvals")] if mid]
     taqc_inspections_module      = [mid for mid in [modules_by_name.get("TA&QC Inspections")] if mid]
     failure_registry_module      = [mid for mid in [modules_by_name.get("Failure Registry")] if mid]
@@ -5434,12 +5434,12 @@ _MASTER_SCHEDULE_SEED = {
 
 def seed_schedule_module_permissions(session):
     """
-    Ensure 'Testing Schedules' module exists and all is_org_admin OrgRoles
+    Ensure 'Schedule Templates' module exists and all is_org_admin OrgRoles
     across every organization have full access to it. Idempotent.
     """
-    mod = session.query(Module).filter_by(name="Testing Schedules").first()
+    mod = session.query(Module).filter_by(name="Schedule Templates").first()
     if not mod:
-        print("[WARN] 'Testing Schedules' module not found — run seed_modules first.")
+        print("[WARN] 'Schedule Templates' module not found — run seed_modules first.")
         return 0
 
     admin_roles = (
@@ -5469,13 +5469,13 @@ def seed_schedule_module_permissions(session):
             granted += 1
 
     session.commit()
-    print(f"[OK] Testing Schedules: full access granted/updated for {len(admin_roles)} org-admin role(s) ({granted} new).")
+    print(f"[OK] Schedule Templates: full access granted/updated for {len(admin_roles)} org-admin role(s) ({granted} new).")
     return granted
 
 
 def seed_schedule_compliance_module_permissions(session, org=None):
     """
-    Grant 'Schedule Compliance' module access to OrgRoles belonging to *org*.
+    Grant 'Test Schedules' module access to OrgRoles belonging to *org*.
     This module is KPTCL-specific — pass the KPTCL Organization object.
     Idempotent — inserts missing rows and updates existing ones.
 
@@ -5483,9 +5483,9 @@ def seed_schedule_compliance_module_permissions(session, org=None):
       is_org_admin roles              → full access (all flags)
       Named field / supervisory roles → can_view only
     """
-    mod = session.query(Module).filter_by(name="Schedule Compliance").first()
+    mod = session.query(Module).filter_by(name="Test Schedules").first()
     if not mod:
-        print("[WARN] 'Schedule Compliance' module not found — run seed_modules first.")
+        print("[WARN] 'Test Schedules' module not found — run seed_modules first.")
         return 0
 
     if org is None:
@@ -5563,7 +5563,7 @@ def seed_schedule_compliance_module_permissions(session, org=None):
 
     session.commit()
     print(
-        f"[OK] Schedule Compliance (KPTCL): permissions seeded for {len(kptcl_roles)} role(s) "
+        f"[OK] Test Schedules (KPTCL): permissions seeded for {len(kptcl_roles)} role(s) "
         f"in org '{org.display_name}' ({granted} new rows inserted)."
     )
     return granted
@@ -7471,19 +7471,19 @@ def run_seed():
             print(f"[WARN] Master schedule seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
-        # Testing Schedules module — full access for org-admin roles
-        print("\n--- Testing Schedules Module Permissions ---")
+        # Schedule Templates module — full access for org-admin roles
+        print("\n--- Schedule Templates Module Permissions ---")
         try:
             seed_schedule_module_permissions(session)
         except Exception as _e:
             print(f"[WARN] Schedule module permissions failed (non-fatal): {_e}")
 
-        # Schedule Compliance module — KPTCL-only (pass kptcl_org to scope it)
-        print("\n--- Schedule Compliance Module Permissions (KPTCL) ---")
+        # Test Schedules module — KPTCL-only (pass kptcl_org to scope it)
+        print("\n--- Test Schedules Module Permissions (KPTCL) ---")
         try:
             seed_schedule_compliance_module_permissions(session, org=kptcl_org)
         except Exception as _e:
-            print(f"[WARN] Schedule Compliance module permissions failed (non-fatal): {_e}")
+            print(f"[WARN] Test Schedules module permissions failed (non-fatal): {_e}")
 
         # Approval module permissions — Technical Approver + Org Admin across all orgs
         # Grants can_view + can_approve on Approvals (module 48) and
