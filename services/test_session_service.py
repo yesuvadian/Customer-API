@@ -336,6 +336,18 @@ class TestSessionService(UTCDateTimeMixin):
             )
 
         total_sessions = testing_request.total_sessions_planned or 1
+
+        # Idempotency guard — return existing sessions if already fully generated
+        existing_count = self.db.query(TestSession).filter(
+            TestSession.testing_request_id == testing_request_id
+        ).count()
+        if existing_count >= total_sessions:
+            return (
+                self.db.query(TestSession)
+                .filter(TestSession.testing_request_id == testing_request_id)
+                .order_by(TestSession.session_number)
+                .all()
+            )
         interval_days = testing_request.session_interval_days or 1
         start_date = testing_request.scheduled_start_date or self._utc_now()
 

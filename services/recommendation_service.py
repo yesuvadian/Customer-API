@@ -26,6 +26,7 @@ class RecommendationService:
         next_action: Optional[str] = None,
         schedule_frequency: Optional[str] = None,
         replacement_products: Optional[list] = None,
+        test_types: Optional[list] = None,
     ) -> Recommendation:
         request = self.db.query(TestingRequest).filter(TestingRequest.id == testing_request_id).first()
         if not request:
@@ -90,6 +91,7 @@ class RecommendationService:
             existing_rec.next_action = parsed_next_action
             existing_rec.schedule_frequency = parsed_frequency
             existing_rec.replacement_products = replacement_products or []
+            existing_rec.test_types = test_types if test_types is not None else existing_rec.test_types
             existing_rec.submitted_by = submitted_by
             existing_rec.submitted_at = UTCDateTimeMixin._utc_now()
             existing_rec.modified_by = submitted_by
@@ -104,6 +106,7 @@ class RecommendationService:
                 next_action=parsed_next_action,
                 schedule_frequency=parsed_frequency,
                 replacement_products=replacement_products or [],
+                test_types=test_types or [],
                 submitted_by=submitted_by,
                 submitted_at=UTCDateTimeMixin._utc_now(),
                 approval_status="pending",
@@ -111,8 +114,21 @@ class RecommendationService:
             )
             self.db.add(recommendation)
 
-        # Transition testing request to under_approval
-        request.status = TestingRequestStatus.under_approval
+        # Transition testing request to under_approval —
+        # but for multi-session requests only after ALL sessions are completed.
+        if request.is_multi_session and request.total_sessions_planned:
+            from models import TestSession
+            completed_sessions = self.db.query(TestSession).filter(
+                TestSession.testing_request_id == testing_request_id,
+                TestSession.status == "completed",
+            ).count()
+            if completed_sessions >= request.total_sessions_planned:
+                request.status = TestingRequestStatus.under_approval
+            else:
+                # More sessions to go — stay in_progress
+                request.status = TestingRequestStatus.in_progress
+        else:
+            request.status = TestingRequestStatus.under_approval
         request.modified_by = submitted_by
 
         self.db.commit()

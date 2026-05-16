@@ -224,9 +224,16 @@ class WorkflowDispatchService:
         """
         test_types: list[dict] = rec.test_types or []
         if test_types:
+            def _safe_int(val):
+                """Convert test_type id to int regardless of whether it arrived as int or str."""
+                try:
+                    return int(val) if val is not None else None
+                except (ValueError, TypeError):
+                    return None
+
             return [
                 self._create_schedule(tr, rec, approver_id, category=category,
-                                      test_type_id=int(t["id"]) if t.get("id") is not None else None)
+                                      test_type_id=_safe_int(t.get("id")))
                 for t in test_types
             ]
         # Legacy / TAQC path — single test_type_id on the TR

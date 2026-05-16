@@ -1384,12 +1384,20 @@ def seed_modules(session):
                 "Accessible to: EE TLSS, Department Head, AEE Maintenance.",
  "path": "test_register",
  "group_name": "Condition Monitoring"},
-# ✅ REPAIR WORKFLOW MODULE
-{"name": "Repair Workflows",
- "description": "Transformer repair lifecycle — 10-stage workflow from Failure Reporting to Commissioning. "
+# ✅ BREAKDOWN WORKFLOW MODULE  (renamed from "Repair Workflows" — path unchanged: repair-workflows)
+{"name": "Breakdown Workflows",
+ "rename_from": "Repair Workflows",
+ "description": "Unplanned breakdown repair lifecycle — 10-stage workflow from Failure Reporting to Commissioning. "
                 "Config (org-admin only): define stages, forms, roles, transitions. "
                 "Execution: stage-role RBAC driven; each stage locks to authorized roles only.",
  "path": "repair-workflows",
+ "group_name": "Field Operations"},
+# ✅ OVERHAUL WORKFLOW MODULE
+{"name": "Overhaul Workflows",
+ "description": "Overhaul lifecycle — auto-triggered when cumulative ops count crosses threshold. "
+                "Stages: Trigger Review, Execution, Completion Upload, Officer Verification. "
+                "Stage-role RBAC driven; each stage locks to authorised roles only.",
+ "path": "overhaul-workflows",
  "group_name": "Field Operations"},
 # ✅ SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
 {"name": "Schedule Templates",
@@ -1411,6 +1419,13 @@ def seed_modules(session):
 
     for m in modules_data:
         existing = session.query(Module).filter_by(name=m["name"]).first()
+
+        # Support rename_from: if new name not found, look up old name and rename in-place
+        if not existing and m.get("rename_from"):
+            existing = session.query(Module).filter_by(name=m["rename_from"]).first()
+            if existing:
+                existing.name = m["name"]
+                print(f"  [RENAME] Module '{m['rename_from']}' → '{m['name']}'")
 
         if not existing:
             module = Module(
@@ -1833,20 +1848,20 @@ def seed_privileges(session, role_ids, module_ids):
         # Config endpoints (PUT /repair-workflows/config/*) require is_org_admin.
 
         # All stage-acting roles: can view + add (save data) + approve (advance/reject)
-        {"role": "Maintenance Officer",         "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "TRC Member",              "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Senior Management Approver",             "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Senior Management Approver",   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Vendor",                  "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Inspection Engineer",     "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Finance Officer",         "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "QA Team",                 "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Reviewing Officer",                   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
-        {"role": "Supervisory Officer",                  "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Maintenance Officer",         "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "TRC Member",              "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",             "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",   "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Vendor",                  "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Inspection Engineer",     "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Finance Officer",         "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "QA Team",                 "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Reviewing Officer",                   "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Supervisory Officer",                  "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_approve": True},
 
         # Supervisory roles: view + export only (no stage actions)
-        {"role": "Reviewing Officer",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
-        {"role": "Supervisory Officer",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer",                 "module": "Breakdown Workflows", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",                 "module": "Breakdown Workflows", "can_view": True, "can_export": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -3006,7 +3021,8 @@ def seed_role_templates(session):
     recommendations_module   = [mid for mid in [modules_by_name.get("Recommendations")] if mid]
     approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
     workflows_module          = [mid for mid in [modules_by_name.get("Workflows")] if mid]
-    repair_workflows_module      = [mid for mid in [modules_by_name.get("Repair Workflows")] if mid]
+    breakdown_workflows_module      = [mid for mid in [modules_by_name.get("Breakdown Workflows")] if mid]
+    overhaul_workflows_module    = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
     schedule_compliance_module   = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
     procurement_approvals_module = [mid for mid in [modules_by_name.get("Procurement Approvals")] if mid]
     taqc_inspections_module      = [mid for mid in [modules_by_name.get("TA&QC Inspections")] if mid]
@@ -3100,7 +3116,7 @@ def seed_role_templates(session):
                 _readwrite(procurement_modules) +
                 _readwrite(testing_requests_module) +
                 _readwrite(equipment_module) +
-                _readwrite(repair_workflows_module)
+                _readwrite(breakdown_workflows_module)
             ),
         },
 
@@ -3108,7 +3124,7 @@ def seed_role_templates(session):
         {
             "name": "Maintenance Officer",
             "rename_from": "Maintenance Officer",
-            "description": "Field-level maintenance responsible officer. Key repair workflow actor.",
+            "description": "Field-level maintenance responsible officer. Key repair and overhaul workflow actor.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3118,7 +3134,8 @@ def seed_role_templates(session):
                 _readonly(testing_requests_module) +
                 _approve(approvals_module) +
                 _readonly(recommendations_module) +
-                _readwrite(repair_workflows_module)
+                _readwrite(breakdown_workflows_module) +
+                _readwrite(overhaul_workflows_module)   # OVERHAUL_TRIGGER, OVERHAUL_EXECUTION, COMPLETION_UPLOAD
             ),
         },
 
@@ -3126,7 +3143,7 @@ def seed_role_templates(session):
         {
             "name": "Test Engineer",
             "rename_from": "Field Tester",
-            "description": "Performs on-site and laboratory transformer testing and repair stage execution.",
+            "description": "Performs on-site and laboratory transformer testing and repair/overhaul stage execution.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3134,7 +3151,8 @@ def seed_role_templates(session):
                 _readonly(testing_requests_module) +
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
-                _readwrite(repair_workflows_module)
+                _readwrite(breakdown_workflows_module) +
+                _readwrite(overhaul_workflows_module)   # OVERHAUL_EXECUTION, COMPLETION_UPLOAD
             ),
         },
 
@@ -3153,7 +3171,7 @@ def seed_role_templates(session):
                 _readonly(testing_requests_module) +
                 _approve(approvals_module) +
                 _readonly(recommendations_module) +
-                _readwrite(repair_workflows_module)
+                _readwrite(breakdown_workflows_module)
             ),
         },
 
@@ -3161,7 +3179,7 @@ def seed_role_templates(session):
         {
             "name": "Reviewing Officer",
             "rename_from": "Reviewing Officer",
-            "description": "Reviews and approves recommendations, testing requests and repair workflow stages. Covers EE-level designation responsibilities.",
+            "description": "Reviews and approves recommendations, testing requests, repair and overhaul workflow stages. Covers EE-level designation responsibilities.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
@@ -3175,7 +3193,8 @@ def seed_role_templates(session):
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
                 _readonly(procurement_modules) +
-                _approve(repair_workflows_module) +
+                _approve(breakdown_workflows_module) +
+                _approve(overhaul_workflows_module) +    # OVERHAUL_TRIGGER review + OFFICER_VERIFICATION
                 _readonly(failure_registry_module)
             ),
         },
@@ -3184,7 +3203,7 @@ def seed_role_templates(session):
         {
             "name": "Supervisory Officer",
             "rename_from": "Supervisory Officer",
-            "description": "Circle-level supervisor. Approves repair workflow stages. Covers SEE-level designation responsibilities.",
+            "description": "Circle-level supervisor. Approves repair workflow stages. Read visibility on overhaul workflows. Covers SEE-level designation responsibilities.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3198,7 +3217,8 @@ def seed_role_templates(session):
                 _approve(testing_request_approvals_module) +
                 _readonly(vendor_documents_module) +
                 _readonly(equipment_module) +
-                _approve(repair_workflows_module)
+                _approve(breakdown_workflows_module) +
+                _readonly(overhaul_workflows_module)     # management visibility
             ),
         },
 
@@ -3206,7 +3226,7 @@ def seed_role_templates(session):
         {
             "name": "Senior Management Approver",
             "rename_from": "Senior Management Approver",
-            "description": "Zone-level management. Final approver for all workflows. Covers CEE-level designation responsibilities.",
+            "description": "Zone-level management. Final approver for all workflows including overhaul verification. Covers CEE-level designation responsibilities.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
@@ -3220,7 +3240,8 @@ def seed_role_templates(session):
                 _readonly(procurement_modules) +
                 _readonly(vendor_documents_module) +
                 _readonly(recommendations_module) +
-                _approve(repair_workflows_module)
+                _approve(breakdown_workflows_module) +
+                _approve(overhaul_workflows_module)      # OFFICER_VERIFICATION final sign-off
             ),
         },
 
@@ -3243,14 +3264,15 @@ def seed_role_templates(session):
         {
             "name": "Transformer Repair Coordinator",
             "rename_from": "Transformer Repair Coordinator",
-            "description": "Assigns users to transformer repair workflow stages and manages the assignment queue.",
+            "description": "Assigns users to transformer repair and overhaul workflow stages. Manages the assignment queue for both workflow types.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "default_module_id": ee_tlss_dashboard_module_id,
             "permissions_template": (
                 _readwrite(dashboard_module) +
-                _readwrite(repair_workflows_module) +
+                _readwrite(breakdown_workflows_module) +
+                _readwrite(overhaul_workflows_module) +  # assignment_role for all 4 overhaul stages
                 _readonly(testing_requests_module)
             ),
         },
@@ -3266,7 +3288,7 @@ def seed_role_templates(session):
             "permissions_template": (
                 _readwrite(dashboard_module) +
                 _readwrite(procurement_modules) +
-                _readwrite(repair_workflows_module)
+                _readwrite(breakdown_workflows_module)
             ),
         },
 
@@ -3315,7 +3337,8 @@ def seed_role_templates(session):
                 _readonly(equipment_module) +
                 _readonly(recommendations_module) +
                 _readonly(failure_registry_module) +
-                _readonly(procurement_modules)
+                _readonly(procurement_modules) +
+                _readonly(overhaul_workflows_module)     # audit trail visibility
             ),
         },
 
@@ -3515,6 +3538,9 @@ def seed_sample_organization(session):
     # Provision default roles from templates
     templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
 
+    # Build valid module ID set to guard against stale IDs in permissions_template
+    _valid_module_ids = {m.id for m in session.query(Module).all()}
+
     provisioned_roles = []
     for template in templates:
         # Skip if role already exists for this org
@@ -3544,13 +3570,16 @@ def seed_sample_organization(session):
         # Save all provisioned roles for later assignment
         provisioned_roles.append(role)
 
-        # Create permissions from template
+        # Create permissions from template (skip stale module IDs that no longer exist)
         if template.permissions_template:
             for perm_data in template.permissions_template:
+                mid = perm_data.get("module_id")
+                if mid not in _valid_module_ids:
+                    continue
                 permission = OrgRolePermission(
                     id=uuid.uuid4(),
                     org_role_id=role.id,
-                    module_id=perm_data.get("module_id"),
+                    module_id=mid,
                     can_view=perm_data.get("can_view", False),
                     can_add=perm_data.get("can_add", False),
                     can_edit=perm_data.get("can_edit", False),
@@ -3809,7 +3838,7 @@ def seed_sample_organization(session):
     tester_users_config = [
         {
             "email": "fieldtester1@sampleorg.com",
-            "password": "Tester123!",
+            "password": "admin123",
             "role_name": "Test Engineer",
             "firstname": "Field",
             "lastname": "Tester One",
@@ -3817,7 +3846,7 @@ def seed_sample_organization(session):
         },
         {
             "email": "fieldtester2@sampleorg.com",
-            "password": "Tester123!",
+            "password": "admin123",
             "role_name": "Test Engineer",
             "firstname": "Field",
             "lastname": "Tester Two",
@@ -3825,7 +3854,7 @@ def seed_sample_organization(session):
         },
         {
             "email": "labtester1@sampleorg.com",
-            "password": "Tester123!",
+            "password": "admin123",
             "role_name": "Test Engineer",
             "firstname": "Lab",
             "lastname": "Tester One",
@@ -3833,7 +3862,7 @@ def seed_sample_organization(session):
         },
         {
             "email": "labtester2@sampleorg.com",
-            "password": "Tester123!",
+            "password": "admin123",
             "role_name": "Test Engineer",
             "firstname": "Lab",
             "lastname": "Tester Two",
@@ -4019,6 +4048,7 @@ def seed_kptcl_organization(session):
         print(f"[INFO] Provisioning missing roles for existing KPTCL org...")
         templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
         existing_role_names = {r.name for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
+        _valid_module_ids = {m.id for m in session.query(Module).all()}
 
         provisioned_count = 0
         for template in templates:
@@ -4038,13 +4068,16 @@ def seed_kptcl_organization(session):
                 session.add(role)
                 session.flush()
 
-                # Create permissions from template
+                # Create permissions from template (skip stale module IDs)
                 if template.permissions_template:
                     for perm_data in template.permissions_template:
+                        mid = perm_data.get("module_id")
+                        if mid not in _valid_module_ids:
+                            continue
                         permission = OrgRolePermission(
                             id=uuid.uuid4(),
                             org_role_id=role.id,
-                            module_id=perm_data.get("module_id"),
+                            module_id=mid,
                             can_view=perm_data.get("can_view", False),
                             can_add=perm_data.get("can_add", False),
                             can_edit=perm_data.get("can_edit", False),
@@ -4062,6 +4095,42 @@ def seed_kptcl_organization(session):
 
         session.commit()
         print(f"[OK] Provisioned {provisioned_count} new roles for KPTCL")
+
+        # ── Sync permissions for EXISTING roles against updated templates ──────
+        # This ensures stale permissions (e.g. missing can_add after template update)
+        # are refreshed on every seed run without needing to drop the org.
+        print(f"[INFO] Syncing permissions for existing KPTCL roles from templates...")
+        templates_by_name = {t.name: t for t in session.query(RoleTemplate).filter_by(auto_provision=True).all()}
+        _valid_module_ids = {m.id for m in session.query(Module).all()}
+        synced_roles = 0
+        for role in session.query(OrgRole).filter_by(organization_id=org.id).all():
+            template = templates_by_name.get(role.name)
+            if not template or not template.permissions_template:
+                continue
+            # Delete existing permissions and re-insert from template
+            session.query(OrgRolePermission).filter_by(org_role_id=role.id).delete()
+            for perm_data in template.permissions_template:
+                mid = perm_data.get("module_id")
+                if mid not in _valid_module_ids:
+                    continue
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mid,
+                    can_view=perm_data.get("can_view", False),
+                    can_add=perm_data.get("can_add", False),
+                    can_edit=perm_data.get("can_edit", False),
+                    can_delete=perm_data.get("can_delete", False),
+                    can_approve=perm_data.get("can_approve", False),
+                    can_assign=perm_data.get("can_assign", False),
+                    can_export=perm_data.get("can_export", False),
+                    can_import=perm_data.get("can_import", False),
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                ))
+            synced_roles += 1
+        session.commit()
+        print(f"[OK] Synced permissions for {synced_roles} existing KPTCL roles")
 
         # Build a lookup of all roles (existing + newly provisioned)
         provisioned_by_name = {r.name: r for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
@@ -4180,7 +4249,7 @@ def seed_kptcl_organization(session):
             },
             {
                 "email": "field.tester@utility.com",
-                "password": "Tester123!",
+                "password": "admin123",
                 "firstname": "Field",
                 "lastname": "Test Engineer",
                 "phone": "+91-9900000017",
@@ -4189,7 +4258,7 @@ def seed_kptcl_organization(session):
             },
             {
                 "email": "lab.tester@utility.com",
-                "password": "Tester123!",
+                "password": "admin123",
                 "firstname": "Lab",
                 "lastname": "Test Engineer",
                 "phone": "+91-9900000018",
@@ -4198,7 +4267,7 @@ def seed_kptcl_organization(session):
             },
             {
                 "email": "wf.coordinator@utility.com",
-                "password": "Coord123!",
+                "password": "admin123",
                 "firstname": "Workflow",
                 "lastname": "Coordinator",
                 "phone": "+91-9900000019",
@@ -4240,37 +4309,29 @@ def seed_kptcl_organization(session):
                 continue
 
             existing_role = session.query(OrgUserRole).filter_by(
-            user_id=user.id,
-            org_role_id=role.id,
-        ).first()
-
-        if existing_role:
-            # UPDATE existing mapping
-            existing_role.department_id = user_data.get("department_id")
-            existing_role.is_active = True
-            existing_role.assigned_at = datetime.now(datetime.now().astimezone().tzinfo)
-
-            print(
-                f"[UPDATED ROLE] "
-                f"{user.email} -> {user_data.get('department_id')}"
-            )
-
-        else:
-            # CREATE new mapping
-            session.add(OrgUserRole(
-                id=uuid.uuid4(),
                 user_id=user.id,
                 org_role_id=role.id,
-                department_id=user_data.get("department_id"),
-                is_active=True,
-                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-                assigned_by=None
-            ))
+            ).first()
 
-        print(
-            f"[CREATED ROLE] "
-            f"{user.email} -> {user_data.get('department_id')}"
-        )
+            if existing_role:
+                # UPDATE existing mapping
+                existing_role.department_id = user_data.get("department_id")
+                existing_role.is_active = True
+                existing_role.assigned_at = datetime.now(datetime.now().astimezone().tzinfo)
+                print(f"[UPDATED ROLE] {user.email} -> {user_data.get('department_id')}")
+            else:
+                # CREATE new mapping
+                session.add(OrgUserRole(
+                    id=uuid.uuid4(),
+                    user_id=user.id,
+                    org_role_id=role.id,
+                    department_id=user_data.get("department_id"),
+                    is_active=True,
+                    assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                    assigned_by=None
+                ))
+                print(f"[CREATED ROLE] {user.email} -> {user_data.get('department_id')}")
+
         session.commit()
         print(f"[OK] Created {created_users} new SRS designation users for KPTCL")
         return existing_org
@@ -4316,6 +4377,7 @@ def seed_kptcl_organization(session):
 
     # Provision default roles from templates
     templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
+    _valid_module_ids = {m.id for m in session.query(Module).all()}
 
     org_admin_role = None
     engineer_role = None
@@ -4347,13 +4409,16 @@ def seed_kptcl_organization(session):
         elif template.name == "Test Engineer":
             tester_role = role
 
-        # Create permissions from template
+        # Create permissions from template (skip stale module IDs)
         if template.permissions_template:
             for perm_data in template.permissions_template:
+                mid = perm_data.get("module_id")
+                if mid not in _valid_module_ids:
+                    continue
                 permission = OrgRolePermission(
                     id=uuid.uuid4(),
                     org_role_id=role.id,
-                    module_id=perm_data.get("module_id"),
+                    module_id=mid,
                     can_view=perm_data.get("can_view", False),
                     can_add=perm_data.get("can_add", False),
                     can_edit=perm_data.get("can_edit", False),
@@ -4537,6 +4602,33 @@ def seed_kptcl_organization(session):
             "role_name": "Senior Management Approver",
             "employee_id": "KPTCL-CEE-RTRD-001",
         },
+        {
+            "email": "field.tester@utility.com",
+            "password": "admin123",
+            "firstname": "Field",
+            "lastname": "Test Engineer",
+            "phone": "+91-9900000017",
+            "role_name": "Test Engineer",
+            "employee_id": "KPTCL-FT-001",
+        },
+        {
+            "email": "lab.tester@utility.com",
+            "password": "admin123",
+            "firstname": "Lab",
+            "lastname": "Test Engineer",
+            "phone": "+91-9900000018",
+            "role_name": "Test Engineer",
+            "employee_id": "KPTCL-LT-001",
+        },
+        {
+            "email": "wf.coordinator@utility.com",
+            "password": "admin123",
+            "firstname": "Workflow",
+            "lastname": "Coordinator",
+            "phone": "+91-9900000019",
+            "role_name": "Transformer Repair Coordinator",
+            "employee_id": "KPTCL-WFC-001",
+        },
     ]
 
     for user_data in kptcl_users:
@@ -4575,19 +4667,16 @@ def seed_kptcl_organization(session):
         if existing_role:
             existing_role.department_id = user_data.get("department_id")
             existing_role.is_active = True
-            existing_role.assigned_at = datetime.now(
-            datetime.now().astimezone().tzinfo
-    )
-
+            existing_role.assigned_at = datetime.now(datetime.now().astimezone().tzinfo)
         else:
             session.add(OrgUserRole(
-            id=uuid.uuid4(),
-            user_id=user.id,
-            org_role_id=role.id,
-            department_id=user_data.get("department_id"),
-            is_active=True,
-            assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-            assigned_by=None
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                department_id=user_data.get("department_id"),
+                is_active=True,
+                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                assigned_by=None,
             ))
 
     session.commit()
@@ -4677,7 +4766,7 @@ def seed_kptcl_organization(session):
     tester_users_config = [
         {
             "email": "testengineer1@utility.com",
-            "password": "Tester123!",
+            "password": "admin123",
             "role_name": "Test Engineer",
             "firstname": "KPTCL Test",
             "lastname": "Engineer One",
@@ -4685,7 +4774,7 @@ def seed_kptcl_organization(session):
         },
         {
             "email": "testengineer2@utility.com",
-            "password": "Tester123!",
+            "password": "admin123",
             "role_name": "Test Engineer",
             "firstname": "KPTCL Test",
             "lastname": "Engineer Two",
@@ -5602,7 +5691,7 @@ def seed_missing_role_permissions(session, org=None):
         "Equipment":             _get_mod("Equipment"),
         "Recommendations":       _get_mod("Recommendations"),
         "Approvals":             _get_mod("Approvals"),
-        "Repair Workflows":      _get_mod("Repair Workflows"),
+        "Breakdown Workflows":      _get_mod("Breakdown Workflows"),
     }
     missing_mods = [k for k, v in mods.items() if v is None]
     if missing_mods:
@@ -5628,7 +5717,7 @@ def seed_missing_role_permissions(session, org=None):
             ("Recommendations",   True, False, False, True, True, True),
             ("Approvals",         True, False, False, True, True, True),
             ("Equipment",         True, False, False, False, False, False),
-            ("Repair Workflows",  True, False, False, True, True, True),
+            ("Breakdown Workflows",  True, False, False, True, True, True),
             ("Testing Requests",  True, False, False, False, False, False),
             ("Failure Registry",  True, False, False, False, False, False),
             ("Dashboard",         True, False, False, False, False, False),
@@ -6197,6 +6286,8 @@ def seed_cumulative_template(session) -> int:
                     "group_by": "equipment_id",
                     "requires_multi_session": True,
                     "reset_on_drop": True,
+                    # Global default — overridable per equipment via EquipmentOverhaulConfig
+                    "default_threshold": 5000,  # ops
                 },
             }
         ],
@@ -7464,9 +7555,24 @@ def run_seed():
         print("\n--- Repair Workflow Seeding ---")
         try:
             seed_workflow(session)
-
         except Exception as _e:
             print(f"[WARN] Repair workflow seed failed (non-fatal): {_e}")
+
+        # Overhaul Workflow — definition + stages for cumulative threshold trigger
+        try:
+            from seed_overhaul_workflow import seed_overhaul_stages
+            seed_overhaul_stages(session)
+        except Exception as _e:
+            print(f"[WARN] Overhaul workflow seed failed (non-fatal): {_e}")
+
+        # Overhaul role mappings — must run AFTER seed_overhaul_stages so stage rows exist
+        if kptcl_org:
+            try:
+                from seed_overhaul_workflow import seed_overhaul_role_mappings
+                seed_overhaul_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Overhaul role mapping failed: {_e}")
 
         # TR / FR / TAQC Workflow Engine — states, transitions, permission matrix
         print("\n--- TR / FR / TAQC Workflow Engine Seeding ---")

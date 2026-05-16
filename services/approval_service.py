@@ -136,6 +136,7 @@ class ApprovalService:
 
             rec = Recommendation(
                 testing_request_id=request.id,
+                organization_id=request.organization_id,
                 recommendation_type=rec_type,
                 summary=summary,
                 approval_status="pending",
@@ -329,12 +330,8 @@ class ApprovalService:
         # close/complete the TestingRequest (FR: closed, TAQC: commissioned).
         dispatch_result = {}
         if request:
-            try:
-                from services.workflow_dispatch_service import WorkflowDispatchService
-                dispatch_result = WorkflowDispatchService(self.db).dispatch(request, rec, approver_id)
-            except Exception as _d:
-                import traceback
-                print(f"[WARN] next_action dispatch failed: {_d}\n{traceback.format_exc()}")
+            from services.workflow_dispatch_service import WorkflowDispatchService
+            dispatch_result = WorkflowDispatchService(self.db).dispatch(request, rec, approver_id)
 
         return {
             "id": str(rec.id),
@@ -493,8 +490,9 @@ class ApprovalService:
             )
 
         rec.approval_status = "rejected"
-        rec.approved_by = approver_id
-        rec.approved_at = UTCDateTimeMixin._utc_now()
+        # approved_by / approved_at are intentionally NOT set on rejection —
+        # they are reserved for the approval actor only.
+        # The rejector is tracked via modified_by; notes capture the reason.
         rec.approval_notes = notes
         rec.modified_by = approver_id
 

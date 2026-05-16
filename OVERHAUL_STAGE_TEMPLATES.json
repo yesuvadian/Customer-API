@@ -1,0 +1,67 @@
+{
+  "overhaul_stage_trigger": {
+    "name": "Overhaul Triggered",
+    "template_type": "overhaul_stage",
+    "sections": [
+      {
+        "title": "Overhaul Trigger Summary",
+        "fields": [
+          {"key": "cumulative_value",  "label": "Cumulative Operations Count", "type": "number",   "required": false, "readonly": true},
+          {"key": "threshold_value",   "label": "Configured Threshold",         "type": "number",   "required": false, "readonly": true},
+          {"key": "triggered_at",      "label": "Triggered At",                 "type": "date",     "required": false, "readonly": true},
+          {"key": "trigger_remarks",   "label": "Remarks",                      "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "overhaul_stage_execution": {
+    "name": "Overhaul Execution",
+    "template_type": "overhaul_stage",
+    "sections": [
+      {
+        "title": "Overhaul Work Details",
+        "fields": [
+          {"key": "work_start_date",   "label": "Work Start Date",              "type": "date",     "required": true},
+          {"key": "work_end_date",     "label": "Work End Date",                "type": "date",     "required": true},
+          {"key": "work_done_by",      "label": "Carried Out By",               "type": "text",     "required": true},
+          {"key": "scope_of_work",     "label": "Scope of Overhaul Work",       "type": "textarea", "required": true},
+          {"key": "parts_replaced",    "label": "Parts / Components Replaced",  "type": "textarea", "required": false},
+          {"key": "work_photo",        "label": "Work Photo",                   "type": "file",     "required": false}
+        ]
+      }
+    ]
+  },
+
+  "overhaul_stage_completion_upload": {
+    "name": "Completion Record Upload",
+    "template_type": "overhaul_stage",
+    "sections": [
+      {
+        "title": "Overhaul Completion Record",
+        "fields": [
+          {"key": "completion_date",     "label": "Date of Completion",          "type": "date",     "required": true},
+          {"key": "completion_notes",    "label": "Completion Notes",            "type": "textarea", "required": true},
+          {"key": "completion_document", "label": "Completion Certificate / Document", "type": "file", "required": true},
+          {"key": "reset_reading",       "label": "Reset Operations Reading (new baseline)", "type": "number", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "overhaul_stage_officer_verification": {
+    "name": "Officer Verification",
+    "template_type": "overhaul_stage",
+    "sections": [
+      {
+        "title": "Verification by Designated Officer",
+        "fields": [
+          {"key": "verification_outcome", "label": "Verification Outcome", "type": "dropdown", "required": true,
+           "options": ["Verified — Overhaul Complete", "Rejected — Resubmit Completion Record"]},
+          {"key": "verification_notes",   "label": "Verification Notes",   "type": "textarea", "required": true},
+          {"key": "verified_date",        "label": "Date of Verification", "type": "date",     "required": true}
+        ]
+      }
+    ]
+  }
+}

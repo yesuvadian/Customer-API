@@ -9,7 +9,7 @@ import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from models import TestingRequest, TestSession, TestingRequestStatus
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class AutoStatusTransitionService:
 
                 # Transition status
                 testing_request.status = TestingRequestStatus.test_submitted
-                testing_request.submitted_at = datetime.utcnow()
+                testing_request.submitted_at = datetime.now(timezone.utc)
 
                 self.db.commit()
 
@@ -159,9 +159,12 @@ class AutoStatusTransitionService:
                 * testing_request.session_interval_days
             )
             end_date = testing_request.scheduled_start_date + timedelta(days=days_needed)
+            # Normalise: make end_date timezone-aware so it can be compared with now
+            if end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
 
             # Check if end date has passed
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             if now <= end_date:
                 return False  # End date not yet reached
 
@@ -190,7 +193,7 @@ class AutoStatusTransitionService:
 
             # Auto-submit test
             testing_request.status = TestingRequestStatus.test_submitted
-            testing_request.submitted_at = datetime.utcnow()
+            testing_request.submitted_at = datetime.now(timezone.utc)
 
             self.db.commit()
 

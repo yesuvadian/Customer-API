@@ -35,7 +35,12 @@ from models import (
     EquipmentOverhaulConfig,
     OrgTestTemplate,
     OverhaulRecommendation,
+    RepairAssignmentQueue,
+    RepairStageAuditLog,
+    RepairStageDefinition,
+    RepairStageInstance,
     RepairWorkflow,
+    RepairWorkflowDefinition,
     TestingRequest,
     TestResult,
 )
@@ -293,21 +298,49 @@ class CumulativeService:
             .first()
         )
 
-    def evaluate_overhaul_trigger(
-        self, equipment_id: UUID, user_id: Optional[UUID] = None
-    ) -> dict:
+    def _get_effective_threshold(self, equipment_id: UUID) -> Optional[float]:
         """
-        Calculate cumulative, compare to threshold.
-        If threshold crossed and no open recommendation exists → create recommendation + workflow.
-        Returns lifecycle status dict.
+        Returns the effective overhaul threshold for an equipment:
+        1. Equipment-specific config (EquipmentOverhaulConfig) — takes priority
+        2. Template default_threshold from the test template rules
+        3. None if neither is configured
         """
-        cumulative = self.calculate_cumulative(equipment_id)
         cfg = (
             self.db.query(EquipmentOverhaulConfig)
             .filter(EquipmentOverhaulConfig.equipment_id == equipment_id)
             .first()
         )
-        threshold = cfg.threshold_value if cfg else None
+        if cfg and cfg.threshold_value is not None:
+            return float(cfg.threshold_value)
+
+        # Fall back to template default_threshold
+        try:
+            from test_templates import TEST_TEMPLATES
+            for tpl in TEST_TEMPLATES.values():
+                if not tpl.get("enable_cumulative"):
+                    continue
+                for rule in tpl.get("rules", []):
+                    default = rule.get("config", {}).get("default_threshold")
+                    if default is not None:
+                        # Use the first cumulative template's default
+                        # (equipment type matching could be added later)
+                        return float(default)
+        except Exception:
+            pass
+        return None
+
+    def evaluate_overhaul_trigger(
+        self, equipment_id: UUID, user_id: Optional[UUID] = None
+    ) -> dict:
+        """
+        Calculate cumulative, compare to threshold.
+        1. Uses equipment-specific threshold if set (EquipmentOverhaulConfig)
+        2. Falls back to template default_threshold
+        If threshold crossed and no open recommendation exists → create recommendation + workflow.
+        Returns lifecycle status dict.
+        """
+        cumulative = self.calculate_cumulative(equipment_id)
+        threshold = self._get_effective_threshold(equipment_id)
 
         open_rec = self._open_recommendation(equipment_id)
 
@@ -324,15 +357,50 @@ class CumulativeService:
         threshold: float,
         user_id: Optional[UUID],
     ) -> OverhaulRecommendation:
-        # Generate a unique workflow number
-        count = self.db.query(func.count(RepairWorkflow.id)).scalar() or 0
-        workflow_number = f"TR-OVH-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{count + 1:04d}"
+        """
+        Create an OVERHAUL RepairWorkflow with all stage instances initialised,
+        exactly mirroring how start_workflow() works for BREAKDOWN.
+        """
+        # ── 1. Resolve OVERHAUL workflow definition ───────────────────────────
+        wf_def = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter(RepairWorkflowDefinition.workflow_code == OVERHAUL_WORKFLOW_CODE)
+            .first()
+        )
+        if not wf_def:
+            raise ValueError(
+                "OVERHAUL workflow definition not found — run seed_overhaul_stages first."
+            )
 
+        # ── 2. Get ordered OVERHAUL stage definitions ─────────────────────────
+        stages = (
+            self.db.query(RepairStageDefinition)
+            .filter(
+                RepairStageDefinition.workflow_definition_id == wf_def.id,
+                RepairStageDefinition.is_active.is_(True),
+            )
+            .order_by(RepairStageDefinition.sequence)
+            .all()
+        )
+        if not stages:
+            raise ValueError("No active OVERHAUL stages found.")
+
+        first_stage = stages[0]
+
+        # ── 3. Generate a unique workflow number ──────────────────────────────
+        count = self.db.query(func.count(RepairWorkflow.id)).scalar() or 0
+        workflow_number = (
+            f"OVH-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{count + 1:04d}"
+        )
+
+        # ── 4. Create the RepairWorkflow row ──────────────────────────────────
         workflow = RepairWorkflow(
             workflow_number=workflow_number,
+            workflow_code=OVERHAUL_WORKFLOW_CODE,
             equipment_id=equipment_id,
             workflow_type="OVERHAUL",
             source="cumulative",
+            current_stage_id=first_stage.id,
             status="active",
             assignment_pending=True,
             progress=0,
@@ -340,8 +408,51 @@ class CumulativeService:
             created_by=user_id,
         )
         self.db.add(workflow)
-        self.db.flush()
+        self.db.flush()  # need workflow.id for stage instances
 
+        # ── 5. Create RepairStageInstance for every stage ─────────────────────
+        _now = datetime.now(timezone.utc)
+        first_instance = None
+        for stage in stages:
+            is_first = stage.id == first_stage.id
+            instance = RepairStageInstance(
+                workflow_id=workflow.id,
+                stage_id=stage.id,
+                status="pending" if is_first else "not_started",
+                assignment_pending=is_first,
+                started_at=_now if is_first else None,
+                created_by=user_id,
+            )
+            self.db.add(instance)
+            self.db.flush()
+            if is_first:
+                first_instance = instance
+
+        # ── 6. Point workflow at the first stage instance ─────────────────────
+        if first_instance:
+            workflow.current_stage_instance_id = first_instance.id
+
+        # ── 7. Create the coordinator assignment queue entry ──────────────────
+        self.db.add(RepairAssignmentQueue(
+            workflow_id=workflow.id,
+            stage_id=first_stage.id,
+            status="pending",
+        ))
+
+        # ── 8. Audit log ──────────────────────────────────────────────────────
+        self.db.add(RepairStageAuditLog(
+            workflow_id=workflow.id,
+            stage_id=first_stage.id,
+            action="created",
+            performed_by=user_id,
+            note=(
+                f"Overhaul workflow auto-triggered — cumulative {cumulative:.0f} "
+                f"≥ threshold {threshold:.0f}"
+            ),
+            performed_at=_now,
+        ))
+
+        # ── 9. Create the OverhaulRecommendation linked to the workflow ────────
         rec = OverhaulRecommendation(
             id=uuid.uuid4(),
             equipment_id=equipment_id,
@@ -353,18 +464,18 @@ class CumulativeService:
         )
         self.db.add(rec)
         self.db.commit()
+
+        print(
+            f"[OVERHAUL] Workflow {workflow_number} created for equipment {equipment_id} "
+            f"— first stage: {first_stage.name} (pending coordinator assignment)"
+        )
         return rec
 
     # ── Lifecycle status ──────────────────────────────────────────────────────
 
     def get_lifecycle_status(self, equipment_id: UUID) -> dict:
         cumulative = self.calculate_cumulative(equipment_id)
-        cfg = (
-            self.db.query(EquipmentOverhaulConfig)
-            .filter(EquipmentOverhaulConfig.equipment_id == equipment_id)
-            .first()
-        )
-        threshold = cfg.threshold_value if cfg else None
+        threshold = self._get_effective_threshold(equipment_id)
         open_rec = self._open_recommendation(equipment_id)
         return self._lifecycle_status(equipment_id, cumulative, threshold, open_rec)
 

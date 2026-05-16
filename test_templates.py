@@ -2394,6 +2394,8 @@ TEST_TEMPLATES = {
                     "group_by": "equipment_id",
                     "requires_multi_session": True,
                     "reset_on_drop": True,
+                    # Default overhaul threshold — overridable per equipment via EquipmentOverhaulConfig
+                    "default_threshold": 2000,  # ops — typical CB overhaul threshold
                 },
             }
         ],
@@ -2440,6 +2442,8 @@ TEST_TEMPLATES = {
                     "group_by": "equipment_id",
                     "requires_multi_session": True,
                     "reset_on_drop": True,
+                    # Default overhaul threshold — overridable per equipment via EquipmentOverhaulConfig
+                    "default_threshold": 5000,  # ops — typical OLTC overhaul threshold
                 },
             }
         ],

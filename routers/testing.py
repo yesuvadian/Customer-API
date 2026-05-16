@@ -110,6 +110,7 @@ def get_test_results(
         resp = TestResultResponse(
             id=r.id,
             testing_request_id=r.testing_request_id,
+            test_session_id=r.test_session_id,
             test_name=r.test_name,
             test_category=r.test_category,
             result_value=r.result_value,
@@ -159,18 +160,26 @@ def get_pending_result_approvals(
     return [_enrich(req) for req in requests]
 
 
-@router.put("/{request_id}/approve_results", response_model=TestingRequestResponse)
+@router.put("/{request_id}/approve_results")
 def approve_test_results(
     request_id: UUID,
     body: dict = Body(default={}),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Approve submitted test results — delegates to the approval/recommendation workflow.
-    Blocked for: originator of the request, assigned tester."""
+    """
+    Approve submitted test results — calls WorkflowDispatchService after approval.
+
+    Returns the dispatch result (next_action, created schedule/workflow/PR id,
+    new TR status) so the caller knows exactly what was triggered downstream.
+    Blocked for: originator of the request, assigned tester.
+    """
     from services.approval_service import ApprovalService
 
-    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    req = db.query(TestingRequest).filter(
+        TestingRequest.id == request_id,
+        TestingRequest.organization_id == current_user.organization_id,
+    ).first()
     if not req:
         raise HTTPException(status_code=404, detail="Testing request not found")
 
@@ -195,12 +204,24 @@ def approve_test_results(
     )
     if not rec:
         raise HTTPException(status_code=404, detail="No recommendation found for this request")
-    ApprovalService(db).approve_recommendation(
+
+    # approve_recommendation runs WorkflowDispatchService internally and returns
+    # the dispatch result dict (next_action, created, status, …).
+    dispatch_result = ApprovalService(db).approve_recommendation(
         recommendation_id=rec.id,
         approver_id=current_user.id,
         notes=body.get("comment"),
     )
-    return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
+
+    # Refresh the TR to pick up the new status set by dispatch, then merge with
+    # dispatch metadata so the caller gets the full picture in one response.
+    updated_req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    return {
+        **dispatch_result,
+        "request_id": str(request_id),
+        "request_number": updated_req.request_number if updated_req else None,
+        "request_status": updated_req.status.value if updated_req else None,
+    }
 
 
 @router.put("/{request_id}/reject_results", response_model=TestingRequestResponse)
@@ -214,7 +235,10 @@ def reject_test_results(
     Blocked for: originator of the request, assigned tester."""
     from services.approval_service import ApprovalService
 
-    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    req = db.query(TestingRequest).filter(
+        TestingRequest.id == request_id,
+        TestingRequest.organization_id == current_user.organization_id,
+    ).first()
     if not req:
         raise HTTPException(status_code=404, detail="Testing request not found")
 
@@ -249,28 +273,38 @@ def reject_test_results(
     return _enrich(db.query(TestingRequest).filter(TestingRequest.id == request_id).first())
 
 
-@router.put("/{request_id}/submit_results", response_model=TestingRequestResponse)
+@router.put("/{request_id}/submit_results")
 def submit_test_results(
     request_id: UUID,
     body: Optional[SubmitTestResultsBody] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # ── Map display-value labels (from dynamic form) to API enum strings ──────
+    # ── Maps: wizard display labels → backend enum strings ───────────────────
     _ACTION_MAP = {
         "none":             "none",
-        "test":             "test",           # follow-up test from FR outcome
+        "test":             "test",
         "maintenance":      "maintenance",
         "inspection":       "inspection",
-        "repair":           "repair_cycle",   # new shorter label
-        "repair lifecycle": "repair_cycle",   # backward compat with old label
+        "repair":           "repair_cycle",
+        "repair_cycle":     "repair_cycle",
+        "repair lifecycle": "repair_cycle",
         "procurement":      "replacement",
+        "replacement":      "replacement",
     }
     _FREQ_MAP = {
-        "monthly":   "monthly",
-        "quarterly": "quarterly",
-        "bi-annual": "semi_annual",
-        "yearly":    "yearly",
+        "daily":       "daily",
+        "weekly":      "weekly",
+        "biweekly":    "biweekly",
+        "bi-weekly":   "biweekly",
+        "monthly":     "monthly",
+        "quarterly":   "quarterly",
+        "semi_annual": "semi_annual",
+        "bi-annual":   "semi_annual",
+        "bi_annual":   "semi_annual",
+        "yearly":      "yearly",
+        "annual":      "yearly",
+        "triennial":   "triennial",
     }
     _REC_MAP = {
         "pass":        "pass",
@@ -279,58 +313,56 @@ def submit_test_results(
         "retest":      "retest",
     }
 
-    # ── Extract outcome fields from the latest test result's test_data ────────
-    # These are submitted via the dynamic overall_assessment form fields
-    # (next_action, recommendation_type, outcome_start_date, outcome_due_date, …).
     from models import TestResult as _TR
     from datetime import datetime as _dt
 
+    if body is None:
+        from schemas import SubmitTestResultsBody as _Body
+        body = _Body()
+
+    # ── Read recommendation data from test_data JSONB (primary source) ────────
+    # The RecommendationWizard stores all outcome fields into test_data via
+    # toFormData(). Body fields (explicitly sent by Flutter) supplement/override.
     latest = (
         db.query(_TR)
         .filter(_TR.testing_request_id == request_id)
         .order_by(_TR.cts.desc())
         .first()
     )
-    td: dict = (latest.test_data or {}) if latest else {}
+    _td: dict = (latest.test_data or {}) if latest else {}
 
-    def _from_td(key: str, mapping: dict) -> Optional[str]:
-        raw = (td.get(key) or "").strip().lower()
-        return mapping.get(raw) if raw else None
+    def _resolve(td_key: str, body_val, mapping: dict) -> Optional[str]:
+        """test_data value → body value → None, normalised through mapping."""
+        raw = (_td.get(td_key) or body_val or "").strip().lower()
+        return mapping.get(raw) or (raw if raw else None)
 
-    if body is None:
-        from schemas import SubmitTestResultsBody as _Body
-        body = _Body()
+    rec_type        = _resolve("recommendation_type", body.recommendation_type, _REC_MAP)
+    next_action     = _resolve("next_action",         body.next_action,         _ACTION_MAP)
+    schedule_freq   = _resolve("outcome_frequency",   body.schedule_frequency,  _FREQ_MAP) \
+                      or _resolve("schedule_frequency", None, _FREQ_MAP)
+    summary         = (_td.get("outcome_summary") or body.summary or "").strip() or None
+    detailed        = (_td.get("outcome_notes")   or body.detailed_notes or "").strip() or None
+    test_types      = _td.get("test_types") or body.test_types or []
+    repl_prods      = body.replacement_products or []
 
-    # Merge test_data values — body fields take precedence if already set
-    body.next_action         = body.next_action         or _from_td("next_action",         _ACTION_MAP)
-    body.recommendation_type = body.recommendation_type or _from_td("recommendation_type", _REC_MAP)
-    body.summary             = body.summary             or (td.get("outcome_summary") or "").strip() or None
-    body.detailed_notes      = body.detailed_notes      or (td.get("outcome_notes")   or "").strip() or None
-
-    # schedule_frequency: prefer explicit body value → schedule_frequency field →
-    # outcome_frequency stored by the outcome_schedule picker widget
-    body.schedule_frequency = (
-        body.schedule_frequency
-        or _from_td("schedule_frequency", _FREQ_MAP)
-        or _from_td("outcome_frequency",  _FREQ_MAP)
-    )
-
-    # Parse and store outcome dates on the TestingRequest so the dispatch
-    # service can pick them up via tr.scheduled_start_date / tr.due_date.
-    # outcome_start_date is set by the outcome_schedule picker widget.
-    outcome_start_raw = td.get("outcome_start_date")
-    outcome_due_raw   = td.get("outcome_due_date") or td.get("outcome_end_date")
-
+    # ── Parse schedule dates ──────────────────────────────────────────────────
     def _parse_date(raw) -> Optional[_dt]:
         if not raw:
             return None
         try:
-            return _dt.fromisoformat(str(raw).replace("Z", "+00:00"))
+            s = str(raw).replace("Z", "+00:00")
+            if len(s) == 10:
+                return _dt.fromisoformat(s + "T00:00:00+00:00")
+            return _dt.fromisoformat(s)
         except Exception:
             return None
 
-    outcome_start = _parse_date(outcome_start_raw)
-    outcome_due   = _parse_date(outcome_due_raw)
+    outcome_start = _parse_date(
+        body.schedule_start_date or _td.get("outcome_start_date")
+    )
+    outcome_due = _parse_date(
+        body.schedule_end_date or _td.get("outcome_due_date") or _td.get("outcome_end_date")
+    )
 
     if outcome_start or outcome_due:
         tr_for_dates = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
@@ -342,40 +374,72 @@ def submit_test_results(
             tr_for_dates.modified_by = current_user.id
             db.commit()
 
-    # ── Validate: Procurement requires at least one replacement product ──────
-    if body.next_action == "replacement" and not body.replacement_products:
+    # ── Multi-session guard: block recommendation until all sessions complete ──
+    _tr_check = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if _tr_check and _tr_check.is_multi_session and _tr_check.total_sessions_planned:
+        from models import TestSession as _TS
+        _completed = db.query(_TS).filter(
+            _TS.testing_request_id == request_id,
+            _TS.status == "completed",
+        ).count()
+        if _completed < _tr_check.total_sessions_planned:
+            rec_type = None   # intermediate session — skip recommendation
+
+    # ── Procurement validation ────────────────────────────────────────────────
+    if rec_type and next_action == "replacement" and not repl_prods:
         raise HTTPException(
             status_code=400,
             detail="At least one replacement product is required when next_action is 'replacement' (Procurement).",
         )
 
-    # ── If recommendation fields are available, create/update recommendation ──
-    if body.recommendation_type and body.summary:
+    # ── Create / update Recommendation record ─────────────────────────────────
+    rec = None
+    if rec_type:
+        # Auto-generate a minimal summary when the tester left it blank
+        effective_summary = summary or f"{rec_type.capitalize()} — {(next_action or 'no further action').replace('_', ' ')}"
+
         from services.recommendation_service import RecommendationService
-        rec_svc = RecommendationService(db)
-        rec_svc.create_recommendation(
+        rec = RecommendationService(db).create_recommendation(
             testing_request_id=request_id,
-            recommendation_type=body.recommendation_type,
-            summary=body.summary,
+            recommendation_type=rec_type,
+            summary=effective_summary,
             submitted_by=current_user.id,
-            detailed_notes=body.detailed_notes,
-            next_action=body.next_action,
-            schedule_frequency=body.schedule_frequency,
-            replacement_products=body.replacement_products,
+            detailed_notes=detailed,
+            next_action=next_action,
+            schedule_frequency=schedule_freq,
+            replacement_products=repl_prods,
+            test_types=test_types,
         )
+
+    # ── Transition request status ─────────────────────────────────────────────
+    if rec_type:
+        # Recommendation was created → status already set to under_approval
+        # by RecommendationService; just fetch the refreshed request.
         req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
         if not req:
             raise HTTPException(status_code=404, detail="Testing request not found")
-        return _enrich(req)
+    else:
+        # No recommendation yet (intermediate session or no type chosen)
+        service = TestingService(db)
+        req = service.submit_test_results(
+            request_id,
+            tester_id=current_user.id,
+            replacement_products=repl_prods or None,
+        )
 
-    # ── Legacy path: auto-derive recommendation from test result data ─────────
-    service = TestingService(db)
-    req = service.submit_test_results(
-        request_id,
-        tester_id=current_user.id,
-        replacement_products=body.replacement_products if body else None,
-    )
-    return _enrich(req)
+    # ── Return request + stored recommendation data ───────────────────────────
+    enriched = _enrich(req)
+    enriched["recommendation"] = {
+        "id":                  str(rec.id) if rec else None,
+        "recommendation_type": rec_type,
+        "next_action":         next_action,
+        "test_types":          test_types,
+        "schedule_frequency":  schedule_freq,
+        "summary":             summary,
+        "notes":               detailed,
+        "replacement_products": repl_prods,
+    }
+    return enriched
 
 
 @router.put("/{request_id}/decline")
@@ -665,6 +729,7 @@ def _build_structured_response(result) -> TestResultStructuredResponse:
     return TestResultStructuredResponse(
         id=result.id,
         testing_request_id=result.testing_request_id,
+        test_session_id=result.test_session_id,
         test_name=result.test_name,
         template_key=result.template_key,
         test_data=result.test_data,

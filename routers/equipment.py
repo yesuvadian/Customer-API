@@ -109,7 +109,7 @@ def _chain_ref(eq_obj) -> dict | None:
     }
 
 
-def _to_response(eq: Equipment) -> dict:
+def _to_response(db: Session, eq: Equipment) -> dict:
     """Convert Equipment ORM object to response dict with computed fields."""
     return {
         "id": eq.id,
@@ -144,7 +144,46 @@ def _to_response(eq: Equipment) -> dict:
         "modified_by": eq.modified_by,
         "cts": eq.cts,
         "mts": eq.mts,
+        # Test types grouped by category — same data as /equipment_types but
+        # scoped to this equipment's type. Lets clients build test dropdowns
+        # without a separate applicable-tests call.
+        "types_by_category": _types_by_category_for_equipment(db, eq),
     }
+
+
+def _types_by_category_for_equipment(db, eq) -> dict:
+    """Return types_by_category for this equipment's type with lifecycle flags."""
+    from models import CategoryDetails, OrgTestTemplate
+    if not eq.equipment_type_id:
+        return {"test": [], "maintenance": [], "inspection": [], "repair_lifecycle": []}
+    all_types = (
+        db.query(CategoryDetails)
+        .filter(
+            CategoryDetails.category_master_id == eq.equipment_type_id,
+            CategoryDetails.is_active.is_(True),
+        )
+        .order_by(CategoryDetails.name)
+        .all()
+    )
+    buckets: dict = {"test": [], "maintenance": [], "inspection": [], "repair_lifecycle": []}
+    for t in all_types:
+        cat = t.category_type or "test"
+        bucket = buckets.get(cat, buckets["test"])
+        tpl = (
+            db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.test_type_id == t.id)
+            .order_by(OrgTestTemplate.version.desc())
+            .first()
+        )
+        tpl_data = (tpl.template_data or {}) if tpl else {}
+        bucket.append({
+            "id": t.id,
+            "name": t.name,
+            "category_type": t.category_type,
+            "enable_cumulative": bool(tpl_data.get("enable_cumulative", False)),
+            "enable_calibration": bool(tpl_data.get("enable_calibration", False)),
+        })
+    return buckets
 
 
 # ============================================================
@@ -205,7 +244,7 @@ def create_equipment(
     except Exception as _n:
         print(f"[WARN] equipment_registered notification failed: {_n}")
 
-    return _to_response(equipment)
+    return _to_response(db, equipment)
 
 
 # ============================================================
@@ -240,7 +279,7 @@ def list_equipment(
         skip=skip,
         limit=limit,
     )
-    return [_to_response(eq) for eq in items]
+    return [_to_response(db, eq) for eq in items]
 
 
 # ============================================================
@@ -333,7 +372,7 @@ def get_equipment(
     if equipment.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
 
-    return _to_response(equipment)
+    return _to_response(db, equipment)
 
 
 # ============================================================
@@ -355,7 +394,7 @@ def get_equipment_by_ueic(
     if equipment.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
 
-    return _to_response(equipment)
+    return _to_response(db, equipment)
 
 
 # ============================================================
@@ -384,7 +423,7 @@ def update_equipment(
     )
     db.commit()
     db.refresh(equipment)
-    return _to_response(equipment)
+    return _to_response(db, equipment)
 
 
 # ============================================================
@@ -427,7 +466,7 @@ def retire_equipment(
     except Exception as _n:
         print(f"[WARN] equipment_retired notification failed: {_n}")
 
-    return _to_response(equipment)
+    return _to_response(db, equipment)
 
 
 # ============================================================
@@ -575,8 +614,8 @@ async def replace_equipment(
 
     report_url = f"/equipment/{new.id}/replacement-report"
     return {
-        "retired_equipment": _to_response(old),
-        "new_equipment": _to_response(new),
+        "retired_equipment": _to_response(db, old),
+        "new_equipment": _to_response(db, new),
         "report_url": report_url,
     }
 
