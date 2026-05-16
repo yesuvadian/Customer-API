@@ -299,8 +299,8 @@ class AnnualAuditService:
         self.db.commit()
         return result
 
-    # Escalation roles (design §14F)
-    _ESCALATION_ROLES = ["EE TLSS", "SEE W&M", "CEE Transmission Zone"]
+    # Escalation roles (design §14F) — updated to new functional role names
+    _ESCALATION_ROLES = ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]
 
     def _get_escalation_users(self, organization_id) -> list:
         """Return users that hold any of the three escalation roles in the org."""

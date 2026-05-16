@@ -1980,7 +1980,7 @@ def _ea(subject: str, body_html: str, roles: list, attachment_vars: list) -> dic
         _ea(
             "Monthly MIS Report — {{report.ref}}",
             body_html,
-            ["SEE W&M", "CEE Transmission Zone"],
+            ["Supervisory Officer", "Senior Management Approver"],
             [
                 {"var_key": "report.retriepdf",  "type": "pdf"},
                 {"var_key": "report.retriexls",  "type": "excel"},
@@ -2049,18 +2049,18 @@ _tmpl("equipment_replacement",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{replaced_on}}</td></tr>"
         "</table>"
         "<p>Log in to SEACMS Equipment Register to download the Replacement Report PDF.</p>",
-        ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "Department Head"],
+        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] {{equipment.type}} at {{equipment.department}} replaced."
         " Old:{{old_ueic}} New:{{new_ueic}}. By {{replaced_by}} on {{replaced_on}}.",
-        ["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
+        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
     ),
     _i(
         "Equipment replaced — {{old_ueic}} → {{new_ueic}}",
         "{{equipment.type}} at {{equipment.department}} replaced by {{replaced_by}} on {{replaced_on}}."
         " Reason: {{reason_type}}.",
-        ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "Department Head"],
+        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Reviewing Officer"],
     ),
 )
 
@@ -2078,19 +2078,19 @@ _tmpl("eval_critical",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Finding</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{result_summary}}</td></tr>"
         "</table>"
         "<p>The evaluation report is attached to this email.</p>",
-        ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "AEE Maintenance"],
+        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
         [{"var_key": "report.retriepdf", "type": "pdf"}],
     ),
     _s(
         "[KPTCL-SEACMS] CRITICAL: {{equipment.ueic}} — {{eval.test_type}}."
         " Req:{{request.number}}. Login SEACMS for details.",
-        ["EE TLSS", "AEE Maintenance"],
+        ["Reviewing Officer", "Maintenance Officer"],
     ),
     _i(
         "CRITICAL — {{equipment.ueic}}",
         "{{eval.test_type}} result CRITICAL for {{equipment.ueic}} ({{request.number}})."
         " Evaluated: {{eval.evaluated_at}}.",
-        ["EE TLSS", "SEE W&M", "CEE Transmission Zone", "AEE Maintenance"],
+        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
     ),
 )
 
@@ -2106,18 +2106,18 @@ _tmpl("eval_alert",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Revised Interval</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{revised_interval}}</td></tr>"
         "</table>"
         "<p><a href='{{report.retriepdf}}'>Download PDF Report</a></p>",
-        ["EE TLSS", "AEE Maintenance"],
+        ["Reviewing Officer", "Maintenance Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] ALERT: {{equipment.ueic}} — {{eval.test_type}}."
         " Revised interval: {{revised_interval}}. Req:{{request.number}}.",
-        ["EE TLSS", "AEE Maintenance"],
+        ["Reviewing Officer", "Maintenance Officer"],
     ),
     _i(
         "Alert — {{equipment.ueic}}",
         "{{eval.test_type}} threshold warning for {{equipment.ueic}}."
         " Revised interval: {{revised_interval}}.",
-        ["EE TLSS", "AEE Maintenance"],
+        ["Reviewing Officer", "Maintenance Officer"],
     ),
 )
 
@@ -2135,17 +2135,17 @@ _tmpl("request_submitted",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
         "</table>"
         "<p>Log in to SEACMS to review and approve this request.</p>",
-        ["EE TLSS", "Department Head"],
+        ["Reviewing Officer", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] New {{category}} request {{request.number}} submitted"
         " by {{request.submitted_by}} for {{equipment.ueic}}. Login to approve.",
-        ["EE TLSS"],
+        ["Reviewing Officer"],
     ),
     _i(
         "New submission — {{request.number}}",
         "{{equipment.ueic}} submitted for {{category}} by {{request.submitted_by}}. Priority: {{request.priority}}.",
-        ["EE TLSS", "Department Head"],
+        ["Reviewing Officer", "Reviewing Officer"],
     ),
 )
 
@@ -2160,17 +2160,17 @@ _tmpl("tester_assigned",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Assigned To</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.assigned_to}}</td></tr>"
         "</table>"
         "<p>Please log in to SEACMS to accept or decline this assignment.</p>",
-        ["Tester", "AEE Maintenance"],
+        ["Test Engineer", "Maintenance Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] You are assigned test req {{request.number}}"
         " for {{equipment.ueic}}. Due: {{request.due_date}}. Login SEACMS.",
-        ["Tester"],
+        ["Test Engineer"],
     ),
     _i(
         "Assigned — {{request.number}}",
         "You have been assigned {{request.number}} for {{equipment.ueic}}. Due: {{request.due_date}}.",
-        ["Tester", "AEE Maintenance"],
+        ["Test Engineer", "Maintenance Officer"],
     ),
 )
 
@@ -2182,17 +2182,17 @@ _tmpl("tester_declined",
         "<p><b>Declined by:</b> {{tester_name}}</p>"
         "<p><b>Reason:</b> {{reason}}</p>"
         "<p>Please reassign this request in SEACMS.</p>",
-        ["TestAssigner", "EE TLSS"],
+        ["Test & Work Coordinator", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] {{tester_name}} declined req {{request.number}}."
         " Reason: {{reason}}. Please reassign.",
-        ["TestAssigner"],
+        ["Test & Work Coordinator"],
     ),
     _i(
         "Tester declined — {{request.number}}",
         "{{tester_name}} declined {{request.number}}. Reason: {{reason}}.",
-        ["TestAssigner", "EE TLSS"],
+        ["Test & Work Coordinator", "Reviewing Officer"],
     ),
 )
 
@@ -2208,18 +2208,18 @@ _tmpl("test_submitted",
         "</table>"
         "<p>The test report is attached to this email.</p>"
         "<p>Log in to SEACMS to approve or reject these results.</p>",
-        ["EE TLSS", "Department Head"],
+        ["Reviewing Officer", "Reviewing Officer"],
         [{"var_key": "report.retriepdf", "type": "pdf"}],
     ),
     _s(
         "[KPTCL-SEACMS] Results submitted for {{request.number}} ({{equipment.ueic}})."
         " Result: {{eval.overall}}. Login SEACMS to review.",
-        ["EE TLSS"],
+        ["Reviewing Officer"],
     ),
     _i(
         "Results submitted — {{request.number}}",
         "Test results for {{equipment.ueic}} ({{request.number}}) await review. Result: {{eval.overall}}.",
-        ["EE TLSS", "Department Head"],
+        ["Reviewing Officer", "Reviewing Officer"],
     ),
 )
 
@@ -2231,17 +2231,17 @@ _tmpl("recommendation_approved",
         "<p><b>Recommendation Type:</b> {{recommendation_type}}</p>"
         "<p><b>Replacement Products:</b> {{product_count}}</p>"
         "<p>Log in to SEACMS to proceed with procurement.</p>",
-        ["Originator", "AEE Maintenance"],
+        ["Asset Data Officer", "Maintenance Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] Recommendation approved for {{request.number}}."
         " Type: {{recommendation_type}}. Login SEACMS.",
-        ["Originator"],
+        ["Asset Data Officer"],
     ),
     _i(
         "Recommendation approved — {{request.number}}",
         "{{recommendation_type}} recommendation approved. {{product_count}} product(s) for procurement.",
-        ["Originator", "AEE Maintenance"],
+        ["Asset Data Officer", "Maintenance Officer"],
     ),
 )
 
@@ -2252,17 +2252,17 @@ _tmpl("recommendation_rejected",
         "<p><b>Request:</b> {{request.number}}</p>"
         "<p><b>Reason:</b> {{reason}}</p>"
         "<p>Please revise and resubmit your recommendation in SEACMS.</p>",
-        ["Tester", "Originator"],
+        ["Test Engineer", "Asset Data Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] Recommendation for {{request.number}} rejected."
         " Reason: {{reason}}. Please revise.",
-        ["Tester"],
+        ["Test Engineer"],
     ),
     _i(
         "Recommendation rejected — {{request.number}}",
         "Recommendation rejected. Reason: {{reason}}.",
-        ["Tester", "Originator"],
+        ["Test Engineer", "Asset Data Officer"],
     ),
 )
 
@@ -2279,17 +2279,17 @@ _tmpl("due_reminder",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Remaining</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_remaining}}</td></tr>"
         "</table>"
         "<p>Please ensure the test is scheduled and resources are allocated.</p>",
-        ["AEE Maintenance", "EE TLSS"],
+        ["Maintenance Officer", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] Test due in {{days_remaining}} days for {{equipment.ueic}}"
         " ({{equipment.department}}). Due: {{request.due_date}}.",
-        ["AEE Maintenance"],
+        ["Maintenance Officer"],
     ),
     _i(
         "Test due in {{days_remaining}} days — {{equipment.ueic}}",
         "Request {{request.number}} for {{equipment.ueic}} is due on {{request.due_date}}.",
-        ["AEE Maintenance", "EE TLSS"],
+        ["Maintenance Officer", "Reviewing Officer"],
     ),
 )
 
@@ -2304,17 +2304,17 @@ _tmpl("due_reminder_final",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
         "</table>"
         "<p><b>Action required:</b> Test must be completed by {{request.due_date}}.</p>",
-        ["AEE Maintenance", "EE TLSS", "Department Head"],
+        ["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] FINAL REMINDER: Test for {{equipment.ueic}} due {{request.due_date}}"
         " ({{days_remaining}} days). Dept: {{equipment.department}}.",
-        ["AEE Maintenance", "EE TLSS"],
+        ["Maintenance Officer", "Reviewing Officer"],
     ),
     _i(
         "Final reminder — {{equipment.ueic}} due {{request.due_date}}",
         "Only {{days_remaining}} days left. Request {{request.number}} must be completed by {{request.due_date}}.",
-        ["AEE Maintenance", "EE TLSS", "Department Head"],
+        ["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
     ),
 )
 
@@ -2330,17 +2330,17 @@ _tmpl("overdue_alert",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
         "</table>"
         "<p>Please take immediate action to complete or reschedule this test.</p>",
-        ["EE TLSS", "AEE Maintenance", "SEE W&M"],
+        ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] OVERDUE: Test for {{equipment.ueic}} ({{equipment.department}})"
         " is {{days_overdue}} days overdue. Req: {{request.number}}.",
-        ["EE TLSS", "AEE Maintenance"],
+        ["Reviewing Officer", "Maintenance Officer"],
     ),
     _i(
         "Overdue {{days_overdue}} days — {{equipment.ueic}}",
         "Test {{request.number}} for {{equipment.ueic}} is overdue by {{days_overdue}} days (was due {{request.due_date}}).",
-        ["EE TLSS", "AEE Maintenance", "SEE W&M"],
+        ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
     ),
 )
 
@@ -2355,17 +2355,17 @@ _tmpl("overdue_escalation",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
         "</table>"
         "<p>This has been escalated to zone/circle management.</p>",
-        ["SEE W&M", "CEE Transmission Zone"],
+        ["Supervisory Officer", "Senior Management Approver"],
     ),
     _s(
         "[KPTCL-SEACMS] ESCALATION: {{equipment.ueic}} test {{days_overdue}}d overdue."
         " Dept: {{equipment.department}}. Req: {{request.number}}.",
-        ["SEE W&M", "CEE Transmission Zone"],
+        ["Supervisory Officer", "Senior Management Approver"],
     ),
     _i(
         "Escalation — {{equipment.ueic}} {{days_overdue}}d overdue",
         "Critical: {{request.number}} for {{equipment.ueic}} is {{days_overdue}} days overdue.",
-        ["SEE W&M", "CEE Transmission Zone"],
+        ["Supervisory Officer", "Senior Management Approver"],
     ),
 )
 
@@ -2381,17 +2381,17 @@ _tmpl("procurement_pending",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
         "</table>"
         "<p>Log in to SEACMS to approve or reject this procurement request.</p>",
-        ["FinanceApprover", "Department Head"],
+        ["Procurement Approver", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] Procurement {{pr_number}} raised for {{request.number}}."
         " Awaiting your finance approval. Login SEACMS.",
-        ["FinanceApprover"],
+        ["Procurement Approver"],
     ),
     _i(
         "Procurement raised — {{pr_number}}",
         "PR {{pr_number}} for test request {{request.number}} is awaiting finance approval.",
-        ["FinanceApprover", "Department Head"],
+        ["Procurement Approver", "Reviewing Officer"],
     ),
 )
 
@@ -2405,17 +2405,17 @@ _tmpl("procurement_decision",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Decision</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{decision}}</td></tr>"
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Notes</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{notes}}</td></tr>"
         "</table>",
-        ["Originator", "TechApprover", "EE TLSS"],
+        ["Asset Data Officer", "Reviewing Officer", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] Procurement {{pr_number}} {{decision}}."
         " Req: {{request.number}}. Notes: {{notes}}.",
-        ["Originator"],
+        ["Asset Data Officer"],
     ),
     _i(
         "Procurement {{decision}} — {{pr_number}}",
         "PR {{pr_number}} ({{request.number}}) has been {{decision}} by Finance. Notes: {{notes}}.",
-        ["Originator", "TechApprover", "EE TLSS"],
+        ["Asset Data Officer", "Reviewing Officer", "Reviewing Officer"],
     ),
 )
 
@@ -2435,17 +2435,17 @@ _tmpl("equipment_registered",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
         "</table>"
         "<p>Log in to SEACMS to review the equipment details and configure test schedules.</p>",
-        ["AEE Maintenance", "EE TLSS", "Department Head"],
+        ["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] New equipment registered: {{equipment.ueic}} ({{equipment.type}})"
         " at {{equipment.department}} on {{system.date}} by {{commissioned_by}}.",
-        ["AEE Maintenance", "EE TLSS"],
+        ["Maintenance Officer", "Reviewing Officer"],
     ),
     _i(
         "New equipment — {{equipment.ueic}}",
         "{{equipment.type}} ({{equipment.ueic}}) commissioned at {{equipment.department}} by {{commissioned_by}}.",
-        ["AEE Maintenance", "EE TLSS", "Department Head"],
+        ["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
     ),
 )
 
@@ -2463,17 +2463,17 @@ _tmpl("equipment_retired",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
         "</table>"
         "<p>All pending test schedules for this equipment have been cancelled. Log in to SEACMS to confirm.</p>",
-        ["AEE Maintenance", "EE TLSS", "SEE W&M", "Department Head"],
+        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] Equipment {{equipment.ueic}} ({{equipment.type}}) at"
         " {{equipment.department}} RETIRED on {{system.date}}. Reason: {{reason}}.",
-        ["AEE Maintenance", "EE TLSS"],
+        ["Maintenance Officer", "Reviewing Officer"],
     ),
     _i(
         "Equipment retired — {{equipment.ueic}}",
         "{{equipment.type}} ({{equipment.ueic}}) at {{equipment.department}} has been decommissioned. Reason: {{reason}}.",
-        ["AEE Maintenance", "EE TLSS", "SEE W&M", "Department Head"],
+        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Reviewing Officer"],
     ),
 )
 
@@ -2491,17 +2491,17 @@ _tmpl("remedial_action_due",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
         "</table>"
         "<p>Please upload the compliance proof immediately in SEACMS.</p>",
-        ["Field Officer", "EE TLSS"],
+        ["Field Officer", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] Remedial compliance NOT uploaded for {{request.number}}"
         " ({{equipment.ueic}}). Due: {{compliance_due_date}}. Upload in SEACMS.",
-        ["Field Officer", "EE TLSS"],
+        ["Field Officer", "Reviewing Officer"],
     ),
     _i(
         "Remedial compliance overdue — {{request.number}}",
         "Compliance for {{request.number}} ({{equipment.ueic}}) was due {{compliance_due_date}} and is now {{days_overdue}} day(s) overdue.",
-        ["Field Officer", "EE TLSS"],
+        ["Field Officer", "Reviewing Officer"],
     ),
 )
 
@@ -2518,17 +2518,17 @@ _tmpl("taqc_observation_overdue",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
         "</table>"
         "<p>Please upload the compliance document in SEACMS immediately.</p>",
-        ["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
+        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
     ),
     _s(
         "[KPTCL-SEACMS] TA&QC compliance NOT uploaded. Req:{{request.number}}"
         " ({{equipment.ueic}}). Target: {{compliance_due_date}}. Upload in SEACMS.",
-        ["EE TLSS", "SEE W&M"],
+        ["Reviewing Officer", "Supervisory Officer"],
     ),
     _i(
         "TA&QC compliance overdue — {{request.number}}",
         "Observation compliance for {{request.number}} ({{equipment.ueic}}) is {{days_overdue}} day(s) past target {{compliance_due_date}}.",
-        ["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
+        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
     ),
 )
 
@@ -2546,17 +2546,17 @@ _tmpl("maintenance_due",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
         "</table>"
         "<p>Please ensure maintenance resources and outage window are scheduled.</p>",
-        ["AEE Maintenance", "Nodal Officer"],
+        ["Maintenance Officer", "Nodal Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] Maintenance due in {{days_remaining}} days for {{equipment.ueic}}"
         " at {{equipment.department}}. Due: {{request.due_date}}.",
-        ["AEE Maintenance", "Nodal Officer"],
+        ["Maintenance Officer", "Nodal Officer"],
     ),
     _i(
         "Maintenance due in {{days_remaining}} days — {{equipment.ueic}}",
         "Request {{request.number}} for {{equipment.ueic}} maintenance is due on {{request.due_date}}.",
-        ["AEE Maintenance", "Nodal Officer"],
+        ["Maintenance Officer", "Nodal Officer"],
     ),
 )
 
@@ -2573,17 +2573,17 @@ _tmpl("overhaul_recommended",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Recommendation Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
         "</table>"
         "<p>An overhaul is recommended. Please raise a maintenance request in SEACMS.</p>",
-        ["AEE Maintenance", "EE TLSS", "SEE W&M"],
+        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] Overhaul needed: {{equipment.ueic}} ({{equipment.type}}) at"
         " {{equipment.department}}. Operations: {{operation_count}}/{{operation_threshold}}.",
-        ["AEE Maintenance", "EE TLSS"],
+        ["Maintenance Officer", "Reviewing Officer"],
     ),
     _i(
         "Overhaul recommended — {{equipment.ueic}}",
         "{{equipment.type}} ({{equipment.ueic}}) has reached {{operation_count}} operations (threshold: {{operation_threshold}}). Overhaul recommended.",
-        ["AEE Maintenance", "EE TLSS", "SEE W&M"],
+        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
     ),
 )
 
@@ -2601,17 +2601,17 @@ _tmpl("design_problem_alert",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Identified On</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
         "</table>"
         "<p>Inspect all {{equipment.type}} units of this make immediately. Log in to SEACMS for the affected equipment list.</p>",
-        ["AEE Maintenance", "EE TLSS", "SEE W&M", "Department Head"],
+        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Reviewing Officer"],
     ),
     _s(
         "[KPTCL-SEACMS] DESIGN ALERT: {{equipment.manufacturer}} {{equipment.type}}."
         " {{affected_count}} units affected. Problem: {{problem_description}}. Login SEACMS.",
-        ["AEE Maintenance", "EE TLSS"],
+        ["Maintenance Officer", "Reviewing Officer"],
     ),
     _i(
         "Design problem — {{equipment.manufacturer}} {{equipment.type}}",
         "Systemic problem detected on {{equipment.manufacturer}} {{equipment.type}}: {{problem_description}}. {{affected_count}} unit(s) affected.",
-        ["AEE Maintenance", "EE TLSS", "SEE W&M", "Department Head"],
+        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Reviewing Officer"],
     ),
 )
 
@@ -2630,17 +2630,17 @@ _tmpl("repair_delay",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
         "</table>"
         "<p>Please review and update the repair timeline in SEACMS.</p>",
-        ["EE TLSS", "CEE Transmission Zone", "CEE RT&R&D"],
+        ["Reviewing Officer", "Senior Management Approver", "CEE RT&R&D"],
     ),
     _s(
         "[KPTCL-SEACMS] REPAIR DELAY: {{equipment.ueic}} stage '{{repair_stage}}'"
         " is {{days_delayed}} days overdue (deadline: {{stage_deadline}}).",
-        ["EE TLSS", "CEE Transmission Zone"],
+        ["Reviewing Officer", "Senior Management Approver"],
     ),
     _i(
         "Repair delay — {{equipment.ueic}} ({{repair_stage}})",
         "Repair stage '{{repair_stage}}' for {{equipment.ueic}} is {{days_delayed}} day(s) past deadline {{stage_deadline}}.",
-        ["EE TLSS", "CEE Transmission Zone", "CEE RT&R&D"],
+        ["Reviewing Officer", "Senior Management Approver", "CEE RT&R&D"],
     ),
 )
 
@@ -2658,7 +2658,7 @@ _tmpl("monthly_mis_report",
         "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overdue Tests</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{overdue_count}}</td></tr>"
         "</table>"
         "<p>The PDF and Excel reports are attached to this email.</p>",
-        ["SEE W&M", "CEE Transmission Zone"],
+        ["Supervisory Officer", "Senior Management Approver"],
         [
             {"var_key": "report.retriepdf", "type": "pdf"},
             {"var_key": "report.retriexls", "type": "excel"},
@@ -2667,7 +2667,7 @@ _tmpl("monthly_mis_report",
     _i(
         "Monthly MIS Report — {{report_month}} ready",
         "The SEACMS MIS report for {{report_month}} is available. Tests: {{tests_completed}}, Critical: {{critical_count}}, Overdue: {{overdue_count}}.",
-        ["SEE W&M", "CEE Transmission Zone"],
+        ["Supervisory Officer", "Senior Management Approver"],
     ),
 )
 

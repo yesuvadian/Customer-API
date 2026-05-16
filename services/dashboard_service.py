@@ -7,11 +7,11 @@ with a 15-minute TTL.
 Cache key pattern:  dashboard::{org_id or 'global'}::{widget}
 TTL: 900 seconds (15 min)
 
-Role view mapping (checked against OrgRole.name, case-insensitive):
-  ee_tlss  ← roles containing "EE", "EE TLSS", "Electrical Engineer"
-  see_cee  ← roles containing "SEE", "CEE", "Superintending", "Chief"
-  admin    ← "System Admin", "Org Admin"
-  field    ← everything else (AEE, Tester, Field Officer…)
+Role view mapping — driven by OrgRole.default_module.path (not role name):
+  ee_tlss  ← Reviewing Officer, Test & Work Coordinator, Maintenance Officer, Test Engineer
+  see_cee  ← Supervisory Officer, Senior Management Approver, Procurement Approver
+  admin    ← System Administrator
+  field    ← everything else
 """
 
 from __future__ import annotations
