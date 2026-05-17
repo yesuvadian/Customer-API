@@ -187,6 +187,48 @@ def _types_by_category_for_equipment(db, eq) -> dict:
 
 
 # ============================================================
+# TYPES BY CATEGORY — by equipment_type_id (CategoryMaster ID)
+# ============================================================
+@router.get("/types-by-category/{equipment_type_id}")
+def get_types_by_category_for_type(
+    equipment_type_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return types_by_category for a CategoryMaster (equipment type) ID."""
+    class _FakeEq:
+        pass
+    fake = _FakeEq()
+    fake.equipment_type_id = equipment_type_id
+    return _types_by_category_for_equipment(db, fake)
+
+
+# ============================================================
+# TYPES BY CATEGORY — by test_type_id (CategoryDetails ID)
+# Resolves parent CategoryMaster via CategoryDetails.category_master_id.
+# Most reliable fallback: test_type_id is always known on a testing request.
+# ============================================================
+@router.get("/types-by-test-type/{test_type_id}")
+def get_types_by_test_type(
+    test_type_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return types_by_category for the equipment category that owns test_type_id."""
+    from models import CategoryDetails
+    detail = db.query(CategoryDetails).filter(
+        CategoryDetails.id == test_type_id
+    ).first()
+    if not detail or not detail.category_master_id:
+        return {"test": [], "maintenance": [], "inspection": [], "repair_lifecycle": []}
+    class _FakeEq:
+        pass
+    fake = _FakeEq()
+    fake.equipment_type_id = detail.category_master_id
+    return _types_by_category_for_equipment(db, fake)
+
+
+# ============================================================
 # CREATE EQUIPMENT
 # ============================================================
 @router.post("/", response_model=EquipmentResponse, status_code=status.HTTP_201_CREATED)

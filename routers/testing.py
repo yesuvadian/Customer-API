@@ -2,6 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session
 
@@ -428,7 +429,10 @@ def submit_test_results(
         )
 
     # ── Return request + stored recommendation data ───────────────────────────
-    enriched = _enrich(req)
+    # _enrich() returns the ORM object — serialise to dict via Pydantic so we
+    # can attach the extra "recommendation" key without hitting TypeError.
+    _enrich(req)
+    enriched = jsonable_encoder(TestingRequestResponse.model_validate(req))
     enriched["recommendation"] = {
         "id":                  str(rec.id) if rec else None,
         "recommendation_type": rec_type,
