@@ -99,17 +99,20 @@ def seed_overhaul_stages(db) -> int:
     for key, t in templates_raw.items():
         existing = db.query(OrgTestTemplate).filter_by(template_key=key).first()
         if existing:
+            existing.template_data = t   # always sync latest sections
+            existing.is_system = True
             template_map[key] = existing.id
-            continue
-        obj = OrgTestTemplate(
-            id=uuid.uuid4(),
-            template_key=key,
-            template_data=t,
-            is_system=True,
-        )
-        db.add(obj)
-        db.flush()
-        template_map[key] = obj.id
+        else:
+            obj = OrgTestTemplate(
+                id=uuid.uuid4(),
+                template_key=key,
+                template_data=t,
+                is_system=True,
+            )
+            db.add(obj)
+            db.flush()
+            template_map[key] = obj.id
+    db.flush()
     print(f"[OK] Overhaul stage templates: {len(template_map)} ready")
 
     # ── 2. Stages ─────────────────────────────────────────────────────────────
@@ -159,6 +162,8 @@ def seed_overhaul_stages(db) -> int:
         exists = db.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
         if not exists:
             db.add(RepairStageTemplate(stage_id=stage_id, template_id=template_id))
+        else:
+            exists.template_id = template_id   # keep link pointing at latest template
 
     # ── 4. Transitions ────────────────────────────────────────────────────────
     for from_code, action, to_code in TRANSITIONS:
