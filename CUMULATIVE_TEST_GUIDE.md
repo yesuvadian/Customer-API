@@ -19,7 +19,7 @@
 | **Test Engineer** | `testengineer1@utility.com` | `admin123` | Submits each test session result |
 | **Transformer Repair Coordinator** | `wf.coordinator@utility.com` | `admin123` | Assigns users to overhaul stages |
 | **Maintenance Officer** | `aee.maintenance@utility.com` | `admin123` | Executes OVERHAUL_EXECUTION + COMPLETION_UPLOAD |
-| **Senior Management Approver** | `cee.zone@utility.com` | `admin123` | Final OFFICER_VERIFICATION sign-off |
+| **Senior Management Approver** | `cee.zone@utility.com` | `TestDept@123` | Final OFFICER_VERIFICATION sign-off |
 
 > **Super Admin** (cross-org): `superadmin@system.com` / `Admin123!`
 
@@ -435,7 +435,7 @@ Before running this flow, confirm the following in the database:
 
 1. Open ticket → assign `cee.zone@utility.com` (Senior Management Approver)
 
-**Login as:** `cee.zone@utility.com` / `admin123`  
+**Login as:** `cee.zone@utility.com` / `TestDept@123`  
 **Role:** Senior Management Approver
 
 1. Sidebar → **Overhaul Workflows** → open ticket
@@ -465,7 +465,7 @@ Before running this flow, confirm the following in the database:
 
 If the Senior Management Approver rejects at Stage 4:
 
-**Login as:** `cee.zone@utility.com` / `admin123`  
+**Login as:** `cee.zone@utility.com` / `TestDept@123`  
 After Stage 3 completion:
 1. Open `Officer Verification` stage
 2. Tap **Reject** → enter reason (mandatory) → confirm
@@ -559,3 +559,7 @@ Custom threshold:  set via EquipmentOverhaulConfig (per equipment)
 | `FK violation: module_id not in modules` during seed | Stale module IDs in `permissions_template` from partial run | Fixed: `_valid_module_ids` guard added at all 3 org-provisioning sites |
 | Coordinator cannot see overhaul ticket | `Overhaul Workflows` module not in their role permissions | Re-run seed — `Transformer Repair Coordinator` now has `_readwrite(overhaul_workflows_module)` |
 | `originator@utility.com` cannot create test request | Existing KPTCL org role has stale permissions from old seed run | Fixed: permission sync step added to `seed_kptcl_organization` — re-run seed |
+| **Overhaul Workflows not visible in sidebar** for `wf.coordinator` | `'overhaul-workflows'` was missing from `_directSubmissionPaths` in `portal_app_drawer.dart` | Fixed — path, label (`'Overhaul Workflows'`) and icon (`Icons.engineering`) added to the drawer config |
+| **"Finalise & Submit" button gives 400** after entering final session results | "Enter Results" with `finalize=true` already calls `submit_results`, advancing TR to `under_approval`. The button then makes a redundant second call | Fixed — button is now hidden (replaced with a green status pill) when TR status is already `under_approval` or later |
+| **No schedule/ticket created after wizard recommendation approval** | User did not complete the approval step in **Testing Request Approvals** — `WorkflowDispatchService.dispatch()` only fires at approval time, not at session submit | Go to **Testing Request Approvals** → open the TR → tap **Approve** to trigger dispatch |
+| `cee.zone@utility.com` login fails with `admin123` | The hierarchy seeding step in `seed.py` overwrites this user's password to `TestDept@123` | Use password **`TestDept@123`** for `cee.zone@utility.com` |

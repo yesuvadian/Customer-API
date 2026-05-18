@@ -11,8 +11,8 @@ Reads recommendation.next_action and creates the appropriate downstream ticket:
   replacement   → ProcurementRequest   (finance approval queue)
   none          → nothing (TR marked approved/complete)
 
-All schedules use TestRequestScheduleService — operational schedules linked
-directly to the equipment (equipment_id), trigger checked immediately on creation.
+Schedules require a registered equipment (equipment_id).
+Type-only TRs (equipment_id=None) skip schedule/ticket creation — by design.
 """
 
 from datetime import datetime, timezone
@@ -264,11 +264,13 @@ class WorkflowDispatchService:
         freq = rec.schedule_frequency or ScheduleFrequency.yearly
         effective_start = tr.scheduled_start_date or now
 
-        # Guard: equipment_id is required for operational schedules
+        # Guard: equipment_id is required for operational schedules.
+        # Tickets are only meaningful for a specific registered equipment asset.
+        # Type-only TRs (equipment_id=None) cannot produce a recurring schedule.
         if not tr.equipment_id:
             print(
-                f"[Dispatch] WARN: cannot create operational schedule for TR "
-                f"{tr.request_number} — no equipment_id"
+                f"[Dispatch] SKIP: no equipment_id on TR {tr.request_number} "
+                f"— recommendation noted but no schedule/ticket created"
             )
             return ""
 
@@ -341,7 +343,8 @@ class WorkflowDispatchService:
             f"next_run={schedule.next_run_date.date()})"
         )
 
-        # Immediate first-ticket trigger (same logic as onboarding)
+        # Immediate first-ticket trigger (same logic as onboarding).
+        # The scheduler daemon creates subsequent tickets on each next_run_date.
         try:
             self.db.refresh(schedule)
             created = TestRequestScheduleService.create_one_ticket(
@@ -357,6 +360,7 @@ class WorkflowDispatchService:
             print(f"[Dispatch] WARN: immediate ticket creation raised: {_e}")
 
         return str(schedule.id)
+
 
     def _start_repair_workflow(
         self,
