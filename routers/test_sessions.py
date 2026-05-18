@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import TestSession, TestSessionReading, TestingRequest, User
+from models import TestResult, TestSession, TestSessionReading, TestingRequest, User
 from schemas import (
     TestSessionCreate,
     TestSessionUpdate,
@@ -308,7 +308,7 @@ def delete_reading(
 # SESSION REPORT — HTML PREVIEW & PDF DOWNLOAD
 # ═══════════════════════════════════════════════════════════
 
-def _build_session_html(session: TestSession, readings: list, request: TestingRequest) -> str:
+def _build_session_html(session: TestSession, readings: list, request: TestingRequest, test_result=None) -> str:
     """Build a styled HTML report for a single test session."""
 
     def fmt(v):
@@ -351,6 +351,31 @@ def _build_session_html(session: TestSession, readings: list, request: TestingRe
         </tr>"""
 
     no_readings = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#888">No readings recorded for this session</td></tr>' if not readings else ""
+
+    # Form submission data (from TestResult.test_data linked to this session)
+    form_section = ""
+    if test_result and test_result.test_data:
+        td = test_result.test_data
+        overall = (td.get("overall_result") or "").upper()
+        result_color = "#1a7340" if overall == "PASS" else "#b71c1c" if overall == "FAIL" else "#555"
+        result_bg = "#e8f5e9" if overall == "PASS" else "#ffebee" if overall == "FAIL" else "#f5f5f5"
+        rows_html = "".join(
+            f"<tr><td style='padding:6px 10px;border:1px solid #e0e0e0;color:#555;font-size:12px'>{k.replace('_',' ').title()}</td>"
+            f"<td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:13px'>{fmt(v)}</td></tr>"
+            for k, v in td.items() if k not in ("overall_result",)
+        )
+        form_section = f"""
+    <div class="section-title">Form Submission</div>
+    <table class="readings" style="margin-bottom:8px">
+      <thead><tr><th style="width:35%">Field</th><th>Value</th></tr></thead>
+      <tbody>
+        {rows_html}
+        <tr>
+          <td style='padding:6px 10px;border:1px solid #e0e0e0;font-weight:700'>Overall Result</td>
+          <td style='padding:6px 10px;border:1px solid #e0e0e0;background:{result_bg};color:{result_color};font-weight:700'>{overall or "—"}</td>
+        </tr>
+      </tbody>
+    </table>"""
 
     req_num = getattr(request, "request_number", "") or ""
     eq_name = ""
@@ -405,6 +430,8 @@ def _build_session_html(session: TestSession, readings: list, request: TestingRe
 
     {"<p><b>Notes:</b> " + (session.notes or "") + "</p>" if session.notes else ""}
 
+    {form_section}
+
     <div class="section-title">Readings ({len(readings)})</div>
     <table class="readings">
       <thead>
@@ -448,7 +475,13 @@ def preview_session(
         .all()
     )
     req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
-    return _build_session_html(session, readings, req)
+    test_result = (
+        db.query(TestResult)
+        .filter(TestResult.test_session_id == session_id)
+        .order_by(TestResult.cts.desc())
+        .first()
+    )
+    return _build_session_html(session, readings, req, test_result)
 
 
 @router.get("/{session_id}/pdf")
@@ -480,6 +513,12 @@ def download_session_pdf(
         .all()
     )
     req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    test_result = (
+        db.query(TestResult)
+        .filter(TestResult.test_session_id == session_id)
+        .order_by(TestResult.cts.desc())
+        .first()
+    )
 
     # ── Build PDF ──────────────────────────────────────────────────────────────
     buf = BytesIO()
@@ -541,6 +580,42 @@ def download_session_pdf(
         ("LEFTPADDING", (0, 0), (-1, -1), 8),
     ]))
     story += [meta_table, Spacer(1, 0.15 * inch)]
+
+    # Form submission section (from TestResult.test_data linked to this session)
+    if test_result and test_result.test_data:
+        story.append(Paragraph("Form Submission", h2_style))
+        td = test_result.test_data
+        overall = (td.get("overall_result") or "").upper()
+        form_rows = [
+            [Paragraph("Field", ParagraphStyle("TH", fontSize=9, textColor=rl_colors.white, fontName="Helvetica-Bold")),
+             Paragraph("Value", ParagraphStyle("TH", fontSize=9, textColor=rl_colors.white, fontName="Helvetica-Bold"))],
+        ]
+        for k, v in td.items():
+            if k == "overall_result":
+                continue
+            form_rows.append([
+                Paragraph(k.replace("_", " ").title(), ParagraphStyle("Cell", fontSize=9, fontName="Helvetica-Bold")),
+                Paragraph(str(v) if v is not None else "-", ParagraphStyle("Cell", fontSize=9)),
+            ])
+        if overall:
+            result_color = rl_colors.HexColor("#1A7340") if overall == "PASS" else rl_colors.HexColor("#B71C1C") if overall == "FAIL" else rl_colors.black
+            form_rows.append([
+                Paragraph("Overall Result", ParagraphStyle("Cell", fontSize=9, fontName="Helvetica-Bold")),
+                Paragraph(overall, ParagraphStyle("Res", fontSize=9, textColor=result_color, fontName="Helvetica-Bold")),
+            ])
+        form_table = Table(form_rows, colWidths=[2.2 * inch, 4.6 * inch])
+        form_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), navy),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#f5f8ff")]),
+            ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#CCCCCC")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#DDDDDD")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story += [form_table, Spacer(1, 0.15 * inch)]
 
     # Readings section
     story.append(Paragraph(f"Readings ({len(readings)})", h2_style))

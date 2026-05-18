@@ -271,11 +271,16 @@ class CumulativeService:
             # Order by reading_date from test_data when available, else fall back to cts
             reading_date_str = data.get("reading_date")
             if reading_date_str:
-                try:
-                    reading_time = datetime.strptime(
-                        str(reading_date_str)[:10], "%Y-%m-%d"
-                    ).replace(tzinfo=timezone.utc)
-                except Exception:
+                reading_time = None
+                for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%m-%d-%Y"):
+                    try:
+                        reading_time = datetime.strptime(
+                            str(reading_date_str)[:10], fmt
+                        ).replace(tzinfo=timezone.utc)
+                        break
+                    except Exception:
+                        pass
+                if reading_time is None:
                     reading_time = r.cts or self._utc_now()
             else:
                 reading_time = r.cts or self._utc_now()
@@ -350,6 +355,58 @@ class CumulativeService:
 
         return self._lifecycle_status(equipment_id, cumulative, threshold, open_rec)
 
+    _OVERHAUL_STAGES = [
+        {"sequence": 1, "code": "OVERHAUL_TRIGGER",     "name": "Overhaul Triggered",      "weight": 10},
+        {"sequence": 2, "code": "OVERHAUL_EXECUTION",   "name": "Overhaul Execution",       "weight": 30},
+        {"sequence": 3, "code": "COMPLETION_UPLOAD",    "name": "Completion Record Upload", "weight": 30},
+        {"sequence": 4, "code": "OFFICER_VERIFICATION", "name": "Officer Verification",     "weight": 30},
+    ]
+
+    def _ensure_overhaul_definition(self) -> RepairWorkflowDefinition:
+        """Create the OVERHAUL workflow definition + stages if they don't exist."""
+        import logging as _log
+        defn = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter(RepairWorkflowDefinition.workflow_code == OVERHAUL_WORKFLOW_CODE)
+            .first()
+        )
+        if not defn:
+            defn = RepairWorkflowDefinition(
+                id=uuid.uuid4(),
+                workflow_code=OVERHAUL_WORKFLOW_CODE,
+                name="Overhaul Workflow",
+                is_active=True,
+            )
+            self.db.add(defn)
+            self.db.flush()
+            _log.getLogger(__name__).info(
+                f"[CUMULATIVE] Auto-created OVERHAUL workflow definition {defn.id}"
+            )
+
+        for s in self._OVERHAUL_STAGES:
+            ex = (
+                self.db.query(RepairStageDefinition)
+                .filter(
+                    RepairStageDefinition.workflow_definition_id == defn.id,
+                    RepairStageDefinition.code == s["code"],
+                )
+                .first()
+            )
+            if not ex:
+                self.db.add(RepairStageDefinition(
+                    id=uuid.uuid4(),
+                    workflow_definition_id=defn.id,
+                    name=s["name"],
+                    code=s["code"],
+                    sequence=s["sequence"],
+                    weight=s["weight"],
+                    is_active=True,
+                ))
+                _log.getLogger(__name__).info(f"[CUMULATIVE] Auto-created stage {s['code']}")
+
+        self.db.flush()
+        return defn
+
     def _trigger_overhaul(
         self,
         equipment_id: UUID,
@@ -361,16 +418,18 @@ class CumulativeService:
         Create an OVERHAUL RepairWorkflow with all stage instances initialised,
         exactly mirroring how start_workflow() works for BREAKDOWN.
         """
-        # ── 1. Resolve OVERHAUL workflow definition ───────────────────────────
+        # ── 1. Resolve OVERHAUL workflow definition (auto-seed if missing) ──────
+        import logging as _log
         wf_def = (
             self.db.query(RepairWorkflowDefinition)
             .filter(RepairWorkflowDefinition.workflow_code == OVERHAUL_WORKFLOW_CODE)
             .first()
         )
         if not wf_def:
-            raise ValueError(
-                "OVERHAUL workflow definition not found — run seed_overhaul_stages first."
+            _log.getLogger(__name__).warning(
+                "[CUMULATIVE] OVERHAUL workflow definition missing — auto-seeding now."
             )
+            wf_def = self._ensure_overhaul_definition()
 
         # ── 2. Get ordered OVERHAUL stage definitions ─────────────────────────
         stages = (

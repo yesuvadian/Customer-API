@@ -79,6 +79,24 @@ class AutoStatusTransitionService:
 
                 self.db.commit()
 
+                # For cumulative test types, evaluate overhaul trigger now that all
+                # sessions are in — this is the correct point to check the running total.
+                if testing_request.is_cumulative and testing_request.equipment_id:
+                    try:
+                        from services.cumulative_service import CumulativeService
+                        lifecycle = CumulativeService(self.db).evaluate_overhaul_trigger(
+                            equipment_id=testing_request.equipment_id,
+                            user_id=testing_request.created_by,
+                        )
+                        logger.info(
+                            f"[CUMULATIVE] auto-transition eval: equipment={testing_request.equipment_id} "
+                            f"cumulative={lifecycle.get('cumulative_value')} "
+                            f"threshold={lifecycle.get('threshold_value')} "
+                            f"status={lifecycle.get('status')}"
+                        )
+                    except Exception as _cum_err:
+                        logger.warning(f"[CUMULATIVE] evaluate_overhaul_trigger failed: {_cum_err}")
+
                 self._notify_approvers(testing_request)
 
                 return True

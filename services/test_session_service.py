@@ -187,12 +187,42 @@ class TestSessionService(UTCDateTimeMixin):
             completed_at=self._utc_now(),
         )
 
+        # Evaluate cumulative overhaul threshold on every session completion
+        # so the overhaul workflow is triggered as soon as the threshold is crossed,
+        # regardless of how many sessions remain.
+        self._evaluate_cumulative(session.testing_request_id)
+
         # Auto-transition to test_submitted if all sessions are complete
         from services.auto_status_transition_service import AutoStatusTransitionService
         auto_transition = AutoStatusTransitionService(self.db)
         auto_transition.check_and_transition_if_all_sessions_complete(session.testing_request_id)
 
         return session
+
+    def _evaluate_cumulative(self, testing_request_id: UUID) -> None:
+        """Fire cumulative overhaul evaluation if this is a cumulative request."""
+        try:
+            from models import TestingRequest
+            from services.cumulative_service import CumulativeService
+            request = self.db.query(TestingRequest).filter(
+                TestingRequest.id == testing_request_id
+            ).first()
+            if not request or not request.is_cumulative or not request.equipment_id:
+                return
+            lifecycle = CumulativeService(self.db).evaluate_overhaul_trigger(
+                equipment_id=request.equipment_id,
+                user_id=request.created_by,
+            )
+            import logging
+            logging.getLogger(__name__).info(
+                f"[CUMULATIVE] session complete — equipment={request.equipment_id} "
+                f"cumulative={lifecycle.get('cumulative_value')} "
+                f"threshold={lifecycle.get('threshold_value')} "
+                f"status={lifecycle.get('status')}"
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"[CUMULATIVE] evaluate failed: {e}")
 
     # ═══════════════════════════════════════════════════════════
     # TEST SESSION READING CRUD

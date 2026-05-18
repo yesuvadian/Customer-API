@@ -11,6 +11,7 @@ from uuid import UUID
 
 from models import TestResult, TestSession, TestSessionReading, TestingRequest, User
 from sqlalchemy.orm import joinedload
+from sqlalchemy import func
 
 
 class TestResultPDFService:
@@ -160,13 +161,48 @@ class TestResultPDFService:
         """
         sessions = (
             self.db.query(TestSession)
-            .options(joinedload(TestSession.readings))
             .filter(TestSession.testing_request_id == request_id)
             .order_by(TestSession.session_number)
             .all()
         )
         if not sessions:
             return
+
+        # Count TestResult rows per session + fetch reading value for cumulative tests
+        session_ids = [s.id for s in sessions]
+        result_count_rows = (
+            self.db.query(TestResult.test_session_id, func.count(TestResult.id))
+            .filter(TestResult.test_session_id.in_(session_ids))
+            .group_by(TestResult.test_session_id)
+            .all()
+        )
+        result_counts: dict = {str(sid): cnt for sid, cnt in result_count_rows}
+
+        # Fetch latest reading value per session (for cumulative display)
+        session_reading_values: dict = {}
+        for _sid in session_ids:
+            _tr = (
+                self.db.query(TestResult)
+                .filter(TestResult.test_session_id == _sid)
+                .order_by(TestResult.cts.desc())
+                .first()
+            )
+            if _tr and _tr.test_data and "reading" in _tr.test_data:
+                session_reading_values[str(_sid)] = _tr.test_data["reading"]
+
+        # Detect cumulative request
+        _tr_req = self.db.query(TestingRequest).filter(
+            TestingRequest.id == request_id
+        ).first()
+        is_cumulative = bool(_tr_req and _tr_req.is_cumulative)
+        if not is_cumulative and session_reading_values:
+            _sample = (
+                self.db.query(TestResult)
+                .filter(TestResult.test_session_id.in_(session_ids))
+                .first()
+            )
+            if _sample and getattr(_sample, "template_key", None) == "operations_tracking":
+                is_cumulative = True
 
         story.append(PageBreak())
         story.append(Paragraph("Session Data", heading_style))
@@ -199,15 +235,21 @@ class TestResultPDFService:
         # ════════════════════════════════════════════════════════════════
         story.append(Paragraph("Session Summary", subheading_style))
 
-        sum_hdr = ["#", "Session Name", "Date", "Readings", "Duration", "Status"]
+        _rv_header = "Reading Value" if is_cumulative else "Submissions"
+        sum_hdr = ["#", "Session Name", "Date", _rv_header, "Duration", "Status"]
         sum_rows = [sum_hdr]
         for s in sessions:
-            r_count = len(s.readings or [])
+            if is_cumulative:
+                _rv = session_reading_values.get(str(s.id))
+                _rv_cell = str(_rv) if _rv is not None else "-"
+            else:
+                r_count = result_counts.get(str(s.id), len(s.readings or []))
+                _rv_cell = str(r_count)
             sum_rows.append([
                 str(s.session_number),
                 s.session_name or f"Session {s.session_number}",
                 _fmt_date(s.session_date),
-                str(r_count),
+                _rv_cell,
                 _duration(s),
                 (s.status or "scheduled").upper(),
             ])

@@ -962,16 +962,54 @@ def preview_test_result(
             fields_html += '</div>'
 
     # ── Session data section (multi-session testing) ─────────────────────────
-    from models import TestSession as _TestSession, TestSessionReading as _TestSessionReading
-    from sqlalchemy.orm import joinedload as _jl
+    from models import TestSession as _TestSession, TestResult as _TestResult
+    from sqlalchemy import func as _func
 
     _sessions = (
         db.query(_TestSession)
-        .options(_jl(_TestSession.readings))
         .filter(_TestSession.testing_request_id == result.testing_request_id)
         .order_by(_TestSession.session_number)
         .all()
     )
+
+    # Count TestResult rows per session + fetch latest reading value (for cumulative)
+    _result_counts: dict = {}
+    _session_reading_values: dict = {}  # session_id → test_data["reading"] from latest TestResult
+    if _sessions:
+        _session_ids = [s.id for s in _sessions]
+        rows = (
+            db.query(_TestResult.test_session_id, _func.count(_TestResult.id))
+            .filter(_TestResult.test_session_id.in_(_session_ids))
+            .group_by(_TestResult.test_session_id)
+            .all()
+        )
+        _result_counts = {str(sid): cnt for sid, cnt in rows}
+        # Fetch the latest TestResult per session to read its cumulative value
+        for _sid in _session_ids:
+            _tr = (
+                db.query(_TestResult)
+                .filter(_TestResult.test_session_id == _sid)
+                .order_by(_TestResult.cts.desc())
+                .first()
+            )
+            if _tr and _tr.test_data and "reading" in _tr.test_data:
+                _session_reading_values[str(_sid)] = _tr.test_data["reading"]
+
+    # Detect cumulative from TestingRequest or from template_key on submitted results
+    from models import TestingRequest as _TestingRequest
+    _tr_req = db.query(_TestingRequest).filter(
+        _TestingRequest.id == result.testing_request_id
+    ).first()
+    _is_cumulative = bool(_tr_req and _tr_req.is_cumulative)
+    if not _is_cumulative and _session_reading_values:
+        # Also treat operations_tracking template as cumulative
+        _any_tr = (
+            db.query(_TestResult)
+            .filter(_TestResult.test_session_id.in_([s.id for s in _sessions]))
+            .first()
+        ) if _sessions else None
+        if _any_tr and getattr(_any_tr, "template_key", None) == "operations_tracking":
+            _is_cumulative = True
 
     SESSION_STATUS_COLORS = {
         "completed":  "#4CAF50",
@@ -1001,20 +1039,26 @@ def preview_test_result(
 
         sessions_html += '<div class="section"><h3>Session Data</h3>'
         sessions_html += '<h4 style="color:#2a5298;margin-bottom:8px">Session Summary</h4>'
-        sessions_html += '''<table class="data-table">
+        _reading_col_header = '<th>Reading Value</th>' if _is_cumulative else '<th>Submissions</th>'
+        sessions_html += f'''<table class="data-table">
           <thead><tr>
             <th>#</th><th>Session Name</th><th>Date</th>
-            <th>Readings</th><th>Duration</th><th>Status</th>
+            {_reading_col_header}<th>Duration</th><th>Status</th>
           </tr></thead><tbody>'''
         for s in _sessions:
             s_status = (s.status or "scheduled").lower()
             s_color  = SESSION_STATUS_COLORS.get(s_status, "#9E9E9E")
-            r_count  = len(s.readings or [])
+            if _is_cumulative:
+                _rv = _session_reading_values.get(str(s.id))
+                _reading_cell = f'<td style="text-align:center;font-weight:600">{_rv if _rv is not None else "-"}</td>'
+            else:
+                r_count = _result_counts.get(str(s.id), len(s.readings or []))
+                _reading_cell = f'<td style="text-align:center">{r_count}</td>'
             sessions_html += f'''<tr>
               <td style="text-align:center">{s.session_number}</td>
               <td>{s.session_name or f"Session {s.session_number}"}</td>
               <td style="text-align:center">{_fmt_dt(s.session_date)[:10]}</td>
-              <td style="text-align:center">{r_count}</td>
+              {_reading_cell}
               <td style="text-align:center">{_dur(s)}</td>
               <td style="text-align:center">
                 <span style="background:{s_color};color:#fff;padding:3px 10px;
