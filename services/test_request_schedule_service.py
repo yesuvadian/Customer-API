@@ -8,10 +8,12 @@ from typing import Optional, List
 from uuid import UUID
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from models import (
     Equipment,
+    RequestCategory,
     TestingRequest,
     TestingRequestStatus,
     TestRequestSchedule,
@@ -800,6 +802,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         self,
         organization_id: Optional[UUID] = None,
         equipment_type_id: Optional[int] = None,
+        request_category: Optional[str] = None,
     ):
 
         query = (
@@ -836,6 +839,24 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 .equipment_type_id
                     == equipment_type_id
             )
+
+        if request_category:
+            try:
+                cat_enum = RequestCategory(request_category)
+            except ValueError:
+                cat_enum = None
+            if cat_enum == RequestCategory.test:
+                # Legacy rows with NULL category are treated as 'test'
+                query = query.filter(
+                    or_(
+                        TestRequestSchedule.request_category == RequestCategory.test,
+                        TestRequestSchedule.request_category.is_(None),
+                    )
+                )
+            elif cat_enum is not None:
+                query = query.filter(
+                    TestRequestSchedule.request_category == cat_enum
+                )
 
         return query.all()
 
@@ -945,9 +966,10 @@ class TestRequestScheduleService(UTCDateTimeMixin):
     def list_operational_schedules(
         self,
         equipment_id: UUID,
+        request_category: Optional[str] = None,
     ):
 
-        return (
+        query = (
             self.db.query(TestRequestSchedule)
             .options(
                 joinedload(
@@ -962,8 +984,27 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 TestRequestSchedule.is_deleted
                     == False,
             )
-            .all()
         )
+
+        if request_category:
+            try:
+                cat_enum = RequestCategory(request_category)
+            except ValueError:
+                cat_enum = None
+            if cat_enum == RequestCategory.test:
+                # Legacy rows with NULL category are treated as 'test'
+                query = query.filter(
+                    or_(
+                        TestRequestSchedule.request_category == RequestCategory.test,
+                        TestRequestSchedule.request_category.is_(None),
+                    )
+                )
+            elif cat_enum is not None:
+                query = query.filter(
+                    TestRequestSchedule.request_category == cat_enum
+                )
+
+        return query.all()
 
     # ============================================================
     # GET OPERATIONAL SCHEDULE

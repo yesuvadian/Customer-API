@@ -74,6 +74,7 @@ def create_master_schedule(
 @router.get("/master")
 def list_master_schedules(
     equipment_type_id: Optional[int] = Query(None),
+    request_category: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -81,10 +82,9 @@ def list_master_schedules(
     svc = TestRequestScheduleService(db)
 
     return svc.list_master_schedules(
-        organization_id=(
-            current_user.organization_id
-        ),
+        organization_id=current_user.organization_id,
         equipment_type_id=equipment_type_id,
+        request_category=request_category,
     )
 
 
@@ -158,6 +158,7 @@ def delete_master_schedule(
 @router.get("/operational/{equipment_id}")
 def list_operational_schedules(
     equipment_id: UUID,
+    request_category: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
 
@@ -165,6 +166,7 @@ def list_operational_schedules(
 
     return svc.list_operational_schedules(
         equipment_id=equipment_id,
+        request_category=request_category,
     )
 
 

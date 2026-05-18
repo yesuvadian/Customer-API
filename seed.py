@@ -1399,12 +1399,20 @@ def seed_modules(session):
                 "Stage-role RBAC driven; each stage locks to authorised roles only.",
  "path": "overhaul-workflows",
  "group_name": "Field Operations"},
-# ✅ SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
-{"name": "Schedule Templates",
- "description": "SRS §5.1.2 — Automated periodic test ticket generation: master schedule templates "
+# ✅ TEST SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
+{"name": "Test Schedule Templates",
+ "rename_from": "Schedule Templates",
+ "description": "SRS §5.1.2 — Automated periodic test ticket generation: master test schedule templates "
                 "and operational schedules per equipment. Org-admin manages master set; "
                 "operational schedules auto-created on equipment commissioning.",
  "path": "testing_schedules",
+ "group_name": "Condition Monitoring"},
+# ✅ MAINTENANCE SCHEDULE TEMPLATES MODULE
+{"name": "Maintenance Schedule Templates",
+ "description": "Automated periodic maintenance ticket generation: master maintenance schedule templates "
+                "and operational schedules per equipment. Mirrors test schedule structure but scoped "
+                "to maintenance request category.",
+ "path": "maintenance_schedules",
  "group_name": "Condition Monitoring"},
 # ✅ SCHEDULE COMPLIANCE MODULE
 {"name": "Test Schedules",
@@ -3023,7 +3031,9 @@ def seed_role_templates(session):
     workflows_module          = [mid for mid in [modules_by_name.get("Workflows")] if mid]
     breakdown_workflows_module      = [mid for mid in [modules_by_name.get("Breakdown Workflows")] if mid]
     overhaul_workflows_module    = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
-    schedule_compliance_module   = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
+    schedule_compliance_module          = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
+    test_schedule_templates_module      = [mid for mid in [modules_by_name.get("Test Schedule Templates")] if mid]
+    maintenance_schedule_templates_module = [mid for mid in [modules_by_name.get("Maintenance Schedule Templates")] if mid]
     procurement_approvals_module = [mid for mid in [modules_by_name.get("Procurement Approvals")] if mid]
     taqc_inspections_module      = [mid for mid in [modules_by_name.get("TA&QC Inspections")] if mid]
     failure_registry_module      = [mid for mid in [modules_by_name.get("Failure Registry")] if mid]
@@ -5435,43 +5445,47 @@ _MASTER_SCHEDULE_SEED = {
 
 def seed_schedule_module_permissions(session):
     """
-    Ensure 'Schedule Templates' module exists and all is_org_admin OrgRoles
-    across every organization have full access to it. Idempotent.
+    Ensure 'Test Schedule Templates' and 'Maintenance Schedule Templates' modules
+    exist and all is_org_admin OrgRoles across every organisation have full access
+    to both. Idempotent.
     """
-    mod = session.query(Module).filter_by(name="Schedule Templates").first()
-    if not mod:
-        print("[WARN] 'Schedule Templates' module not found — run seed_modules first.")
-        return 0
+    MODULE_NAMES = ["Test Schedule Templates", "Maintenance Schedule Templates"]
+    total_granted = 0
 
-    admin_roles = (
-        session.query(OrgRole).filter_by(is_org_admin=True, is_active=True).all()
-    )
+    admin_roles = session.query(OrgRole).filter_by(is_org_admin=True, is_active=True).all()
 
-    granted = 0
-    for role in admin_roles:
-        existing = (
-            session.query(OrgRolePermission)
-            .filter_by(org_role_id=role.id, module_id=mod.id)
-            .first()
-        )
-        if existing:
-            existing.can_view = existing.can_add = existing.can_edit = True
-            existing.can_delete = existing.can_approve = existing.can_assign = True
-            existing.can_export = existing.can_import = True
-        else:
-            session.add(OrgRolePermission(
-                id=uuid.uuid4(),
-                org_role_id=role.id,
-                module_id=mod.id,
-                can_view=True, can_add=True, can_edit=True,
-                can_delete=True, can_approve=True, can_assign=True,
-                can_export=True, can_import=True,
-            ))
-            granted += 1
+    for mod_name in MODULE_NAMES:
+        mod = session.query(Module).filter_by(name=mod_name).first()
+        if not mod:
+            print(f"[WARN] '{mod_name}' module not found — run seed_modules first.")
+            continue
+
+        granted = 0
+        for role in admin_roles:
+            existing = (
+                session.query(OrgRolePermission)
+                .filter_by(org_role_id=role.id, module_id=mod.id)
+                .first()
+            )
+            if existing:
+                existing.can_view = existing.can_add = existing.can_edit = True
+                existing.can_delete = existing.can_approve = existing.can_assign = True
+                existing.can_export = existing.can_import = True
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mod.id,
+                    can_view=True, can_add=True, can_edit=True,
+                    can_delete=True, can_approve=True, can_assign=True,
+                    can_export=True, can_import=True,
+                ))
+                granted += 1
+        total_granted += granted
+        print(f"[OK] {mod_name}: full access granted/updated for {len(admin_roles)} org-admin role(s) ({granted} new).")
 
     session.commit()
-    print(f"[OK] Schedule Templates: full access granted/updated for {len(admin_roles)} org-admin role(s) ({granted} new).")
-    return granted
+    return total_granted
 
 
 def seed_schedule_compliance_module_permissions(session, org=None):
@@ -7476,7 +7490,7 @@ def run_seed():
             print(f"[WARN] Master schedule seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
-        # Schedule Templates module — full access for org-admin roles
+        # Test & Maintenance Schedule Templates — full access for org-admin roles
         print("\n--- Schedule Templates Module Permissions ---")
         try:
             seed_schedule_module_permissions(session)

@@ -1146,6 +1146,7 @@ class TestRequestScheduleCreate(BaseModel):
     revised_periodicity_days: Optional[int] = None
     priority: Optional[str] = None
     notes: Optional[str] = None
+    request_category: Optional[Literal["test", "maintenance"]] = "test"
 
 
 class TestRequestScheduleUpdate(BaseModel):
