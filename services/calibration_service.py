@@ -46,10 +46,18 @@ from models import (
     Equipment,
     EquipmentCalibrationConfig,
     OrgTestTemplate,
+    RepairAssignmentQueue,
+    RepairStageAuditLog,
+    RepairStageDefinition,
+    RepairStageInstance,
+    RepairWorkflow,
+    RepairWorkflowDefinition,
     TestingRequest,
     TestingRequestStatus,
     TestResult,
 )
+
+CALIBRATION_WORKFLOW_CODE = "CALIBRATION"
 
 CALIBRATION_KEY = "calibration"
 CALIBRATION_NAME = "Calibration"
@@ -409,8 +417,17 @@ class CalibrationService:
 
         return status
 
+    def _ensure_calibration_definition(self) -> RepairWorkflowDefinition:
+        from seed_calibration_workflow import seed_calibration_stages
+        seed_calibration_stages(self.db)
+        return (
+            self.db.query(RepairWorkflowDefinition)
+            .filter_by(workflow_code=CALIBRATION_WORKFLOW_CODE)
+            .first()
+        )
+
     def _handle_fail(self, equipment_id: UUID, user_id: Optional[UUID]) -> None:
-        """Stop schedule + create CalibrationRepairRecommendation if none open."""
+        """Stop schedule + create CalibrationRepairRecommendation + RepairWorkflow if none open."""
         # Stop scheduling
         cfg = (
             self.db.query(EquipmentCalibrationConfig)
@@ -430,18 +447,227 @@ class CalibrationService:
             self.db.add(cfg)
         self.db.flush()
 
-        # Create repair recommendation if none open for this equipment
+        # Create recommendation record if none open
         open_rec = self._get_open_repair_recommendation(equipment_id)
-        if not open_rec:
-            rec = CalibrationRepairRecommendation(
-                id=uuid.uuid4(),
-                equipment_id=equipment_id,
-                status="OPEN",
+        if open_rec:
+            self.db.commit()
+            return
+
+        rec = CalibrationRepairRecommendation(
+            id=uuid.uuid4(),
+            equipment_id=equipment_id,
+            status="OPEN",
+            created_by=user_id,
+        )
+        self.db.add(rec)
+        self.db.flush()
+
+        # ── Create CALIBRATION RepairWorkflow ─────────────────────────────────
+        wf_def = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter_by(workflow_code=CALIBRATION_WORKFLOW_CODE)
+            .first()
+        )
+        if not wf_def:
+            wf_def = self._ensure_calibration_definition()
+
+        stages = (
+            self.db.query(RepairStageDefinition)
+            .filter(
+                RepairStageDefinition.workflow_definition_id == wf_def.id,
+                RepairStageDefinition.is_active.is_(True),
+            )
+            .order_by(RepairStageDefinition.sequence)
+            .all()
+        )
+        if not stages:
+            self.db.commit()
+            return
+
+        first_stage = stages[0]
+        count = self.db.query(func.count(RepairWorkflow.id)).scalar() or 0
+        workflow_number = (
+            f"CAL-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{count + 1:04d}"
+        )
+
+        workflow = RepairWorkflow(
+            workflow_number=workflow_number,
+            workflow_code=CALIBRATION_WORKFLOW_CODE,
+            equipment_id=equipment_id,
+            workflow_type="CALIBRATION",
+            source="calibration",
+            current_stage_id=first_stage.id,
+            status="active",
+            assignment_pending=True,
+            progress=0,
+            priority="normal",
+            created_by=user_id,
+        )
+        self.db.add(workflow)
+        self.db.flush()
+
+        _now = datetime.now(timezone.utc)
+        first_instance = None
+        for stage in stages:
+            is_first = stage.id == first_stage.id
+            instance = RepairStageInstance(
+                workflow_id=workflow.id,
+                stage_id=stage.id,
+                status="pending" if is_first else "not_started",
+                assignment_pending=is_first,
+                started_at=_now if is_first else None,
                 created_by=user_id,
             )
-            self.db.add(rec)
+            self.db.add(instance)
+            self.db.flush()
+            if is_first:
+                first_instance = instance
+
+        if first_instance:
+            workflow.current_stage_instance_id = first_instance.id
+
+        self.db.add(RepairAssignmentQueue(
+            workflow_id=workflow.id,
+            stage_id=first_stage.id,
+            status="pending",
+        ))
+
+        self.db.add(RepairStageAuditLog(
+            workflow_id=workflow.id,
+            stage_id=first_stage.id,
+            action="created",
+            performed_by=user_id,
+            note="Calibration workflow auto-triggered — calibration result: Fail",
+            performed_at=_now,
+        ))
 
         self.db.commit()
+
+        print(
+            f"[CALIBRATION] Workflow {workflow_number} created for equipment {equipment_id} "
+            f"— first stage: {first_stage.name} (pending coordinator assignment)"
+        )
+
+    # ── Calibration schedule entry in test_request_schedules ─────────────────
+
+    @staticmethod
+    def _months_to_frequency(validity_months: int):
+        """Map validity period to nearest ScheduleFrequency enum value."""
+        from models import ScheduleFrequency
+        if validity_months <= 2:
+            return ScheduleFrequency.monthly
+        if validity_months <= 4:
+            return ScheduleFrequency.quarterly
+        if validity_months <= 9:
+            return ScheduleFrequency.semi_annual
+        if validity_months <= 18:
+            return ScheduleFrequency.yearly
+        return ScheduleFrequency.triennial
+
+    def upsert_calibration_schedule(
+        self,
+        tr: "TestingRequest",
+        user_id: Optional[UUID] = None,
+    ) -> Optional[str]:
+        """
+        Create or update a test_request_schedules row for this calibration request
+        so the existing scheduler infrastructure auto-creates the next ticket
+        near next_due_date - lead_days.
+
+        next_run_date is set explicitly from the calibration result's
+        calibration_date + validity_months — it is NOT derived from frequency.
+        Frequency is stored only so the scheduler has a fallback interval.
+        """
+        from models import Equipment, TestRequestSchedule, ScheduleFrequency
+        from datetime import timedelta, timezone
+
+        if not tr.equipment_id:
+            return None
+
+        latest = self._get_latest_reading(tr.equipment_id)
+        if not latest:
+            return None
+
+        try:
+            cal_date_str = latest["calibration_date"]
+            validity_months = int(latest["validity_months"])
+            next_due = date_add(cal_date_str, validity_months)
+
+            cfg = (
+                self.db.query(EquipmentCalibrationConfig)
+                .filter(EquipmentCalibrationConfig.equipment_id == tr.equipment_id)
+                .first()
+            )
+            lead_days = cfg.lead_days if cfg else 30
+
+            # Trigger date: lead_days before next_due
+            trigger_date = next_due - __import__("datetime").timedelta(days=lead_days)
+            trigger_dt = datetime(
+                trigger_date.year, trigger_date.month, trigger_date.day,
+                tzinfo=timezone.utc,
+            )
+
+            frequency = self._months_to_frequency(validity_months)
+
+            # Equipment details for the schedule record
+            equipment = (
+                self.db.query(Equipment)
+                .filter(Equipment.id == tr.equipment_id)
+                .first()
+            )
+            equipment_type_id = equipment.equipment_type_id if equipment else tr.equipment_type_id
+
+            # Upsert: unique constraint is (equipment_id, test_type_id)
+            existing = (
+                self.db.query(TestRequestSchedule)
+                .filter(
+                    TestRequestSchedule.equipment_id == tr.equipment_id,
+                    TestRequestSchedule.test_type_id == tr.test_type_id,
+                    TestRequestSchedule.is_deleted == False,
+                )
+                .first()
+            )
+
+            if existing:
+                existing.next_run_date = trigger_dt
+                existing.frequency = frequency
+                existing.is_active = True
+                self.db.flush()
+                print(
+                    f"[CALIBRATION] Updated schedule {existing.id} "
+                    f"next_run={trigger_date} for equipment {tr.equipment_id}"
+                )
+                return str(existing.id)
+
+            schedule = TestRequestSchedule(
+                id=uuid.uuid4(),
+                equipment_id=tr.equipment_id,
+                equipment_type_id=equipment_type_id,
+                test_type_id=tr.test_type_id,
+                organization_id=tr.organization_id,
+                title=tr.title or f"Calibration — {tr.request_number}",
+                request_category=tr.request_category,
+                frequency=frequency,
+                start_date=datetime.now(timezone.utc),
+                next_run_date=trigger_dt,
+                advance_days=lead_days,
+                is_active=True,
+                created_by=user_id,
+            )
+            self.db.add(schedule)
+            self.db.flush()
+            self.db.commit()
+            print(
+                f"[CALIBRATION] Created schedule {schedule.id} "
+                f"next_run={trigger_date} freq={frequency.value} "
+                f"for equipment {tr.equipment_id}"
+            )
+            return str(schedule.id)
+
+        except Exception as e:
+            print(f"[CALIBRATION] WARN: upsert_calibration_schedule failed: {e}")
+            import traceback; traceback.print_exc()
+            return None
 
     # ── Recovery (resume after repair) ───────────────────────────────────────
 

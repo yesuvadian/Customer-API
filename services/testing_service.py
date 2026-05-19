@@ -473,42 +473,48 @@ class TestingService:
         self.db.refresh(result)
 
         # ── Cumulative overhaul evaluation (fire-and-forget; never blocks save) ─
-        # For cumulative test types (OLTC ops count, CB ops count, etc.):
-        # recalculate the running total across all sessions for this equipment.
-        #
-        # Trigger rule:
-        #   • If cumulative >= threshold on THIS session → create overhaul ticket immediately,
-        #     regardless of how many sessions remain (no point delaying an overhaul alert).
-        #   • If cumulative < threshold → just return current status; wait for more sessions.
-        #   • Idempotent: _open_recommendation() guard in evaluate_overhaul_trigger()
-        #     prevents duplicate tickets even if called again on session 3.
-        if getattr(request, 'is_cumulative', False) and getattr(request, 'equipment_id', None):
+        # Fires for any template whose rules list contains a CUMULATIVE_DIFF rule.
+        # Covers all cumulative test types (OLTC ops count, CB ops count, etc.)
+        # generically — no hardcoded is_cumulative flag needed.
+        # Idempotent: evaluate_overhaul_trigger() only creates a new ticket when
+        # cumulative >= threshold AND no open recommendation already exists.
+        if getattr(request, 'equipment_id', None) and result.template_key:
             try:
-                from services.cumulative_service import CumulativeService
-                _csvc = CumulativeService(self.db)
+                from test_templates import get_template_by_key as _get_tmpl_c
+                _tmpl_c = _get_tmpl_c(result.template_key)
+                if _tmpl_c is None:
+                    from services.org_test_template_service import OrgTestTemplateService as _OTS_C
+                    try:
+                        _ot_c = _OTS_C(self.db).get_by_template_key(result.template_key)
+                        _tmpl_c = _ot_c.template_data if _ot_c else None
+                    except Exception:
+                        _tmpl_c = None
 
-                # Always evaluate — the service only triggers a new ticket when
-                # cumulative >= threshold AND no open recommendation exists yet.
-                lifecycle = _csvc.evaluate_overhaul_trigger(
-                    equipment_id=request.equipment_id,
-                    user_id=tester_id,
+                _has_cumulative = any(
+                    (r.get("type") or "").upper() == "CUMULATIVE_DIFF"
+                    for r in (_tmpl_c or {}).get("rules", [])
                 )
 
-                # Attach lifecycle status to evaluation_result for visibility in the response.
-                # Use flag_modified so SQLAlchemy always flushes the JSONB change even
-                # when the dict reference stays the same (in-place JSONB mutation).
-                from sqlalchemy.orm.attributes import flag_modified
-                merged = {**(result.evaluation_result or {}), "cumulative_lifecycle": lifecycle}
-                result.evaluation_result = merged
-                flag_modified(result, "evaluation_result")
-                self.db.commit()
-                self.db.refresh(result)
-                print(
-                    f"[CUMULATIVE] equipment={request.equipment_id} "
-                    f"cumulative={lifecycle.get('cumulative_value')} "
-                    f"threshold={lifecycle.get('threshold_value')} "
-                    f"status={lifecycle.get('status')}"
-                )
+                if _has_cumulative:
+                    from services.cumulative_service import CumulativeService
+                    from sqlalchemy.orm.attributes import flag_modified
+                    _csvc = CumulativeService(self.db)
+                    lifecycle = _csvc.evaluate_overhaul_trigger(
+                        equipment_id=request.equipment_id,
+                        user_id=tester_id,
+                    )
+                    merged = {**(result.evaluation_result or {}), "cumulative_lifecycle": lifecycle}
+                    result.evaluation_result = merged
+                    flag_modified(result, "evaluation_result")
+                    self.db.commit()
+                    self.db.refresh(result)
+                    print(
+                        f"[CUMULATIVE] equipment={request.equipment_id} "
+                        f"template={result.template_key} "
+                        f"cumulative={lifecycle.get('cumulative_value')} "
+                        f"threshold={lifecycle.get('threshold_value')} "
+                        f"status={lifecycle.get('status')}"
+                    )
             except Exception as _cum_err:
                 import traceback
                 print(f"[WARN] Cumulative evaluation failed: {_cum_err}")

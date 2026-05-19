@@ -133,6 +133,13 @@ class WorkflowDispatchService:
             result["created"] = pr_number
             result["status"] = "finance_pending"
 
+        # ── Calibration workflow auto-trigger ─────────────────────────────────
+        # Fires on result approval when any test result for this TR has a
+        # template containing a DATE_ADD rule AND overall_result == "fail".
+        # This is independent of next_action — calibration workflow is always
+        # auto-triggered by the template rule, not by the tester's recommendation.
+        self._maybe_trigger_calibration_workflow(tr, approver_id, result)
+
         return result
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -389,6 +396,92 @@ class WorkflowDispatchService:
         except Exception as e:
             print(f"[Dispatch] WARN: repair workflow start failed: {e}")
             return None
+
+    def _maybe_trigger_calibration_workflow(
+        self,
+        tr: TestingRequest,
+        approver_id: UUID,
+        result: dict,
+    ) -> None:
+        """
+        After result approval, handle calibration lifecycle based on outcome:
+          - Fail + DATE_ADD template → trigger CALIBRATION RepairWorkflow + stop scheduler
+          - Pass + DATE_ADD template → resume scheduler so pre-due check auto-creates
+                                       the next calibration ticket near next_due_date
+
+        Fire-and-forget — never blocks the approval transaction.
+        """
+        if not tr.equipment_id:
+            return
+        try:
+            results = (
+                self.db.query(TestResult)
+                .filter(TestResult.testing_request_id == tr.id)
+                .all()
+            )
+
+            fail_template = None
+            pass_template = None
+
+            for r in results:
+                outcome = (r.overall_result or "").strip().lower()
+                if not r.template_key:
+                    continue
+                # Resolve template: static dict first, then OrgTestTemplate
+                from test_templates import get_template_by_key as _get_tpl
+                tmpl = _get_tpl(r.template_key)
+                if tmpl is None:
+                    try:
+                        from models import OrgTestTemplate
+                        ot = (
+                            self.db.query(OrgTestTemplate)
+                            .filter(OrgTestTemplate.template_key == r.template_key)
+                            .first()
+                        )
+                        tmpl = ot.template_data if ot else None
+                    except Exception:
+                        tmpl = None
+                has_date_add = any(
+                    (rule.get("type") or "").upper() == "DATE_ADD"
+                    for rule in (tmpl or {}).get("rules", [])
+                )
+                if not has_date_add:
+                    continue
+                if outcome == "fail" and fail_template is None:
+                    fail_template = r.template_key
+                elif outcome == "pass" and pass_template is None:
+                    pass_template = r.template_key
+
+            from services.calibration_service import CalibrationService
+            cal_svc = CalibrationService(self.db)
+
+            if fail_template:
+                # Fail: stop scheduling + create calibration repair workflow
+                cal_svc._handle_fail(equipment_id=tr.equipment_id, user_id=approver_id)
+                result["calibration_workflow"] = "triggered"
+                result["calibration_triggered_by_template"] = fail_template
+                print(
+                    f"[CALIBRATION] Workflow triggered at result approval — "
+                    f"equipment={tr.equipment_id} template={fail_template}"
+                )
+            elif pass_template:
+                # Pass: re-enable scheduling flag + upsert test_request_schedules
+                # entry so the existing scheduler creates the next ticket
+                # automatically at next_due_date - lead_days.
+                cal_svc.resume_schedule(equipment_id=tr.equipment_id, user_id=approver_id)
+                schedule_id = cal_svc.upsert_calibration_schedule(tr=tr, user_id=approver_id)
+                result["calibration_scheduling"] = "resumed"
+                result["calibration_schedule_id"] = schedule_id
+                result["calibration_pass_template"] = pass_template
+                print(
+                    f"[CALIBRATION] Scheduling resumed + schedule upserted "
+                    f"(id={schedule_id}) — equipment={tr.equipment_id} template={pass_template}"
+                )
+
+        except Exception as _err:
+            import traceback
+            print(f"[WARN] Calibration workflow trigger failed at approval: {_err}")
+            traceback.print_exc()
 
     def _create_procurement(
         self,

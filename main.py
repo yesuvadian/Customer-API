@@ -10,7 +10,7 @@ from fastapi.security import HTTPBearer
 from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
-from routers import repair_workflow, websocket_routes
+from routers import repair_workflow, websocket_routes, workflow_dashboard
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.test_request_schedule_service import TestRequestScheduleService
 
@@ -723,6 +723,9 @@ app.include_router(workflows.router)
 # Repair Lifecycle Workflow
 app.include_router(repair_workflow.router)
 
+# Unified Workflow Operations Dashboard
+app.include_router(workflow_dashboard.router)
+
 # WebSocket
 app.include_router(websocket_routes.router)
 
@@ -737,6 +740,10 @@ async def startup_event():
         "[Scheduler] APScheduler started — "
         "daily test request job scheduled at 00:00 UTC"
     )
+    # Register workflow lifecycle hooks (import = self-registration side-effect)
+    import calibration_hooks  # noqa: F401
+    logger.info("[Hooks] Workflow lifecycle hooks registered")
+
     # Seed default notification templates + variables (idempotent)
     try:
         _db = SessionLocal()

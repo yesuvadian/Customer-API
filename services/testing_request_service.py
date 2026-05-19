@@ -32,7 +32,10 @@ class TestingRequestService:
         return f"TR-{today}-{(count + 1):04d}"
 
     def _resolve_is_cumulative(self, test_type_id) -> bool:
-        """Return True if the OrgTestTemplate for this test_type_id has enable_cumulative=true."""
+        """
+        Return True if the template has enable_cumulative=true OR a CUMULATIVE_DIFF rule.
+        Covers both legacy flag-based templates and rule-driven templates.
+        """
         if not test_type_id:
             return False
         tpl = (
@@ -43,10 +46,19 @@ class TestingRequestService:
         )
         if not tpl:
             return False
-        return bool((tpl.template_data or {}).get("enable_cumulative", False))
+        data = tpl.template_data or {}
+        if data.get("enable_cumulative"):
+            return True
+        return any(
+            (r.get("type") or "").upper() == "CUMULATIVE_DIFF"
+            for r in data.get("rules", [])
+        )
 
     def _resolve_is_calibration(self, test_type_id) -> bool:
-        """Return True if the OrgTestTemplate for this test_type_id has enable_calibration=true."""
+        """
+        Return True if the template has enable_calibration=true OR a DATE_ADD rule.
+        Covers both legacy flag-based templates and rule-driven templates.
+        """
         if not test_type_id:
             return False
         tpl = (
@@ -57,7 +69,13 @@ class TestingRequestService:
         )
         if not tpl:
             return False
-        return bool((tpl.template_data or {}).get("enable_calibration", False))
+        data = tpl.template_data or {}
+        if data.get("enable_calibration"):
+            return True
+        return any(
+            (r.get("type") or "").upper() == "DATE_ADD"
+            for r in data.get("rules", [])
+        )
 
     def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
         request_number = self._generate_request_number()
@@ -407,18 +425,69 @@ class TestingRequestService:
                     .first()
                 )
                 tpl_data = (tpl.template_data or {}) if tpl else {}
+                rules = tpl_data.get("rules", [])
+                has_date_add = any((r.get("type") or "").upper() == "DATE_ADD" for r in rules)
+                has_cumulative = any((r.get("type") or "").upper() == "CUMULATIVE_DIFF" for r in rules)
                 bucket.append({
                     "id": t.id,
                     "name": t.name,
                     "category_type": t.category_type,
-                    "enable_cumulative": bool(tpl_data.get("enable_cumulative", False)),
-                    "enable_calibration": bool(tpl_data.get("enable_calibration", False)),
+                    "enable_cumulative": bool(tpl_data.get("enable_cumulative", False)) or has_cumulative,
+                    "enable_calibration": bool(tpl_data.get("enable_calibration", False)) or has_date_add,
                 })
             result.append({
                 "id": m.id,
                 "name": m.name,
                 "tests": types_by_category["test"],    # legacy field
                 "types_by_category": types_by_category,
+            })
+        return result
+
+    def list_all_test_types(self, category: str = None) -> list:
+        """Return all CategoryDetails (test types) across ALL equipment types,
+        with lifecycle flags resolved from OrgTestTemplate.
+
+        Optionally filtered by category_type (test / maintenance / inspection /
+        repair_lifecycle).  Used by the form when no equipment type is selected.
+        """
+        query = (
+            self.db.query(CategoryDetails, CategoryMaster)
+            .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
+            .filter(
+                CategoryMaster.description == "Testing Equipment",
+                CategoryMaster.is_active.is_(True),
+                CategoryDetails.is_active.is_(True),
+            )
+        )
+        if category:
+            query = query.filter(CategoryDetails.category_type == category)
+        rows = query.order_by(CategoryMaster.name, CategoryDetails.name).all()
+
+        result = []
+        for t, m in rows:
+            tpl = (
+                self.db.query(OrgTestTemplate)
+                .filter(OrgTestTemplate.test_type_id == t.id)
+                .order_by(OrgTestTemplate.version.desc())
+                .first()
+            )
+            tpl_data = (tpl.template_data or {}) if tpl else {}
+            has_date_add = any(
+                (r.get("type") or "").upper() == "DATE_ADD"
+                for r in tpl_data.get("rules", [])
+            )
+            has_cumulative = any(
+                (r.get("type") or "").upper() == "CUMULATIVE_DIFF"
+                for r in tpl_data.get("rules", [])
+            )
+            result.append({
+                "id": t.id,
+                "name": t.name,
+                "category_type": t.category_type,
+                "equipment_type_id": m.id,
+                "equipment_type_name": m.name,
+                "enable_cumulative": bool(tpl_data.get("enable_cumulative", False)) or has_cumulative,
+                "enable_calibration": bool(tpl_data.get("enable_calibration", False)) or has_date_add,
             })
         return result
 
