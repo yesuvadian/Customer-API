@@ -392,8 +392,14 @@ def list_equipment(
     substation_ids: Optional[str] = None,
     # Year filters
     commission_year: Optional[int] = None,
+    commission_year_from: Optional[int] = None,
+    commission_year_to: Optional[int] = None,
     failure_year: Optional[int] = None,
+    failure_year_from: Optional[int] = None,
+    failure_year_to: Optional[int] = None,
     replacement_year: Optional[int] = None,
+    replacement_year_from: Optional[int] = None,
+    replacement_year_to: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -405,22 +411,31 @@ def list_equipment(
     # The new filter params (model_number, tlss_division, etc.) are accepted
     # by the route but ignored until equipment_service.py is also updated.
     items = EquipmentService.list_equipment(
-    db=db,
-    organization_id=org_id,
-    department_id=department_id,
-    equipment_type_id=equipment_type_id,
-    status=status,
-    voltage_class=voltage_class,
-    manufacturer=manufacturer,
-    model_number=model_number,
-    substation_ids=substation_ids,          
-    tlss_division=tlss_division,
-    wm_circle=wm_circle,
-    transmission_zone=transmission_zone,
-    search=search,
-    skip=skip,
-    limit=limit,
-)
+        db=db,
+        organization_id=org_id,
+        department_id=department_id,
+        equipment_type_id=equipment_type_id,
+        status=status,
+        voltage_class=voltage_class,
+        manufacturer=manufacturer,
+        model_number=model_number,
+        substation_ids=substation_ids,
+        tlss_division=tlss_division,
+        wm_circle=wm_circle,
+        transmission_zone=transmission_zone,
+        search=search,
+        skip=skip,
+        limit=limit,
+        commission_year=commission_year,
+        commission_year_from=commission_year_from,
+        commission_year_to=commission_year_to,
+        failure_year=failure_year,
+        failure_year_from=failure_year_from,
+        failure_year_to=failure_year_to,
+        replacement_year=replacement_year,
+        replacement_year_from=replacement_year_from,
+        replacement_year_to=replacement_year_to,
+    )
     return [_to_response(db, eq) for eq in items]
 
 

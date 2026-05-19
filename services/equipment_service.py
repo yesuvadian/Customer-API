@@ -270,16 +270,26 @@ class EquipmentService:
         status: Optional[str] = None,
         voltage_class: Optional[str] = None,
         manufacturer: Optional[str] = None,
-        model_number: Optional[str] = None,       # NEW
-        substation_ids: Optional[str] = None,      # NEW — comma-separated UUID string
-        tlss_division: Optional[str] = None,       # NEW
-        wm_circle: Optional[str] = None,           # NEW
-        transmission_zone: Optional[str] = None,   # NEW
+        model_number: Optional[str] = None,
+        substation_ids: Optional[str] = None,
+        tlss_division: Optional[str] = None,
+        wm_circle: Optional[str] = None,
+        transmission_zone: Optional[str] = None,
         search: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
+        # ── year filters (new) ──────────────────────────────────────────────
+        commission_year: Optional[int] = None,
+        commission_year_from: Optional[int] = None,
+        commission_year_to: Optional[int] = None,
+        failure_year: Optional[int] = None,
+        failure_year_from: Optional[int] = None,
+        failure_year_to: Optional[int] = None,
+        replacement_year: Optional[int] = None,
+        replacement_year_from: Optional[int] = None,
+        replacement_year_to: Optional[int] = None,
     ) -> List[Equipment]:
-        """List equipment with filters. All filters are AND-combined."""
+        from sqlalchemy import extract
 
         query = (
             db.query(Equipment)
@@ -289,33 +299,23 @@ class EquipmentService:
             )
         )
 
-        # ── org scope (always applied) ────────────────────────────────────
         if organization_id:
             query = query.filter(Equipment.organization_id == organization_id)
 
-        # ── department subtree filter ─────────────────────────────────────
-        # NOTE: substation_ids / zone / circle / division filters below will
-        # override or further narrow this when provided together.
         if department_id:
             dept_ids = cls._get_department_subtree_ids(db, department_id)
             query = query.filter(Equipment.department_id.in_(dept_ids))
 
-        # ── simple column filters ─────────────────────────────────────────
         if equipment_type_id:
             query = query.filter(Equipment.equipment_type_id == equipment_type_id)
-
         if status:
             query = query.filter(Equipment.status == status)
-
         if voltage_class:
             query = query.filter(Equipment.voltage_class == voltage_class)
-
         if manufacturer:
             query = query.filter(Equipment.manufacturer.ilike(f"%{manufacturer}%"))
-
         if model_number:
             query = query.filter(Equipment.model_number.ilike(f"%{model_number}%"))
-
         if search:
             query = query.filter(
                 (Equipment.ueic.ilike(f"%{search}%")) |
@@ -324,7 +324,6 @@ class EquipmentService:
                 (Equipment.factory_serial_number.ilike(f"%{search}%"))
             )
 
-        # ── substation filter (leaf dept, direct ID match) ────────────────
         if substation_ids:
             id_list = [s.strip() for s in substation_ids.split(",") if s.strip()]
             if id_list:
@@ -332,31 +331,70 @@ class EquipmentService:
                     parsed = [UUID(i) for i in id_list]
                     query = query.filter(Equipment.department_id.in_(parsed))
                 except ValueError:
-                    pass  # malformed UUID — ignore filter rather than crash
+                    pass
 
-        # ── hierarchical area filters (zone → circle → division) ──────────
-        # Each walks the org's dept tree to find all descendant dept IDs
-        # under the named ancestor, then limits equipment to those depts.
         if transmission_zone:
             dept_ids = cls._get_descendants_of_named(db, organization_id, transmission_zone)
             if not dept_ids:
-                return []  # named zone doesn't exist in this org
+                return []
             query = query.filter(Equipment.department_id.in_(dept_ids))
-
         if wm_circle:
             dept_ids = cls._get_descendants_of_named(db, organization_id, wm_circle)
             if not dept_ids:
                 return []
             query = query.filter(Equipment.department_id.in_(dept_ids))
-
         if tlss_division:
             dept_ids = cls._get_descendants_of_named(db, organization_id, tlss_division)
             if not dept_ids:
                 return []
             query = query.filter(Equipment.department_id.in_(dept_ids))
 
-        # ── execute ───────────────────────────────────────────────────────
-        results = (
+        # ── Commission year filters ──────────────────────────────────────────
+        if commission_year:
+            query = query.filter(
+                extract('year', Equipment.commissioned_date) == commission_year
+            )
+        if commission_year_from:
+            query = query.filter(
+                extract('year', Equipment.commissioned_date) >= commission_year_from
+            )
+        if commission_year_to:
+            query = query.filter(
+                extract('year', Equipment.commissioned_date) <= commission_year_to
+            )
+
+        # ── Failure year filters (retired_date = when the equipment failed/was retired) ──
+        if failure_year:
+            query = query.filter(
+                extract('year', Equipment.retired_date) == failure_year
+            )
+        if failure_year_from:
+            query = query.filter(
+                extract('year', Equipment.retired_date) >= failure_year_from
+            )
+        if failure_year_to:
+            query = query.filter(
+                extract('year', Equipment.retired_date) <= failure_year_to
+            )
+
+        # ── Replacement year filters (commissioned_date of units that ARE replacements) ──
+        if replacement_year:
+            query = query.filter(
+                Equipment.replaces_equipment_id.isnot(None),
+                extract('year', Equipment.commissioned_date) == replacement_year
+            )
+        if replacement_year_from:
+            query = query.filter(
+                Equipment.replaces_equipment_id.isnot(None),
+                extract('year', Equipment.commissioned_date) >= replacement_year_from
+            )
+        if replacement_year_to:
+            query = query.filter(
+                Equipment.replaces_equipment_id.isnot(None),
+                extract('year', Equipment.commissioned_date) <= replacement_year_to
+            )
+
+        return (
             query
             .order_by(Equipment.ueic)
             .offset(skip)
