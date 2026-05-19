@@ -1635,15 +1635,20 @@ class RepairWorkflowService:
                 }
         return {
             "id": str(workflow.id),
+            "workflow_number": workflow.workflow_number,
+            "workflow_type": workflow.workflow_type or "BREAKDOWN",  # BREAKDOWN / OVERHAUL
+            "source": workflow.source,                               # manual / cumulative / scheduled
             "workflow_code": workflow.workflow_code,
             "entity_type": workflow.entity_type,
             "entity_id": str(workflow.entity_id) if workflow.entity_id else None,
             "equipment_id": str(workflow.equipment_id),
             "equipment_ueic": equipment.ueic if equipment else None,
+            "equipment_name": equipment.nameplate_data.get("name") if equipment and equipment.nameplate_data else None,
             "source_failure_id": str(workflow.source_failure_id) if workflow.source_failure_id else None,
             "status": workflow.status,
             "assignment_pending": workflow.assignment_pending,
             "progress": workflow.progress,
+            "priority": workflow.priority,
             "current_stage": current_stage,
             "created_at": workflow.created_at.isoformat() if workflow.created_at else None,
         }

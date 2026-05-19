@@ -224,9 +224,11 @@ class DirectSubmissionService:
             }
             flag_modified(req, "form_data")
 
-        # ── TAQC: TestResult (form data lives here for TAQC) ─────────────────
+        # ── TestResult — created for both TAQC and Failure Registry ─────────────
+        # Failure Registry needs a TestResult row so that attach_file() has
+        # somewhere to store the supporting document uploaded at submission time.
         result = None
-        if category == RequestCategory.taqc_inspection:
+        if category in (RequestCategory.taqc_inspection, RequestCategory.failure_registry):
             result = TestResult(
                 testing_request_id=req.id,
                 template_key=data.get("template_key", category.value),

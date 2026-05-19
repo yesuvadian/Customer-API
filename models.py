@@ -693,7 +693,14 @@ class EquipmentOverhaulConfig(Base):
 
 
 class OverhaulRecommendation(Base):
-    """Records an auto-triggered overhaul recommendation when cumulative threshold is crossed."""
+    """Records an auto-triggered overhaul recommendation when cumulative threshold is crossed.
+
+    Lifecycle:
+      OPEN               — triggered automatically; awaiting overhaul completion record
+      PENDING_VERIFICATION — EE uploaded completion record; awaiting Officer verification
+      CLOSED             — Officer verified; overhaul confirmed complete
+      REJECTED           — Officer rejected the completion record; back to OPEN flow
+    """
     __tablename__ = "overhaul_recommendations"
     __table_args__ = {"schema": "public"}
 
@@ -702,10 +709,27 @@ class OverhaulRecommendation(Base):
     workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True)
     cumulative_value = Column(Float, nullable=False)
     threshold_value = Column(Float, nullable=False)
-    status = Column(String(20), default="OPEN")  # OPEN / CLOSED
+
+    # Status: OPEN / PENDING_VERIFICATION / CLOSED / REJECTED
+    status = Column(String(30), default="OPEN", index=True)
+
     triggered_at = Column(DateTime(timezone=True), server_default=func.now())
-    closed_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+
+    # ── Completion record (submitted by EE) ──────────────────────────────────
+    completion_notes = Column(Text, nullable=True)
+    completion_file_name = Column(String(500), nullable=True)   # uploaded file name
+    completion_file_data = Column(LargeBinary, nullable=True)   # file bytes
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # ── Verification (by designated Officer) ─────────────────────────────────
+    verified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    verification_notes = Column(Text, nullable=True)
+
+    # ── Closure ──────────────────────────────────────────────────────────────
+    closed_at = Column(DateTime(timezone=True), nullable=True)
 
     equipment = relationship("Equipment", foreign_keys=[equipment_id])
 

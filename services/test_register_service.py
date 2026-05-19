@@ -67,7 +67,7 @@ _FREQ_DELTA = {
 }
 
 # ── roles allowed to create / edit templates ──────────────────────────────────
-_WRITE_ROLES = {"Admin", "SuperAdmin", "EE TLSS", "Department Head"}
+_WRITE_ROLES = {"Admin", "SuperAdmin", "Reviewing Officer", "System Administrator"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ class TestRegisterService:
         if not names.intersection(_WRITE_ROLES):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only EE TLSS, Department Head, or Admin can manage the Test Register.",
+                detail="Only Reviewing Officer, System Administrator, or Admin can manage the Test Register.",
             )
 
     @staticmethod

@@ -1146,6 +1146,7 @@ class TestRequestScheduleCreate(BaseModel):
     revised_periodicity_days: Optional[int] = None
     priority: Optional[str] = None
     notes: Optional[str] = None
+    request_category: Optional[Literal["test", "maintenance"]] = "test"
 
 
 class TestRequestScheduleUpdate(BaseModel):
@@ -1214,6 +1215,7 @@ class TestResultCreate(BaseModel):
 class TestResultResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    test_session_id: Optional[UUID] = None  # Session this result belongs to
     organization_id: Optional[UUID] = None
     test_name: str
     test_category: Optional[str] = None
@@ -1430,6 +1432,7 @@ class RecommendationCreate(BaseModel):
     # next_action dispatch — set by Tester when submitting result
     next_action: Optional[str] = None          # none|maintenance|inspection|repair_cycle|replacement
     schedule_frequency: Optional[str] = None   # yearly|quarterly|monthly|semi_annual etc.
+    test_types: Optional[list] = None          # [{id, name}] — recommended follow-up test types
 
 class RecommendationUpdate(BaseModel):
     recommendation_type: Optional[str] = None
@@ -1437,6 +1440,7 @@ class RecommendationUpdate(BaseModel):
     detailed_notes: Optional[str] = None
     next_action: Optional[str] = None
     schedule_frequency: Optional[str] = None
+    test_types: Optional[list] = None
 
 class ApprovalAction(BaseModel):
     notes: Optional[str] = None
@@ -1451,8 +1455,11 @@ class SubmitTestResultsBody(BaseModel):
     recommendation_type: Optional[str] = None   # pass | fail | conditional | retest
     summary: Optional[str] = None
     detailed_notes: Optional[str] = None
-    next_action: Optional[str] = None           # none | maintenance | inspection | repair_cycle | replacement
-    schedule_frequency: Optional[str] = None    # yearly | half_yearly | quarterly | monthly
+    next_action: Optional[str] = None           # none | test | maintenance | inspection | repair_cycle | replacement
+    schedule_frequency: Optional[str] = None    # daily | weekly | biweekly | monthly | quarterly | semi_annual | yearly | triennial
+    schedule_start_date: Optional[str] = None   # YYYY-MM-DD — from wizard schedule picker
+    schedule_end_date: Optional[str] = None     # YYYY-MM-DD — from wizard schedule picker
+    test_types: Optional[list] = None           # [{id, name}] — recommended follow-up test types
 
 
 class RecommendationResponse(BaseModel):
@@ -1465,6 +1472,7 @@ class RecommendationResponse(BaseModel):
     replacement_products: Optional[list] = None
     next_action: Optional[str] = None
     schedule_frequency: Optional[str] = None
+    test_types: Optional[list] = None          # [{id, name}] — recommended follow-up test types
     approval_status: Optional[str] = None
     approved_by: Optional[UUID] = None
     approved_by_name: Optional[str] = None   # resolved display name

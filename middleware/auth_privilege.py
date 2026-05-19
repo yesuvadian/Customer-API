@@ -98,6 +98,12 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             or request.headers.get("authorization")
         )
 
+        # Allow token as query param for browser-navigated URLs (HTML/PDF reports)
+        if not auth_header:
+            q_token = request.query_params.get("token")
+            if q_token:
+                auth_header = f"Bearer {q_token}"
+
         if not auth_header or not auth_header.startswith("Bearer "):
             raise HTTPException(
                 status_code=401,

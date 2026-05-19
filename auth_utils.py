@@ -498,21 +498,36 @@ def authenticate_user(db: Session, username: str, password: str, request=None):
 # ==============================
 from fastapi import Depends, HTTPException, Request, status
 
+_optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+
 def get_current_user(
     request: Request,
-    token: str = Depends(oauth2_scheme),
+    header_token: Optional[str] = Depends(_optional_oauth2_scheme),
     db: Session = Depends(get_db)
 ):
-    # Standard credentials exception used on decode/lookup failures
+    # If middleware already validated the user, reuse it (avoids double JWT decode)
+    if hasattr(request.state, "user") and request.state.user is not None:
+        return request.state.user
+
+    # Fall back to query-param token (for browser-navigated report URLs)
+    raw_token = header_token or request.query_params.get("token")
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     # Decode JWT
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(raw_token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id_str = payload.get("sub")
         if not user_id_str:
             raise credentials_exception
@@ -525,7 +540,6 @@ def get_current_user(
     if not user:
         raise credentials_exception
 
-    # Allow everything else
     return user
 
 
