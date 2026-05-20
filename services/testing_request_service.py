@@ -389,19 +389,48 @@ class TestingRequestService:
         ]
 
     def list_equipment_types(self) -> list:
-        """Return CategoryMaster rows where description='Testing Equipment'
-        with their CategoryDetails grouped by request category."""
+        """
+        Return only supported equipment types for Testing Equipment
+        with their CategoryDetails grouped by request category.
+        """
+
+        ALLOWED_EQUIPMENT_TYPES = [
+            "Power Transformer",
+            "Circuit Breaker",
+            "Current Transformer",
+            "Potential Transformer",
+            "Capacitor Voltage Transformer",
+            "Surge Arrestor",
+            "Isolator / Disconnector",
+            "Control & Relay Panel",
+            "Battery Set",
+            "Battery Charger",
+            "Wave Trap",
+            "Station Auxiliary Transformer",
+            "LTAC Panel",
+            "Fire Fighting System",
+            "PLCC Panel",
+            "Digital Communication Panel",
+            "Diesel Generator Set",
+            "Electronic Tri-vector Meter",
+            "Protection Relay",
+        ]
+
         masters = (
             self.db.query(CategoryMaster)
             .filter(
                 CategoryMaster.description == "Testing Equipment",
                 CategoryMaster.is_active.is_(True),
+                CategoryMaster.name.in_(ALLOWED_EQUIPMENT_TYPES),
             )
             .order_by(CategoryMaster.name)
             .all()
         )
+
         result = []
+
         for m in masters:
+
             all_types = (
                 self.db.query(CategoryDetails)
                 .filter(
@@ -411,36 +440,58 @@ class TestingRequestService:
                 .order_by(CategoryDetails.name)
                 .all()
             )
+
             types_by_category: dict = {
-                "test": [], "maintenance": [], "inspection": [], "repair_lifecycle": []
+                "test": [],
+                "maintenance": [],
+                "inspection": [],
+                "repair_lifecycle": [],
             }
+
             for t in all_types:
+
                 cat = t.category_type or "test"
-                bucket = types_by_category.get(cat, types_by_category["test"])
-                # Look up linked OrgTestTemplate to expose lifecycle flags
+
+                bucket = types_by_category.get(
+                    cat,
+                    types_by_category["test"]
+                )
+
+                # Get lifecycle flags from template
                 tpl = (
                     self.db.query(OrgTestTemplate)
-                    .filter(OrgTestTemplate.test_type_id == t.id)
-                    .order_by(OrgTestTemplate.version.desc())
+                    .filter(
+                        OrgTestTemplate.test_type_id == t.id
+                    )
+                    .order_by(
+                        OrgTestTemplate.version.desc()
+                    )
                     .first()
                 )
-                tpl_data = (tpl.template_data or {}) if tpl else {}
-                rules = tpl_data.get("rules", [])
-                has_date_add = any((r.get("type") or "").upper() == "DATE_ADD" for r in rules)
-                has_cumulative = any((r.get("type") or "").upper() == "CUMULATIVE_DIFF" for r in rules)
+
+                tpl_data = (
+                    tpl.template_data or {}
+                ) if tpl else {}
+
                 bucket.append({
                     "id": t.id,
                     "name": t.name,
                     "category_type": t.category_type,
-                    "enable_cumulative": bool(tpl_data.get("enable_cumulative", False)) or has_cumulative,
-                    "enable_calibration": bool(tpl_data.get("enable_calibration", False)) or has_date_add,
+                    "enable_cumulative": bool(
+                        tpl_data.get("enable_cumulative", False)
+                    ),
+                    "enable_calibration": bool(
+                        tpl_data.get("enable_calibration", False)
+                    ),
                 })
+
             result.append({
                 "id": m.id,
                 "name": m.name,
-                "tests": types_by_category["test"],    # legacy field
+                "tests": types_by_category["test"],  # legacy support
                 "types_by_category": types_by_category,
             })
+
         return result
 
     def list_all_test_types(self, category: str = None) -> list:
