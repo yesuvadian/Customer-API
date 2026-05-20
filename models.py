@@ -123,17 +123,31 @@ class RepairWorkflowDefinition(Base):
 
 
 class RepairStageTemplate(Base):
-    """1-to-1 mapping: one stage → one form template."""
+    """Stage → form template mapping.
+
+    Generic stages (OBSERVATION_ASSIGNMENT, COMPLIANCE_REVIEW, OBSERVATION_CLOSURE)
+    have category_detail_id = NULL.  Category-specific stages (OBSERVATION_REPORTING,
+    COMPLIANCE_SUBMISSION) have one row per CategoryDetail so the form rendered
+    matches the observation's category.
+    """
     __tablename__ = "repair_stage_templates"
 
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     stage_id = Column(
         UUID(as_uuid=True),
         ForeignKey("repair_stage_definitions.id", ondelete="CASCADE"),
-        primary_key=True,
+        nullable=False,
+        index=True,
     )
     template_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.org_test_templates.id", ondelete="CASCADE"),
+    )
+    # NULL → generic (shown for all categories); non-NULL → category-specific
+    category_detail_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
 

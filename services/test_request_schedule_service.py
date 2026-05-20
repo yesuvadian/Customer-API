@@ -220,14 +220,9 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             db.query(TestRequestSchedule)
             .filter(
                 TestRequestSchedule.is_active.is_(True),
-
                 TestRequestSchedule.is_deleted == False,
-
-                # MASTER ONLY
-                TestRequestSchedule.equipment_id.is_(None),
-
-                TestRequestSchedule.equipment_type_id
-                    == equipment.equipment_type_id,
+                TestRequestSchedule.equipment_id.is_(None),  # MASTER ONLY
+                TestRequestSchedule.equipment_type_id == equipment.equipment_type_id,
             )
             .all()
         )
@@ -240,12 +235,8 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             existing = (
                 db.query(TestRequestSchedule)
                 .filter(
-                    TestRequestSchedule.equipment_id
-                        == equipment.id,
-
-                    TestRequestSchedule.test_type_id
-                        == template.test_type_id,
-
+                    TestRequestSchedule.equipment_id == equipment.id,
+                    TestRequestSchedule.test_type_id == template.test_type_id,
                     TestRequestSchedule.is_deleted == False,
                 )
                 .first()
@@ -254,85 +245,49 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             if existing:
                 continue
 
+            # Calculate appropriate next_run_date based on frequency
+            # For monthly/yearly, use the advanced date; for immediate, use now
+            if template.frequency in [
+                ScheduleFrequency.monthly,
+                ScheduleFrequency.quarterly,
+                ScheduleFrequency.semi_annual,
+                ScheduleFrequency.yearly,
+                ScheduleFrequency.triennial,
+            ]:
+                # For longer frequencies, set next_run_date to the advanced date
+                # This prevents immediate ticket creation
+                next_run_date = _advance_date(now, template.frequency)
+            else:
+                # For daily/weekly/biweekly, set to now for immediate ticket
+                next_run_date = now
+
             operational_schedule = TestRequestSchedule(
-
-                # OPERATIONAL
                 equipment_id=equipment.id,
-
                 organization_id=equipment.organization_id,
-
-                equipment_type_id=(
-                    template.equipment_type_id
-                ),
-
-                test_type_id=(
-                    template.test_type_id
-                ),
-
+                equipment_type_id=template.equipment_type_id,
+                test_type_id=template.test_type_id,
                 title=template.title,
-
                 description=template.description,
-
-                request_category=(
-                    template.request_category
-                ),
-
+                request_category=template.request_category,
                 priority=template.priority,
-
                 notes=template.notes,
-
-                assigned_tester_id=(
-                    template.assigned_tester_id
-                ),
-
-                transformer_type=(
-                    template.transformer_type
-                ),
-
-                transformer_rating=(
-                    template.transformer_rating
-                ),
-
+                assigned_tester_id=template.assigned_tester_id,
+                transformer_type=template.transformer_type,
+                transformer_rating=template.transformer_rating,
                 zone=template.zone,
-
                 ce_circle=template.ce_circle,
-
                 se_division=template.se_division,
-
-                ee_subdivision=(
-                    template.ee_subdivision
-                ),
-
+                ee_subdivision=template.ee_subdivision,
                 aee_section=template.aee_section,
-
                 ae_je=template.ae_je,
-
                 frequency=template.frequency,
-
                 start_date=now,
-
-                # Set next_run_date = now so the trigger check in
-                # create_one_ticket passes immediately on commissioning.
-                # create_one_ticket will advance it to now + frequency
-                # after the first ticket is created.
-                next_run_date=now,
-
+                next_run_date=next_run_date,  # Now properly set based on frequency
                 end_date=template.end_date,
-
-                advance_days=(
-                    template.advance_days
-                ),
-
-                revised_periodicity_days=(
-                    template.revised_periodicity_days
-                ),
-
-                oem_reference=(
-                    template.oem_reference
-                ),
-
+                advance_days=template.advance_days,
+                revised_periodicity_days=template.revised_periodicity_days,
+                oem_reference=template.oem_reference,
                 is_active=True,
-
                 created_by=user_id,
             )
 
@@ -341,14 +296,14 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
         db.commit()
 
-        # Apply same trigger check as daily scheduler — create ticket now if due
+        # Apply same trigger check as daily scheduler
         for sched in new_schedules:
             db.refresh(sched)
             try:
+                # This will now properly check based on the next_run_date
                 TestRequestScheduleService.create_one_ticket(db, sched, now)
             except Exception as e:
                 print(f"[WARN] create_one_ticket on onboard failed for schedule {sched.id}: {e}")
-
 
     # ============================================================
     # CREATE ONE TICKET

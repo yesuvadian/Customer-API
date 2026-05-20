@@ -5,6 +5,7 @@ import pandas as pd
 from typing import Dict, Optional
 from requests import session
 from sqlalchemy import text
+from sqlalchemy.orm.attributes import flag_modified
 from database import VendorSessionLocal, Base, vendor_engine
 from models import (
     CategoryDetails, CategoryMaster, Country, Division, OrgTestTemplate, Plan, Product,
@@ -1384,6 +1385,13 @@ def seed_modules(session):
                 "Accessible to: EE TLSS, Department Head, AEE Maintenance.",
  "path": "test_register",
  "group_name": "Condition Monitoring"},
+# ✅ WORKFLOW OPERATIONS DASHBOARD — unified view across all workflow types
+{"name": "Workflow Dashboard",
+ "description": "Unified operations dashboard — dynamically shows counts, stage breakdown, "
+                "equipment at risk, and recent activity for all workflow types defined in "
+                "repair_workflow_definitions. New workflow types appear automatically.",
+ "path": "workflow-dashboard",
+ "group_name": "Field Operations"},
 # ✅ BREAKDOWN WORKFLOW MODULE  (renamed from "Repair Workflows" — path unchanged: repair-workflows)
 {"name": "Breakdown Workflows",
  "rename_from": "Repair Workflows",
@@ -1398,6 +1406,18 @@ def seed_modules(session):
                 "Stages: Trigger Review, Execution, Completion Upload, Officer Verification. "
                 "Stage-role RBAC driven; each stage locks to authorised roles only.",
  "path": "overhaul-workflows",
+ "group_name": "Field Operations"},
+# ✅ CALIBRATION WORKFLOW MODULE
+{"name": "Calibration Workflows",
+ "description": "Calibration lifecycle workflow — auto-triggered when a calibration result is Fail. "
+                "Stages: Due Review, Send to Lab, Certificate Upload, Officer Verification. "
+                "Stage-role RBAC driven; each stage locks to authorised roles only.",
+ "path": "calibration-workflows",
+ "group_name": "Field Operations"},
+# ✅ ANNUAL AUDIT WORKFLOW MODULE
+{"name": "Annual Audit Workflows",
+ "description": "Annual audit 5-stage workflow: Observation Reporting to Closure. TA&QC Inspector executes; Reviewing Officer reviews compliance.",
+ "path": "annual-audit-workflows",
  "group_name": "Field Operations"},
 # ✅ TEST SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
 {"name": "Test Schedule Templates",
@@ -3029,8 +3049,11 @@ def seed_role_templates(session):
     recommendations_module   = [mid for mid in [modules_by_name.get("Recommendations")] if mid]
     approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
     workflows_module          = [mid for mid in [modules_by_name.get("Workflows")] if mid]
+    workflow_dashboard_module       = [mid for mid in [modules_by_name.get("Workflow Dashboard")] if mid]
     breakdown_workflows_module      = [mid for mid in [modules_by_name.get("Breakdown Workflows")] if mid]
-    overhaul_workflows_module    = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
+    overhaul_workflows_module       = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
+    calibration_workflows_module    = [mid for mid in [modules_by_name.get("Calibration Workflows")] if mid]
+    annual_audit_workflows_module   = [mid for mid in [modules_by_name.get("Annual Audit Workflows")] if mid]
     schedule_compliance_module          = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
     test_schedule_templates_module      = [mid for mid in [modules_by_name.get("Test Schedule Templates")] if mid]
     maintenance_schedule_templates_module = [mid for mid in [modules_by_name.get("Maintenance Schedule Templates")] if mid]
@@ -3144,8 +3167,11 @@ def seed_role_templates(session):
                 _readonly(testing_requests_module) +
                 _approve(approvals_module) +
                 _readonly(recommendations_module) +
+                _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module) +
-                _readwrite(overhaul_workflows_module)   # OVERHAUL_TRIGGER, OVERHAUL_EXECUTION, COMPLETION_UPLOAD
+                _readwrite(overhaul_workflows_module) +      # OVERHAUL_TRIGGER, OVERHAUL_EXECUTION, COMPLETION_UPLOAD
+                _readwrite(calibration_workflows_module) +   # CAL_REVIEW, CAL_EXECUTION, CAL_CERTIFICATE
+                _readwrite(annual_audit_workflows_module)    # OBSERVATION_REPORTING, OBSERVATION_ASSIGNMENT
             ),
         },
 
@@ -3161,8 +3187,11 @@ def seed_role_templates(session):
                 _readonly(testing_requests_module) +
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
+                _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module) +
-                _readwrite(overhaul_workflows_module)   # OVERHAUL_EXECUTION, COMPLETION_UPLOAD
+                _readwrite(overhaul_workflows_module) +      # OVERHAUL_EXECUTION, COMPLETION_UPLOAD
+                _readwrite(calibration_workflows_module) +   # CAL_EXECUTION, CAL_CERTIFICATE
+                _readonly(annual_audit_workflows_module)     # view-only; TA&QC Inspector is the actor
             ),
         },
 
@@ -3181,6 +3210,7 @@ def seed_role_templates(session):
                 _readonly(testing_requests_module) +
                 _approve(approvals_module) +
                 _readonly(recommendations_module) +
+                _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module)
             ),
         },
@@ -3203,8 +3233,11 @@ def seed_role_templates(session):
                 _readwrite(testing_module) +
                 _readonly(equipment_module) +
                 _readonly(procurement_modules) +
+                _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
-                _approve(overhaul_workflows_module) +    # OVERHAUL_TRIGGER review + OFFICER_VERIFICATION
+                _approve(overhaul_workflows_module) +        # OVERHAUL_TRIGGER review + OFFICER_VERIFICATION
+                _approve(calibration_workflows_module) +     # CAL_REVIEW + CAL_VERIFY
+                _approve(annual_audit_workflows_module) +    # COMPLIANCE_REVIEW
                 _readonly(failure_registry_module)
             ),
         },
@@ -3227,8 +3260,11 @@ def seed_role_templates(session):
                 _approve(testing_request_approvals_module) +
                 _readonly(vendor_documents_module) +
                 _readonly(equipment_module) +
+                _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
-                _readonly(overhaul_workflows_module)     # management visibility
+                _readonly(overhaul_workflows_module) +       # management visibility
+                _readonly(calibration_workflows_module) +    # management visibility
+                _readonly(annual_audit_workflows_module)     # management visibility
             ),
         },
 
@@ -3250,8 +3286,11 @@ def seed_role_templates(session):
                 _readonly(procurement_modules) +
                 _readonly(vendor_documents_module) +
                 _readonly(recommendations_module) +
+                _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
-                _approve(overhaul_workflows_module)      # OFFICER_VERIFICATION final sign-off
+                _approve(overhaul_workflows_module) +        # OFFICER_VERIFICATION final sign-off
+                _approve(calibration_workflows_module) +     # CAL_VERIFY final sign-off
+                _approve(annual_audit_workflows_module)      # OBSERVATION_CLOSURE final sign-off
             ),
         },
 
@@ -3265,6 +3304,7 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": (
                 _readwrite(taqc_inspections_module) +
+                _readwrite(annual_audit_workflows_module) +  # OBSERVATION_REPORTING → COMPLIANCE_SUBMISSION
                 _readonly(failure_registry_module) +
                 _readonly(dashboard_module)
             ),
@@ -3281,8 +3321,11 @@ def seed_role_templates(session):
             "default_module_id": ee_tlss_dashboard_module_id,
             "permissions_template": (
                 _readwrite(dashboard_module) +
+                _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module) +
-                _readwrite(overhaul_workflows_module) +  # assignment_role for all 4 overhaul stages
+                _readwrite(overhaul_workflows_module) +      # assignment_role for all 4 overhaul stages
+                _readwrite(calibration_workflows_module) +   # assignment_role for all 4 calibration stages
+                _readwrite(annual_audit_workflows_module) +  # assignment_role for all 5 annual audit stages
                 _readonly(testing_requests_module)
             ),
         },
@@ -3348,7 +3391,8 @@ def seed_role_templates(session):
                 _readonly(recommendations_module) +
                 _readonly(failure_registry_module) +
                 _readonly(procurement_modules) +
-                _readonly(overhaul_workflows_module)     # audit trail visibility
+                _readonly(overhaul_workflows_module) +       # audit trail visibility
+                _readonly(calibration_workflows_module)      # audit trail visibility
             ),
         },
 
@@ -3382,6 +3426,7 @@ def seed_role_templates(session):
             existing.auto_provision = template_data["auto_provision"]
             existing.default_module_id = template_data.get("default_module_id")
             existing.permissions_template = template_data["permissions_template"]
+            flag_modified(existing, "permissions_template")  # JSONB needs explicit dirty flag
             existing.mts = datetime.now(datetime.now().astimezone().tzinfo)
             updated_count += 1
         else:
@@ -4698,9 +4743,20 @@ def seed_kptcl_organization(session):
     # Create sample tester roles with EXACT module permissions
     print(f"[INFO] Creating sample tester roles for KPTCL")
 
-    # Required modules for testers: [45, 46, 49]
-    # Removed 51 (Tester Mapping) - no longer used
-    TESTER_REQUIRED_MODULES = [45, 46, 49]
+    # Build tester module IDs dynamically to avoid hardcoded IDs that become
+    # stale after DB drops (PostgreSQL sequences advance even on rollback).
+    _tester_module_names = [
+        "Testing Requests",
+        "Testing",
+        "Testing Request Approvals",
+    ]
+    TESTER_REQUIRED_MODULES = []
+    for _mod_name in _tester_module_names:
+        _mod = session.query(Module).filter_by(name=_mod_name, is_active=True).first()
+        if _mod:
+            TESTER_REQUIRED_MODULES.append(_mod.id)
+        else:
+            print(f"[WARN] Module '{_mod_name}' not found — excluded from KPTCL tester role permissions")
 
     tester_roles_config = [
         {
@@ -5696,16 +5752,18 @@ def seed_missing_role_permissions(session, org=None):
         return session.query(Module).filter_by(name=name, is_active=True).first()
 
     mods = {
-        "Procurement Approvals": _get_mod("Procurement Approvals"),
-        "TA&QC Inspections":     _get_mod("TA&QC Inspections"),
-        "Failure Registry":      _get_mod("Failure Registry"),
-        "Dashboard":             _get_mod("Dashboard"),
-        "Testing Requests":      _get_mod("Testing Requests"),
-        "Testing":               _get_mod("Testing"),
-        "Equipment":             _get_mod("Equipment"),
-        "Recommendations":       _get_mod("Recommendations"),
-        "Approvals":             _get_mod("Approvals"),
+        "Procurement Approvals":    _get_mod("Procurement Approvals"),
+        "TA&QC Inspections":        _get_mod("TA&QC Inspections"),
+        "Failure Registry":         _get_mod("Failure Registry"),
+        "Dashboard":                _get_mod("Dashboard"),
+        "Testing Requests":         _get_mod("Testing Requests"),
+        "Testing":                  _get_mod("Testing"),
+        "Equipment":                _get_mod("Equipment"),
+        "Recommendations":          _get_mod("Recommendations"),
+        "Approvals":                _get_mod("Approvals"),
         "Breakdown Workflows":      _get_mod("Breakdown Workflows"),
+        "Calibration Workflows":    _get_mod("Calibration Workflows"),
+        "Annual Audit Workflows":   _get_mod("Annual Audit Workflows"),
     }
     missing_mods = [k for k, v in mods.items() if v is None]
     if missing_mods:
@@ -5718,9 +5776,10 @@ def seed_missing_role_permissions(session, org=None):
             ("Dashboard",             True, False, False, False, False, False),
         ],
         "TA&QC Inspector": [
-            ("TA&QC Inspections", True, True,  True,  False, False, True),
-            ("Failure Registry",  True, False, False, False, False, False),
-            ("Dashboard",         True, False, False, False, False, False),
+            ("TA&QC Inspections",       True, True,  True,  False, False, True),
+            ("Annual Audit Workflows",  True, True,  True,  False, False, True),
+            ("Failure Registry",        True, False, False, False, False, False),
+            ("Dashboard",               True, False, False, False, False, False),
         ],
         "Test Engineer": [
             ("Testing Requests", True, False, False, False, False, False),
@@ -5728,13 +5787,15 @@ def seed_missing_role_permissions(session, org=None):
             ("Equipment",        True, False, False, False, False, False),
         ],
         "Reviewing Officer": [
-            ("Recommendations",   True, False, False, True, True, True),
-            ("Approvals",         True, False, False, True, True, True),
-            ("Equipment",         True, False, False, False, False, False),
-            ("Breakdown Workflows",  True, False, False, True, True, True),
-            ("Testing Requests",  True, False, False, False, False, False),
-            ("Failure Registry",  True, False, False, False, False, False),
-            ("Dashboard",         True, False, False, False, False, False),
+            ("Recommendations",       True, False, False, True, True, True),
+            ("Approvals",             True, False, False, True, True, True),
+            ("Equipment",             True, False, False, False, False, False),
+            ("Breakdown Workflows",      True, False, False, True, True, True),
+            ("Calibration Workflows",    True, False, False, True, True, True),
+            ("Annual Audit Workflows",   True, False, False, True, True, True),
+            ("Testing Requests",         True, False, False, False, False, False),
+            ("Failure Registry",      True, False, False, False, False, False),
+            ("Dashboard",             True, False, False, False, False, False),
         ],
     }
 
@@ -7588,6 +7649,22 @@ def run_seed():
                 session.rollback()
                 print(f"[WARN] Overhaul role mapping failed: {_e}")
 
+        # Calibration Workflow — definition + stages for DATE_ADD fail trigger
+        try:
+            from seed_calibration_workflow import seed_calibration_stages
+            seed_calibration_stages(session)
+        except Exception as _e:
+            print(f"[WARN] Calibration workflow seed failed (non-fatal): {_e}")
+
+        # Calibration role mappings — must run AFTER seed_calibration_stages
+        if kptcl_org:
+            try:
+                from seed_calibration_workflow import seed_calibration_role_mappings
+                seed_calibration_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Calibration role mapping failed: {_e}")
+
         # TR / FR / TAQC Workflow Engine — states, transitions, permission matrix
         print("\n--- TR / FR / TAQC Workflow Engine Seeding ---")
         try:
@@ -7702,6 +7779,14 @@ def seed_sample_equipment(session, org):
         ("Power Transformer", "66", "01", "Crompton Greaves", "PT-66-C", "PT2024003", 2018),
         ("Relay", "220", "01", "L&T", "REL-220-A", "REL2024001", 2023),
         ("Meter", "110", "01", "Secure Meters", "MTR-110-A", "MTR2024001", 2021),
+        # Cumulative lifecycle
+        ("Circuit Breaker", "220", "01", "ABB", "CB-220-A", "CB2024001", 2021),
+        ("Circuit Breaker", "110", "02", "Siemens", "CB-110-B", "CB2024002", 2020),
+        # Calibration lifecycle
+        ("Protection Relay", "220", "01", "GE", "PR-220-A", "PR2024001", 2022),
+        ("Protection Relay", "110", "02", "SEL", "PR-110-B", "PR2024002", 2021),
+        ("Electronic Tri-vector Meter", "110", "01", "Secure Meters", "TVM-110-A", "TVM2024001", 2023),
+        ("Electronic Tri-vector Meter", "220", "02", "L&T", "TVM-220-B", "TVM2024002", 2022),
     ]
 
     created = 0

@@ -1485,6 +1485,11 @@ class RecommendationResponse(BaseModel):
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    # Enriched from related TR + equipment
+    request_number: Optional[str] = None
+    request_title: Optional[str] = None
+    equipment_ueic: Optional[str] = None
+    equipment_type_name: Optional[str] = None
 
     class Config:
         from_attributes = True
