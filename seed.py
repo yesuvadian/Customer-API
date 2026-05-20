@@ -1413,6 +1413,14 @@ def seed_modules(session):
                 "Stage-role RBAC driven; each stage locks to authorised roles only.",
  "path": "calibration-workflows",
  "group_name": "Field Operations"},
+# ✅ ANNUAL AUDIT WORKFLOW MODULE
+{"name": "Annual Audit Workflows",
+ "description": "Annual audit observation stage-execution — 5-stage workflow from Observation Reporting to Observation Closure. "
+                "Auto-created per TAQCObservation on TAQC COMMISSIONED. "
+                "Stage-role RBAC driven; TA&QC Inspector executes; Reviewing Officer reviews compliance; "
+                "Senior Management Approver closes.",
+ "path": "annual-audit-workflows",
+ "group_name": "Field Operations"},
 # ✅ TEST SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
 {"name": "Test Schedule Templates",
  "rename_from": "Schedule Templates",
@@ -3047,6 +3055,7 @@ def seed_role_templates(session):
     breakdown_workflows_module      = [mid for mid in [modules_by_name.get("Breakdown Workflows")] if mid]
     overhaul_workflows_module       = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
     calibration_workflows_module    = [mid for mid in [modules_by_name.get("Calibration Workflows")] if mid]
+    annual_audit_workflows_module   = [mid for mid in [modules_by_name.get("Annual Audit Workflows")] if mid]
     schedule_compliance_module          = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
     test_schedule_templates_module      = [mid for mid in [modules_by_name.get("Test Schedule Templates")] if mid]
     maintenance_schedule_templates_module = [mid for mid in [modules_by_name.get("Maintenance Schedule Templates")] if mid]
@@ -3163,7 +3172,8 @@ def seed_role_templates(session):
                 _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module) +
                 _readwrite(overhaul_workflows_module) +      # OVERHAUL_TRIGGER, OVERHAUL_EXECUTION, COMPLETION_UPLOAD
-                _readwrite(calibration_workflows_module)     # CAL_REVIEW, CAL_EXECUTION, CAL_CERTIFICATE
+                _readwrite(calibration_workflows_module) +   # CAL_REVIEW, CAL_EXECUTION, CAL_CERTIFICATE
+                _readwrite(annual_audit_workflows_module)    # OBSERVATION_REPORTING, OBSERVATION_ASSIGNMENT
             ),
         },
 
@@ -3182,7 +3192,8 @@ def seed_role_templates(session):
                 _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module) +
                 _readwrite(overhaul_workflows_module) +      # OVERHAUL_EXECUTION, COMPLETION_UPLOAD
-                _readwrite(calibration_workflows_module)     # CAL_EXECUTION, CAL_CERTIFICATE
+                _readwrite(calibration_workflows_module) +   # CAL_EXECUTION, CAL_CERTIFICATE
+                _readonly(annual_audit_workflows_module)     # view-only; TA&QC Inspector is the actor
             ),
         },
 
@@ -3228,6 +3239,7 @@ def seed_role_templates(session):
                 _approve(breakdown_workflows_module) +
                 _approve(overhaul_workflows_module) +        # OVERHAUL_TRIGGER review + OFFICER_VERIFICATION
                 _approve(calibration_workflows_module) +     # CAL_REVIEW + CAL_VERIFY
+                _approve(annual_audit_workflows_module) +    # COMPLIANCE_REVIEW
                 _readonly(failure_registry_module)
             ),
         },
@@ -3253,7 +3265,8 @@ def seed_role_templates(session):
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
                 _readonly(overhaul_workflows_module) +       # management visibility
-                _readonly(calibration_workflows_module)      # management visibility
+                _readonly(calibration_workflows_module) +    # management visibility
+                _readonly(annual_audit_workflows_module)     # management visibility
             ),
         },
 
@@ -3278,7 +3291,8 @@ def seed_role_templates(session):
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
                 _approve(overhaul_workflows_module) +        # OFFICER_VERIFICATION final sign-off
-                _approve(calibration_workflows_module)       # CAL_VERIFY final sign-off
+                _approve(calibration_workflows_module) +     # CAL_VERIFY final sign-off
+                _approve(annual_audit_workflows_module)      # OBSERVATION_CLOSURE final sign-off
             ),
         },
 
@@ -3292,6 +3306,7 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": (
                 _readwrite(taqc_inspections_module) +
+                _readwrite(annual_audit_workflows_module) +  # OBSERVATION_REPORTING → COMPLIANCE_SUBMISSION
                 _readonly(failure_registry_module) +
                 _readonly(dashboard_module)
             ),
@@ -3312,6 +3327,7 @@ def seed_role_templates(session):
                 _readwrite(breakdown_workflows_module) +
                 _readwrite(overhaul_workflows_module) +      # assignment_role for all 4 overhaul stages
                 _readwrite(calibration_workflows_module) +   # assignment_role for all 4 calibration stages
+                _readwrite(annual_audit_workflows_module) +  # assignment_role for all 5 annual audit stages
                 _readonly(testing_requests_module)
             ),
         },
@@ -5737,6 +5753,7 @@ def seed_missing_role_permissions(session, org=None):
         "Approvals":                _get_mod("Approvals"),
         "Breakdown Workflows":      _get_mod("Breakdown Workflows"),
         "Calibration Workflows":    _get_mod("Calibration Workflows"),
+        "Annual Audit Workflows":   _get_mod("Annual Audit Workflows"),
     }
     missing_mods = [k for k, v in mods.items() if v is None]
     if missing_mods:
@@ -5749,9 +5766,10 @@ def seed_missing_role_permissions(session, org=None):
             ("Dashboard",             True, False, False, False, False, False),
         ],
         "TA&QC Inspector": [
-            ("TA&QC Inspections", True, True,  True,  False, False, True),
-            ("Failure Registry",  True, False, False, False, False, False),
-            ("Dashboard",         True, False, False, False, False, False),
+            ("TA&QC Inspections",       True, True,  True,  False, False, True),
+            ("Annual Audit Workflows",  True, True,  True,  False, False, True),
+            ("Failure Registry",        True, False, False, False, False, False),
+            ("Dashboard",               True, False, False, False, False, False),
         ],
         "Test Engineer": [
             ("Testing Requests", True, False, False, False, False, False),
@@ -5762,9 +5780,10 @@ def seed_missing_role_permissions(session, org=None):
             ("Recommendations",       True, False, False, True, True, True),
             ("Approvals",             True, False, False, True, True, True),
             ("Equipment",             True, False, False, False, False, False),
-            ("Breakdown Workflows",   True, False, False, True, True, True),
-            ("Calibration Workflows", True, False, False, True, True, True),
-            ("Testing Requests",      True, False, False, False, False, False),
+            ("Breakdown Workflows",      True, False, False, True, True, True),
+            ("Calibration Workflows",    True, False, False, True, True, True),
+            ("Annual Audit Workflows",   True, False, False, True, True, True),
+            ("Testing Requests",         True, False, False, False, False, False),
             ("Failure Registry",      True, False, False, False, False, False),
             ("Dashboard",             True, False, False, False, False, False),
         ],

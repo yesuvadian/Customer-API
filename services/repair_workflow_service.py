@@ -41,6 +41,7 @@ from models import (
     RepairWorkflow,
     RepairWorkflowDefinition,
     OrgTestTemplate,
+    TAQCObservation,
     User,
 )
 
@@ -1260,11 +1261,39 @@ class RepairWorkflowService:
             RepairStageDefinition.id == workflow.current_stage_id
         ).first()
 
-        tmpl_link = (
-            self.db.query(RepairStageTemplate)
-            .filter(RepairStageTemplate.stage_id == workflow.current_stage_id)
-            .first()
-        )
+        # For ANNUAL_AUDIT workflows resolve category-specific template first,
+        # then fall back to the generic (category_detail_id IS NULL) template.
+        category_detail_id = None
+        if workflow.workflow_code == "ANNUAL_AUDIT":
+            obs = (
+                self.db.query(TAQCObservation)
+                .filter(TAQCObservation.workflow_id == workflow_id)
+                .first()
+            )
+            if obs:
+                category_detail_id = obs.category_detail_id
+
+        tmpl_link = None
+        if category_detail_id is not None:
+            tmpl_link = (
+                self.db.query(RepairStageTemplate)
+                .filter(
+                    RepairStageTemplate.stage_id == workflow.current_stage_id,
+                    RepairStageTemplate.category_detail_id == category_detail_id,
+                )
+                .first()
+            )
+        if tmpl_link is None:
+            # Generic fallback (also used by all non-ANNUAL_AUDIT workflows)
+            tmpl_link = (
+                self.db.query(RepairStageTemplate)
+                .filter(
+                    RepairStageTemplate.stage_id == workflow.current_stage_id,
+                    RepairStageTemplate.category_detail_id.is_(None),
+                )
+                .first()
+            )
+
         template_data = None
         if tmpl_link and tmpl_link.template_id:
             tmpl = self.db.query(OrgTestTemplate).filter(

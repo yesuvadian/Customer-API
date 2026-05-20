@@ -74,6 +74,13 @@ class WorkflowDispatchService:
                                                    category=RequestCategory.inspection)
                     result["mn_schedule"] = mn_num
                     result["in_schedule"] = in_num
+                # Auto-create TAQCAnnualInspection linked to this TQ
+                audit_id = self._create_annual_inspection(tr, approver_id)
+                if audit_id:
+                    result["annual_inspection_id"] = str(audit_id)
+                # Create taqc_inspection recurrence schedule using chosen frequency
+                taqc_sched = self._create_taqc_schedule(tr, rec, approver_id)
+                result["taqc_schedule"] = taqc_sched
                 result["status"] = "commissioned"
                 self.db.commit()
             else:
@@ -145,6 +152,85 @@ class WorkflowDispatchService:
     # ─────────────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────────────
+
+    def _create_annual_inspection(self, tr, approver_id: UUID):
+        """Auto-create a TAQCAnnualInspection record when a TQ inspection is commissioned."""
+        from models import TAQCAnnualInspection
+        from services.annual_audit_service import AnnualAuditService
+        try:
+            substation_id = tr.equipment_id
+            if not substation_id:
+                return None
+            svc = AnnualAuditService(self.db)
+            number = svc._next_number("TR-ANU-INSP")
+            inspection = TAQCAnnualInspection(
+                inspection_number=number,
+                organization_id=tr.organization_id,
+                substation_id=substation_id,
+                inspection_date=datetime.now(timezone.utc).date(),
+                inspected_by=tr.originator_id or approver_id,
+                remarks=f"Auto-created from {tr.request_number}",
+                created_by=approver_id,
+            )
+            self.db.add(inspection)
+            self.db.flush()
+            print(f"[Dispatch] Created TAQCAnnualInspection {number} for TQ {tr.request_number}")
+            return inspection.id
+        except Exception as e:
+            print(f"[Dispatch] WARN: could not create TAQCAnnualInspection for {tr.request_number}: {e}")
+            return None
+
+    def _create_taqc_schedule(self, tr, rec, approver_id: UUID) -> str:
+        """Create a taqc_inspection recurrence schedule so the next TQ is auto-generated."""
+        from services.test_request_schedule_service import _advance_date
+        try:
+            if not tr.equipment_id or not tr.test_type_id:
+                return ""
+            equipment_type_id = tr.equipment_type_id
+            if not equipment_type_id:
+                from models import Equipment as _Eq
+                eq = self.db.query(_Eq).filter(_Eq.id == tr.equipment_id).first()
+                equipment_type_id = eq.equipment_type_id if eq else None
+            if not equipment_type_id:
+                return ""
+            from models import TestRequestSchedule
+            existing = self.db.query(TestRequestSchedule).filter(
+                TestRequestSchedule.equipment_id == tr.equipment_id,
+                TestRequestSchedule.test_type_id == tr.test_type_id,
+                TestRequestSchedule.request_category == RequestCategory.taqc_inspection,
+                TestRequestSchedule.is_deleted == False,
+            ).first()
+            freq = rec.schedule_frequency or ScheduleFrequency.yearly
+            now = datetime.now(timezone.utc)
+            if existing:
+                # Update next_run_date and frequency on renewal
+                existing.frequency = freq
+                existing.next_run_date = _advance_date(now, freq)
+                existing.is_active = True
+                self.db.flush()
+                print(f"[Dispatch] Updated taqc_inspection schedule id={existing.id}")
+                return str(existing.id)
+            schedule = TestRequestSchedule(
+                equipment_id=tr.equipment_id,
+                equipment_type_id=equipment_type_id,
+                test_type_id=tr.test_type_id,
+                organization_id=tr.organization_id,
+                title=tr.title,
+                request_category=RequestCategory.taqc_inspection,
+                frequency=freq,
+                start_date=now,
+                next_run_date=_advance_date(now, freq),
+                advance_days=15,
+                is_active=True,
+                created_by=approver_id,
+            )
+            self.db.add(schedule)
+            self.db.flush()
+            print(f"[Dispatch] Created taqc_inspection schedule id={schedule.id} freq={freq.value}")
+            return str(schedule.id)
+        except Exception as e:
+            print(f"[Dispatch] WARN: could not create taqc_inspection schedule for {tr.request_number}: {e}")
+            return ""
 
     def _commission_equipment(
         self,
@@ -271,6 +357,13 @@ class WorkflowDispatchService:
         freq = rec.schedule_frequency or ScheduleFrequency.yearly
         effective_start = tr.scheduled_start_date or now
 
+        # If the original TR start date is in the past, anchor next_run_date to
+        # now so the first ticket is always one full period in the future.
+        # (A past start_date would cause _advance_date to return a date already
+        # within — or past — the 15-day window, triggering an unwanted immediate
+        # ticket at approval time.)
+        schedule_base = effective_start if effective_start > now else now
+
         # Guard: equipment_id is required for operational schedules.
         # Tickets are only meaningful for a specific registered equipment asset.
         # Type-only TRs (equipment_id=None) cannot produce a recurring schedule.
@@ -335,7 +428,7 @@ class WorkflowDispatchService:
             request_category=category,
             frequency=freq,
             start_date=effective_start,
-            next_run_date=_advance_date(effective_start, freq),
+            next_run_date=_advance_date(schedule_base, freq),
             advance_days=_adv,
             is_active=True,
             created_by=approver_id,
