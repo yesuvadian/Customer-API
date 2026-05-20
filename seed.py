@@ -1415,10 +1415,7 @@ def seed_modules(session):
  "group_name": "Field Operations"},
 # ✅ ANNUAL AUDIT WORKFLOW MODULE
 {"name": "Annual Audit Workflows",
- "description": "Annual audit observation stage-execution — 5-stage workflow from Observation Reporting to Observation Closure. "
-                "Auto-created per TAQCObservation on TAQC COMMISSIONED. "
-                "Stage-role RBAC driven; TA&QC Inspector executes; Reviewing Officer reviews compliance; "
-                "Senior Management Approver closes.",
+ "description": "Annual audit 5-stage workflow: Observation Reporting to Closure. TA&QC Inspector executes; Reviewing Officer reviews compliance.",
  "path": "annual-audit-workflows",
  "group_name": "Field Operations"},
 # ✅ TEST SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
