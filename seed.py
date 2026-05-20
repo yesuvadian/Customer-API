@@ -5,6 +5,7 @@ import pandas as pd
 from typing import Dict, Optional
 from requests import session
 from sqlalchemy import text
+from sqlalchemy.orm.attributes import flag_modified
 from database import VendorSessionLocal, Base, vendor_engine
 from models import (
     CategoryDetails, CategoryMaster, Country, Division, OrgTestTemplate, Plan, Product,
@@ -3425,6 +3426,7 @@ def seed_role_templates(session):
             existing.auto_provision = template_data["auto_provision"]
             existing.default_module_id = template_data.get("default_module_id")
             existing.permissions_template = template_data["permissions_template"]
+            flag_modified(existing, "permissions_template")  # JSONB needs explicit dirty flag
             existing.mts = datetime.now(datetime.now().astimezone().tzinfo)
             updated_count += 1
         else:
@@ -4741,9 +4743,20 @@ def seed_kptcl_organization(session):
     # Create sample tester roles with EXACT module permissions
     print(f"[INFO] Creating sample tester roles for KPTCL")
 
-    # Required modules for testers: [45, 46, 49]
-    # Removed 51 (Tester Mapping) - no longer used
-    TESTER_REQUIRED_MODULES = [45, 46, 49]
+    # Build tester module IDs dynamically to avoid hardcoded IDs that become
+    # stale after DB drops (PostgreSQL sequences advance even on rollback).
+    _tester_module_names = [
+        "Testing Requests",
+        "Testing",
+        "Testing Request Approvals",
+    ]
+    TESTER_REQUIRED_MODULES = []
+    for _mod_name in _tester_module_names:
+        _mod = session.query(Module).filter_by(name=_mod_name, is_active=True).first()
+        if _mod:
+            TESTER_REQUIRED_MODULES.append(_mod.id)
+        else:
+            print(f"[WARN] Module '{_mod_name}' not found — excluded from KPTCL tester role permissions")
 
     tester_roles_config = [
         {
