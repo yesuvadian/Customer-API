@@ -1862,7 +1862,7 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Test Engineer",              "module": "Failure Registry", "can_view": True, "can_add": True},
 
         # ✅ TA&QC INSPECTIONS — Stage 10 (SRS Sec 6)
-        # Restricted to TA&QC Officers and supervisory roles.
+        {"role": "Asset Data Officer",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "Reviewing Officer",                   "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "Supervisory Officer",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "Senior Management Approver",             "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_approve": True},
@@ -3149,7 +3149,8 @@ def seed_role_templates(session):
                 _readwrite(procurement_modules) +
                 _readwrite(testing_requests_module) +
                 _readwrite(equipment_module) +
-                _readwrite(breakdown_workflows_module)
+                _readwrite(breakdown_workflows_module) +
+                _readwrite(taqc_inspections_module)      # can create TA&QC inspection requests
             ),
         },
 
