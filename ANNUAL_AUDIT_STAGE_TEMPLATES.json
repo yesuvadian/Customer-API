@@ -1,4 +1,53 @@
 {
+  "audit_obs_reporting_generic": {
+    "name": "Observation Reporting",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Observation Details",
+        "fields": [
+          {"key": "observation_location", "label": "Location / Area", "type": "text", "required": true},
+          {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": true},
+          {"key": "severity", "label": "Severity", "type": "dropdown", "required": true, "options": ["Major", "Minor", "Advisory"]},
+          {"key": "root_cause", "label": "Root Cause", "type": "textarea", "required": false},
+          {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": true},
+          {"key": "supporting_photos", "label": "Supporting Photos", "type": "file", "required": false}
+        ]
+      },
+      {
+        "title": "Assessment",
+        "fields": [
+          {"key": "overall_result", "label": "Assessment Result", "type": "dropdown", "required": true, "options": ["Non-Compliant", "Conditional", "Compliant"]},
+          {"key": "inspector_remarks", "label": "Inspector Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_compliance_submission_generic": {
+    "name": "Compliance Submission",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "resolution_status", "label": "Resolution Status", "type": "dropdown", "required": true,
+            "options": ["Fully Resolved", "Partially Resolved", "Pending — Extension Required"]},
+          {"key": "action_description", "label": "Action Description", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "compliance_evidence", "label": "Compliance Evidence (Photos / Documents)", "type": "file", "required": false},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
   "audit_obs_reporting_electrical_safety": {
     "name": "Observation Reporting — Electrical Safety",
     "template_type": "audit_stage",

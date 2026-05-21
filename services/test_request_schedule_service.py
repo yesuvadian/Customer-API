@@ -339,17 +339,19 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             if not schedule.is_active:
                 return False
 
+            # Site-level schedules (e.g. taqc_inspection) have no equipment_id.
+            # Equipment-bound schedules require a valid Equipment record.
             from models import Equipment
-            equipment = (
-                db.query(Equipment)
-                .filter(Equipment.id == schedule.equipment_id)
-                .first()
-            )
-
-            if not equipment:
-                raise Exception(
-                    "Equipment not found."
+            if schedule.equipment_id:
+                equipment = (
+                    db.query(Equipment)
+                    .filter(Equipment.id == schedule.equipment_id)
+                    .first()
                 )
+                if not equipment:
+                    raise Exception("Equipment not found.")
+            else:
+                equipment = None
 
             trigger_date = (
                 schedule.next_run_date
@@ -357,7 +359,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     days=schedule.advance_days
                 )
             )
-            if not force_run:        
+            if not force_run:
              if now.date() < trigger_date.date():
                 return False
 
@@ -404,18 +406,18 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     schedule.assigned_tester_id
                 ),
 
-                "equipment_id": equipment.id,
+                "equipment_id": equipment.id if equipment else None,
 
                 "equipment_type_id": (
-                    equipment.equipment_type_id
+                    equipment.equipment_type_id if equipment else None
                 ),
 
                 "manufacturer": (
-                    equipment.manufacturer
+                    equipment.manufacturer if equipment else None
                 ),
 
                 "serial_number": (
-                    equipment.factory_serial_number
+                    equipment.factory_serial_number if equipment else None
                 ),
 
                 "transformer_type": (
@@ -427,11 +429,11 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 ),
 
                 "organization_id": (
-                    equipment.organization_id
+                    equipment.organization_id if equipment else schedule.organization_id
                 ),
 
                 "department_id": (
-                    equipment.department_id
+                    equipment.department_id if equipment else schedule.department_id
                 ),
 
                 "zone": schedule.zone,

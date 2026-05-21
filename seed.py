@@ -1862,7 +1862,7 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Test Engineer",              "module": "Failure Registry", "can_view": True, "can_add": True},
 
         # ✅ TA&QC INSPECTIONS — Stage 10 (SRS Sec 6)
-        # Restricted to TA&QC Officers and supervisory roles.
+        {"role": "Asset Data Officer",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "Reviewing Officer",                   "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "Supervisory Officer",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "Senior Management Approver",             "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_approve": True},
@@ -3149,7 +3149,8 @@ def seed_role_templates(session):
                 _readwrite(procurement_modules) +
                 _readwrite(testing_requests_module) +
                 _readwrite(equipment_module) +
-                _readwrite(breakdown_workflows_module)
+                _readwrite(breakdown_workflows_module) +
+                _readwrite(taqc_inspections_module)      # can create TA&QC inspection requests
             ),
         },
 
@@ -4193,6 +4194,15 @@ def seed_kptcl_organization(session):
         # Create missing test users for new SRS roles
         kptcl_users = [
             {
+                "email": "taqc.inspector@utility.com",
+                "password": "admin123",
+                "firstname": "TAQC",
+                "lastname": "Inspector",
+                "phone": "+91-9900000015",
+                "role_name": "TA&QC Inspector",
+                "employee_id": "KPTCL-TAQC-001",
+            },
+            {
                 "email": "aee.maintenance@utility.com",
                 "password": "admin123",
                 "firstname": "AEE",
@@ -4331,6 +4341,16 @@ def seed_kptcl_organization(session):
             },
         ]
 
+        # Pick a default substation department for site-level users (TAQC originator).
+        # Use the first leaf-level (deepest) department in the KPTCL hierarchy.
+        _default_dept = (
+            session.query(OrgDepartment)
+            .filter(OrgDepartment.organization_id == org.id, OrgDepartment.is_active == True)
+            .order_by(OrgDepartment.cts.asc())
+            .first()
+        )
+        _default_dept_id = _default_dept.id if _default_dept else None
+
         created_users = 0
         for user_data in kptcl_users:
             existing_user = session.query(User).filter_by(email=user_data["email"]).first()
@@ -4338,6 +4358,9 @@ def seed_kptcl_organization(session):
                 user = existing_user
                 if user.organization_id != org.id:
                     user.organization_id = org.id
+                # Assign default department if not already set
+                if not user.department_id and _default_dept_id:
+                    user.department_id = _default_dept_id
             else:
                 user = User(
                     id=uuid.uuid4(),
@@ -4348,6 +4371,7 @@ def seed_kptcl_organization(session):
                     phone_number=user_data["phone"],
                     employee_id=user_data.get("employee_id"),
                     organization_id=org.id,
+                    department_id=_default_dept_id,
                     isactive=True,
                     email_confirmed=True,
                     phone_confirmed=True,
@@ -4686,12 +4710,23 @@ def seed_kptcl_organization(session):
         },
     ]
 
+    # Pick a default substation department for all KPTCL users
+    _default_dept = (
+        session.query(OrgDepartment)
+        .filter(OrgDepartment.organization_id == org.id, OrgDepartment.is_active == True)
+        .order_by(OrgDepartment.cts.asc())
+        .first()
+    )
+    _default_dept_id = _default_dept.id if _default_dept else None
+
     for user_data in kptcl_users:
         existing_user = session.query(User).filter_by(email=user_data["email"]).first()
         if existing_user:
             user = existing_user
             if user.organization_id != org.id:
                 user.organization_id = org.id
+            if not user.department_id and _default_dept_id:
+                user.department_id = _default_dept_id
         else:
             user = User(
                 id=uuid.uuid4(),
@@ -4702,6 +4737,7 @@ def seed_kptcl_organization(session):
                 phone_number=user_data["phone"],
                 employee_id=user_data.get("employee_id"),
                 organization_id=org.id,
+                department_id=_default_dept_id,
                 isactive=True,
                 email_confirmed=True,
                 phone_confirmed=True,
@@ -6062,6 +6098,44 @@ def seed_direct_submission_templates(session) -> int:
             count += 1
     session.commit()
     return count
+
+
+def seed_taqc_inspection_test_type(session) -> int:
+    """
+    Idempotently seed a CategoryMaster "Inspection Types" and a
+    CategoryDetails "Annual TA&QC Inspection" row.
+    Returns the CategoryDetails.id (used as test_type_id in TAQC schedules).
+    """
+    master = session.query(CategoryMaster).filter_by(name="Inspection Types").first()
+    if not master:
+        master = CategoryMaster(
+            name="Inspection Types",
+            description="Types of periodic site and equipment inspections.",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+        print("[OK] CategoryMaster 'Inspection Types' created")
+
+    detail = session.query(CategoryDetails).filter_by(
+        name="Annual TA&QC Inspection",
+        category_master_id=master.id,
+    ).first()
+    if not detail:
+        detail = CategoryDetails(
+            name="Annual TA&QC Inspection",
+            description="Annual TA&QC substation inspection (site-level, periodic).",
+            category_master_id=master.id,
+            is_active=True,
+        )
+        session.add(detail)
+        session.flush()
+        print(f"[OK] CategoryDetails 'Annual TA&QC Inspection' created id={detail.id}")
+    else:
+        print(f"[OK] CategoryDetails 'Annual TA&QC Inspection' already exists id={detail.id}")
+
+    session.commit()
+    return detail.id
 
 
 def seed_annual_audit_templates(session) -> int:
@@ -7476,6 +7550,7 @@ def run_seed():
         print(f"[OK] Overall assessment template: {'inserted' if inserted else 'updated'}.")
         n2 = seed_direct_submission_templates(session)
         print(f"[OK] Direct-submission templates: {n2} seeded.")
+        seed_taqc_inspection_test_type(session)
         n3 = seed_annual_audit_templates(session)
         print(f"[OK] Annual Audit templates: {n3} seeded.")
         from seed_annual_audit import seed_annual_audit_stages

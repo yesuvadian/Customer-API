@@ -1,5 +1,7 @@
 {
   "generic": {
+    "Observation Reporting":  "audit_obs_reporting_generic",
+    "Compliance Submission":  "audit_compliance_submission_generic",
     "Observation Assignment": "audit_stage_observation_assignment",
     "Compliance Review":      "audit_stage_compliance_review",
     "Observation Closure":    "audit_stage_observation_closure"
