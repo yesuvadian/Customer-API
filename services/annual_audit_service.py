@@ -86,17 +86,23 @@ class AnnualAuditService:
                 "Run seed_annual_audit_stages(db) first."
             )
 
+        # Re-run stage template seeding (idempotent) so that new templates added
+        # to ANNUAL_AUDIT_STAGE_TEMPLATES.json / ANNUAL_AUDIT_STAGE_TEMPLATE_MAP.json
+        # are picked up without a full seed restart.
+        from seed_annual_audit import seed_annual_audit_stages
+        seed_annual_audit_stages(self.db)
+
         if organization_id:
             from seed_annual_audit import seed_annual_audit_role_mappings
             seed_annual_audit_role_mappings(self.db, organization_id)
 
     def create_inspection(self, data: dict, user: User) -> dict:
         self.ensure_configuration(user.organization_id)
-        substation = self._get_substation(UUID(str(data["substation_id"])), user)
+        dept_id = data.get("department_id") or getattr(user, "department_id", None)
         inspection = TAQCAnnualInspection(
             inspection_number=self._next_number("TR-ANU-INSP"),
-            organization_id=user.organization_id or substation.organization_id,
-            substation_id=substation.id,
+            organization_id=user.organization_id,
+            department_id=dept_id,
             inspection_date=data["inspection_date"],
             inspected_by=data.get("inspected_by") or user.id,
             remarks=data.get("remarks"),
@@ -434,7 +440,12 @@ class AnnualAuditService:
             raise ValueError(
                 "Annual Audit workflow definition not found. Run seed.py first."
             )
-        stages = self.workflow._get_stages_for_definition(wf_def.id)
+        stages = (
+            self.db.query(RepairStageDefinition)
+            .filter(RepairStageDefinition.workflow_definition_id == wf_def.id)
+            .order_by(RepairStageDefinition.sequence)
+            .all()
+        )
         if not stages:
             raise ValueError("Annual Audit workflow stages are not configured. Run seed.py first.")
 
@@ -444,7 +455,8 @@ class AnnualAuditService:
             workflow_code=ANNUAL_AUDIT_WORKFLOW_CODE,
             entity_type=ANNUAL_AUDIT_ENTITY_TYPE,
             entity_id=observation.id,
-            equipment_id=inspection.substation_id,
+            equipment_id=None,
+            organization_id=inspection.organization_id,
             current_stage_id=first_stage.id,
             status="active",
             assignment_pending=False,
@@ -461,10 +473,10 @@ class AnnualAuditService:
             inst = RepairStageInstance(
                 workflow_id=workflow.id,
                 stage_id=stage.id,
-                status="assigned" if is_first else "not_started",
-                assigned_user_id=user.id if is_first else None,
-                assignment_pending=False,
-                started_at=self._utc_now() if is_first else None,
+                status="not_started",
+                assigned_user_id=None,
+                assignment_pending=is_first,
+                started_at=None,
                 created_by=user.id,
             )
             self.db.add(inst)
@@ -473,15 +485,7 @@ class AnnualAuditService:
                 first_instance = inst
 
         workflow.current_stage_instance_id = first_instance.id if first_instance else None
-        self.db.add(
-            RepairAssignmentQueue(
-                workflow_id=workflow.id,
-                stage_id=first_stage.id,
-                status="assigned",
-                assigned_to_user_id=user.id,
-                assigned_at=self._utc_now(),
-            )
-        )
+        workflow.assignment_pending = True
         self.db.add(
             RepairStageAuditLog(
                 workflow_id=workflow.id,
@@ -528,13 +532,12 @@ class AnnualAuditService:
             .first()
         )
 
-    def _get_substation(self, substation_id: UUID, user: User) -> Equipment:
-        substation = self.db.query(Equipment).filter(Equipment.id == substation_id).first()
-        if not substation:
-            raise ValueError("Substation/equipment not found.")
-        if user.organization_id and substation.organization_id != user.organization_id:
-            raise ValueError("Unauthorized substation access.")
-        return substation
+    def _get_department(self, department_id: UUID, user: User):
+        from models import OrgDepartment
+        dept = self.db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
+        if not dept:
+            raise ValueError("Department/substation not found.")
+        return dept
 
     def _get_inspection(self, inspection_id: UUID, user: User) -> TAQCAnnualInspection:
         inspection = self.db.query(TAQCAnnualInspection).filter(TAQCAnnualInspection.id == inspection_id).first()
@@ -557,8 +560,8 @@ class AnnualAuditService:
             "id": str(inspection.id),
             "inspection_number": inspection.inspection_number,
             "organization_id": str(inspection.organization_id),
-            "substation_id": str(inspection.substation_id),
-            "substation_ueic": inspection.substation.ueic if inspection.substation else None,
+            "department_id": str(inspection.department_id) if inspection.department_id else None,
+            "department_name": inspection.department.name if inspection.department else None,
             "inspection_date": inspection.inspection_date.isoformat() if inspection.inspection_date else None,
             "inspected_by": str(inspection.inspected_by) if inspection.inspected_by else None,
             "remarks": inspection.remarks,
@@ -586,8 +589,8 @@ class AnnualAuditService:
             ),
             "reviewer_id": str(observation.reviewer_id) if observation.reviewer_id else None,
             "is_overdue": observation.is_overdue,
-            "substation_id": str(observation.inspection.substation_id) if observation.inspection else None,
-            "substation_ueic": observation.inspection.substation.ueic if observation.inspection and observation.inspection.substation else None,
+            "department_id": str(observation.inspection.department_id) if observation.inspection and observation.inspection.department_id else None,
+            "department_name": observation.inspection.department.name if observation.inspection and observation.inspection.department else None,
             "created_at": observation.cts.isoformat() if observation.cts else None,
         }
 

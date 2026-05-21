@@ -283,7 +283,7 @@ class ApprovalService:
         if rec.approval_status != "pending":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only pending recommendations can be approved",
+                detail=f"This recommendation is already '{rec.approval_status}' and cannot be approved again. Please refresh the approvals list.",
             )
 
         rec.approval_status = "approved"

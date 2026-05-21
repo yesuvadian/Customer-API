@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -56,14 +56,20 @@ def get_workflow_dashboard(
 
     # ── 2. Per-definition stats ───────────────────────────────────────────────
     # Single aggregation query: (workflow_code, status) → count
+    # outerjoin Equipment so org-level workflows (no equipment_id) are included
     counts_raw = (
         db.query(
             RepairWorkflow.workflow_code,
             RepairWorkflow.status,
             func.count(RepairWorkflow.id).label("cnt"),
         )
-        .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
-        .filter(Equipment.organization_id == org_id)
+        .outerjoin(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+        .filter(
+            or_(
+                Equipment.organization_id == org_id,
+                RepairWorkflow.organization_id == org_id,
+            )
+        )
         .group_by(RepairWorkflow.workflow_code, RepairWorkflow.status)
         .all()
     )
@@ -78,9 +84,12 @@ def get_workflow_dashboard(
             RepairWorkflow.workflow_code,
             func.count(RepairWorkflow.id).label("cnt"),
         )
-        .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+        .outerjoin(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .filter(
-            Equipment.organization_id == org_id,
+            or_(
+                Equipment.organization_id == org_id,
+                RepairWorkflow.organization_id == org_id,
+            ),
             RepairWorkflow.status == "active",
             RepairWorkflow.assignment_pending.is_(True),
         )

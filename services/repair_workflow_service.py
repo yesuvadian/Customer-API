@@ -595,12 +595,38 @@ class RepairWorkflowService:
         if instance.assigned_user_id and str(instance.assigned_user_id) != str(user_id):
             self._check_stage_rbac(stage_id, user_id)
 
-        # Validate required fields at submit time (not at save/draft time)
-        tmpl_link = (
-            self.db.query(RepairStageTemplate)
-            .filter(RepairStageTemplate.stage_id == stage_id)
-            .first()
-        )
+        # Validate required fields at submit time (not at save/draft time).
+        # Use the same category-aware resolution as get_current_form so that
+        # ANNUAL_AUDIT workflows validate against the right template.
+        category_detail_id = None
+        if workflow.workflow_code == "ANNUAL_AUDIT":
+            obs = (
+                self.db.query(TAQCObservation)
+                .filter(TAQCObservation.workflow_id == workflow_id)
+                .first()
+            )
+            if obs:
+                category_detail_id = obs.category_detail_id
+
+        tmpl_link = None
+        if category_detail_id is not None:
+            tmpl_link = (
+                self.db.query(RepairStageTemplate)
+                .filter(
+                    RepairStageTemplate.stage_id == stage_id,
+                    RepairStageTemplate.category_detail_id == category_detail_id,
+                )
+                .first()
+            )
+        if tmpl_link is None:
+            tmpl_link = (
+                self.db.query(RepairStageTemplate)
+                .filter(
+                    RepairStageTemplate.stage_id == stage_id,
+                    RepairStageTemplate.category_detail_id.is_(None),
+                )
+                .first()
+            )
         if tmpl_link and tmpl_link.template_id:
             data_row = (
                 self.db.query(RepairStageData)
@@ -937,7 +963,12 @@ class RepairWorkflowService:
         limit: int = 20,
     ) -> list:
         q = self.db.query(RepairWorkflow)
-        q = q.filter(or_(RepairWorkflow.workflow_code.is_(None), RepairWorkflow.workflow_code != "ANNUAL_AUDIT"))
+        if status == "annual_audit":
+            # Annual Audit workflows are a separate type — show only them
+            q = q.filter(RepairWorkflow.workflow_code == "ANNUAL_AUDIT")
+            status = None  # don't apply status filter below
+        else:
+            q = q.filter(or_(RepairWorkflow.workflow_code.is_(None), RepairWorkflow.workflow_code != "ANNUAL_AUDIT"))
         if equipment_id:
             q = q.filter(RepairWorkflow.equipment_id == equipment_id)
         if status:
@@ -1080,27 +1111,20 @@ class RepairWorkflowService:
         if not workflow:
             raise ValueError("Workflow not found")
 
-        # Multi-tenant security
-        equipment = (
-            self.db.query(Equipment)
-            .filter(
-                Equipment.id == workflow.equipment_id
+        # Multi-tenant security — ANNUAL_AUDIT workflows have no equipment_id
+        if workflow.equipment_id:
+            equipment = (
+                self.db.query(Equipment)
+                .filter(Equipment.id == workflow.equipment_id)
+                .first()
             )
-            .first()
-        )
-
-        if not equipment:
-            raise ValueError(
-                "Equipment not found"
-            )
-
-        if (
-            str(equipment.organization_id)
-            != str(current_user.organization_id)
-        ):
-            raise ValueError(
-                "Unauthorized workflow access"
-            )
+            if not equipment:
+                raise ValueError("Equipment not found")
+            if str(equipment.organization_id) != str(current_user.organization_id):
+                raise ValueError("Unauthorized workflow access")
+        elif workflow.organization_id:
+            if str(workflow.organization_id) != str(current_user.organization_id):
+                raise ValueError("Unauthorized workflow access")
 
         # Validate stage
         stage_def = (
@@ -1211,9 +1235,9 @@ class RepairWorkflowService:
 
         stage_status = instance.status
 
-        # can_assign: coordinator (can_assign=True) when stage is pending
+        # can_assign: coordinator (can_assign=True) when stage awaits assignment
         if self._can_assign_stage(user_id, instance.stage_id):
-            if stage_status == "pending":
+            if stage_status in ("pending", "not_started"):
                 result["can_assign"] = True
 
         # can_submit: assigned actor with can_edit=True
@@ -1692,7 +1716,10 @@ class RepairWorkflowService:
         ))
 
     def _workflow_to_dict(self, workflow: RepairWorkflow) -> dict:
-        equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+        equipment = (
+            self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+            if workflow.equipment_id else None
+        )
         current_stage = None
         if workflow.current_stage_id:
             stage = self.db.query(RepairStageDefinition).filter(
@@ -1713,7 +1740,7 @@ class RepairWorkflowService:
             "workflow_code": workflow.workflow_code,
             "entity_type": workflow.entity_type,
             "entity_id": str(workflow.entity_id) if workflow.entity_id else None,
-            "equipment_id": str(workflow.equipment_id),
+            "equipment_id": str(workflow.equipment_id) if workflow.equipment_id else None,
             "equipment_ueic": equipment.ueic if equipment else None,
             "equipment_name": equipment.nameplate_data.get("name") if equipment and equipment.nameplate_data else None,
             "source_failure_id": str(workflow.source_failure_id) if workflow.source_failure_id else None,

@@ -1173,7 +1173,6 @@ class DashboardService:
             return mapping.get(freq, relativedelta(years=1))
 
         q = self.db.query(TestRequestSchedule).filter(
-            TestRequestSchedule.equipment_id.isnot(None),
             TestRequestSchedule.is_active.is_(True),
             TestRequestSchedule.is_deleted.is_(False),
         )
@@ -1203,6 +1202,22 @@ class DashboardService:
                     buckets[m][cat] = buckets[m].get(cat, 0) + 1
                 run_date = run_date + delta
                 itr += 1
+
+        # Also include already-scheduled TestingRequest records (status='scheduled')
+        # that have a scheduled_start_date in the target year.
+        from models import TestingRequest, TestingRequestStatus
+        sq = self.db.query(TestingRequest).filter(
+            TestingRequest.status == TestingRequestStatus.scheduled,
+            TestingRequest.scheduled_start_date.isnot(None),
+            TestingRequest.scheduled_start_date >= jan_1,
+            TestingRequest.scheduled_start_date <= dec_31,
+        )
+        if self.org_id:
+            sq = sq.filter(TestingRequest.organization_id == self.org_id)
+        for tr in sq.all():
+            cat = tr.request_category.value if tr.request_category else "test"
+            m = tr.scheduled_start_date.month
+            buckets[m][cat] = buckets[m].get(cat, 0) + 1
 
         month_labels = ["Jan","Feb","Mar","Apr","May","Jun",
                          "Jul","Aug","Sep","Oct","Nov","Dec"]

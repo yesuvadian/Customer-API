@@ -1,13 +1,9 @@
 import os
 import smtplib
-import logging
 import mimetypes
 from email.message import EmailMessage
 from typing import List, Dict, Optional
-#from config import EMAIL_CONFIG
 from dotenv import load_dotenv
-
-logger = logging.getLogger(__name__)
 
 from config import EMAIL_PASS, EMAIL_USER, FROM_EMAIL, SMTP_PORT, SMTP_SERVER
 
@@ -105,8 +101,7 @@ class EmailService:
         server = smtplib.SMTP(self.smtp_server, self.smtp_port)
         try:
             server.ehlo()
-            server.starttls()   # 🔑 REQUIRED for Office 365
-            server.set_debuglevel(1)
+            server.starttls()
             server.ehlo()
             server.login(self.username, self.password)
             server.send_message(msg)
@@ -172,7 +167,6 @@ class EmailService:
             mime_type = att.get("mime_type", "application/octet-stream")
 
             if not content:
-                logger.debug(f"[Email] Skipping empty attachment: {filename}")
                 continue
 
             maintype, subtype = mime_type.split("/", 1)
@@ -214,8 +208,7 @@ class EmailService:
                 # Treat as local filesystem path
                 with open(url, "rb") as fh:
                     return fh.read()
-        except Exception as exc:
-            logger.warning(f"[Email] Could not fetch attachment from {url!r}: {exc}")
+        except Exception:
             return None
 
     @staticmethod
