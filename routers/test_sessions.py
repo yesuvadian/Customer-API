@@ -32,6 +32,7 @@ router = APIRouter(
     prefix="/testing_requests/{request_id}/sessions",
     tags=["test_sessions"],
     dependencies=[Depends(get_current_user)],
+    redirect_slashes=False,
 )
 
 
@@ -39,7 +40,7 @@ router = APIRouter(
 # TEST SESSION ENDPOINTS
 # ═══════════════════════════════════════════════════════════
 
-@router.post("/", response_model=TestSessionResponse, status_code=201)
+@router.post("", response_model=TestSessionResponse, status_code=201)
 def create_session(
     request_id: UUID,
     data: TestSessionCreate,
@@ -80,7 +81,7 @@ def auto_generate_sessions(
     )
 
 
-@router.get("/", response_model=List[TestSessionResponse])
+@router.get("", response_model=List[TestSessionResponse])
 def list_sessions(
     request_id: UUID,
     skip: int = 0,
