@@ -3138,7 +3138,7 @@ def seed_role_templates(session):
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "default_module_id": aee_dashboard_module_id,
+           "default_module_id": modules_by_name.get("Asset Dashboard"),
             "permissions_template": (
                 _readonly(dashboard_module) +
                 _readonly(testing_requests_module) +
@@ -8345,7 +8345,7 @@ def _dft_get_or_create_dept(session, org_id, name, code,
 # Must match the Module.path values seeded in seed_modules().
 _DFT_ROLE_MODULE_PATH = {
     "System Administrator":             "admin_dashboard",
-    "Asset Data Officer":               "aee_dashboard",
+    "Asset Data Officer":               "asset_dashboard",
     "Maintenance Officer":              "aee_dashboard",
     "Test Engineer":                    "aee_dashboard",
     "Test & Work Coordinator":          "aee_dashboard",

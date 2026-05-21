@@ -553,7 +553,22 @@ def get_aee_dashboard(
             'alert': alert_count,
         }
     }
-
+@router.get("/asset")
+def get_asset_dashboard(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Asset Data Officer Dashboard — equipment registry and data quality view."""
+    svc = _svc(db, current_user, org_id, dept_id)
+    return {
+        "kpi_cards":          svc.all_kpi_cards(),
+        "overdue_tests":      svc.overdue_tests_breakdown(),
+        "failure_registry":   svc.failure_registry_list(),
+        "maintenance_overdue": svc.maintenance_overdue(),
+        "open_remediation":   svc.open_remediation_list(),
+    }
 
 @router.get("/ee-tlss")
 def get_ee_tlss_dashboard(
