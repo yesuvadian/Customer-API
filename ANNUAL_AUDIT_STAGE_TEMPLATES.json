@@ -24,6 +24,30 @@
     ]
   },
 
+  "audit_compliance_submission_generic": {
+    "name": "Compliance Submission",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "resolution_status", "label": "Resolution Status", "type": "dropdown", "required": true,
+            "options": ["Fully Resolved", "Partially Resolved", "Pending — Extension Required"]},
+          {"key": "action_description", "label": "Action Description", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "compliance_evidence", "label": "Compliance Evidence (Photos / Documents)", "type": "file", "required": false},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
   "audit_obs_reporting_electrical_safety": {
     "name": "Observation Reporting — Electrical Safety",
     "template_type": "audit_stage",
