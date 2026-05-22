@@ -1345,6 +1345,7 @@ def seed_modules(session):
 {"name": "Equipment", "description": "Equipment asset register with UEIC auto-generation", "path": "equipment", "group_name": "Testing"},
 # ✅ DASHBOARD KPI MODULES - Role-specific dashboards
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
+{"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
@@ -1636,7 +1637,7 @@ def seed_privileges(session, role_ids, module_ids):
             "can_delete": True, "can_search": True, "can_assign": True
         },
         # Removed: Validation Requests privilege (module not implemented)
-        {"role": "Asset Data Officer","module": "Dashboard", "can_view": True},
+       {"role": "Asset Data Officer","module": "Asset Dashboard", "can_view": True},
         # Originator — Procurement modules (full add/edit)
         {"role": "Asset Data Officer","module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
         {"role": "Asset Data Officer","module": "RQ with Vendor",      "can_view": True, "can_add": True, "can_edit": True},
@@ -3004,6 +3005,7 @@ def seed_role_templates(session):
 
     # Role-specific dashboard module IDs
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
+    asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
     aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
     see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
     cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
@@ -8373,13 +8375,14 @@ def _dft_get_or_create_role(session, org_id, name,
         if r.is_dept_admin != is_dept_admin:
             r.is_dept_admin = is_dept_admin
             updated = True
-        if not r.default_module_id:
-            module_path = _DFT_ROLE_MODULE_PATH.get(name)
-            if module_path:
-                mod = session.query(Module).filter_by(path=module_path).first()
-                if mod:
-                    r.default_module_id = mod.id
-                    updated = True
+    module_path = _DFT_ROLE_MODULE_PATH.get(name)
+
+    if module_path:
+        mod = session.query(Module).filter_by(path=module_path).first()
+
+        if mod and r.default_module_id != mod.id:
+            r.default_module_id = mod.id
+            updated = True
         if updated:
             session.flush()
         return r
