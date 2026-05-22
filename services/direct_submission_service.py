@@ -292,6 +292,7 @@ class DirectSubmissionService:
         skip: int = 0,
         limit: int = 50,
         own_only: bool = False,
+        department_id=None,
     ) -> list:
         """
         Return direct-submission records for a given category, dept-scoped
@@ -322,10 +323,13 @@ class DirectSubmissionService:
             .order_by(TestingRequest.cts.desc())
         )
 
-        # Apply department scope — org-admins see all; others see only their dept
-        is_org_admin, dept_id = self._get_user_scope(user)
-        if not is_org_admin and dept_id:
-            query = query.filter(TestingRequest.department_id == dept_id)
+        # Apply department scope — explicit filter takes priority over user scope
+        if department_id is not None:
+            query = query.filter(TestingRequest.department_id == department_id)
+        else:
+            is_org_admin, dept_id = self._get_user_scope(user)
+            if not is_org_admin and dept_id:
+                query = query.filter(TestingRequest.department_id == dept_id)
 
         if own_only:
             query = query.filter(TestingRequest.originator_id == user.id)
