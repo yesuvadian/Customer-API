@@ -142,6 +142,16 @@ class DirectSubmissionService:
         dept_id = data.get("department_id")    or getattr(submitter, "department_id",   None)
         _td     = data.get("test_data") or {}
 
+        # TAQC: parse target_compliance_date from test_data as due_date
+        _due_date = None
+        _raw_compliance = _td.get("target_compliance_date") or data.get("target_compliance_date")
+        if _raw_compliance:
+            try:
+                from datetime import datetime as _dt
+                _due_date = _dt.fromisoformat(str(_raw_compliance).replace("Z", "+00:00"))
+            except Exception:
+                pass
+
         # ── TestingRequest ────────────────────────────────────────────────────
         initial_status = (
             TestingRequestStatus.under_approval  # FR goes straight to Tech Approver queue
@@ -159,6 +169,7 @@ class DirectSubmissionService:
             department_id=dept_id,
             priority=data.get("priority", "normal"),
             notes=data.get("notes"),
+            due_date=_due_date,
             status=initial_status,
             is_direct_submission=True,
             originator_id=submitter.id,
@@ -184,7 +195,11 @@ class DirectSubmissionService:
             }
             rec_type    = _result_map.get((data.get("overall_result") or "advisory").lower(), RecommendationType.conditional)
             next_action = None
-            sched_freq  = None
+            # TAQC: capture inspection frequency — top-level preferred, test_data as fallback
+            _raw_freq = data.get("schedule_frequency") or _td.get("schedule_frequency") or "yearly"
+            # Normalize display labels to enum keys (e.g. "Semi-Annual (every 6 months)" → "semi_annual")
+            _norm_freq = _raw_freq.lower().replace("-", "_").replace(" ", "_").split("_every_")[0].split("_(")[0].strip("_")
+            sched_freq = _WIZARD_FREQ.get(_norm_freq) or _WIZARD_FREQ.get(_raw_freq.lower()) or ScheduleFrequency.yearly
             repl_prods  = []
             summary     = f"[Direct Submission] {category.value.replace('_',' ').title()} — {req.request_number}"
             detailed    = data.get("remarks")
@@ -277,6 +292,7 @@ class DirectSubmissionService:
         skip: int = 0,
         limit: int = 50,
         own_only: bool = False,
+        department_id=None,
     ) -> list:
         """
         Return direct-submission records for a given category, dept-scoped
@@ -307,10 +323,13 @@ class DirectSubmissionService:
             .order_by(TestingRequest.cts.desc())
         )
 
-        # Apply department scope — org-admins see all; others see only their dept
-        is_org_admin, dept_id = self._get_user_scope(user)
-        if not is_org_admin and dept_id:
-            query = query.filter(TestingRequest.department_id == dept_id)
+        # Apply department scope — explicit filter takes priority over user scope
+        if department_id is not None:
+            query = query.filter(TestingRequest.department_id == department_id)
+        else:
+            is_org_admin, dept_id = self._get_user_scope(user)
+            if not is_org_admin and dept_id:
+                query = query.filter(TestingRequest.department_id == dept_id)
 
         if own_only:
             query = query.filter(TestingRequest.originator_id == user.id)

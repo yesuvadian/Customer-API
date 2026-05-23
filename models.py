@@ -123,17 +123,31 @@ class RepairWorkflowDefinition(Base):
 
 
 class RepairStageTemplate(Base):
-    """1-to-1 mapping: one stage → one form template."""
+    """Stage → form template mapping.
+
+    Generic stages (OBSERVATION_ASSIGNMENT, COMPLIANCE_REVIEW, OBSERVATION_CLOSURE)
+    have category_detail_id = NULL.  Category-specific stages (OBSERVATION_REPORTING,
+    COMPLIANCE_SUBMISSION) have one row per CategoryDetail so the form rendered
+    matches the observation's category.
+    """
     __tablename__ = "repair_stage_templates"
 
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     stage_id = Column(
         UUID(as_uuid=True),
         ForeignKey("repair_stage_definitions.id", ondelete="CASCADE"),
-        primary_key=True,
+        nullable=False,
+        index=True,
     )
     template_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.org_test_templates.id", ondelete="CASCADE"),
+    )
+    # NULL → generic (shown for all categories); non-NULL → category-specific
+    category_detail_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
 
@@ -233,7 +247,7 @@ class RepairWorkflow(Base):
     equipment_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.equipment.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
 
@@ -257,6 +271,13 @@ class RepairWorkflow(Base):
         UUID(as_uuid=True),
         ForeignKey("public.testing_requests.id", ondelete="SET NULL"),
         nullable=True,
+    )
+
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     workflow_type = Column(String(50), default="BREAKDOWN", nullable=True)  # BREAKDOWN / OVERHAUL
@@ -772,7 +793,7 @@ class TAQCAnnualInspection(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     inspection_number = Column(String(50), unique=True, nullable=False, index=True)
     organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=False)
-    substation_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=False)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
     inspection_date = Column(Date, nullable=False)
     inspected_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     remarks = Column(Text, nullable=True)
@@ -781,7 +802,7 @@ class TAQCAnnualInspection(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     organization = relationship("Organization", foreign_keys=[organization_id])
-    substation = relationship("Equipment", foreign_keys=[substation_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
     inspector = relationship("User", foreign_keys=[inspected_by])
     observations = relationship(
         "TAQCObservation",
@@ -2442,7 +2463,7 @@ class TestRequestSchedule(Base):
             "public.CategoryMaster.id",
             ondelete="CASCADE",
         ),
-        nullable=False,
+        nullable=True,   # NULL for site-level schedules (e.g. taqc_inspection)
         index=True,
     )
 
@@ -2457,6 +2478,20 @@ class TestRequestSchedule(Base):
         ForeignKey(
             "public.equipment.id",
             ondelete="CASCADE",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    # ============================================================
+    # SITE-LEVEL TARGET (taqc_inspection schedules)
+    # ============================================================
+
+    department_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.org_departments.id",
+            ondelete="SET NULL",
         ),
         nullable=True,
         index=True,

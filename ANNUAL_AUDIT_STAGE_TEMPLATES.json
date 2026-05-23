@@ -1,28 +1,448 @@
 {
-  "audit_stage_observation_reporting": {
+  "audit_obs_reporting_generic": {
     "name": "Observation Reporting",
     "template_type": "audit_stage",
     "sections": [
       {
         "title": "Observation Details",
         "fields": [
+          {"key": "observation_location", "label": "Location / Area", "type": "text", "required": true},
           {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": true},
-          {
-            "key": "severity",
-            "label": "Severity",
-            "type": "dropdown",
-            "required": true,
-            "options": ["Major", "Minor", "Advisory"]
-          },
+          {"key": "severity", "label": "Severity", "type": "dropdown", "required": true, "options": ["Major", "Minor", "Advisory"]},
+          {"key": "root_cause", "label": "Root Cause", "type": "textarea", "required": false},
           {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": true},
-          {
-            "key": "overall_result",
-            "label": "Assessment Result",
-            "type": "dropdown",
-            "required": true,
-            "options": ["Non-Compliant", "Conditional"]
-          },
-          {"key": "supporting_photo", "label": "Supporting Photo", "type": "file", "required": false}
+          {"key": "supporting_photos", "label": "Supporting Photos", "type": "file", "required": false}
+        ]
+      },
+      {
+        "title": "Assessment",
+        "fields": [
+          {"key": "overall_result", "label": "Assessment Result", "type": "dropdown", "required": true, "options": ["Non-Compliant", "Conditional", "Compliant"]},
+          {"key": "inspector_remarks", "label": "Inspector Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_compliance_submission_generic": {
+    "name": "Compliance Submission",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "resolution_status", "label": "Resolution Status", "type": "dropdown", "required": true,
+            "options": ["Fully Resolved", "Partially Resolved", "Pending — Extension Required"]},
+          {"key": "action_description", "label": "Action Description", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "compliance_evidence", "label": "Compliance Evidence (Photos / Documents)", "type": "file", "required": false},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_obs_reporting_electrical_safety": {
+    "name": "Observation Reporting — Electrical Safety",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Observation Details",
+        "fields": [
+          {"key": "observation_location", "label": "Location / Panel / Area", "type": "text", "required": true},
+          {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": true},
+          {"key": "severity", "label": "Severity", "type": "dropdown", "required": true, "options": ["Major", "Minor", "Advisory"]},
+          {"key": "root_cause", "label": "Root Cause", "type": "textarea", "required": false},
+          {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": true},
+          {"key": "supporting_photos", "label": "Supporting Photos", "type": "file", "required": false}
+        ]
+      },
+      {
+        "title": "Electrical Safety Findings",
+        "fields": [
+          {"key": "es_earthing_condition", "label": "Earthing Condition", "type": "dropdown", "required": true, "options": ["Good", "Damaged", "Corroded", "Not Tested"]},
+          {"key": "es_earthing_resistance", "label": "Earthing Resistance (ohms)", "type": "number", "required": false},
+          {"key": "es_danger_board_available", "label": "Danger Board Available", "type": "boolean", "required": false},
+          {"key": "es_shock_hazard_observed", "label": "Shock Hazard Observed", "type": "boolean", "required": false},
+          {"key": "es_relay_calibration_status", "label": "Protection Relay Calibration Status", "type": "dropdown", "required": false, "options": ["Current", "Overdue", "Not Available"]},
+          {"key": "es_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Assessment",
+        "fields": [
+          {"key": "overall_result", "label": "Assessment Result", "type": "dropdown", "required": true, "options": ["Non-Compliant", "Conditional", "Compliant"]},
+          {"key": "inspector_remarks", "label": "Inspector Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_obs_reporting_civil": {
+    "name": "Observation Reporting — Civil",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Observation Details",
+        "fields": [
+          {"key": "observation_location", "label": "Location / Structure / Area", "type": "text", "required": true},
+          {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": true},
+          {"key": "severity", "label": "Severity", "type": "dropdown", "required": true, "options": ["Major", "Minor", "Advisory"]},
+          {"key": "root_cause", "label": "Root Cause", "type": "textarea", "required": false},
+          {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": true},
+          {"key": "supporting_photos", "label": "Supporting Photos", "type": "file", "required": false}
+        ]
+      },
+      {
+        "title": "Civil Findings",
+        "fields": [
+          {"key": "civil_foundation_condition", "label": "Foundation Condition", "type": "dropdown", "required": true, "options": ["Good", "Cracked", "Settled", "Damaged"]},
+          {"key": "civil_fencing_condition", "label": "Fencing / Compound Wall Condition", "type": "dropdown", "required": false, "options": ["Good", "Damaged", "Missing", "Partial"]},
+          {"key": "civil_yard_drainage", "label": "Yard Drainage Status", "type": "dropdown", "required": false, "options": ["Clear", "Blocked", "Water Logging"]},
+          {"key": "civil_roof_condition", "label": "Roof / Building Condition", "type": "dropdown", "required": false, "options": ["Good", "Leaking", "Damaged", "Not Applicable"]},
+          {"key": "civil_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Assessment",
+        "fields": [
+          {"key": "overall_result", "label": "Assessment Result", "type": "dropdown", "required": true, "options": ["Non-Compliant", "Conditional", "Compliant"]},
+          {"key": "inspector_remarks", "label": "Inspector Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_obs_reporting_fire_safety": {
+    "name": "Observation Reporting — Fire Safety",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Observation Details",
+        "fields": [
+          {"key": "observation_location", "label": "Location / Area", "type": "text", "required": true},
+          {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": true},
+          {"key": "severity", "label": "Severity", "type": "dropdown", "required": true, "options": ["Major", "Minor", "Advisory"]},
+          {"key": "root_cause", "label": "Root Cause", "type": "textarea", "required": false},
+          {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": true},
+          {"key": "supporting_photos", "label": "Supporting Photos", "type": "file", "required": false}
+        ]
+      },
+      {
+        "title": "Fire Safety Findings",
+        "fields": [
+          {"key": "fs_extinguisher_available", "label": "Fire Extinguisher Available", "type": "boolean", "required": false},
+          {"key": "fs_extinguisher_expiry", "label": "Fire Extinguisher Expiry Date", "type": "date", "required": false},
+          {"key": "fs_fire_alarm_operational", "label": "Fire Alarm Operational", "type": "boolean", "required": false},
+          {"key": "fs_oil_leakage_present", "label": "Oil Leakage Present", "type": "boolean", "required": false},
+          {"key": "fs_sand_bucket_status", "label": "Sand Bucket Status", "type": "dropdown", "required": false, "options": ["Available & Filled", "Available & Empty", "Missing"]},
+          {"key": "fs_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Assessment",
+        "fields": [
+          {"key": "overall_result", "label": "Assessment Result", "type": "dropdown", "required": true, "options": ["Non-Compliant", "Conditional", "Compliant"]},
+          {"key": "inspector_remarks", "label": "Inspector Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_obs_reporting_documentation": {
+    "name": "Observation Reporting — Documentation",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Observation Details",
+        "fields": [
+          {"key": "observation_location", "label": "Document / Record Reference", "type": "text", "required": true},
+          {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": true},
+          {"key": "severity", "label": "Severity", "type": "dropdown", "required": true, "options": ["Major", "Minor", "Advisory"]},
+          {"key": "root_cause", "label": "Root Cause", "type": "textarea", "required": false},
+          {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": true},
+          {"key": "supporting_photos", "label": "Supporting Evidence", "type": "file", "required": false}
+        ]
+      },
+      {
+        "title": "Documentation Findings",
+        "fields": [
+          {"key": "doc_maintenance_register_updated", "label": "Maintenance Register Updated", "type": "boolean", "required": false},
+          {"key": "doc_test_records_available", "label": "Test Records Available", "type": "boolean", "required": false},
+          {"key": "doc_sld_available", "label": "Single Line Diagram Available", "type": "boolean", "required": false},
+          {"key": "doc_protection_settings_available", "label": "Protection Settings Register Available", "type": "boolean", "required": false},
+          {"key": "doc_gap_details", "label": "Documentation Gap Details", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Assessment",
+        "fields": [
+          {"key": "overall_result", "label": "Assessment Result", "type": "dropdown", "required": true, "options": ["Non-Compliant", "Conditional", "Compliant"]},
+          {"key": "inspector_remarks", "label": "Inspector Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_obs_reporting_environmental": {
+    "name": "Observation Reporting — Environmental",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Observation Details",
+        "fields": [
+          {"key": "observation_location", "label": "Location / Area", "type": "text", "required": true},
+          {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": true},
+          {"key": "severity", "label": "Severity", "type": "dropdown", "required": true, "options": ["Major", "Minor", "Advisory"]},
+          {"key": "root_cause", "label": "Root Cause", "type": "textarea", "required": false},
+          {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": true},
+          {"key": "supporting_photos", "label": "Supporting Photos", "type": "file", "required": false}
+        ]
+      },
+      {
+        "title": "Environmental Findings",
+        "fields": [
+          {"key": "env_oil_spillage_observed", "label": "Oil Spillage Observed", "type": "boolean", "required": false},
+          {"key": "env_waste_disposal_status", "label": "Waste Disposal Status", "type": "dropdown", "required": false, "options": ["Compliant", "Non-Compliant", "Not Applicable"]},
+          {"key": "env_vegetation_clearance", "label": "Vegetation Clearance Status", "type": "dropdown", "required": false, "options": ["Clear", "Needs Trimming", "Unsafe Encroachment"]},
+          {"key": "env_noise_level", "label": "Noise Level", "type": "dropdown", "required": false, "options": ["Within Limits", "Exceeds Limits", "Not Measured"]},
+          {"key": "env_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Assessment",
+        "fields": [
+          {"key": "overall_result", "label": "Assessment Result", "type": "dropdown", "required": true, "options": ["Non-Compliant", "Conditional", "Compliant"]},
+          {"key": "inspector_remarks", "label": "Inspector Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_obs_reporting_general_maintenance": {
+    "name": "Observation Reporting — General Maintenance",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Observation Details",
+        "fields": [
+          {"key": "observation_location", "label": "Location / Equipment / Area", "type": "text", "required": true},
+          {"key": "observation_description", "label": "Observation Description", "type": "textarea", "required": true},
+          {"key": "severity", "label": "Severity", "type": "dropdown", "required": true, "options": ["Major", "Minor", "Advisory"]},
+          {"key": "root_cause", "label": "Root Cause", "type": "textarea", "required": false},
+          {"key": "target_compliance_date", "label": "Target Compliance Date", "type": "date", "required": true},
+          {"key": "supporting_photos", "label": "Supporting Photos", "type": "file", "required": false}
+        ]
+      },
+      {
+        "title": "General Maintenance Findings",
+        "fields": [
+          {"key": "gm_cleanliness_status", "label": "Cleanliness Status", "type": "dropdown", "required": false, "options": ["Good", "Average", "Poor"]},
+          {"key": "gm_illumination_status", "label": "Illumination Status", "type": "dropdown", "required": false, "options": ["Adequate", "Inadequate", "Not Working"]},
+          {"key": "gm_access_path_condition", "label": "Access Path Condition", "type": "dropdown", "required": false, "options": ["Good", "Obstructed", "Damaged"]},
+          {"key": "gm_equipment_labelling", "label": "Equipment Labelling", "type": "dropdown", "required": false, "options": ["Complete", "Partial", "Missing"]},
+          {"key": "gm_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Assessment",
+        "fields": [
+          {"key": "overall_result", "label": "Assessment Result", "type": "dropdown", "required": true, "options": ["Non-Compliant", "Conditional", "Compliant"]},
+          {"key": "inspector_remarks", "label": "Inspector Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_compliance_submission_electrical_safety": {
+    "name": "Compliance Submission — Electrical Safety",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "resolution_status", "label": "Resolution Status", "type": "dropdown", "required": true, "options": ["Fully Resolved", "Partially Resolved", "Pending — Extension Required"]}
+        ]
+      },
+      {
+        "title": "Electrical Safety Actions",
+        "fields": [
+          {"key": "es_earthing_resistance_after", "label": "Earthing Resistance After Rectification (ohms)", "type": "number", "required": false},
+          {"key": "es_relay_recalibrated", "label": "Relay Recalibrated / Replaced", "type": "boolean", "required": false},
+          {"key": "es_danger_board_fixed", "label": "Danger Board Installed / Replaced", "type": "boolean", "required": false},
+          {"key": "es_action_description", "label": "Action Description", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "compliance_evidence", "label": "Compliance Evidence (Photos / Certificates)", "type": "file", "required": true},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_compliance_submission_civil": {
+    "name": "Compliance Submission — Civil",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "resolution_status", "label": "Resolution Status", "type": "dropdown", "required": true, "options": ["Fully Resolved", "Partially Resolved", "Pending — Extension Required"]}
+        ]
+      },
+      {
+        "title": "Civil Actions",
+        "fields": [
+          {"key": "civil_repair_completed", "label": "Civil Repair / Construction Completed", "type": "boolean", "required": false},
+          {"key": "civil_drainage_cleared", "label": "Drainage Cleared", "type": "boolean", "required": false},
+          {"key": "civil_fencing_restored", "label": "Fencing / Compound Wall Restored", "type": "boolean", "required": false},
+          {"key": "civil_action_description", "label": "Action Description", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "compliance_evidence", "label": "Compliance Evidence (Photos / Completion Certificate)", "type": "file", "required": true},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_compliance_submission_fire_safety": {
+    "name": "Compliance Submission — Fire Safety",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "resolution_status", "label": "Resolution Status", "type": "dropdown", "required": true, "options": ["Fully Resolved", "Partially Resolved", "Pending — Extension Required"]}
+        ]
+      },
+      {
+        "title": "Fire Safety Actions",
+        "fields": [
+          {"key": "fs_extinguisher_replaced", "label": "Fire Extinguisher Replaced / Refilled", "type": "boolean", "required": false},
+          {"key": "fs_new_expiry_date", "label": "New Extinguisher Expiry Date", "type": "date", "required": false},
+          {"key": "fs_oil_leakage_rectified", "label": "Oil Leakage Rectified", "type": "boolean", "required": false},
+          {"key": "fs_alarm_repaired", "label": "Fire Alarm Repaired / Tested", "type": "boolean", "required": false},
+          {"key": "fs_action_description", "label": "Action Description", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "compliance_evidence", "label": "Compliance Evidence (Photos / Service Records)", "type": "file", "required": true},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_compliance_submission_documentation": {
+    "name": "Compliance Submission — Documentation",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "resolution_status", "label": "Resolution Status", "type": "dropdown", "required": true, "options": ["Fully Resolved", "Partially Resolved", "Pending — Extension Required"]}
+        ]
+      },
+      {
+        "title": "Documentation Actions",
+        "fields": [
+          {"key": "doc_records_updated", "label": "Records Updated / Created", "type": "boolean", "required": false},
+          {"key": "doc_sld_updated", "label": "Single Line Diagram Updated", "type": "boolean", "required": false},
+          {"key": "doc_protection_settings_filed", "label": "Protection Settings Filed", "type": "boolean", "required": false},
+          {"key": "doc_action_description", "label": "Action Description", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "compliance_evidence", "label": "Updated Documents / Scanned Records", "type": "file", "required": true},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_compliance_submission_environmental": {
+    "name": "Compliance Submission — Environmental",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "resolution_status", "label": "Resolution Status", "type": "dropdown", "required": true, "options": ["Fully Resolved", "Partially Resolved", "Pending — Extension Required"]}
+        ]
+      },
+      {
+        "title": "Environmental Actions",
+        "fields": [
+          {"key": "env_spillage_cleaned", "label": "Oil / Chemical Spillage Cleaned", "type": "boolean", "required": false},
+          {"key": "env_vegetation_cleared", "label": "Vegetation Cleared", "type": "boolean", "required": false},
+          {"key": "env_waste_disposed", "label": "Waste Properly Disposed", "type": "boolean", "required": false},
+          {"key": "env_action_description", "label": "Action Description", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "compliance_evidence", "label": "Compliance Evidence (Photos / Disposal Records)", "type": "file", "required": true},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+        ]
+      }
+    ]
+  },
+
+  "audit_compliance_submission_general_maintenance": {
+    "name": "Compliance Submission — General Maintenance",
+    "template_type": "audit_stage",
+    "sections": [
+      {
+        "title": "Corrective Action",
+        "fields": [
+          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
+          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
+          {"key": "resolution_status", "label": "Resolution Status", "type": "dropdown", "required": true, "options": ["Fully Resolved", "Partially Resolved", "Pending — Extension Required"]}
+        ]
+      },
+      {
+        "title": "Maintenance Actions",
+        "fields": [
+          {"key": "gm_cleaning_done", "label": "Cleaning / Housekeeping Done", "type": "boolean", "required": false},
+          {"key": "gm_lighting_restored", "label": "Lighting Restored / Replaced", "type": "boolean", "required": false},
+          {"key": "gm_labelling_completed", "label": "Equipment Labelling Completed", "type": "boolean", "required": false},
+          {"key": "gm_access_cleared", "label": "Access Path Cleared", "type": "boolean", "required": false},
+          {"key": "gm_action_description", "label": "Action Description", "type": "textarea", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "compliance_evidence", "label": "Compliance Evidence (Before / After Photos)", "type": "file", "required": true},
+          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
         ]
       }
     ]
@@ -33,26 +453,21 @@
     "template_type": "audit_stage",
     "sections": [
       {
+        "title": "Responsible Officer Details",
+        "fields": [
+          {"key": "responsible_officer_name", "label": "Responsible Officer Name", "type": "text", "required": true},
+          {"key": "responsible_officer_designation", "label": "Designation", "type": "text", "required": true},
+          {"key": "responsible_officer_department", "label": "Department / Division", "type": "text", "required": false},
+          {"key": "responsible_officer_contact", "label": "Contact Number", "type": "text", "required": false}
+        ]
+      },
+      {
         "title": "Assignment Details",
         "fields": [
+          {"key": "assignment_priority", "label": "Priority", "type": "dropdown", "required": true, "options": ["Immediate (within 7 days)", "High (within 15 days)", "Normal (within 30 days)", "Low (within 60 days)"]},
+          {"key": "expected_compliance_date", "label": "Expected Compliance Date", "type": "date", "required": true},
           {"key": "assignment_remarks", "label": "Assignment Remarks", "type": "textarea", "required": false},
-          {"key": "priority_note", "label": "Priority Note", "type": "text", "required": false}
-        ]
-      }
-    ]
-  },
-
-  "audit_stage_compliance_submission": {
-    "name": "Compliance Submission",
-    "template_type": "audit_stage",
-    "sections": [
-      {
-        "title": "Corrective Action",
-        "fields": [
-          {"key": "corrective_action_taken", "label": "Corrective Action Taken", "type": "textarea", "required": true},
-          {"key": "compliance_date", "label": "Date of Compliance", "type": "date", "required": true},
-          {"key": "compliance_evidence", "label": "Compliance Evidence", "type": "file", "required": true},
-          {"key": "additional_remarks", "label": "Additional Remarks", "type": "textarea", "required": false}
+          {"key": "assignment_acknowledged", "label": "Assignment Acknowledged", "type": "boolean", "required": true}
         ]
       }
     ]
@@ -65,15 +480,16 @@
       {
         "title": "Review Assessment",
         "fields": [
+          {"key": "overall_result", "label": "Compliance Status", "type": "dropdown", "required": true, "options": ["Compliant", "Non-Compliant", "Conditional"]},
           {"key": "review_remarks", "label": "Review Remarks", "type": "textarea", "required": true},
-          {
-            "key": "overall_result",
-            "label": "Compliance Status",
-            "type": "dropdown",
-            "required": true,
-            "options": ["Compliant", "Non-Compliant", "Conditional"]
-          },
-          {"key": "review_evidence", "label": "Review Evidence", "type": "file", "required": false}
+          {"key": "reinspection_required", "label": "Re-inspection Required", "type": "boolean", "required": false},
+          {"key": "reinspection_date", "label": "Re-inspection Date", "type": "date", "required": false}
+        ]
+      },
+      {
+        "title": "Evidence",
+        "fields": [
+          {"key": "review_evidence", "label": "Review Evidence / Site Visit Photos", "type": "file", "required": false}
         ]
       }
     ]
@@ -86,9 +502,17 @@
       {
         "title": "Closure Confirmation",
         "fields": [
-          {"key": "closure_remarks", "label": "Closure Remarks", "type": "textarea", "required": true},
+          {"key": "final_compliance_status", "label": "Final Compliance Status", "type": "dropdown", "required": true, "options": ["Fully Compliant", "Conditionally Closed", "Deferred with Approval"]},
           {"key": "closure_date", "label": "Date of Closure", "type": "date", "required": true},
-          {"key": "closure_evidence", "label": "Closure Evidence", "type": "file", "required": false}
+          {"key": "closure_remarks", "label": "Closure Summary", "type": "textarea", "required": true}
+        ]
+      },
+      {
+        "title": "Lessons Learned",
+        "fields": [
+          {"key": "lessons_learned", "label": "Lessons Learned", "type": "textarea", "required": false},
+          {"key": "preventive_recommendation", "label": "Preventive Recommendation", "type": "textarea", "required": false},
+          {"key": "closure_evidence", "label": "Closure Evidence / Final Photos", "type": "file", "required": false}
         ]
       }
     ]

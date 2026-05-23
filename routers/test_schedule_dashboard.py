@@ -99,3 +99,23 @@ def equipment_detail(
     if not result:
         raise HTTPException(404, "Equipment not found.")
     return result
+
+
+# ─────────────────────────────────────────────────────────────────
+# Org-level schedules  (equipment_id = NULL)
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/compliance/org-schedules")
+def org_schedules(
+    org_id: UUID = Query(...),
+    department_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns active schedules that are not linked to a specific equipment
+    (site-level / org-level, e.g. TA&QC Inspection).
+    """
+    return TestScheduleDashboardService(db).get_org_schedules(
+        org_id=org_id,
+        department_id=department_id,
+    )

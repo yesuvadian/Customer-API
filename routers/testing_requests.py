@@ -162,6 +162,25 @@ def list_lifecycle_types(db: Session = Depends(get_db)):
     return TestingRequestService(db).list_lifecycle_types()
 
 
+# ─── All test types by category (no equipment filter) ───────────────────────
+@router.get("/all-test-types")
+def list_all_test_types(
+    category: str = None,
+    db: Session = Depends(get_db),
+):
+    """Return all CategoryDetails (test types) grouped by category_type, with
+    lifecycle flags resolved from their OrgTestTemplate.
+
+    Optional ?category=test|maintenance|inspection|repair_lifecycle to filter.
+
+    Flutter uses this to populate the test-type dropdown when no equipment
+    type is selected — so calibration/cumulative maintenance types (Protection
+    Relay Calibration, Circuit Breaker Operations Count, etc.) are accessible
+    without first picking a specific registered equipment.
+    """
+    return TestingRequestService(db).list_all_test_types(category=category)
+
+
 # ─── Generic dropdown by master description ─────────────
 @router.get("/dropdown/{master_desc}")
 def get_dropdown_values(master_desc: str, db: Session = Depends(get_db)):

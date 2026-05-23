@@ -498,3 +498,81 @@ class TestScheduleDashboardService:
             "critical_alert": 0, "critical_pct": "0%",
             "completed_this_month": 0, "completed_pct": "—",
         }
+
+    # ─────────────────────────────────────────────────────────────
+    # Public — org-level schedules (equipment_id = NULL)
+    # ─────────────────────────────────────────────────────────────
+
+    def get_org_schedules(
+        self,
+        org_id: UUID,
+        department_id: Optional[UUID] = None,
+    ) -> dict:
+        """
+        Returns active schedules that are not linked to a specific equipment
+        (equipment_id IS NULL). These are org-level / site-level schedules
+        such as TA&QC Inspection.
+        """
+        q = (
+            self.db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.organization_id == org_id,
+                TestRequestSchedule.equipment_id.is_(None),
+                TestRequestSchedule.is_active.is_(True),
+                TestRequestSchedule.is_deleted.is_(False),
+            )
+        )
+        if department_id:
+            q = q.filter(TestRequestSchedule.department_id == department_id)
+
+        schedules = q.order_by(TestRequestSchedule.next_run_date).all()
+
+        # Load test type names
+        tt_ids = list({s.test_type_id for s in schedules if s.test_type_id})
+        tt_map: dict[int, CategoryDetails] = {}
+        if tt_ids:
+            tt_map = {
+                r.id: r
+                for r in self.db.query(CategoryDetails)
+                .filter(CategoryDetails.id.in_(tt_ids))
+                .all()
+            }
+
+        # Load department names
+        dept_ids = list({s.department_id for s in schedules if s.department_id})
+        dept_map: dict = {}
+        if dept_ids:
+            dept_map = {
+                d.id: d
+                for d in self.db.query(OrgDepartment)
+                .filter(OrgDepartment.id.in_(dept_ids))
+                .all()
+            }
+
+        items = []
+        for s in schedules:
+            next_run = s.next_run_date
+            if next_run:
+                next_date = next_run.date() if isinstance(next_run, datetime) else next_run
+                days = (next_date - self._today).days
+            else:
+                next_date = None
+                days = None
+
+            status = _cell_status(days)
+            tt   = tt_map.get(s.test_type_id)
+            dept = dept_map.get(s.department_id) if s.department_id else None
+
+            items.append({
+                "schedule_id":      str(s.id),
+                "title":            s.title,
+                "test_type":        tt.name if tt else None,
+                "department":       dept.name if dept else None,
+                "frequency":        s.frequency.value if s.frequency else None,
+                "next_due":         next_date.isoformat() if next_date else None,
+                "days_until_due":   days,
+                "status":           status,
+                "request_category": s.request_category.value if s.request_category else None,
+            })
+
+        return {"items": items, "total": len(items)}

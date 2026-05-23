@@ -137,7 +137,7 @@ class RecommendationService:
 
     @staticmethod
     def _enrich(rec: Recommendation) -> Recommendation:
-        """Attach resolved user display names to the ORM object."""
+        """Attach resolved display names and TR/equipment context."""
         def _name(user):
             if not user:
                 return None
@@ -146,6 +146,25 @@ class RecommendationService:
 
         rec.submitted_by_name = _name(rec.submitter)
         rec.approved_by_name = _name(rec.approver)
+
+        tr = rec.testing_request
+        if tr:
+            rec.request_number = tr.request_number
+            rec.request_title = tr.title
+            eq = getattr(tr, "equipment", None)
+            if eq:
+                rec.equipment_ueic = eq.ueic
+                cat = getattr(eq, "equipment_type", None)
+                rec.equipment_type_name = cat.name if cat else None
+            else:
+                rec.equipment_ueic = None
+                rec.equipment_type_name = None
+        else:
+            rec.request_number = None
+            rec.request_title = None
+            rec.equipment_ueic = None
+            rec.equipment_type_name = None
+
         return rec
 
     def get_recommendation(self, recommendation_id: UUID) -> Recommendation:

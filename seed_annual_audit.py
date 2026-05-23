@@ -3,7 +3,7 @@ Seed annual audit workflow stages, stage templates, transitions, and role mappin
 
 Source files (all at repo root):
   ANNUAL_AUDIT_STAGE_TEMPLATES.json    — {template_key: {name, template_type, sections, ...}}
-  ANNUAL_AUDIT_STAGE_TEMPLATE_MAP.json — {stage_name: template_key}
+  ANNUAL_AUDIT_STAGE_TEMPLATE_MAP.json — {generic: {stage_name: key}, by_category: {stage_name: {cat_name: key}}}
   ANNUAL_AUDIT_STAGE_ROLES.json        — [{stage_code, roles, assign_also, assignment_role}]
 
 Call order:
@@ -16,6 +16,7 @@ import os
 import uuid
 
 from models import (
+    CategoryDetails,
     OrgRole,
     OrgTestTemplate,
     RepairStageDefinition,
@@ -66,19 +67,20 @@ def seed_annual_audit_stages(db) -> int:
     Idempotently insert:
       - RepairStageDefinition  (5 stages)
       - RepairStageTransition  (6 transitions)
-      - OrgTestTemplate        (one per stage, from ANNUAL_AUDIT_STAGE_TEMPLATES.json)
-      - RepairStageTemplate    (stage → template links, from ANNUAL_AUDIT_STAGE_TEMPLATE_MAP.json)
+      - OrgTestTemplate        (one per template key, from ANNUAL_AUDIT_STAGE_TEMPLATES.json)
+      - RepairStageTemplate    (generic: stage → template; category-specific: stage+category → template)
 
     Safe to run multiple times. Returns the count of stage rows inserted (0 if all already present).
     """
     templates_raw = _load("ANNUAL_AUDIT_STAGE_TEMPLATES.json")
-    stage_tmpl_map = _load("ANNUAL_AUDIT_STAGE_TEMPLATE_MAP.json")  # {stage_name: template_key}
+    stage_tmpl_map = _load("ANNUAL_AUDIT_STAGE_TEMPLATE_MAP.json")
 
     # ── 1. Templates ─────────────────────────────────────────────────────────
     template_map = {}   # key → UUID
     for key, t in templates_raw.items():
         existing = db.query(OrgTestTemplate).filter_by(template_key=key).first()
         if existing:
+            existing.template_data = t  # always sync fields from JSON
             template_map[key] = existing.id
             continue
         obj = OrgTestTemplate(
@@ -101,7 +103,6 @@ def seed_annual_audit_stages(db) -> int:
         duration = s.get("default_duration_days")
         existing = db.query(RepairStageDefinition).filter_by(code=s["code"]).first()
         if existing:
-            # Keep name/sequence/duration in sync
             existing.name     = s["name"]
             existing.sequence = s["sequence"]
             if duration is not None and existing.default_duration_days != duration:
@@ -127,16 +128,68 @@ def seed_annual_audit_stages(db) -> int:
 
     print(f"[OK] Annual Audit stages: {inserted} inserted ({len(stage_map)} total)")
 
-    # ── 3. Stage → Template links ─────────────────────────────────────────────
-    for stage_name, tmpl_key in stage_tmpl_map.items():
+    # ── 3a. Generic stage → template links ────────────────────────────────────
+    for stage_name, tmpl_key in stage_tmpl_map.get("generic", {}).items():
         stage_id    = stage_map.get(stage_name)
         template_id = template_map.get(tmpl_key)
         if not stage_id or not template_id:
-            print(f"[WARN] Skipping stage-template link: {stage_name!r} → {tmpl_key!r} (not found)")
+            print(f"[WARN] Skipping generic link: {stage_name!r} → {tmpl_key!r} (not found)")
             continue
-        exists = db.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
+        exists = (
+            db.query(RepairStageTemplate)
+            .filter(
+                RepairStageTemplate.stage_id == stage_id,
+                RepairStageTemplate.category_detail_id.is_(None),
+            )
+            .first()
+        )
         if not exists:
-            db.add(RepairStageTemplate(stage_id=stage_id, template_id=template_id))
+            db.add(RepairStageTemplate(
+                id=uuid.uuid4(),
+                stage_id=stage_id,
+                template_id=template_id,
+                category_detail_id=None,
+            ))
+        else:
+            exists.template_id = template_id  # sync in case key changed
+
+    # ── 3b. Category-specific stage → template links ──────────────────────────
+    for stage_name, cat_map in stage_tmpl_map.get("by_category", {}).items():
+        stage_id = stage_map.get(stage_name)
+        if not stage_id:
+            print(f"[WARN] Stage not found for category-specific link: {stage_name!r}")
+            continue
+        for cat_name, tmpl_key in cat_map.items():
+            template_id = template_map.get(tmpl_key)
+            if not template_id:
+                print(f"[WARN] Template key not found: {tmpl_key!r}")
+                continue
+            # Look up the CategoryDetails row by name
+            cat_detail = (
+                db.query(CategoryDetails)
+                .filter(CategoryDetails.name == cat_name)
+                .first()
+            )
+            if not cat_detail:
+                print(f"[WARN] CategoryDetails not found: {cat_name!r} — skipping")
+                continue
+            exists = (
+                db.query(RepairStageTemplate)
+                .filter(
+                    RepairStageTemplate.stage_id == stage_id,
+                    RepairStageTemplate.category_detail_id == cat_detail.id,
+                )
+                .first()
+            )
+            if not exists:
+                db.add(RepairStageTemplate(
+                    id=uuid.uuid4(),
+                    stage_id=stage_id,
+                    template_id=template_id,
+                    category_detail_id=cat_detail.id,
+                ))
+            else:
+                exists.template_id = template_id  # sync
 
     # ── 4. Transitions ────────────────────────────────────────────────────────
     for from_code, action, to_code in TRANSITIONS:
