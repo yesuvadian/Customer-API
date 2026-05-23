@@ -1636,87 +1636,6 @@ TEST_TEMPLATES = {
     },
 
     # ────────────────────────────────────────────────────────────
-    # 37. Capacitance & Tan Delta Test Transformer (Power Transformer)
-    # ────────────────────────────────────────────────────────────
-    "capacitance_tandelta_transformer": {
-        "key": "capacitance_tandelta_transformer",
-        "name": "Capacitance & Tan Delta Test (Transformer)",
-        "equipment_type": "Power Transformer",
-        "description": "Capacitance and tan delta test results for transformer bushings and windings",
-        "sections": [
-            {
-                "title": "Test Information",
-                "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "transformer_name", "label": "Transformer Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
-            },
-            {
-                "title": "HV Bushing Readings",
-                "fields": [
-                    {"key": "hv_bushing_readings", "label": "HV Bushing Capacitance & Tan Delta", "type": "table", "columns": [
-                        {"key": "details", "label": "Details", "type": "text"},
-                        {"key": "freq_hz", "label": "f (Hz)", "type": "number"},
-                        {"key": "voltage_kv", "label": "U (kV)", "type": "number"},
-                        {"key": "current_ma", "label": "I (mA)", "type": "number"},
-                        {"key": "cap_pf", "label": "C (pF)", "type": "number"},
-                        {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
-                    ]}
-                ]
-            },
-            {
-                "title": "LV/IV Bushing Readings",
-                "fields": [
-                    {"key": "lv_bushing_readings", "label": "LV/IV Bushing Capacitance & Tan Delta", "type": "table", "columns": [
-                        {"key": "details", "label": "Details", "type": "text"},
-                        {"key": "freq_hz", "label": "f (Hz)", "type": "number"},
-                        {"key": "voltage_kv", "label": "U (kV)", "type": "number"},
-                        {"key": "current_ma", "label": "I (mA)", "type": "number"},
-                        {"key": "cap_pf", "label": "C (pF)", "type": "number"},
-                        {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
-                    ]}
-                ]
-            },
-            {
-                "title": "Winding Readings (UST)",
-                "fields": [
-                    {"key": "winding_ust_readings", "label": "Winding Capacitance & Tan Delta (UST)", "type": "table", "columns": [
-                        {"key": "winding_pair", "label": "Winding Pair", "type": "text"},
-                        {"key": "current_ma", "label": "I (mA)", "type": "number"},
-                        {"key": "cap_pf", "label": "C (pF)", "type": "number"},
-                        {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
-                    ]}
-                ]
-            },
-            {
-                "title": "Winding Readings (GSTg-RB)",
-                "fields": [
-                    {"key": "winding_gst_readings", "label": "Winding Capacitance & Tan Delta (GSTg-RB)", "type": "table", "columns": [
-                        {"key": "winding_pair", "label": "Winding Pair", "type": "text"},
-                        {"key": "current_ma", "label": "I (mA)", "type": "number"},
-                        {"key": "cap_pf", "label": "C (pF)", "type": "number"},
-                        {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
-                    ]}
-                ]
-            },
-            {
-                "title": "Neutral Bushing",
-                "fields": [
-                    {"key": "neutral_bushing", "label": "Neutral Bushing Readings", "type": "table", "columns": [
-                        {"key": "details", "label": "Details", "type": "text"},
-                        {"key": "freq_hz", "label": "f (Hz)", "type": "number"},
-                        {"key": "voltage_kv", "label": "U (kV)", "type": "number"},
-                        {"key": "current_ma", "label": "I (mA)", "type": "number"},
-                        {"key": "cap_pf", "label": "C (pF)", "type": "number"},
-                        {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
-                    ]}
-                ]
-            },
-        ]
-    },
-
-    # ────────────────────────────────────────────────────────────
     # 38. Capacitance & Tan Delta Comparison (Power Transformer)
     # ────────────────────────────────────────────────────────────
     "tandelta_comparison": {
@@ -2448,6 +2367,399 @@ TEST_TEMPLATES = {
             }
         ],
     },
+    # ────────────────────────────────────────────────────────────────────────────
+    # Transformer Insulating Oil Sample Test  (IS 1866:2017)
+    #
+    # transformer_voltage is pre-populated from the equipment record (e.g. "220kV").
+    # No intermediate calculated field is needed — the THRESHOLD lookup_field carries
+    # an inline LOOKUP that maps the raw voltage to an IS 1866 class on the fly:
+    #   "11kV"/"33kV"/"66kV"         → "<=72.5kV"
+    #   "66kV"/"110kV"/"132kV"       → "72.5-170kV"
+    #   "220kV"/"400kV"              → ">170kV"
+    #
+    # Test results are a fixed table (one row per IS 1866 parameter).
+    # The THRESHOLD rule navigates thresholds[test_name][voltage_class] and
+    # range-matches the measured value. All limit data lives in the rule config.
+    # overall_condition aggregates oil_test_results.condition via AGGREGATE_STATUS.
+    # ────────────────────────────────────────────────────────────────────────────
+    "transformer_oil_test": {
+        "key": "transformer_oil_test",
+        "name": "Transformer Oil Test",
+        "equipment_type": "Power Transformer",
+        "description": "Insulating oil sample analysis as per IS 1866:2017.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": 365,
+        "typical_total_sessions": 1,
+        "sections": [
+            # ── Section 1 — Equipment & Test Details ─────────────────────────────
+            {
+                "title": "Equipment & Test Details",
+                "fields": [
+                    {"key": "reference_no",          "label": "Reference No.",           "type": "text",     "required": False},
+                    {"key": "substation_name",        "label": "Substation Name",         "type": "text",     "required": True},
+                    {"key": "sample_no",              "label": "Sample No.",              "type": "text",     "required": False},
+                    {"key": "capacity_mva",           "label": "Capacity",                "type": "number",   "required": False, "unit": "MVA"},
+                    {"key": "make",                   "label": "Make",                    "type": "text",     "required": False},
+                    {"key": "serial_number",          "label": "Serial Number",           "type": "text",     "required": False},
+                    {"key": "doc",                    "label": "Date of Commissioning",   "type": "date",     "required": False},
+                    {"key": "yom",                    "label": "Year of Manufacture",     "type": "text",     "required": False},
+                    {"key": "date_of_filtration",     "label": "Date of Last Filtration", "type": "date",     "required": False},
+                    {"key": "date_of_test",           "label": "Date of Test",            "type": "date",     "required": True},
+                    {"key": "transformer_voltage",    "label": "Transformer Voltage",     "type": "dropdown", "required": True,
+                     "options": ["11kV", "33kV", "66kV", "110kV", "132kV", "220kV", "400kV"]},
+                ],
+            },
+            # ── Section 2 — Oil Test Measurements ───────────────────────────────
+            {
+                "title": "Oil Test Measurements",
+                "fields": [
+                    {
+                        "key": "oil_test_results",
+                        "label": "Test Results as per IS 1866:2017",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_name",      "label": "Parameter",       "type": "readonly"},
+                            {"key": "unit",           "label": "Unit",            "type": "readonly"},
+                            {"key": "measured_value", "label": "Measured Value",  "type": "number"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "measured_value",
+                                        "lookup_fields": [
+                                            "test_name",
+                                            {
+                                                "field": "$form.transformer_voltage",
+                                                "mapping": {
+                                                    "11kV":  "<=72.5kV",
+                                                    "33kV":  "<=72.5kV",
+                                                    "66kV":  "<=72.5kV",
+                                                    "110kV": "72.5-170kV",
+                                                    "132kV": "72.5-170kV",
+                                                    "220kV": ">170kV",
+                                                    "400kV": ">170kV",
+                                                },
+                                            },
+                                        ],
+                                        "thresholds": {
+                                            # Acidity (mg KOH/g) — lower is better
+                                            "Acidity": {
+                                                ">170kV":     {"Good": [0, 0.10], "Fair": [0.10, 0.15], "Poor": [0.15, None]},
+                                                "72.5-170kV": {"Good": [0, 0.10], "Fair": [0.10, 0.20], "Poor": [0.20, None]},
+                                                "<=72.5kV":   {"Good": [0, 0.15], "Fair": [0.15, 0.30], "Poor": [0.30, None]},
+                                            },
+                                            # Resistivity at 90 deg C (T-ohm.m) — higher is better
+                                            "Resistivity at 90C": {
+                                                ">170kV":     {"Poor": [0, 3],   "Fair": [3,   10],   "Good": [10,  None]},
+                                                "72.5-170kV": {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
+                                                "<=72.5kV":   {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
+                                            },
+                                            # Tan Delta at 90 deg C — lower is better, Good/Poor only
+                                            "Tan Delta at 90C": {
+                                                ">170kV":     {"Good": [0, 0.2], "Poor": [0.2, None]},
+                                                "72.5-170kV": {"Good": [0, 0.5], "Poor": [0.5, None]},
+                                                "<=72.5kV":   {"Good": [0, 0.5], "Poor": [0.5, None]},
+                                            },
+                                            # BDV Top sample — higher is better
+                                            "BDV Top (T)": {
+                                                ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
+                                                "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
+                                                "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
+                                            },
+                                            # BDV Bottom sample — higher is better
+                                            "BDV Bottom (B)": {
+                                                ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
+                                                "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
+                                                "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
+                                            },
+                                            # Interfacial Tension (mN/m) — higher is better, fixed limits
+                                            "Interfacial Tension": {
+                                                ">170kV":     {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
+                                                "72.5-170kV": {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
+                                                "<=72.5kV":   {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
+                                            },
+                                            # Flash Point (deg C) — higher is better, fixed limits
+                                            "Flash Point": {
+                                                ">170kV":     {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
+                                                "72.5-170kV": {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
+                                                "<=72.5kV":   {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
+                                            },
+                                            # Water Content (ppm) — lower is better
+                                            "Water Content": {
+                                                ">170kV":     {"Good": [0, 15], "Fair": [15, 20], "Poor": [20, None]},
+                                                "72.5-170kV": {"Good": [0, 20], "Fair": [20, 30], "Poor": [30, None]},
+                                                "<=72.5kV":   {"Good": [0, 30], "Fair": [30, 40], "Poor": [40, None]},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            {"key": "remarks", "label": "Remarks", "type": "text"},
+                        ],
+                        "default_rows": [
+                            {"test_name": "Acidity",              "unit": "mg KOH/g"},
+                            {"test_name": "Resistivity at 90C",   "unit": "T-ohm.m"},
+                            {"test_name": "Tan Delta at 90C",     "unit": ""},
+                            {"test_name": "BDV Top (T)",          "unit": "kV"},
+                            {"test_name": "BDV Bottom (B)",       "unit": "kV"},
+                            {"test_name": "Interfacial Tension",  "unit": "mN/m"},
+                            {"test_name": "Flash Point",          "unit": "deg C"},
+                            {"test_name": "Water Content",        "unit": "ppm"},
+                        ],
+                    },
+                ],
+            },
+            # ── Section 3 — Overall Assessment ──────────────────────────────────
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_condition",
+                        "label": "Overall Oil Condition",
+                        "type": "calculated",
+                        "rule": {
+                            "type": "AGGREGATE_STATUS",
+                            "config": {
+                                "sources":  ["oil_test_results.condition"],
+                                "priority": ["Poor", "Fair", "Good"],
+                            },
+                        },
+                    },
+                    {"key": "filtration_recommended",  "label": "Oil Filtration Recommended",  "type": "boolean",  "required": False},
+                    {"key": "replacement_recommended", "label": "Oil Replacement Recommended", "type": "boolean",  "required": False},
+                    {"key": "overall_remarks",         "label": "Remarks / Observations",      "type": "textarea", "required": False},
+                ],
+            },
+        ],
+    },
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # Capacitance & Tan Delta Test (Transformer)
+    # Point-in-time insulation quality measurement — no multi-session.
+    # Measurements: C(pF), tan δ, temperature → auto-calculates expected current,
+    # temperature-corrected tan δ, and trend change from previous reading.
+    # ────────────────────────────────────────────────────────────────────────────
+    "capacitance_tandelta_transformer": {
+        "key": "capacitance_tandelta_transformer",
+        "name": "Capacitance & Tan Delta Test (Transformer)",
+        "equipment_type": "Power Transformer",
+        "description": "Capacitance and tan delta insulation quality test per IEC 60450",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            # ── Section 1 — Test Conditions ─────────────────────────────────────
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_voltage_kv",  "label": "Applied Test Voltage", "type": "number", "unit": "kV",   "required": True},
+                    {"key": "frequency_hz",     "label": "Supply Frequency",     "type": "number", "unit": "Hz",   "required": True, "default": "50"},
+                    {"key": "ambient_temp_c",   "label": "Ambient Temperature",  "type": "number", "unit": "°C",   "required": True},
+                    {"key": "oil_temp_c",       "label": "Oil Temperature",      "type": "number", "unit": "°C",   "required": False},
+                    {
+                        "key": "test_mode",
+                        "label": "Test Mode",
+                        "type": "dropdown",
+                        "options": ["UST (Ungrounded Specimen)", "GST (Grounded Specimen)", "GST-Guard"],
+                        "required": True,
+                    },
+                    {"key": "instrument_make",  "label": "Instrument Make/Model", "type": "text", "required": False},
+                ],
+            },
+
+            # ── Section 2 — HV Winding Measurements ─────────────────────────────
+            {
+                "title": "HV Winding (Measurements)",
+                "fields": [
+                    {
+                        "key": "hv_measurements",
+                        "label": "HV Winding Test Data",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "phase",             "label": "Phase",              "type": "readonly"},
+                            {"key": "capacitance_pf",    "label": "Capacitance (pF)",   "type": "number"},
+                            {"key": "tan_delta",         "label": "Tan δ (×10⁻³)",     "type": "number"},
+                            {"key": "temperature_c",     "label": "Temp (°C)",          "type": "number"},
+                            {
+                                "key": "expected_current_ma",
+                                "label": "Expected I (mA)",
+                                "type": "calculated",
+                                "rule": {
+                                    "type": "FORMULA",
+                                    "config": {
+                                        "formula": "CAP_CURRENT",
+                                        "inputs": {
+                                            "frequency": "$form.frequency_hz",
+                                            "capacitance_pf": "capacitance_pf",
+                                            "voltage_kv": "$form.test_voltage_kv",
+                                        },
+                                        "precision": 3,
+                                    },
+                                },
+                            },
+                            {
+                                "key": "corrected_tan_delta",
+                                "label": "Corrected Tan δ (20°C)",
+                                "type": "calculated",
+                                "rule": {
+                                    "type": "FORMULA",
+                                    "config": {
+                                        "formula": "TEMP_CORRECTED_TAND",
+                                        "inputs": {
+                                            "tan_delta":   "tan_delta",
+                                            "temperature": "temperature_c",
+                                        },
+                                        "precision": 4,
+                                    },
+                                },
+                            },
+                        ],
+                        "default_rows": [
+                            {"phase": "R"},
+                            {"phase": "Y"},
+                            {"phase": "B"},
+                        ],
+                    },
+                    {
+                        "key": "hv_phase_average",
+                        "label": "HV Average Tan δ (corrected, 20°C)",
+                        "type": "calculated",
+                        "rule": {
+                            "type": "AVERAGE",
+                            "config": {
+                                "table": "hv_measurements",
+                                "field": "corrected_tan_delta",
+                                "precision": 4,
+                            },
+                        },
+                    },
+                ],
+            },
+
+            # ── Section 3 — LV Winding Measurements ─────────────────────────────
+            {
+                "title": "LV Winding (Measurements)",
+                "fields": [
+                    {
+                        "key": "lv_measurements",
+                        "label": "LV Winding Test Data",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "phase",             "label": "Phase",              "type": "readonly"},
+                            {"key": "capacitance_pf",    "label": "Capacitance (pF)",   "type": "number"},
+                            {"key": "tan_delta",         "label": "Tan δ (×10⁻³)",     "type": "number"},
+                            {"key": "temperature_c",     "label": "Temp (°C)",          "type": "number"},
+                            {
+                                "key": "expected_current_ma",
+                                "label": "Expected I (mA)",
+                                "type": "calculated",
+                                "rule": {
+                                    "type": "FORMULA",
+                                    "config": {
+                                        "formula": "CAP_CURRENT",
+                                        "inputs": {
+                                            "frequency": "$form.frequency_hz",
+                                            "capacitance_pf": "capacitance_pf",
+                                            "voltage_kv": "$form.test_voltage_kv",
+                                        },
+                                        "precision": 3,
+                                    },
+                                },
+                            },
+                            {
+                                "key": "corrected_tan_delta",
+                                "label": "Corrected Tan δ (20°C)",
+                                "type": "calculated",
+                                "rule": {
+                                    "type": "FORMULA",
+                                    "config": {
+                                        "formula": "TEMP_CORRECTED_TAND",
+                                        "inputs": {
+                                            "tan_delta":   "tan_delta",
+                                            "temperature": "temperature_c",
+                                        },
+                                        "precision": 4,
+                                    },
+                                },
+                            },
+                        ],
+                        "default_rows": [
+                            {"phase": "R"},
+                            {"phase": "Y"},
+                            {"phase": "B"},
+                        ],
+                    },
+                    {
+                        "key": "lv_phase_average",
+                        "label": "LV Average Tan δ (corrected, 20°C)",
+                        "type": "calculated",
+                        "rule": {
+                            "type": "AVERAGE",
+                            "config": {
+                                "table": "lv_measurements",
+                                "field": "corrected_tan_delta",
+                                "precision": 4,
+                            },
+                        },
+                    },
+                ],
+            },
+
+            # ── Section 4 — Trend Analysis ───────────────────────────────────────
+            {
+                "title": "Trend Analysis (vs. Previous Reading)",
+                "fields": [
+                    {"key": "previous_hv_avg_tand", "label": "Previous HV Avg Tan δ (20°C)", "type": "number", "required": False},
+                    {
+                        "key": "hv_trend_change_pct",
+                        "label": "HV Tan δ Trend Change (%)",
+                        "type": "calculated",
+                        "rule": {
+                            "type": "FORMULA",
+                            "config": {
+                                "formula": "TREND_CHANGE",
+                                "inputs": {
+                                    "current":  "$form.hv_phase_average",
+                                    "previous": "$form.previous_hv_avg_tand",
+                                },
+                                "precision": 1,
+                            },
+                        },
+                    },
+                    {"key": "previous_lv_avg_tand", "label": "Previous LV Avg Tan δ (20°C)", "type": "number", "required": False},
+                    {
+                        "key": "lv_trend_change_pct",
+                        "label": "LV Tan δ Trend Change (%)",
+                        "type": "calculated",
+                        "rule": {
+                            "type": "FORMULA",
+                            "config": {
+                                "formula": "TREND_CHANGE",
+                                "inputs": {
+                                    "current":  "$form.lv_phase_average",
+                                    "previous": "$form.previous_lv_avg_tand",
+                                },
+                                "precision": 1,
+                            },
+                        },
+                    },
+                ],
+            },
+
+        ],
+    },
 }
 
 
@@ -2510,6 +2822,11 @@ TEST_TYPE_TO_TEMPLATE = {
     "Tan Delta NCT Test": "tandelta_nct",
     # CVT
     "CVT Test Report": "cvt_test",
+
+    # ── Oil test ──
+    "Transformer Oil Test":             "transformer_oil_test",
+    "Insulating Oil Test":              "transformer_oil_test",
+    "Oil BDV Test":                     "transformer_oil_test",
 
     # ── Calibration test types (enable_calibration=True, DATE_ADD rule) ──
     "Protection Relay Calibration and History": "protection_relay_calibration",
