@@ -1081,6 +1081,9 @@ class Equipment(Base):
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
     # Relationships
     organization = relationship("Organization", foreign_keys=[organization_id])
     department = relationship("OrgDepartment", back_populates="equipment", foreign_keys=[department_id])
