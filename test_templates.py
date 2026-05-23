@@ -2414,6 +2414,26 @@ TEST_TEMPLATES = {
                 "title": "Oil Test Measurements",
                 "fields": [
                     {
+                        "key": "threshold_reference",
+                        "label": "IS 1866:2017 Acceptable Limits (Good Range)",
+                        "type": "calculated",
+                        "rule": {
+                            "type": "LOOKUP",
+                            "config": {
+                                "field": "$form.transformer_voltage",
+                                "mapping": {
+                                    "11kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
+                                    "33kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
+                                    "66kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
+                                    "110kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
+                                    "132kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
+                                    "220kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
+                                    "400kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
+                                }
+                            }
+                        }
+                    },
+                    {
                         "key": "oil_test_results",
                         "label": "Test Results as per IS 1866:2017",
                         "type": "table",
