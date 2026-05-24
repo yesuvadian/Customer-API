@@ -1,0 +1,493 @@
+{
+  "surveillance_quarter_review": {
+    "template_name": "Quarterly Surveillance Review",
+    "description": "Officer review of surveillance testing results for a 3-month quarter",
+    "sections": [
+      {
+        "title": "Quarter Overview",
+        "fields": [
+          {
+            "key": "quarter_number",
+            "label": "Quarter Number",
+            "type": "readonly",
+            "help_text": "Automatically populated from stage data (1, 2, 3, or 4)"
+          },
+          {
+            "key": "date_range",
+            "label": "Quarter Period",
+            "type": "readonly",
+            "help_text": "Date range for this quarter (auto-populated)"
+          },
+          {
+            "key": "parent_repair_workflow",
+            "label": "Parent Repair Workflow",
+            "type": "readonly",
+            "help_text": "Original repair workflow ID that triggered this surveillance"
+          },
+          {
+            "key": "equipment_name",
+            "label": "Equipment",
+            "type": "readonly",
+            "help_text": "Equipment under surveillance"
+          }
+        ]
+      },
+      {
+        "title": "Test Completion Status",
+        "description": "Summary of all testing requests auto-created for this quarter",
+        "fields": [
+          {
+            "key": "test_summary_table",
+            "label": "Testing Requests",
+            "type": "table",
+            "readonly": true,
+            "help_text": "Auto-populated from testing_requests WHERE surveillance_quarter = {quarter_number}",
+            "columns": [
+              {
+                "key": "test_type",
+                "label": "Test Type",
+                "type": "text"
+              },
+              {
+                "key": "status",
+                "label": "Status",
+                "type": "badge",
+                "color_map": {
+                  "completed": "green",
+                  "in_progress": "blue",
+                  "pending": "grey"
+                }
+              },
+              {
+                "key": "tested_at",
+                "label": "Tested Date",
+                "type": "date"
+              },
+              {
+                "key": "result_status",
+                "label": "Result",
+                "type": "badge",
+                "color_map": {
+                  "PASS": "green",
+                  "NORMAL": "green",
+                  "GOOD": "green",
+                  "FAIL": "red",
+                  "CRITICAL": "red",
+                  "POOR": "red",
+                  "MARGINAL": "orange",
+                  "ALERT": "orange",
+                  "WARNING": "orange",
+                  "FAIR": "orange"
+                }
+              },
+              {
+                "key": "is_abnormal",
+                "label": "Abnormal",
+                "type": "boolean",
+                "icon_true": "⚠️",
+                "icon_false": "✓"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Quarter Statistics",
+        "description": "Auto-calculated metrics for this quarter",
+        "fields": [
+          {
+            "key": "total_tests_planned",
+            "label": "Total Tests Planned",
+            "type": "readonly",
+            "help_text": "Number of testing requests auto-created for this quarter"
+          },
+          {
+            "key": "tests_completed",
+            "label": "Tests Completed",
+            "type": "readonly",
+            "help_text": "Number of tests with status = 'completed'"
+          },
+          {
+            "key": "abnormal_count",
+            "label": "Abnormal Results",
+            "type": "readonly",
+            "color": "red",
+            "help_text": "Number of tests with FAIL/MARGINAL/CRITICAL/ALERT results"
+          },
+          {
+            "key": "abnormal_rate",
+            "label": "Abnormal Rate",
+            "type": "readonly",
+            "format": "percentage",
+            "help_text": "Percentage of abnormal results (abnormal_count / tests_completed)"
+          }
+        ]
+      },
+      {
+        "title": "Officer Review",
+        "description": "Officer observations and recommendations for this quarter",
+        "fields": [
+          {
+            "key": "officer_observations",
+            "label": "Observations",
+            "type": "textarea",
+            "required": true,
+            "rows": 4,
+            "placeholder": "Describe overall equipment health, test result trends, any concerns noted...",
+            "help_text": "Summary of your observations for this quarter"
+          },
+          {
+            "key": "corrective_actions_ordered",
+            "label": "Corrective Actions Ordered",
+            "type": "textarea",
+            "required": false,
+            "rows": 3,
+            "placeholder": "List any follow-up actions or corrective measures ordered...",
+            "help_text": "Actions taken in response to abnormal results (leave blank if none)"
+          },
+          {
+            "key": "vendor_performance_notes",
+            "label": "Vendor Performance Notes",
+            "type": "textarea",
+            "required": false,
+            "rows": 3,
+            "placeholder": "Comments on vendor repair quality, responsiveness, warranty claims...",
+            "help_text": "Observations related to vendor repair performance"
+          },
+          {
+            "key": "approval_recommendation",
+            "label": "Quarter Approval",
+            "type": "select",
+            "required": true,
+            "options": [
+              {
+                "value": "approved",
+                "label": "Approved - Proceed to Next Quarter",
+                "description": "Equipment performance is acceptable, continue surveillance"
+              },
+              {
+                "value": "approved_with_concerns",
+                "label": "Approved with Concerns",
+                "description": "Minor issues noted but not critical, continue surveillance with monitoring"
+              },
+              {
+                "value": "escalate",
+                "label": "Escalate - Requires Attention",
+                "description": "Significant issues detected, vendor followup or additional testing required"
+              }
+            ],
+            "help_text": "Your recommendation for this quarter"
+          }
+        ]
+      }
+    ]
+  },
+  "surveillance_final_evaluation": {
+    "template_name": "Final Surveillance Evaluation",
+    "description": "Comprehensive 24-month surveillance period summary and final assessment",
+    "sections": [
+      {
+        "title": "Surveillance Period Summary",
+        "fields": [
+          {
+            "key": "surveillance_duration",
+            "label": "Surveillance Duration",
+            "type": "readonly",
+            "help_text": "Total surveillance period (e.g., '24 months')"
+          },
+          {
+            "key": "start_date",
+            "label": "Start Date",
+            "type": "readonly",
+            "help_text": "Surveillance workflow start date (commissioning date)"
+          },
+          {
+            "key": "end_date",
+            "label": "End Date",
+            "type": "readonly",
+            "help_text": "Surveillance workflow end date"
+          },
+          {
+            "key": "parent_repair_workflow",
+            "label": "Parent Repair Workflow",
+            "type": "readonly",
+            "help_text": "Original repair workflow that triggered surveillance"
+          },
+          {
+            "key": "equipment_name",
+            "label": "Equipment",
+            "type": "readonly"
+          },
+          {
+            "key": "vendor_name",
+            "label": "Repair Vendor",
+            "type": "readonly",
+            "help_text": "Vendor who performed the original repair"
+          }
+        ]
+      },
+      {
+        "title": "Test Summary (All Quarters)",
+        "description": "Aggregated statistics across the entire 24-month surveillance period",
+        "fields": [
+          {
+            "key": "total_tests_conducted",
+            "label": "Total Tests Conducted",
+            "type": "readonly",
+            "help_text": "Total number of tests completed across all 4 quarters"
+          },
+          {
+            "key": "abnormal_tests_count",
+            "label": "Abnormal Test Results",
+            "type": "readonly",
+            "color": "red",
+            "help_text": "Total tests with FAIL/MARGINAL/CRITICAL/ALERT results"
+          },
+          {
+            "key": "abnormal_rate",
+            "label": "Overall Abnormal Rate",
+            "type": "readonly",
+            "format": "percentage",
+            "help_text": "Percentage of abnormal results across entire surveillance period"
+          },
+          {
+            "key": "quality_rating",
+            "label": "Quality Rating",
+            "type": "readonly",
+            "badge": true,
+            "color_map": {
+              "GOOD": "green",
+              "FAIR": "orange",
+              "POOR": "red"
+            },
+            "help_text": "Auto-calculated: GOOD (0% abnormal), FAIR (<20% abnormal), POOR (≥20% abnormal)"
+          }
+        ]
+      },
+      {
+        "title": "Quarterly Breakdown",
+        "description": "Test results by quarter",
+        "fields": [
+          {
+            "key": "quarter_breakdown_table",
+            "label": "Quarterly Summary",
+            "type": "table",
+            "readonly": true,
+            "help_text": "Auto-populated from repair_surveillance_tests grouped by quarter",
+            "columns": [
+              {
+                "key": "quarter",
+                "label": "Quarter",
+                "type": "text"
+              },
+              {
+                "key": "tests_completed",
+                "label": "Tests Completed",
+                "type": "number"
+              },
+              {
+                "key": "abnormal_count",
+                "label": "Abnormal",
+                "type": "number"
+              },
+              {
+                "key": "abnormal_rate",
+                "label": "Abnormal %",
+                "type": "percentage"
+              },
+              {
+                "key": "quarter_status",
+                "label": "Status",
+                "type": "badge",
+                "color_map": {
+                  "approved": "green",
+                  "approved_with_concerns": "orange",
+                  "escalate": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Trend Analysis",
+        "description": "Test result trends over time",
+        "fields": [
+          {
+            "key": "dga_trend",
+            "label": "DGA Trend",
+            "type": "readonly",
+            "help_text": "Improving / Stable / Deteriorating (auto-calculated from DGA results)"
+          },
+          {
+            "key": "bdv_trend",
+            "label": "BDV Trend",
+            "type": "readonly",
+            "help_text": "Improving / Stable / Deteriorating"
+          },
+          {
+            "key": "ir_trend",
+            "label": "IR Trend",
+            "type": "readonly",
+            "help_text": "Improving / Stable / Deteriorating"
+          },
+          {
+            "key": "oil_quality_trend",
+            "label": "Oil Quality Trend",
+            "type": "readonly",
+            "help_text": "Improving / Stable / Deteriorating"
+          }
+        ]
+      },
+      {
+        "title": "Final Evaluation",
+        "description": "Officer's final assessment and recommendations",
+        "fields": [
+          {
+            "key": "equipment_health_status",
+            "label": "Equipment Health Status",
+            "type": "select",
+            "required": true,
+            "options": [
+              {
+                "value": "excellent",
+                "label": "Excellent",
+                "description": "Equipment performing above expectations, no issues detected"
+              },
+              {
+                "value": "good",
+                "label": "Good",
+                "description": "Equipment performing well, minor issues only"
+              },
+              {
+                "value": "satisfactory",
+                "label": "Satisfactory",
+                "description": "Equipment acceptable but requires continued monitoring"
+              },
+              {
+                "value": "concerning",
+                "label": "Concerning",
+                "description": "Multiple issues detected, may require intervention"
+              },
+              {
+                "value": "poor",
+                "label": "Poor",
+                "description": "Equipment health is poor, immediate action required"
+              }
+            ]
+          },
+          {
+            "key": "surveillance_outcome",
+            "label": "Surveillance Outcome",
+            "type": "select",
+            "required": true,
+            "options": [
+              {
+                "value": "successful",
+                "label": "Successful - Return to Normal Schedule",
+                "description": "Surveillance complete, equipment stable, resume normal test frequency"
+              },
+              {
+                "value": "successful_extended",
+                "label": "Successful - Extend Monitoring (Optional)",
+                "description": "Equipment stable but recommend extended surveillance period"
+              },
+              {
+                "value": "failed_warranty_claim",
+                "label": "Failed - Warranty Claim Required",
+                "description": "Significant issues detected, vendor warranty claim to be initiated"
+              },
+              {
+                "value": "failed_re_repair",
+                "label": "Failed - Re-Repair Required",
+                "description": "Equipment requires additional repair work"
+              }
+            ],
+            "help_text": "Final outcome of the 24-month surveillance period"
+          },
+          {
+            "key": "final_observations",
+            "label": "Final Observations",
+            "type": "textarea",
+            "required": true,
+            "rows": 6,
+            "placeholder": "Provide comprehensive summary of equipment performance, test trends, vendor repair quality, and final recommendations...",
+            "help_text": "Detailed final assessment of the entire surveillance period"
+          },
+          {
+            "key": "warranty_claim_required",
+            "label": "Warranty Claim Required",
+            "type": "select",
+            "required": true,
+            "options": [
+              {
+                "value": "no",
+                "label": "No - Repair Quality Acceptable"
+              },
+              {
+                "value": "yes_minor",
+                "label": "Yes - Minor Issues"
+              },
+              {
+                "value": "yes_major",
+                "label": "Yes - Major Issues / Repair Failure"
+              }
+            ],
+            "help_text": "Should a warranty claim be filed against the vendor?"
+          },
+          {
+            "key": "warranty_claim_details",
+            "label": "Warranty Claim Details",
+            "type": "textarea",
+            "required": false,
+            "rows": 4,
+            "placeholder": "Describe specific issues, evidence from test results, and recommended actions...",
+            "help_text": "Required if warranty claim is needed",
+            "conditional": {
+              "field": "warranty_claim_required",
+              "value": ["yes_minor", "yes_major"]
+            }
+          },
+          {
+            "key": "vendor_performance_rating",
+            "label": "Vendor Performance Rating",
+            "type": "select",
+            "required": true,
+            "options": [
+              {
+                "value": "5",
+                "label": "5 - Excellent (0% abnormal)"
+              },
+              {
+                "value": "4",
+                "label": "4 - Good (1-10% abnormal)"
+              },
+              {
+                "value": "3",
+                "label": "3 - Satisfactory (11-20% abnormal)"
+              },
+              {
+                "value": "2",
+                "label": "2 - Below Expectations (21-30% abnormal)"
+              },
+              {
+                "value": "1",
+                "label": "1 - Poor (>30% abnormal)"
+              }
+            ],
+            "help_text": "Overall vendor repair quality based on surveillance results"
+          },
+          {
+            "key": "recommendations",
+            "label": "Recommendations",
+            "type": "textarea",
+            "required": true,
+            "rows": 4,
+            "placeholder": "Future testing schedule, preventive maintenance, equipment replacement, vendor blacklisting, etc...",
+            "help_text": "Recommendations for equipment management going forward"
+          }
+        ]
+      }
+    ]
+  }
+}

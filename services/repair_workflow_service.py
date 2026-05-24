@@ -636,6 +636,10 @@ class RepairWorkflowService:
             saved_data = data_row.form_data if data_row else {}
             self._validate_form_data(tmpl_link.template_id, saved_data or {})
 
+        # Surveillance-specific validation: quarterly stages require all tests completed
+        if workflow.workflow_type == 'surveillance' and instance.quarter_number:
+            self._validate_surveillance_tests_completed(workflow_id, instance.quarter_number)
+
         instance.status = "submitted"
         if remarks:
             instance.remarks = remarks
@@ -1778,6 +1782,51 @@ class RepairWorkflowService:
 
         if errors:
             raise ValueError("; ".join(errors))
+
+    def _validate_surveillance_tests_completed(self, workflow_id: UUID, quarter_number: int) -> None:
+        """
+        Validate that all surveillance testing requests for this quarter are completed.
+        Raises ValueError if any tests are pending/in-progress.
+
+        Args:
+            workflow_id: Surveillance workflow ID
+            quarter_number: Quarter number (1-4)
+        """
+        from models import TestingRequest
+
+        # Get all testing requests for this quarter
+        testing_requests = (
+            self.db.query(TestingRequest)
+            .filter(
+                TestingRequest.surveillance_workflow_id == workflow_id,
+                TestingRequest.surveillance_quarter == quarter_number
+            )
+            .all()
+        )
+
+        if not testing_requests:
+            # No tests created yet - this shouldn't happen but allow submission
+            # (tests will be created by daily scheduler)
+            return
+
+        # Check for incomplete tests
+        incomplete = [
+            tr for tr in testing_requests
+            if tr.status not in ['completed', 'cancelled']
+        ]
+
+        if incomplete:
+            test_names = [tr.title or f"Test {tr.test_type.name if tr.test_type else 'Unknown'}"
+                         for tr in incomplete[:3]]  # Show first 3
+            count = len(incomplete)
+            msg = (
+                f"Cannot submit quarterly review: {count} testing request(s) still in progress. "
+                f"Please complete all tests before submitting this stage. "
+                f"Incomplete tests: {', '.join(test_names)}"
+            )
+            if count > 3:
+                msg += f" and {count - 3} more"
+            raise ValueError(msg)
 
     def _fire_notification_safe(self, event_type: str, workflow: RepairWorkflow, stage, user_id: UUID) -> None:
         try:

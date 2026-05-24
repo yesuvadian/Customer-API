@@ -401,6 +401,9 @@ class RepairStageInstance(Base):
 
     status = Column(String, default="not_started")
 
+    # Surveillance workflow support — quarter number for quarterly surveillance stages (1-4)
+    quarter_number = Column(Integer, nullable=True)  # NULL for non-surveillance stages
+
     assigned_user_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.users.id"),
@@ -2364,6 +2367,15 @@ class TestingRequest(Base):
     # Calibration tracking — stamped at creation from template's enable_calibration flag
     is_calibration = Column(Boolean, default=False, nullable=False)
 
+    # Surveillance workflow linkage — for testing requests auto-created during post-commissioning surveillance
+    surveillance_workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    surveillance_quarter = Column(Integer, nullable=True)  # 1, 2, 3, or 4 (NULL for non-surveillance tests)
+
     # Direct submission (Failure Registry / TA&QC — no tester assignment step)
     is_direct_submission = Column(Boolean, default=False)  # True = filler IS the submitter
     form_data = Column(JSONB, nullable=True)               # FR: template fields + recommendation snapshot
@@ -2671,6 +2683,25 @@ class TestRequestSchedule(Base):
 
     pause_reason = Column(
         Text,
+        nullable=True,
+    )
+
+    # ============================================================
+    # SURVEILLANCE WORKFLOW LINKAGE
+    # ============================================================
+
+    surveillance_workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "repair_workflows.id",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    surveillance_quarter = Column(
+        Integer,
         nullable=True,
     )
 
@@ -3962,3 +3993,206 @@ class NotificationRoutingRule(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     cts       = Column(DateTime(timezone=True), server_default=func.now())
     mts       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# POST-COMMISSIONING SURVEILLANCE WORKFLOW MODELS
+# ═══════════════════════════════════════════════════════════════════════════
+
+class SurveillanceConfig(Base):
+    """
+    Hierarchical configuration for post-commissioning surveillance periods.
+
+    Determines surveillance duration and test frequency after Stage 10 (Commissioning) completes.
+    Resolution order: Department → Organization → System (.env fallback).
+
+    Example:
+    - Zone A: 24-month surveillance (default)
+    - Zone B (rural): 18-month surveillance (department override)
+    - System default: 24 months (from .env SURVEILLANCE_PERIOD_MONTHS=24)
+    """
+    __tablename__ = "surveillance_config"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Scope (NULL = system-wide default)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    department_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.org_departments.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    # Surveillance period in months (default: 24)
+    surveillance_period_months = Column(Integer, nullable=False, default=24)
+
+    # Enhanced test frequency multiplier (default: 2x normal frequency)
+    # Normal DGA = 12 months → Surveillance DGA = 12/2 = 6 months
+    frequency_multiplier = Column(Float, nullable=False, default=2.0)
+
+    # Abnormal result detection config
+    # Test results matching these statuses trigger "abnormal" flagging
+    abnormal_statuses = Column(
+        JSONB,
+        nullable=False,
+        server_default='["FAIL", "MARGINAL", "CRITICAL", "ALERT"]'
+    )
+
+    # Quality rating thresholds (% abnormal tests)
+    # GOOD: 0% abnormal
+    # FAIR: 1-19% abnormal
+    # POOR: ≥20% abnormal
+    quality_threshold_fair = Column(Float, nullable=False, default=20.0)  # ≥20% = POOR
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+
+
+class SurveillanceTestConfig(Base):
+    """
+    Defines which test types are auto-created during surveillance periods.
+
+    Links to CategoryDetails (test types) to maintain single source of truth.
+    Each surveillance workflow gets these tests created automatically every 6 months
+    (or per configured frequency).
+
+    Example config row:
+    - equipment_type_id: Power Transformer
+    - test_type_id: DGA (from CategoryDetails where category='test' and name='DGA')
+    - is_required: True
+    - default_priority: high
+    """
+    __tablename__ = "surveillance_test_config"
+    __table_args__ = (
+        UniqueConstraint('equipment_type_id', 'test_type_id', name='uq_surveillance_equipment_test'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Equipment type (FK → CategoryMaster where category='equipment')
+    equipment_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryMaster.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # Test type (FK → CategoryDetails where category='test')
+    # References same table as testing_requests.test_type_id
+    test_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # Whether this test is mandatory during surveillance
+    is_required = Column(Boolean, default=True, nullable=False)
+
+    # Default priority for auto-created testing requests
+    default_priority = Column(String(20), default="high")
+
+    # Test frequency in days (overrides general frequency_multiplier if set)
+    # NULL = use general multiplier logic (normal_period / frequency_multiplier)
+    custom_periodicity_days = Column(Integer, nullable=True)
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+
+
+class RepairSurveillanceTest(Base):
+    """
+    Tracking table linking testing_requests back to surveillance workflows.
+
+    Provides fast reverse lookup and test result aggregation for quality rating calculations.
+    Denormalizes key fields from testing_requests for efficient queries without JOIN.
+
+    Updated automatically when:
+    1. Surveillance scheduler creates testing requests
+    2. Testing request status changes to 'completed'
+    3. Testing request result_status changes (PASS/FAIL/MARGINAL)
+
+    Used for:
+    - Dashboard queries: "Show all abnormal tests for this surveillance workflow"
+    - Quality rating: COUNT(is_abnormal=true) / COUNT(*) per surveillance_workflow_id
+    - Quarter summaries: Pre-populate surveillance stage forms with test results
+    """
+    __tablename__ = "repair_surveillance_tests"
+    __table_args__ = (
+        UniqueConstraint('surveillance_workflow_id', 'testing_request_id', name='uq_surveillance_test_link'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Surveillance workflow (FK → repair_workflows where workflow_type='surveillance')
+    surveillance_workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Testing request created by surveillance scheduler
+    testing_request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.testing_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Quarter number (1-4) — denormalized from surveillance_quarter for fast filtering
+    quarter_number = Column(Integer, nullable=False, index=True)
+
+    # Test type (denormalized from testing_requests.test_type_id)
+    test_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id"),
+        nullable=True,
+    )
+
+    # Test completion status (denormalized from testing_requests.status)
+    test_status = Column(String(50), nullable=True)  # completed, in_progress, etc.
+
+    # Test result (denormalized from testing_requests.result_status or form_data evaluation)
+    result_status = Column(String(50), nullable=True)  # PASS, FAIL, MARGINAL, etc.
+
+    # Abnormal flag — TRUE if result_status matches surveillance_config.abnormal_statuses
+    is_abnormal = Column(Boolean, default=False, nullable=False, index=True)
+
+    # Test completion timestamp (denormalized from testing_requests.completed_at)
+    tested_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    surveillance_workflow = relationship("RepairWorkflow", foreign_keys=[surveillance_workflow_id])
+    testing_request = relationship("TestingRequest", foreign_keys=[testing_request_id])
+    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])

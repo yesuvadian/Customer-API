@@ -10,7 +10,13 @@ from fastapi.security import HTTPBearer
 from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
-from routers import repair_workflow, websocket_routes, workflow_dashboard
+from routers import (
+    repair_workflow,
+    surveillance_workflow,
+    surveillance_dashboard,
+    websocket_routes,
+    workflow_dashboard,
+)
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.test_request_schedule_service import TestRequestScheduleService
 
@@ -723,6 +729,10 @@ app.include_router(workflows.router)
 # Repair Lifecycle Workflow
 app.include_router(repair_workflow.router)
 
+# Surveillance Workflow (Post-Commissioning Monitoring)
+app.include_router(surveillance_workflow.router)
+app.include_router(surveillance_dashboard.router)
+
 # Unified Workflow Operations Dashboard
 app.include_router(workflow_dashboard.router)
 
@@ -743,6 +753,7 @@ async def startup_event():
     # Register workflow lifecycle hooks (import = self-registration side-effect)
     import calibration_hooks  # noqa: F401
     import overhaul_hooks  # noqa: F401
+    import surveillance_hooks  # noqa: F401
     logger.info("[Hooks] Workflow lifecycle hooks registered")
 
     # Seed default notification templates + variables (idempotent)

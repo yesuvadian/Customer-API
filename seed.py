@@ -20,6 +20,8 @@ from models import (
     # Repair Workflow
     RepairStageDefinition, RepairStageTemplate, RepairStageRole,
     RepairStageTransition, RepairWorkflowDefinition, OrgTestTemplate,
+    # Surveillance Workflow
+    SurveillanceConfig, SurveillanceTestConfig,
     # Notification config tables
     NotificationEventCatalogue, NotificationRoutingRule, NotificationScheduleRule,
     # Schedule
@@ -35,6 +37,70 @@ def get_db_session():
         yield session
     finally:
         session.close()
+
+
+def run_migration_from_file(session, migration_file: str, migration_name: str) -> bool:
+    """
+    Execute a SQL migration file.
+
+    Args:
+        session: SQLAlchemy session
+        migration_file: Path to .sql file (e.g., "migrations/008_surveillance_workflow.sql")
+        migration_name: Display name (e.g., "Migration 008: Surveillance Workflow")
+
+    Returns:
+        True if successful, False if failed
+    """
+    import os
+
+    if not os.path.exists(migration_file):
+        print(f"[WARN] Migration file not found: {migration_file} — skipping")
+        return False
+
+    # Read with UTF-8 encoding (handle encoding issues on Windows)
+    try:
+        with open(migration_file, encoding='utf-8') as fh:
+            sql_content = fh.read()
+    except UnicodeDecodeError:
+        # Fallback to latin-1 if UTF-8 fails
+        with open(migration_file, encoding='latin-1') as fh:
+            sql_content = fh.read()
+
+    # Split on semicolons, skip blank/comment-only chunks
+    statements = []
+    for raw in sql_content.split(";"):
+        lines = [l.split("--")[0].strip() for l in raw.split("\n")]
+        clean = "\n".join(l for l in lines if l).strip()
+        if clean:
+            statements.append(clean)
+
+    if not statements:
+        print(f"[WARN] {migration_name}: No statements found — skipping")
+        return True
+
+    print(f"\n[MIGRATION] {migration_name}: {len(statements)} statement(s)")
+
+    for i, stmt in enumerate(statements, 1):
+        # Show truncated statement for progress
+        preview = stmt[:60].replace("\n", " ")
+        print(f"  [{i}/{len(statements)}] {preview}...", end=" ")
+        try:
+            session.execute(text(stmt))
+            session.commit()
+            print("[OK]")
+        except Exception as exc:
+            msg = str(exc).lower()
+            # Graceful handling for "already exists" or "does not exist" errors (idempotency)
+            if "already exists" in msg or "does not exist" in msg:
+                print(f"[SKIP - already applied]")
+                session.rollback()
+            else:
+                print(f"[ERROR] {exc}")
+                session.rollback()
+                return False
+
+    print(f"[OK] {migration_name} completed")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1419,6 +1485,19 @@ def seed_modules(session):
  "description": "Annual audit 5-stage workflow: Observation Reporting to Closure. TA&QC Inspector executes; Reviewing Officer reviews compliance.",
  "path": "annual-audit-workflows",
  "group_name": "Field Operations"},
+# ✅ SURVEILLANCE WORKFLOW MODULE (SRS §7.3)
+{"name": "Surveillance Workflows",
+ "description": "24-month post-commissioning surveillance with quarterly testing (Q1-Q4) and final evaluation. "
+                "Tracks DGA, BDV, IR, Oil Quality tests at enhanced frequency with quality ratings.",
+ "path": "surveillance-workflows",
+ "group_name": "Field Operations"},
+# ✅ SURVEILLANCE DASHBOARD MODULE
+{"name": "Surveillance Dashboard",
+ "description": "Surveillance analytics dashboard — organization-wide surveillance metrics including "
+                "quality ratings distribution, abnormal test rates, quarterly completion status, "
+                "and equipment health trends.",
+ "path": "surveillance-dashboard",
+ "group_name": "Field Operations"},
 # ✅ TEST SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
 {"name": "Test Schedule Templates",
  "rename_from": "Schedule Templates",
@@ -1890,6 +1969,27 @@ def seed_privileges(session, role_ids, module_ids):
         # Supervisory roles: view + export only (no stage actions)
         {"role": "Reviewing Officer",                 "module": "Breakdown Workflows", "can_view": True, "can_export": True},
         {"role": "Supervisory Officer",                 "module": "Breakdown Workflows", "can_view": True, "can_export": True},
+
+        # ✅ SURVEILLANCE WORKFLOWS — Post-commissioning 24-month monitoring (SRS §7.3)
+        # Stage-level RBAC enforced via RepairStageRole (same as repair workflows).
+        # Module-level privileges control nav visibility.
+
+        # All surveillance-acting roles: can view + add (save quarterly review data) + approve (advance stages)
+        {"role": "Maintenance Officer",         "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Reviewing Officer",           "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Supervisory Officer",         "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",  "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "TRC Member",                  "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Test Engineer",               "module": "Surveillance Workflows", "can_view": True, "can_add": True},
+
+        # ✅ SURVEILLANCE DASHBOARD — Analytics and metrics
+        # All roles that can view surveillance workflows can also view the dashboard
+        {"role": "Maintenance Officer",         "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer",           "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",         "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver",  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "TRC Member",                  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -3055,6 +3155,8 @@ def seed_role_templates(session):
     overhaul_workflows_module       = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
     calibration_workflows_module    = [mid for mid in [modules_by_name.get("Calibration Workflows")] if mid]
     annual_audit_workflows_module   = [mid for mid in [modules_by_name.get("Annual Audit Workflows")] if mid]
+    surveillance_workflows_module   = [mid for mid in [modules_by_name.get("Surveillance Workflows")] if mid]
+    surveillance_dashboard_module   = [mid for mid in [modules_by_name.get("Surveillance Dashboard")] if mid]
     schedule_compliance_module          = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
     test_schedule_templates_module      = [mid for mid in [modules_by_name.get("Test Schedule Templates")] if mid]
     maintenance_schedule_templates_module = [mid for mid in [modules_by_name.get("Maintenance Schedule Templates")] if mid]
@@ -5801,6 +5903,8 @@ def seed_missing_role_permissions(session, org=None):
         "Breakdown Workflows":      _get_mod("Breakdown Workflows"),
         "Calibration Workflows":    _get_mod("Calibration Workflows"),
         "Annual Audit Workflows":   _get_mod("Annual Audit Workflows"),
+        "Surveillance Workflows":   _get_mod("Surveillance Workflows"),
+        "Surveillance Dashboard":   _get_mod("Surveillance Dashboard"),
     }
     missing_mods = [k for k, v in mods.items() if v is None]
     if missing_mods:
@@ -5822,6 +5926,8 @@ def seed_missing_role_permissions(session, org=None):
             ("Testing Requests", True, False, False, False, False, False),
             ("Testing",          True, True,  True,  False, False, True),
             ("Equipment",        True, False, False, False, False, False),
+            ("Surveillance Workflows",   True, True,  True,  False, False, False),
+            ("Surveillance Dashboard",   True, False, False, False, False, False),
         ],
         "Reviewing Officer": [
             ("Recommendations",       True, False, False, True, True, True),
@@ -5830,6 +5936,8 @@ def seed_missing_role_permissions(session, org=None):
             ("Breakdown Workflows",      True, False, False, True, True, True),
             ("Calibration Workflows",    True, False, False, True, True, True),
             ("Annual Audit Workflows",   True, False, False, True, True, True),
+            ("Surveillance Workflows",   True, True,  True,  True, True, True),
+            ("Surveillance Dashboard",   True, False, False, False, False, True),
             ("Testing Requests",         True, False, False, False, False, False),
             ("Failure Registry",      True, False, False, False, False, False),
             ("Dashboard",             True, False, False, False, False, False),
@@ -7833,6 +7941,38 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Repair workflow seed failed (non-fatal): {_e}")
 
+        # === Surveillance Migrations ===
+        print("\n" + "=" * 80)
+        print("  SURVEILLANCE WORKFLOW MIGRATIONS")
+        print("=" * 80)
+
+        # Migration 008: Create surveillance tables (surveillance_config, surveillance_test_config, repair_surveillance_tests)
+        # + Add surveillance_workflow_id/surveillance_quarter to testing_requests
+        # + Add quarter_number to repair_stage_instances
+        migration_008_ok = run_migration_from_file(
+            session,
+            "migrations/008_surveillance_workflow.sql",
+            "Migration 008: Surveillance Workflow Schema"
+        )
+
+        # Migration 013: Add surveillance linkage to test_request_schedules
+        # (surveillance_workflow_id, surveillance_quarter columns + index)
+        migration_013_ok = run_migration_from_file(
+            session,
+            "migrations/013_add_surveillance_to_schedules.sql",
+            "Migration 013: Surveillance Schedule Linkage"
+        )
+
+        if not migration_008_ok or not migration_013_ok:
+            print("\n[WARN] Some migrations failed — surveillance seeding may fail")
+
+        print("\n--- Surveillance Workflow Seeding ---")
+        try:
+            seed_surveillance_workflow(session)
+            seed_surveillance_config(session)
+        except Exception as _e:
+            print(f"[WARN] Surveillance workflow seed failed (non-fatal): {_e}")
+
         # Overhaul Workflow — definition + stages for cumulative threshold trigger
         try:
             from seed_overhaul_workflow import seed_overhaul_stages
@@ -8575,6 +8715,299 @@ _DFT_PHONE = {
     ("mysuru", "Procurement Officer"):              "9900003011",
     ("mysuru", "Procurement Approver"):             "9900003012",
 }
+
+
+def seed_surveillance_workflow(session):
+    """
+    Seed surveillance workflow stages, templates, role assignments, and transitions.
+
+    Source files (all at repo root):
+      SURVEILLANCE_WORKFLOW_STAGES.json      — [{name, sequence}]
+      SURVEILLANCE_STAGE_TEMPLATES.json      — {template_key: {name, sections, ...}}
+      SURVEILLANCE_STAGE_TEMPLATE_MAP.json   — {stage_name: template_key}
+      SURVEILLANCE_STAGE_ROLES.json          — [{stage_code, roles:[role_name,...]}]
+    """
+    import json as _json
+    import os as _os
+
+    def _load(fname):
+        path = _os.path.join(_os.path.dirname(__file__), fname)
+        if not _os.path.exists(path):
+            print(f"[WARN] File not found: {fname} - skipping")
+            return None
+        with open(path) as fh:
+            return _json.load(fh)
+
+    stages_raw      = _load("SURVEILLANCE_WORKFLOW_STAGES.json")
+    templates_raw   = _load("SURVEILLANCE_STAGE_TEMPLATES.json")
+    stage_tmpl_map  = _load("SURVEILLANCE_STAGE_TEMPLATE_MAP.json")
+    roles_raw       = _load("SURVEILLANCE_STAGE_ROLES.json")
+
+    if not stages_raw or not templates_raw or not stage_tmpl_map:
+        print("[WARN] Missing surveillance JSON files - skipping surveillance workflow seed")
+        return
+
+    # Stage name → code mapping
+    NAME_TO_CODE = {
+        "Q1 Surveillance Testing":     "Q1_SURVEILLANCE",
+        "Q2 Surveillance Testing":     "Q2_SURVEILLANCE",
+        "Q3 Surveillance Testing":     "Q3_SURVEILLANCE",
+        "Q4 Surveillance Testing":     "Q4_SURVEILLANCE",
+        "Final Evaluation & Report":   "FINAL_EVALUATION",
+    }
+    CODE_TO_NAME = {v: k for k, v in NAME_TO_CODE.items()}
+
+    # ── 0. Workflow definition ────────────────────────────────────────────────
+    wf_def = session.query(RepairWorkflowDefinition).filter_by(workflow_code="SURVEILLANCE").first()
+    if not wf_def:
+        wf_def = RepairWorkflowDefinition(
+            id=uuid.uuid4(),
+            workflow_code="SURVEILLANCE",
+            workflow_name="Post-Commissioning Surveillance",
+            description="24-month surveillance workflow with quarterly testing and final evaluation",
+            is_active=True,
+        )
+        session.add(wf_def)
+        session.flush()
+    print(f"[OK] RepairWorkflowDefinition SURVEILLANCE: {wf_def.id}")
+
+    # ── 1. Templates ──────────────────────────────────────────────────────────
+    template_map = {}   # key → UUID
+    for key, t in templates_raw.items():
+        existing = session.query(OrgTestTemplate).filter_by(template_key=key).first()
+        if existing:
+            template_map[key] = existing.id
+            continue
+        obj = OrgTestTemplate(
+            id=uuid.uuid4(),
+            template_key=key,
+            template_data=t,
+            is_system=True,
+        )
+        session.add(obj)
+        session.flush()
+        template_map[key] = obj.id
+    print(f"[OK] Surveillance templates: {len(template_map)} ready")
+
+    # ── 2. Stages ─────────────────────────────────────────────────────────────
+    stage_map = {}      # name → UUID
+    code_map  = {}      # code → UUID
+    for s in stages_raw:
+        name = s["name"]
+        code = NAME_TO_CODE.get(name, name.upper().replace(" ", "_"))
+        existing = session.query(RepairStageDefinition).filter_by(code=code).first()
+        if existing:
+            if existing.workflow_definition_id != wf_def.id:
+                existing.workflow_definition_id = wf_def.id
+            stage_map[name] = existing.id
+            code_map[code]  = existing.id
+            continue
+        stage = RepairStageDefinition(
+            id=uuid.uuid4(),
+            name=name,
+            code=code,
+            stage_number=s["sequence"],
+            is_active=True,
+            is_mandatory=True,
+            workflow_definition_id=wf_def.id,
+            requires_approval=True,
+        )
+        session.add(stage)
+        session.flush()
+        stage_map[name] = stage.id
+        code_map[code]  = stage.id
+    print(f"[OK] Surveillance stages: {len(stage_map)} ready")
+
+    # ── 3. Stage → Template mapping ───────────────────────────────────────────
+    for stage_name, tmpl_key in stage_tmpl_map.items():
+        stage_id   = stage_map.get(stage_name)
+        template_id = template_map.get(tmpl_key)
+        if not stage_id or not template_id:
+            continue
+        exists = session.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
+        if not exists:
+            session.add(RepairStageTemplate(stage_id=stage_id, template_id=template_id))
+
+    # ── 4. Stage → Role mapping ───────────────────────────────────────────────
+    if roles_raw:
+        for entry in roles_raw:
+            stage_code = entry.get("stage_code") or entry.get("code")
+            stage_id   = code_map.get(stage_code)
+            if not stage_id:
+                print(f"[WARN] Stage code not found: {stage_code}")
+                continue
+
+            # Stage actor roles
+            for role_name in entry.get("roles", []):
+                matched_roles = session.query(OrgRole).filter(OrgRole.name == role_name).all()
+                if not matched_roles:
+                    print(f"[WARN] Role not found in any org: {role_name}")
+                    continue
+                for role in matched_roles:
+                    exists = session.query(RepairStageRole).filter_by(
+                        stage_id=stage_id, role_id=role.id
+                    ).first()
+                    if not exists:
+                        session.add(RepairStageRole(
+                            stage_id=stage_id,
+                            role_id=role.id,
+                            can_edit=True,
+                            can_approve=True,
+                        ))
+
+    # ── 5. Stage Transitions ──────────────────────────────────────────────────
+    # Q1 → Q2 → Q3 → Q4 → Final (no transition after final = workflow completes)
+    transitions = [
+        ("Q1_SURVEILLANCE", "Q2_SURVEILLANCE", "approve"),
+        ("Q2_SURVEILLANCE", "Q3_SURVEILLANCE", "approve"),
+        ("Q3_SURVEILLANCE", "Q4_SURVEILLANCE", "approve"),
+        ("Q4_SURVEILLANCE", "FINAL_EVALUATION", "approve"),
+    ]
+
+    for from_code, to_code, action in transitions:
+        from_id = code_map.get(from_code)
+        to_id   = code_map.get(to_code)
+        if not from_id or not to_id:
+            continue
+        exists = session.query(RepairStageTransition).filter_by(
+            from_stage_id=from_id, to_stage_id=to_id, action=action
+        ).first()
+        if not exists:
+            session.add(RepairStageTransition(
+                from_stage_id=from_id,
+                to_stage_id=to_id,
+                action=action,
+                label=f"Complete {CODE_TO_NAME.get(from_code, from_code)}",
+            ))
+
+    session.commit()
+    print("[OK] Surveillance workflow seeded successfully")
+
+
+def seed_surveillance_config(session):
+    """
+    Seed surveillance configuration data.
+
+    Creates:
+    1. System-wide default surveillance config (24 months, 2x frequency)
+    2. Test type configurations (DGA, BDV, IR, Oil Quality for surveillance)
+    """
+    print("\n[INFO] Seeding surveillance configuration...")
+
+    # ── 1. System-wide Default Config ─────────────────────────────────────────
+    # Check if system default already exists
+    system_config = session.query(SurveillanceConfig).filter_by(
+        organization_id=None,
+        department_id=None
+    ).first()
+
+    if not system_config:
+        system_config = SurveillanceConfig(
+            id=uuid.uuid4(),
+            organization_id=None,  # System-wide default
+            department_id=None,
+            surveillance_period_months=24,  # 24-month surveillance period
+            frequency_multiplier=2.0,        # 2x normal test frequency (12mo → 6mo)
+            abnormal_statuses=['FAIL', 'MARGINAL', 'CRITICAL', 'ALERT'],
+            quality_thresholds={
+                'excellent': 0,      # 0% abnormal
+                'good': 20,          # <20% abnormal
+                'fair': 50,          # 20-50% abnormal
+                'poor': 51           # ≥50% abnormal
+            },
+            is_active=True,
+        )
+        session.add(system_config)
+        session.flush()
+        print(f"[OK] System surveillance config created: {system_config.id}")
+    else:
+        print(f"[SKIP] System surveillance config already exists: {system_config.id}")
+
+    # ── 2. Surveillance Test Configurations ───────────────────────────────────
+    # Get equipment types and test types from CategoryDetails
+
+    # Find "Power Transformer" equipment type
+    equipment_type = session.query(CategoryDetails).filter(
+        CategoryDetails.category == 'asset',
+        CategoryDetails.name.ilike('%transformer%')
+    ).first()
+
+    if not equipment_type:
+        print("[WARN] Power Transformer equipment type not found - skipping test config")
+        return
+
+    # Find required test types
+    test_type_names = ['DGA', 'BDV', 'IR', 'Oil Quality']
+    test_types = session.query(CategoryDetails).filter(
+        CategoryDetails.category == 'test',
+        CategoryDetails.name.in_(test_type_names)
+    ).all()
+
+    if not test_types:
+        print("[WARN] Test types not found in CategoryDetails - skipping test config")
+        return
+
+    test_type_map = {t.name: t for t in test_types}
+
+    # Create surveillance test configs
+    surveillance_tests = [
+        {
+            'test_name': 'DGA',
+            'is_required': True,
+            'default_priority': 'high',
+            'description': 'Dissolved Gas Analysis - monitors transformer health through gas levels'
+        },
+        {
+            'test_name': 'BDV',
+            'is_required': True,
+            'default_priority': 'high',
+            'description': 'Breakdown Voltage - measures insulating oil dielectric strength'
+        },
+        {
+            'test_name': 'IR',
+            'is_required': True,
+            'default_priority': 'medium',
+            'description': 'Insulation Resistance - checks winding insulation integrity'
+        },
+        {
+            'test_name': 'Oil Quality',
+            'is_required': True,
+            'default_priority': 'medium',
+            'description': 'Oil Quality Analysis - comprehensive oil condition assessment'
+        },
+    ]
+
+    for test_config in surveillance_tests:
+        test_name = test_config['test_name']
+        test_type = test_type_map.get(test_name)
+
+        if not test_type:
+            print(f"[WARN] Test type not found: {test_name}")
+            continue
+
+        # Check if config already exists
+        existing = session.query(SurveillanceTestConfig).filter_by(
+            equipment_type_id=equipment_type.id,
+            test_type_id=test_type.id
+        ).first()
+
+        if existing:
+            print(f"[SKIP] Surveillance test config exists: {test_name}")
+            continue
+
+        config = SurveillanceTestConfig(
+            id=uuid.uuid4(),
+            equipment_type_id=equipment_type.id,
+            test_type_id=test_type.id,
+            is_required=test_config['is_required'],
+            default_priority=test_config['default_priority'],
+            description=test_config.get('description'),
+        )
+        session.add(config)
+        print(f"[OK] Surveillance test config created: {test_name}")
+
+    session.commit()
+    print("[OK] Surveillance configuration seeded successfully")
 
 
 def _dft_get_or_create_org(session) -> Organization:
