@@ -29,6 +29,7 @@ from models import (
     EquipmentStatus,
     OrgRole,
     OrgUserRole,
+    OverhaulRecommendation,
     RepairAssignmentQueue,
     RepairStageAuditLog,
     RepairStageData,
@@ -704,6 +705,17 @@ class RepairWorkflowService:
             equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
             if equipment:
                 equipment.status = EquipmentStatus.active
+
+            # Close associated OverhaulRecommendation if this is an OVERHAUL workflow
+            if workflow.workflow_type == "OVERHAUL":
+                rec = self.db.query(OverhaulRecommendation).filter(
+                    OverhaulRecommendation.workflow_id == workflow_id,
+                    OverhaulRecommendation.status == "OPEN"
+                ).first()
+                if rec:
+                    rec.status = "CLOSED"
+                    rec.closed_at = self._utc_now()
+
             self.db.commit()
             # Fire registered completion hooks (e.g. calibration schedule upsert).
             # Hooks are registered by *_hooks.py modules imported at startup.
@@ -890,6 +902,16 @@ class RepairWorkflowService:
         equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
         if equipment:
             equipment.status = EquipmentStatus.active
+
+        # Close associated OverhaulRecommendation if this is an OVERHAUL workflow
+        if workflow.workflow_type == "OVERHAUL":
+            rec = self.db.query(OverhaulRecommendation).filter(
+                OverhaulRecommendation.workflow_id == workflow_id,
+                OverhaulRecommendation.status == "OPEN"
+            ).first()
+            if rec:
+                rec.status = "CLOSED"
+                rec.closed_at = self._utc_now()
 
         self.db.commit()
         self._log_audit(workflow_id, workflow.current_stage_id, "cancel", user_id, reason or "Workflow cancelled")
