@@ -2278,6 +2278,12 @@ class EquipmentCreate(BaseModel):
     year_of_manufacture: Optional[int] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    phase: Optional[str] = None
+    ct_ratio_actual: Optional[str] = None
+    ct_ratio_current: Optional[str] = None
+    pt_ratio: Optional[str] = None
+    vector_group: Optional[str] = None
+    impedance_pct: Optional[float] = None
 
 
 class EquipmentUpdate(BaseModel):
@@ -2289,8 +2295,14 @@ class EquipmentUpdate(BaseModel):
     factory_serial_number: Optional[str] = None
     year_of_manufacture: Optional[int] = None
     commissioned_date: Optional[datetime] = None
-    latitude: Optional[float] = None   
-    longitude: Optional[float] = None  
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    phase: Optional[str] = None
+    ct_ratio_actual: Optional[str] = None
+    ct_ratio_current: Optional[str] = None
+    pt_ratio: Optional[str] = None
+    vector_group: Optional[str] = None
+    impedance_pct: Optional[float] = None
 
 
 class EquipmentChainRef(BaseModel):
@@ -2321,10 +2333,10 @@ class EquipmentResponse(BaseModel):
     nameplate_data: Optional[dict] = None
     status: str
     # Replacement chain (bidirectional)
-    replaces_equipment_id: Optional[UUID] = None   # UUID of the old unit this replaced
-    replaces_equipment: Optional[EquipmentChainRef] = None  # inline summary of the old unit
-    replaced_by_id: Optional[UUID] = None          # UUID of the new unit that replaced this one
-    replaced_by: Optional[EquipmentChainRef] = None  # inline summary of the new unit
+    replaces_equipment_id: Optional[UUID] = None
+    replaces_equipment: Optional[EquipmentChainRef] = None
+    replaced_by_id: Optional[UUID] = None
+    replaced_by: Optional[EquipmentChainRef] = None
     replacement_reason_type: Optional[str] = None
     commissioned_date: Optional[datetime] = None
     retired_date: Optional[datetime] = None
@@ -2333,6 +2345,12 @@ class EquipmentResponse(BaseModel):
     model_number: Optional[str] = None
     factory_serial_number: Optional[str] = None
     year_of_manufacture: Optional[int] = None
+    phase: Optional[str] = None
+    ct_ratio_actual: Optional[str] = None
+    ct_ratio_current: Optional[str] = None
+    pt_ratio: Optional[str] = None
+    vector_group: Optional[str] = None
+    impedance_pct: Optional[float] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
@@ -2358,6 +2376,12 @@ class EquipmentReplaceRequest(BaseModel):
     model_number: Optional[str] = None
     factory_serial_number: Optional[str] = None
     year_of_manufacture: Optional[int] = None
+    phase: Optional[str] = None
+    ct_ratio_actual: Optional[str] = None
+    ct_ratio_current: Optional[str] = None
+    pt_ratio: Optional[str] = None
+    vector_group: Optional[str] = None
+    impedance_pct: Optional[float] = None
 
 
 class EquipmentCountResponse(BaseModel):

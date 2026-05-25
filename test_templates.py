@@ -204,7 +204,7 @@ TEST_TEMPLATES = {
     "protection_relay_functional_test": {
         "key": "protection_relay_functional_test",
         "name": "Protection Relay Functional Test",
-        "equipment_type": "Protection relays",
+        "equipment_type": "Protection Relay",
         "description": "Functional verification of protection relay settings and operation",
         "sections": [
             {
@@ -260,7 +260,7 @@ TEST_TEMPLATES = {
     "insulation_resistance_test": {
         "key": "insulation_resistance_test",
         "name": "Insulation Resistance (IR) Test",
-        "equipment_type": "Current transformers",
+        "equipment_type": "Current Transformer",
         "description": "Insulation resistance measurement using megger",
         "sections": [
             {
@@ -320,7 +320,7 @@ TEST_TEMPLATES = {
     "ct_ratio_test": {
         "key": "ct_ratio_test",
         "name": "CT Ratio Test",
-        "equipment_type": "Current transformers",
+        "equipment_type": "Current Transformer",
         "description": "Current transformer ratio and polarity verification",
         "sections": [
             {
@@ -374,7 +374,7 @@ TEST_TEMPLATES = {
     "core_insulation_test": {
         "key": "core_insulation_test",
         "name": "Core Insulation Test",
-        "equipment_type": "Current transformers",
+        "equipment_type": "Current Transformer",
         "description": "Core insulation resistance and voltage withstand test",
         "sections": [
             {
@@ -841,7 +841,7 @@ TEST_TEMPLATES = {
     "meter_testing": {
         "key": "meter_testing",
         "name": "Meter Testing",
-        "equipment_type": "Meter",
+        "equipment_type": "Electronic Tri-vector Meter",
         "description": "Testing of energy meters at substations",
         "sections": [
             {
@@ -891,7 +891,7 @@ TEST_TEMPLATES = {
     "relay_testing": {
         "key": "relay_testing",
         "name": "Relay Testing",
-        "equipment_type": "Relay",
+        "equipment_type": "Protection Relay",
         "description": "Testing of relays at substations with phase-wise readings",
         "sections": [
             {
@@ -1525,7 +1525,7 @@ TEST_TEMPLATES = {
     "cvt_test": {
         "key": "cvt_test",
         "name": "CVT Test Report",
-        "equipment_type": "CVT",
+        "equipment_type": "Capacitor Voltage Transformer",
         "description": "CVT test report with details, insulation resistance, and ratio test",
         "sections": [
             {
@@ -2149,7 +2149,7 @@ TEST_TEMPLATES = {
     "protection_relay_calibration": {
         "key": "protection_relay_calibration",
         "name": "Protection Relay Calibration",
-        "equipment_type": "Protection Relays",
+        "equipment_type": "Protection Relay",
         "description": "Calibration record for protection relays — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
         "enable_calibration": True,
         "multi_session": True,
@@ -2212,7 +2212,7 @@ TEST_TEMPLATES = {
     "tri_vector_meter_calibration": {
         "key": "tri_vector_meter_calibration",
         "name": "Electronic Tri-vector Meter Calibration",
-        "equipment_type": "Electronic Tri-vector Meters",
+        "equipment_type": "Electronic Tri-vector Meter",
         "description": "Calibration record for electronic tri-vector meters — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
         "enable_calibration": True,
         "multi_session": True,
@@ -2279,7 +2279,7 @@ TEST_TEMPLATES = {
     "circuit_breaker_operations": {
         "key": "circuit_breaker_operations",
         "name": "Circuit Breaker Operations Count",
-        "equipment_type": "Circuit Breakers",
+        "equipment_type": "Circuit Breaker",
         "description": "Multi-session cumulative operations count for circuit breakers — triggers overhaul when threshold crossed.",
         "enable_cumulative": True,
         "multi_session": True,
@@ -2327,7 +2327,7 @@ TEST_TEMPLATES = {
     "oltc_operations": {
         "key": "oltc_operations",
         "name": "OLTC Operations Count",
-        "equipment_type": "OLTCs",
+        "equipment_type": "Power Transformer",
         "description": "Multi-session cumulative tap-change operations count for OLTCs — triggers overhaul when threshold crossed.",
         "enable_cumulative": True,
         "multi_session": True,
@@ -2780,6 +2780,1206 @@ TEST_TEMPLATES = {
 
         ],
     },
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # CIRCUIT BREAKER TEMPLATES
+    # ════════════════════════════════════════════════════════════════════════════
+
+    "circuit_breaker_contact_resistance": {
+        "key": "circuit_breaker_contact_resistance",
+        "name": "Contact Resistance Test",
+        "equipment_type": "Circuit Breaker",
+        "description": "Contact resistance measurement of circuit breaker poles using micro-ohmmeter.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",       "label": "Station Name",          "type": "text",     "required": True},
+                    {"key": "bay_number",          "label": "Bay Number",             "type": "text",     "required": True},
+                    {"key": "date_of_testing",     "label": "Date of Testing",        "type": "date",     "required": True},
+                    {"key": "cb_make",             "label": "CB Make",                "type": "text",     "required": True},
+                    {"key": "cb_model",            "label": "CB Model",               "type": "text"},
+                    {"key": "cb_serial",           "label": "Serial Number",          "type": "text"},
+                    {"key": "voltage_class_kv",    "label": "Voltage Class",          "type": "number",   "unit": "kV",     "required": True},
+                    {"key": "rated_current_a",     "label": "Rated Current",          "type": "number",   "unit": "A"},
+                    {"key": "instrument_used",     "label": "Instrument Used",        "type": "text"},
+                    {"key": "test_current_a",      "label": "Test Current (DLRO)",    "type": "number",   "unit": "A"},
+                ],
+            },
+            {
+                "title": "Contact Resistance Readings",
+                "fields": [
+                    {
+                        "key": "resistance_readings",
+                        "label": "Resistance per Pole (µΩ)",
+                        "type": "table",
+                        "columns": [
+                            {"key": "pole",          "label": "Pole",           "type": "text"},
+                            {"key": "reading_1",     "label": "Reading 1 (µΩ)", "type": "number"},
+                            {"key": "reading_2",     "label": "Reading 2 (µΩ)", "type": "number"},
+                            {"key": "average",       "label": "Average (µΩ)",   "type": "number"},
+                            {"key": "max_limit",     "label": "Max Limit (µΩ)", "type": "number"},
+                            {"key": "result",        "label": "Result",         "type": "dropdown", "options": ["Pass", "Fail"]},
+                        ],
+                        "default_rows": [
+                            {"pole": "R Phase"},
+                            {"pole": "Y Phase"},
+                            {"pole": "B Phase"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",         "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result",  "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "tested_by",      "label": "Tested By",       "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "circuit_breaker_insulation_resistance": {
+        "key": "circuit_breaker_insulation_resistance",
+        "name": "Insulation Resistance Test",
+        "equipment_type": "Circuit Breaker",
+        "description": "Insulation resistance measurement of circuit breaker in open and closed positions.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",    "label": "Station Name",       "type": "text",   "required": True},
+                    {"key": "bay_number",       "label": "Bay Number",          "type": "text",   "required": True},
+                    {"key": "date_of_testing",  "label": "Date of Testing",     "type": "date",   "required": True},
+                    {"key": "cb_make",          "label": "CB Make",             "type": "text"},
+                    {"key": "cb_serial",        "label": "Serial Number",       "type": "text"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class",       "type": "number", "unit": "kV",  "required": True},
+                    {"key": "test_voltage_kv",  "label": "Megger Test Voltage", "type": "number", "unit": "kV",  "required": True},
+                    {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C"},
+                    {"key": "humidity_pct",     "label": "Relative Humidity",   "type": "number", "unit": "%"},
+                ],
+            },
+            {
+                "title": "IR Readings — CB Open Position",
+                "fields": [
+                    {
+                        "key": "ir_open",
+                        "label": "IR (CB Open) in GΩ",
+                        "type": "table",
+                        "columns": [
+                            {"key": "measurement",   "label": "Measurement",    "type": "text"},
+                            {"key": "r_phase",       "label": "R Phase (GΩ)",   "type": "number"},
+                            {"key": "y_phase",       "label": "Y Phase (GΩ)",   "type": "number"},
+                            {"key": "b_phase",       "label": "B Phase (GΩ)",   "type": "number"},
+                        ],
+                        "default_rows": [
+                            {"measurement": "1 min (R60)"},
+                            {"measurement": "10 min (R600)"},
+                            {"measurement": "PI (R600/R60)"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "IR Readings — CB Closed Position",
+                "fields": [
+                    {
+                        "key": "ir_closed",
+                        "label": "IR (CB Closed) in GΩ",
+                        "type": "table",
+                        "columns": [
+                            {"key": "measurement", "label": "Measurement",   "type": "text"},
+                            {"key": "r_phase",     "label": "R Phase (GΩ)", "type": "number"},
+                            {"key": "y_phase",     "label": "Y Phase (GΩ)", "type": "number"},
+                            {"key": "b_phase",     "label": "B Phase (GΩ)", "type": "number"},
+                        ],
+                        "default_rows": [
+                            {"measurement": "Phase to Earth"},
+                            {"measurement": "Phase to Phase"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "circuit_breaker_sf6_pressure": {
+        "key": "circuit_breaker_sf6_pressure",
+        "name": "SF6 Gas Pressure Test",
+        "equipment_type": "Circuit Breaker",
+        "description": "SF6 gas pressure check against rated and minimum operating pressure.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",       "label": "Station Name",            "type": "text",   "required": True},
+                    {"key": "bay_number",          "label": "Bay Number",               "type": "text",   "required": True},
+                    {"key": "date_of_testing",     "label": "Date of Testing",          "type": "date",   "required": True},
+                    {"key": "cb_make",             "label": "CB Make",                  "type": "text"},
+                    {"key": "cb_serial",           "label": "Serial Number",            "type": "text"},
+                    {"key": "voltage_class_kv",    "label": "Voltage Class",            "type": "number", "unit": "kV", "required": True},
+                    {"key": "rated_pressure_bar",  "label": "Rated Gas Pressure",       "type": "number", "unit": "bar (20°C)"},
+                    {"key": "min_op_pressure_bar", "label": "Min Operating Pressure",   "type": "number", "unit": "bar"},
+                    {"key": "alarm_pressure_bar",  "label": "Alarm Pressure Setting",   "type": "number", "unit": "bar"},
+                ],
+            },
+            {
+                "title": "Gas Pressure Readings",
+                "fields": [
+                    {
+                        "key": "pressure_readings",
+                        "label": "Pressure per Pole",
+                        "type": "table",
+                        "columns": [
+                            {"key": "pole",           "label": "Pole / Chamber",      "type": "text"},
+                            {"key": "pressure_bar",   "label": "Measured (bar)",      "type": "number"},
+                            {"key": "temp_c",         "label": "Ambient Temp (°C)",   "type": "number"},
+                            {"key": "corrected_bar",  "label": "Corrected to 20°C",   "type": "number"},
+                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Normal", "Low", "Critical"]},
+                        ],
+                        "default_rows": [
+                            {"pole": "R Phase"},
+                            {"pole": "Y Phase"},
+                            {"pole": "B Phase"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "top_up_done",    "label": "Gas Top-up Done",    "type": "boolean"},
+                    {"key": "top_up_qty_kg",  "label": "Gas Added",          "type": "number",   "unit": "kg"},
+                    {"key": "remarks",        "label": "Remarks",            "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result",     "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Topped Up - Pass"]},
+                    {"key": "tested_by",      "label": "Tested By",          "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "circuit_breaker_sf6_purity": {
+        "key": "circuit_breaker_sf6_purity",
+        "name": "SF6 Gas Purity Test",
+        "equipment_type": "Circuit Breaker",
+        "description": "SF6 gas purity analysis — moisture, decomposition products, and purity percentage.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",    "label": "Station Name",    "type": "text", "required": True},
+                    {"key": "bay_number",       "label": "Bay Number",       "type": "text", "required": True},
+                    {"key": "date_of_testing",  "label": "Date of Testing",  "type": "date", "required": True},
+                    {"key": "cb_make",          "label": "CB Make",          "type": "text"},
+                    {"key": "cb_serial",        "label": "Serial Number",    "type": "text"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class",    "type": "number", "unit": "kV", "required": True},
+                    {"key": "analyzer_make",    "label": "Analyzer Make",    "type": "text"},
+                    {"key": "analyzer_serial",  "label": "Analyzer Serial",  "type": "text"},
+                ],
+            },
+            {
+                "title": "Gas Quality Measurements",
+                "fields": [
+                    {
+                        "key": "purity_readings",
+                        "label": "Gas Quality per Pole",
+                        "type": "table",
+                        "columns": [
+                            {"key": "pole",           "label": "Pole",                "type": "text"},
+                            {"key": "purity_pct",     "label": "Purity (%)",          "type": "number"},
+                            {"key": "moisture_ppm",   "label": "Moisture (ppmv)",     "type": "number"},
+                            {"key": "dew_point_c",    "label": "Dew Point (°C)",      "type": "number"},
+                            {"key": "so2_ppm",        "label": "SO₂ (ppm)",           "type": "number"},
+                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Pass", "Fail"]},
+                        ],
+                        "default_rows": [
+                            {"pole": "R Phase"},
+                            {"pole": "Y Phase"},
+                            {"pole": "B Phase"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "gas_replacement_done", "label": "Gas Replacement Done", "type": "boolean"},
+                    {"key": "remarks",              "label": "Remarks",              "type": "textarea"},
+                    {"key": "overall_result",       "label": "Overall Result",       "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Gas Replaced - Pass"]},
+                    {"key": "tested_by",            "label": "Tested By",            "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "circuit_breaker_travel_timing": {
+        "key": "circuit_breaker_travel_timing",
+        "name": "Travel and Timing Test",
+        "equipment_type": "Circuit Breaker",
+        "description": "Circuit breaker operating time, travel, and velocity measurements per IEC 62271-100.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",    "label": "Station Name",       "type": "text",   "required": True},
+                    {"key": "bay_number",       "label": "Bay Number",          "type": "text",   "required": True},
+                    {"key": "date_of_testing",  "label": "Date of Testing",     "type": "date",   "required": True},
+                    {"key": "cb_make",          "label": "CB Make",             "type": "text"},
+                    {"key": "cb_serial",        "label": "Serial Number",       "type": "text"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class",       "type": "number", "unit": "kV", "required": True},
+                    {"key": "rated_voltage_dc", "label": "Rated Control Voltage","type": "number", "unit": "Vdc"},
+                    {"key": "analyzer_make",    "label": "Analyzer Make/Model", "type": "text"},
+                ],
+            },
+            {
+                "title": "Opening Operation",
+                "fields": [
+                    {
+                        "key": "opening_times",
+                        "label": "Opening Times (ms)",
+                        "type": "table",
+                        "columns": [
+                            {"key": "operation",   "label": "Operation",        "type": "text"},
+                            {"key": "r_phase_ms",  "label": "R Phase (ms)",     "type": "number"},
+                            {"key": "y_phase_ms",  "label": "Y Phase (ms)",     "type": "number"},
+                            {"key": "b_phase_ms",  "label": "B Phase (ms)",     "type": "number"},
+                            {"key": "limit_ms",    "label": "Max Limit (ms)",   "type": "number"},
+                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"]},
+                        ],
+                        "default_rows": [
+                            {"operation": "Opening Time"},
+                            {"operation": "Contact Wipe"},
+                            {"operation": "Contact Travel (mm)"},
+                            {"operation": "Opening Velocity (m/s)"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Closing Operation",
+                "fields": [
+                    {
+                        "key": "closing_times",
+                        "label": "Closing Times (ms)",
+                        "type": "table",
+                        "columns": [
+                            {"key": "operation",   "label": "Operation",        "type": "text"},
+                            {"key": "r_phase_ms",  "label": "R Phase (ms)",     "type": "number"},
+                            {"key": "y_phase_ms",  "label": "Y Phase (ms)",     "type": "number"},
+                            {"key": "b_phase_ms",  "label": "B Phase (ms)",     "type": "number"},
+                            {"key": "limit_ms",    "label": "Max Limit (ms)",   "type": "number"},
+                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"]},
+                        ],
+                        "default_rows": [
+                            {"operation": "Closing Time"},
+                            {"operation": "Closing Velocity (m/s)"},
+                            {"operation": "Bounce Time (ms)"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Close-Open (CO) Operation",
+                "fields": [
+                    {"key": "co_open_time_ms",  "label": "CO — Open Time",     "type": "number", "unit": "ms"},
+                    {"key": "co_dead_time_ms",  "label": "CO — Dead Time",     "type": "number", "unit": "ms"},
+                    {"key": "co_result",        "label": "CO Result",          "type": "dropdown", "options": ["Pass", "Fail", "Not Tested"]},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "circuit_breaker_min_trip_voltage": {
+        "key": "circuit_breaker_min_trip_voltage",
+        "name": "Minimum Trip Voltage Test",
+        "equipment_type": "Circuit Breaker",
+        "description": "Determines minimum control voltage at which the CB trips reliably.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",         "label": "Station Name",           "type": "text",     "required": True},
+                    {"key": "bay_number",             "label": "Bay Number",              "type": "text",     "required": True},
+                    {"key": "date_of_testing",        "label": "Date of Testing",         "type": "date",     "required": True},
+                    {"key": "cb_make",                "label": "CB Make",                 "type": "text"},
+                    {"key": "cb_serial",              "label": "Serial Number",           "type": "text"},
+                    {"key": "rated_control_voltage_v","label": "Rated Control Voltage",   "type": "number",   "unit": "V",  "required": True},
+                    {"key": "rated_current_a",        "label": "Rated Current",           "type": "number",   "unit": "A"},
+                ],
+            },
+            {
+                "title": "Trip Coil Test",
+                "fields": [
+                    {"key": "trip_coil_resistance_ohm",  "label": "Trip Coil Resistance",         "type": "number", "unit": "Ω"},
+                    {"key": "min_trip_voltage_v",         "label": "Min Trip Voltage (Actual)",     "type": "number", "unit": "V",  "required": True},
+                    {"key": "min_trip_voltage_pct",       "label": "Min Trip Voltage (% of Rated)", "type": "number", "unit": "%"},
+                    {"key": "spec_min_pct",               "label": "Specified Minimum (%)",         "type": "number", "unit": "%", "placeholder": "e.g. 70"},
+                    {"key": "trip_time_at_min_v_ms",      "label": "Trip Time at Min Voltage",      "type": "number", "unit": "ms"},
+                    {"key": "close_coil_resistance_ohm",  "label": "Close Coil Resistance",         "type": "number", "unit": "Ω"},
+                    {"key": "min_close_voltage_v",        "label": "Min Close Voltage (Actual)",    "type": "number", "unit": "V"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"]},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "circuit_breaker_maintenance": {
+        "key": "circuit_breaker_maintenance",
+        "name": "Circuit Breaker Preventive Maintenance",
+        "equipment_type": "Circuit Breaker",
+        "description": "Routine and major preventive maintenance checklist for circuit breakers.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",           "type": "date",   "required": True},
+                    {"key": "maintenance_time",    "label": "Time",                           "type": "text",   "placeholder": "HH:MM"},
+                    {"key": "ambient_temp_c",      "label": "Ambient Temperature",            "type": "number", "unit": "°C"},
+                    {"key": "humidity_pct",        "label": "Relative Humidity",              "type": "number", "unit": "%"},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer","type": "text",   "required": True},
+                    {"key": "witness_officer",     "label": "Name of Witnessing Officer",     "type": "text"},
+                    {"key": "ops_count_at_maint",  "label": "Operations Count at Maintenance","type": "number"},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",         "label": "Permit to Work obtained",                 "type": "checkbox", "required": True},
+                    {"key": "lockout_tagout",          "label": "Lockout / Tagout applied",                "type": "checkbox", "required": True},
+                    {"key": "earth_applied",           "label": "Earth connections applied",               "type": "checkbox", "required": True},
+                    {"key": "sf6_pressure_checked",    "label": "SF6 gas pressure checked",                "type": "checkbox", "required": True},
+                    {"key": "general_cleaning",        "label": "General cleaning completed",              "type": "checkbox", "required": True},
+                    {"key": "mechanism_lubricated",    "label": "Operating mechanism lubricated",          "type": "checkbox"},
+                    {"key": "trip_close_ops_checked",  "label": "Trip / close operations verified",        "type": "dropdown", "options": ["Pass", "Fail", "N/A"]},
+                    {"key": "heater_working",          "label": "Anti-condensation heater working",        "type": "checkbox"},
+                    {"key": "control_cables_ok",       "label": "Control cables and connections intact",   "type": "checkbox"},
+                    {"key": "earthing_ok",             "label": "Earthing connections intact",             "type": "checkbox"},
+                    {"key": "no_corrosion",            "label": "No corrosion / physical damage observed", "type": "checkbox"},
+                    {"key": "bushing_insulators_clean","label": "Bushing insulators cleaned",              "type": "checkbox"},
+                    {"key": "observations",            "label": "Observations",                            "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"]},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "circuit_breaker_inspection": {
+        "key": "circuit_breaker_inspection",
+        "name": "Circuit Breaker Annual Inspection",
+        "equipment_type": "Circuit Breaker",
+        "description": "Annual inspection checklist for circuit breakers — safety, civil, fire, and documentation.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "station_name",      "label": "Station Name",       "type": "text", "required": True},
+                    {"key": "bay_number",         "label": "Bay Number",          "type": "text"},
+                    {"key": "inspection_date",    "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type",    "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",     "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok",   "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",             "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",              "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",     "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "fire_extinguisher_ok",     "label": "Fire extinguisher in place and valid",     "type": "checkbox"},
+                    {"key": "documents_updated",        "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",             "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # SURGE ARRESTOR TEMPLATES
+    # ════════════════════════════════════════════════════════════════════════════
+
+    "surge_arrestor_ir_leakage": {
+        "key": "surge_arrestor_ir_leakage",
+        "name": "Insulation Resistance / Leakage Current Test",
+        "equipment_type": "Surge Arrestor",
+        "description": "Insulation resistance and leakage current measurement of surge arrestors.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",    "label": "Station Name",       "type": "text",   "required": True},
+                    {"key": "bay_number",       "label": "Bay Number",          "type": "text",   "required": True},
+                    {"key": "date_of_testing",  "label": "Date of Testing",     "type": "date",   "required": True},
+                    {"key": "sa_make",          "label": "Surge Arrestor Make", "type": "text"},
+                    {"key": "sa_serial",        "label": "Serial Number",       "type": "text"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class",       "type": "number", "unit": "kV",  "required": True},
+                    {"key": "rated_voltage_kv", "label": "Rated Voltage (Ur)",  "type": "number", "unit": "kV"},
+                    {"key": "test_voltage_kv",  "label": "Megger Test Voltage", "type": "number", "unit": "kV",  "required": True},
+                    {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C"},
+                ],
+            },
+            {
+                "title": "IR and Leakage Current Readings",
+                "fields": [
+                    {
+                        "key": "ir_readings",
+                        "label": "Per Phase Readings",
+                        "type": "table",
+                        "columns": [
+                            {"key": "phase",          "label": "Phase",                "type": "text"},
+                            {"key": "ir_mohm",        "label": "IR (MΩ)",             "type": "number"},
+                            {"key": "leakage_ua",     "label": "Leakage Current (µA)", "type": "number"},
+                            {"key": "prev_leakage_ua","label": "Previous Reading (µA)","type": "number"},
+                            {"key": "deviation_pct",  "label": "Deviation (%)",        "type": "number"},
+                            {"key": "result",         "label": "Result",               "type": "dropdown", "options": ["Pass", "Fail"]},
+                        ],
+                        "default_rows": [
+                            {"phase": "R Phase"},
+                            {"phase": "Y Phase"},
+                            {"phase": "B Phase"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "surge_arrestor_vi_characteristic": {
+        "key": "surge_arrestor_vi_characteristic",
+        "name": "V-I Characteristic Test",
+        "equipment_type": "Surge Arrestor",
+        "description": "Voltage-current characteristic test to verify arrestor clamp voltage and knee-point.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",     "label": "Station Name",         "type": "text",   "required": True},
+                    {"key": "bay_number",        "label": "Bay Number",            "type": "text",   "required": True},
+                    {"key": "date_of_testing",   "label": "Date of Testing",       "type": "date",   "required": True},
+                    {"key": "sa_make",           "label": "Surge Arrestor Make",   "type": "text"},
+                    {"key": "sa_serial",         "label": "Serial Number",         "type": "text"},
+                    {"key": "voltage_class_kv",  "label": "Voltage Class",         "type": "number", "unit": "kV",  "required": True},
+                    {"key": "rated_voltage_kv",  "label": "Rated Voltage (Ur)",    "type": "number", "unit": "kV"},
+                    {"key": "nominal_discharge_ka", "label": "Nominal Discharge Current", "type": "number", "unit": "kA"},
+                    {"key": "test_equipment",    "label": "Test Equipment Used",   "type": "text"},
+                ],
+            },
+            {
+                "title": "V-I Characteristic Readings",
+                "fields": [
+                    {
+                        "key": "vi_curve",
+                        "label": "V-I Curve Points",
+                        "type": "table",
+                        "columns": [
+                            {"key": "point",      "label": "Point",          "type": "text"},
+                            {"key": "voltage_kv", "label": "Voltage (kV)",   "type": "number"},
+                            {"key": "current_a",  "label": "Current (A)",    "type": "number"},
+                            {"key": "phase",      "label": "Phase",          "type": "dropdown", "options": ["R", "Y", "B", "All"]},
+                        ],
+                        "default_rows": [
+                            {"point": "Point 1"},
+                            {"point": "Point 2"},
+                            {"point": "Point 3 (Knee)"},
+                            {"point": "Point 4"},
+                            {"point": "Point 5"},
+                        ],
+                    },
+                    {"key": "residual_voltage_kv",  "label": "Residual Voltage at 8/20µs", "type": "number", "unit": "kV"},
+                    {"key": "ref_voltage_kv",        "label": "Reference Voltage (1mA)",    "type": "number", "unit": "kV"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "surge_arrestor_power_freq_withstand": {
+        "key": "surge_arrestor_power_freq_withstand",
+        "name": "Power Frequency Voltage Withstand Test",
+        "equipment_type": "Surge Arrestor",
+        "description": "Power frequency voltage withstand test per IEC 60099-4.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",      "label": "Station Name",           "type": "text",   "required": True},
+                    {"key": "bay_number",         "label": "Bay Number",              "type": "text",   "required": True},
+                    {"key": "date_of_testing",    "label": "Date of Testing",         "type": "date",   "required": True},
+                    {"key": "sa_make",            "label": "Surge Arrestor Make",     "type": "text"},
+                    {"key": "sa_serial",          "label": "Serial Number",           "type": "text"},
+                    {"key": "voltage_class_kv",   "label": "Voltage Class",           "type": "number", "unit": "kV",  "required": True},
+                    {"key": "rated_voltage_kv",   "label": "Rated Voltage (Ur)",      "type": "number", "unit": "kV"},
+                    {"key": "test_equipment",     "label": "Test Equipment Used",     "type": "text"},
+                ],
+            },
+            {
+                "title": "Withstand Test",
+                "fields": [
+                    {
+                        "key": "withstand_readings",
+                        "label": "Per Phase Withstand Test",
+                        "type": "table",
+                        "columns": [
+                            {"key": "phase",             "label": "Phase",                  "type": "text"},
+                            {"key": "test_voltage_kv",   "label": "Test Voltage (kVrms)",    "type": "number"},
+                            {"key": "duration_sec",      "label": "Duration (s)",            "type": "number"},
+                            {"key": "flashover",         "label": "Flashover / Breakdown",   "type": "dropdown", "options": ["No", "Yes"]},
+                            {"key": "result",            "label": "Result",                  "type": "dropdown", "options": ["Pass", "Fail"]},
+                        ],
+                        "default_rows": [
+                            {"phase": "R Phase"},
+                            {"phase": "Y Phase"},
+                            {"phase": "B Phase"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"]},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "surge_arrestor_maintenance": {
+        "key": "surge_arrestor_maintenance",
+        "name": "Surge Arrestor Maintenance",
+        "equipment_type": "Surge Arrestor",
+        "description": "Routine visual inspection and major maintenance checklist for surge arrestors.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",           "type": "date", "required": True},
+                    {"key": "maintenance_type",    "label": "Maintenance Type",               "type": "dropdown", "options": ["Routine Visual Inspection", "LA Major Maintenance"]},
+                    {"key": "ambient_temp_c",      "label": "Ambient Temperature",            "type": "number", "unit": "°C"},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer","type": "text",   "required": True},
+                ],
+            },
+            {
+                "title": "Visual Inspection Checklist",
+                "fields": [
+                    {"key": "no_cracks",          "label": "No cracks or chips on housing / insulators",       "type": "checkbox"},
+                    {"key": "no_contamination",   "label": "No contamination / pollution deposits",            "type": "checkbox"},
+                    {"key": "insulator_clean",    "label": "Insulator surface cleaned",                        "type": "checkbox"},
+                    {"key": "connections_tight",  "label": "All connections and clamps tight",                 "type": "checkbox"},
+                    {"key": "earthing_ok",        "label": "Earthing connections intact and tight",            "type": "checkbox"},
+                    {"key": "counter_reading",    "label": "Surge Counter Reading",                            "type": "number"},
+                    {"key": "prev_counter",       "label": "Previous Counter Reading",                         "type": "number"},
+                    {"key": "operations_since",   "label": "Operations Since Last Inspection",                 "type": "number"},
+                    {"key": "no_physical_damage", "label": "No physical damage observed",                      "type": "checkbox"},
+                    {"key": "observations",       "label": "Observations",                                     "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"]},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "surge_arrestor_inspection": {
+        "key": "surge_arrestor_inspection",
+        "name": "Surge Arrestor Annual Inspection",
+        "equipment_type": "Surge Arrestor",
+        "description": "Annual inspection checklist for surge arrestors — safety, documentation, and general maintenance.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "station_name",    "label": "Station Name",       "type": "text", "required": True},
+                    {"key": "bay_number",       "label": "Bay Number",          "type": "text"},
+                    {"key": "inspection_date",  "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type",  "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "General Maintenance", "Documentation"]},
+                    {"key": "inspector_name",   "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "labelling_ok",     "label": "Equipment labelling complete and legible",    "type": "checkbox"},
+                    {"key": "earthing_ok",       "label": "Earthing and bonding intact",                 "type": "checkbox"},
+                    {"key": "physical_ok",       "label": "No physical damage or contamination",         "type": "checkbox"},
+                    {"key": "docs_updated",      "label": "Test and maintenance records up to date",     "type": "checkbox"},
+                    {"key": "observations",      "label": "Observations / Non-conformances",             "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # BATTERY SET TEMPLATES
+    # ════════════════════════════════════════════════════════════════════════════
+
+    "battery_specific_gravity": {
+        "key": "battery_specific_gravity",
+        "name": "Specific Gravity Check",
+        "equipment_type": "Battery Set",
+        "description": "Cell-wise specific gravity measurement to assess electrolyte condition.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",   "label": "Station Name",      "type": "text", "required": True},
+                    {"key": "battery_id",      "label": "Battery Set ID",    "type": "text"},
+                    {"key": "date_of_testing", "label": "Date of Testing",   "type": "date", "required": True},
+                    {"key": "battery_make",    "label": "Make",              "type": "text"},
+                    {"key": "battery_type",    "label": "Battery Type",      "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
+                    {"key": "num_cells",       "label": "Number of Cells",   "type": "number"},
+                    {"key": "rated_voltage_v", "label": "Rated Bank Voltage","type": "number", "unit": "V"},
+                    {"key": "hydrometer_make", "label": "Hydrometer Make",   "type": "text"},
+                    {"key": "electrolyte_temp_c", "label": "Electrolyte Temperature", "type": "number", "unit": "°C"},
+                ],
+            },
+            {
+                "title": "Specific Gravity Readings",
+                "fields": [
+                    {
+                        "key": "sg_readings",
+                        "label": "Cell-wise Specific Gravity",
+                        "type": "table",
+                        "columns": [
+                            {"key": "cell_no",      "label": "Cell No.",               "type": "text"},
+                            {"key": "sg_value",     "label": "SG Reading",             "type": "number"},
+                            {"key": "sg_corrected", "label": "Temp-Corrected SG",      "type": "number"},
+                            {"key": "condition",    "label": "Condition",              "type": "dropdown", "options": ["Good", "Low", "Critical"]},
+                        ],
+                        "default_rows": [
+                            {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
+                            {"cell_no": "Cell 4"}, {"cell_no": "Cell 5"}, {"cell_no": "Cell 6"},
+                        ],
+                    },
+                    {"key": "avg_sg",           "label": "Average SG",            "type": "number"},
+                    {"key": "min_sg",           "label": "Minimum SG (worst cell)","type": "number"},
+                    {"key": "rated_sg",         "label": "Rated SG (fully charged)","type": "number"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "water_added",    "label": "Distilled Water Added",  "type": "boolean"},
+                    {"key": "remarks",        "label": "Remarks",                "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result",         "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"]},
+                    {"key": "tested_by",      "label": "Tested By",              "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "battery_float_voltage": {
+        "key": "battery_float_voltage",
+        "name": "Float Voltage per Cell",
+        "equipment_type": "Battery Set",
+        "description": "Measurement of individual cell float voltages under normal charging conditions.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",       "label": "Station Name",         "type": "text",   "required": True},
+                    {"key": "battery_id",          "label": "Battery Set ID",       "type": "text"},
+                    {"key": "date_of_testing",     "label": "Date of Testing",      "type": "date",   "required": True},
+                    {"key": "battery_make",        "label": "Make",                 "type": "text"},
+                    {"key": "num_cells",           "label": "Number of Cells",      "type": "number"},
+                    {"key": "charger_output_v",    "label": "Charger Output Voltage","type": "number","unit": "V"},
+                    {"key": "rated_float_v",       "label": "Rated Float Voltage/Cell","type": "number","unit": "V"},
+                    {"key": "multimeter_make",     "label": "Multimeter Make",      "type": "text"},
+                ],
+            },
+            {
+                "title": "Cell Voltage Readings",
+                "fields": [
+                    {
+                        "key": "voltage_readings",
+                        "label": "Per-Cell Float Voltage",
+                        "type": "table",
+                        "columns": [
+                            {"key": "cell_no",  "label": "Cell No.",         "type": "text"},
+                            {"key": "voltage_v","label": "Voltage (V)",      "type": "number"},
+                            {"key": "deviation","label": "Deviation from Rated (V)","type": "number"},
+                            {"key": "condition","label": "Condition",        "type": "dropdown", "options": ["Normal", "High", "Low"]},
+                        ],
+                        "default_rows": [
+                            {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
+                            {"cell_no": "Cell 4"}, {"cell_no": "Cell 5"}, {"cell_no": "Cell 6"},
+                        ],
+                    },
+                    {"key": "total_bank_voltage_v", "label": "Total Bank Voltage",   "type": "number", "unit": "V"},
+                    {"key": "avg_cell_voltage_v",   "label": "Average Cell Voltage",  "type": "number", "unit": "V"},
+                    {"key": "min_cell_voltage_v",   "label": "Minimum Cell Voltage",  "type": "number", "unit": "V"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"]},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "battery_discharge_capacity": {
+        "key": "battery_discharge_capacity",
+        "name": "Discharge / Capacity Test",
+        "equipment_type": "Battery Set",
+        "description": "Battery discharge test to verify rated capacity per IEEE 450.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",      "label": "Station Name",            "type": "text",   "required": True},
+                    {"key": "battery_id",         "label": "Battery Set ID",          "type": "text"},
+                    {"key": "date_of_testing",    "label": "Date of Testing",         "type": "date",   "required": True},
+                    {"key": "battery_make",       "label": "Make",                    "type": "text"},
+                    {"key": "battery_type",       "label": "Battery Type",            "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
+                    {"key": "rated_capacity_ah",  "label": "Rated Capacity",          "type": "number", "unit": "Ah", "required": True},
+                    {"key": "discharge_rate_hr",  "label": "Discharge Rate",          "type": "number", "unit": "hr (e.g. 10)"},
+                    {"key": "discharge_current_a","label": "Discharge Current",       "type": "number", "unit": "A",  "required": True},
+                    {"key": "initial_voltage_v",  "label": "Initial Voltage",         "type": "number", "unit": "V",  "required": True},
+                    {"key": "cutoff_voltage_v",   "label": "End-of-Discharge Voltage","type": "number", "unit": "V"},
+                ],
+            },
+            {
+                "title": "Discharge Data",
+                "fields": [
+                    {
+                        "key": "discharge_log",
+                        "label": "Periodic Voltage Log",
+                        "type": "table",
+                        "columns": [
+                            {"key": "time_hr",    "label": "Time (hr)",         "type": "number"},
+                            {"key": "voltage_v",  "label": "Bank Voltage (V)",  "type": "number"},
+                            {"key": "current_a",  "label": "Current (A)",       "type": "number"},
+                            {"key": "temp_c",     "label": "Temp (°C)",         "type": "number"},
+                        ],
+                        "default_rows": [
+                            {"time_hr": "0"}, {"time_hr": "1"}, {"time_hr": "2"},
+                            {"time_hr": "4"}, {"time_hr": "6"}, {"time_hr": "8"}, {"time_hr": "10"},
+                        ],
+                    },
+                    {"key": "actual_capacity_ah",  "label": "Actual Capacity Achieved", "type": "number", "unit": "Ah"},
+                    {"key": "capacity_pct",         "label": "Capacity (% of Rated)",    "type": "number", "unit": "%"},
+                    {"key": "discharge_duration_hr","label": "Total Discharge Duration", "type": "number", "unit": "hr"},
+                    {"key": "end_voltage_v",        "label": "End Voltage at Cutoff",    "type": "number", "unit": "V"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Marginal"]},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "battery_electrolyte_level": {
+        "key": "battery_electrolyte_level",
+        "name": "Electrolyte Level Check",
+        "equipment_type": "Battery Set",
+        "description": "Cell-wise electrolyte level inspection and top-up record.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",   "label": "Station Name",    "type": "text", "required": True},
+                    {"key": "battery_id",      "label": "Battery Set ID",  "type": "text"},
+                    {"key": "date_of_testing", "label": "Date of Check",   "type": "date", "required": True},
+                    {"key": "battery_make",    "label": "Make",            "type": "text"},
+                    {"key": "num_cells",       "label": "Number of Cells", "type": "number"},
+                ],
+            },
+            {
+                "title": "Electrolyte Level Readings",
+                "fields": [
+                    {
+                        "key": "level_readings",
+                        "label": "Per-Cell Electrolyte Level",
+                        "type": "table",
+                        "columns": [
+                            {"key": "cell_no",     "label": "Cell No.",      "type": "text"},
+                            {"key": "level",       "label": "Level",         "type": "dropdown", "options": ["Normal", "Low", "High", "Critical Low"]},
+                            {"key": "water_added_ml", "label": "Water Added (ml)", "type": "number"},
+                            {"key": "remarks",     "label": "Remarks",       "type": "text"},
+                        ],
+                        "default_rows": [
+                            {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
+                            {"cell_no": "Cell 4"}, {"cell_no": "Cell 5"}, {"cell_no": "Cell 6"},
+                        ],
+                    },
+                    {"key": "total_water_added_ml", "label": "Total Distilled Water Added", "type": "number", "unit": "ml"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Normal", "Low — Topped Up", "Critical — Action Required"]},
+                    {"key": "checked_by",     "label": "Checked By",     "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "battery_terminal_voltage": {
+        "key": "battery_terminal_voltage",
+        "name": "Terminal Voltage Measurement",
+        "equipment_type": "Battery Set",
+        "description": "Overall bank terminal voltage and individual cell voltage under float / standby conditions.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "station_name",       "label": "Station Name",          "type": "text",   "required": True},
+                    {"key": "battery_id",          "label": "Battery Set ID",        "type": "text"},
+                    {"key": "date_of_testing",     "label": "Date of Testing",       "type": "date",   "required": True},
+                    {"key": "battery_make",        "label": "Make",                  "type": "text"},
+                    {"key": "num_cells",           "label": "Number of Cells",       "type": "number"},
+                    {"key": "rated_voltage_v",     "label": "Rated Bank Voltage",    "type": "number", "unit": "V"},
+                    {"key": "multimeter_make",     "label": "Multimeter Make",       "type": "text"},
+                    {"key": "charger_status",      "label": "Charger Status",        "type": "dropdown", "options": ["Float Charge", "Boost Charge", "Off / Standalone"]},
+                ],
+            },
+            {
+                "title": "Terminal Voltage",
+                "fields": [
+                    {"key": "bank_terminal_v",  "label": "Bank Terminal Voltage",    "type": "number", "unit": "V",  "required": True},
+                    {"key": "pos_terminal_v",   "label": "Positive Terminal Voltage", "type": "number", "unit": "V"},
+                    {"key": "neg_terminal_v",   "label": "Negative Terminal Voltage", "type": "number", "unit": "V"},
+                    {
+                        "key": "cell_voltages",
+                        "label": "Individual Cell Voltages",
+                        "type": "table",
+                        "columns": [
+                            {"key": "cell_no",   "label": "Cell No.",    "type": "text"},
+                            {"key": "voltage_v", "label": "Voltage (V)", "type": "number"},
+                            {"key": "condition", "label": "Condition",   "type": "dropdown", "options": ["Normal", "High", "Low"]},
+                        ],
+                        "default_rows": [
+                            {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
+                            {"cell_no": "Cell 4"}, {"cell_no": "Cell 5"}, {"cell_no": "Cell 6"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"]},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "battery_maintenance": {
+        "key": "battery_maintenance",
+        "name": "Battery Set Routine Maintenance",
+        "equipment_type": "Battery Set",
+        "description": "Routine and major maintenance checklist for battery sets.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date",     "required": True},
+                    {"key": "maintenance_type",    "label": "Maintenance Type",                "type": "dropdown", "options": ["Routine Battery Maintenance", "Battery Bank Major Maintenance"]},
+                    {"key": "ambient_temp_c",      "label": "Ambient Temperature",             "type": "number",   "unit": "°C"},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text",     "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",       "label": "Permit to Work obtained",                "type": "checkbox", "required": True},
+                    {"key": "ppe_used",              "label": "Appropriate PPE used (acid-resistant)",  "type": "checkbox", "required": True},
+                    {"key": "terminal_cleaning",    "label": "Terminals cleaned and greased",           "type": "checkbox"},
+                    {"key": "connections_tightened","label": "All connections tightened",               "type": "checkbox"},
+                    {"key": "vent_plugs_ok",        "label": "Vent plugs / caps clean and intact",      "type": "checkbox"},
+                    {"key": "tray_cleaned",         "label": "Battery tray / room cleaned",             "type": "checkbox"},
+                    {"key": "earthing_ok",          "label": "Earthing connections checked",            "type": "checkbox"},
+                    {"key": "charger_output_ok",    "label": "Charger output voltage checked",          "type": "dropdown", "options": ["Normal", "High", "Low", "Not Checked"]},
+                    {"key": "electrolyte_checked",  "label": "Electrolyte level checked",               "type": "checkbox"},
+                    {"key": "water_added",          "label": "Distilled water added if required",       "type": "checkbox"},
+                    {"key": "sg_checked",           "label": "Specific gravity checked",                "type": "checkbox"},
+                    {"key": "no_cracks",            "label": "No cracks or bulging observed",           "type": "checkbox"},
+                    {"key": "observations",         "label": "Observations",                            "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"]},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "battery_inspection": {
+        "key": "battery_inspection",
+        "name": "Battery Set Annual Inspection",
+        "equipment_type": "Battery Set",
+        "description": "Annual inspection checklist for battery sets — safety, documentation, and environmental.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "station_name",   "label": "Station Name",       "type": "text", "required": True},
+                    {"key": "battery_id",      "label": "Battery Set ID",     "type": "text"},
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Environmental", "General Maintenance", "Documentation"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "acid_spill_ok",    "label": "No acid spills or leakage",               "type": "checkbox"},
+                    {"key": "ventilation_ok",   "label": "Room ventilation adequate",               "type": "checkbox"},
+                    {"key": "earthing_ok",       "label": "Earthing and bonding intact",             "type": "checkbox"},
+                    {"key": "labelling_ok",      "label": "Equipment labelling complete",            "type": "checkbox"},
+                    {"key": "eyewash_ok",        "label": "Eyewash station and PPE available",       "type": "checkbox"},
+                    {"key": "docs_updated",      "label": "Test and maintenance records up to date", "type": "checkbox"},
+                    {"key": "observations",      "label": "Observations / Non-conformances",         "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # PROTECTION RELAY & ETM INSPECTION TEMPLATES
+    # ════════════════════════════════════════════════════════════════════════════
+
+    "protection_relay_inspection": {
+        "key": "protection_relay_inspection",
+        "name": "Protection Relay Annual Inspection",
+        "equipment_type": "Protection Relay",
+        "description": "Annual inspection checklist for protection relays — safety, documentation, and general maintenance.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "station_name",   "label": "Station Name",       "type": "text", "required": True},
+                    {"key": "panel_id",        "label": "Panel / Bay ID",     "type": "text"},
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "General Maintenance", "Documentation"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "panel_clean",        "label": "Panel interior clean and free of dust",   "type": "checkbox"},
+                    {"key": "connections_ok",     "label": "All terminal connections tight",          "type": "checkbox"},
+                    {"key": "indicators_ok",      "label": "LED indicators / annunciations healthy",  "type": "checkbox"},
+                    {"key": "settings_verified",  "label": "Relay settings verified against record",  "type": "checkbox"},
+                    {"key": "earthing_ok",        "label": "Panel earthing intact",                   "type": "checkbox"},
+                    {"key": "docs_updated",       "label": "Settings record and test log up to date", "type": "checkbox"},
+                    {"key": "observations",       "label": "Observations / Non-conformances",         "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
+    "etm_inspection": {
+        "key": "etm_inspection",
+        "name": "Electronic Tri-vector Meter Annual Inspection",
+        "equipment_type": "Electronic Tri-vector Meter",
+        "description": "Annual inspection checklist for electronic tri-vector meters.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "station_name",   "label": "Station Name",       "type": "text", "required": True},
+                    {"key": "feeder_id",       "label": "Feeder / Bay ID",    "type": "text"},
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "General Maintenance", "Documentation"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "display_ok",       "label": "Meter display functional and readable",      "type": "checkbox"},
+                    {"key": "seals_intact",     "label": "Meter seals intact (tamper-evident)",        "type": "checkbox"},
+                    {"key": "connections_ok",   "label": "CT / PT connections tight",                  "type": "checkbox"},
+                    {"key": "reading_plausible","label": "Meter reading plausible (no anomalies)",     "type": "checkbox"},
+                    {"key": "earthing_ok",      "label": "Earthing and bonding intact",                "type": "checkbox"},
+                    {"key": "calib_valid",      "label": "Calibration certificate valid",              "type": "checkbox"},
+                    {"key": "docs_updated",     "label": "Test and calibration records up to date",    "type": "checkbox"},
+                    {"key": "observations",     "label": "Observations / Non-conformances",            "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
+                ],
+            },
+        ],
+    },
+
 }
 
 
@@ -2856,30 +4056,54 @@ TEST_TYPE_TO_TEMPLATE = {
     "Circuit Breaker Operations Count": "circuit_breaker_operations",
     "OLTC Operations Count":            "oltc_operations",
 
-    # ── Category-based type mappings (Option 1: reuse templates) ──
-    # Maintenance types → transformer_maintenance
-    "Routine Preventive Maintenance": "transformer_maintenance",
-    "Power Transformer Major Maintenance": "transformer_maintenance",
-    "Circuit Breaker Major Maintenance": "transformer_maintenance",
+    # ── Circuit Breaker test types ──
+    "Contact Resistance Test":               "circuit_breaker_contact_resistance",
+    "Insulation Resistance Test":            "circuit_breaker_insulation_resistance",
+    "SF6 Gas Pressure Test":                 "circuit_breaker_sf6_pressure",
+    "SF6 Gas Purity Test":                   "circuit_breaker_sf6_purity",
+    "Travel and Timing Test":                "circuit_breaker_travel_timing",
+    "Minimum Trip Voltage Test":             "circuit_breaker_min_trip_voltage",
 
-    # Inspection types → transformer_inspection
-    "Electrical Safety": "transformer_inspection",
-    "Civil": "transformer_inspection",
-    "Fire Safety": "transformer_inspection",
-    "Documentation": "transformer_inspection",
-    "Environmental": "transformer_inspection",
-    "General Maintenance": "transformer_inspection",
+    # ── Surge Arrestor test types ──
+    "Insulation Resistance / Leakage Current Test": "surge_arrestor_ir_leakage",
+    "V-I Characteristic Test":               "surge_arrestor_vi_characteristic",
+    "Power Frequency Voltage Withstand Test":"surge_arrestor_power_freq_withstand",
+
+    # ── Battery Set test types ──
+    "Specific Gravity Check":     "battery_specific_gravity",
+    "Float Voltage per Cell":     "battery_float_voltage",
+    "Discharge / Capacity Test":  "battery_discharge_capacity",
+    "Electrolyte Level Check":    "battery_electrolyte_level",
+    "Terminal Voltage Measurement":"battery_terminal_voltage",
+
+    # ── Maintenance types ──
+    "Routine Preventive Maintenance":       "transformer_maintenance",
+    "Power Transformer Major Maintenance":  "transformer_maintenance",
+    "Circuit Breaker Major Maintenance":    "circuit_breaker_maintenance",
+    "Routine Battery Maintenance":          "battery_maintenance",
+    "Battery Bank Major Maintenance":       "battery_maintenance",
+    "Routine Visual Inspection":            "surge_arrestor_maintenance",
+    "LA Major Maintenance":                 "surge_arrestor_maintenance",
+
+    # ── Inspection types — equipment-specific ──
+    # Power Transformer inspections → transformer_inspection
+    "Electrical Safety":    "transformer_inspection",
+    "Civil":                "transformer_inspection",
+    "Fire Safety":          "transformer_inspection",
+    "Documentation":        "transformer_inspection",
+    "Environmental":        "transformer_inspection",
+    "General Maintenance":  "transformer_inspection",
 
     # Repair lifecycle stages → transformer_repair_lifecycle
-    "S1: Failure Report": "transformer_repair_lifecycle",
-    "S2: Repair Committee": "transformer_repair_lifecycle",
-    "S3: Allotment to Repairer": "transformer_repair_lifecycle",
-    "S4: Lifting by Repairer": "transformer_repair_lifecycle",
-    "S5: Joint Inspection at Vendor": "transformer_repair_lifecycle",
-    "S6: Estimate & Revised Work Award": "transformer_repair_lifecycle",
-    "S7: Stage Inspections": "transformer_repair_lifecycle",
-    "S8: Final Inspection": "transformer_repair_lifecycle",
-    "S9: Dispatch": "transformer_repair_lifecycle",
+    "S1: Failure Report":                  "transformer_repair_lifecycle",
+    "S2: Repair Committee":                "transformer_repair_lifecycle",
+    "S3: Allotment to Repairer":           "transformer_repair_lifecycle",
+    "S4: Lifting by Repairer":             "transformer_repair_lifecycle",
+    "S5: Joint Inspection at Vendor":      "transformer_repair_lifecycle",
+    "S6: Estimate & Revised Work Award":   "transformer_repair_lifecycle",
+    "S7: Stage Inspections":               "transformer_repair_lifecycle",
+    "S8: Final Inspection":                "transformer_repair_lifecycle",
+    "S9: Dispatch":                        "transformer_repair_lifecycle",
     "S10: Erection, Testing & Commissioning": "transformer_repair_lifecycle",
 }
 

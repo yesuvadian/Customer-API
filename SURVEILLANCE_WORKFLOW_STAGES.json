@@ -1,0 +1,7 @@
+[
+    {"name": "Q1 Surveillance Testing", "sequence": 1},
+    {"name": "Q2 Surveillance Testing", "sequence": 2},
+    {"name": "Q3 Surveillance Testing", "sequence": 3},
+    {"name": "Q4 Surveillance Testing", "sequence": 4},
+    {"name": "Final Evaluation & Report", "sequence": 5}
+]
