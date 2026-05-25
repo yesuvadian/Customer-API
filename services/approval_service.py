@@ -496,14 +496,10 @@ class ApprovalService:
         rec.approval_notes = notes
         rec.modified_by = approver_id
 
-        # For FR records, rejection is final → set rejected.
-        # For standard TRs, move to under_review so the tester can revise and resubmit.
+        # Set status to rejected for both FR and standard TRs
         request = self.db.query(TestingRequest).filter(TestingRequest.id == rec.testing_request_id).first()
         if request:
-            if request.request_category == RequestCategory.failure_registry:
-                request.status = TestingRequestStatus.rejected
-            else:
-                request.status = TestingRequestStatus.under_review
+            request.status = TestingRequestStatus.rejected
             request.rejection_reason = notes
             request.modified_by = approver_id
 

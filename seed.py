@@ -2382,6 +2382,7 @@ def seed_test_type_categories(session, master_ids):
                 "Open Circuit Test IV-LV (3Ph)",
                 "Capacitance & Tan Delta Test (Transformer)",
                 "Capacitance & Tan Delta Comparison",
+                "Transformer Oil Test",
             ],
             "maintenance": [
                 "Routine Preventive Maintenance",
@@ -6606,6 +6607,126 @@ def seed_calibration_template(session) -> int:
     return count
 
 
+def seed_transformer_oil_template(session) -> int:
+    """
+    Seed the Transformer Oil Test OrgTestTemplate.
+
+    Links to CategoryDetails "Transformer Oil Test" under the
+    "Testing Equipment" CategoryMaster (same master used by all other
+    test-type templates). Creates master/detail only when absent.
+    """
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Testing Equipment",
+            description="Testing Equipment",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+
+    detail = session.query(CategoryDetails).filter(
+        CategoryDetails.category_master_id == master.id,
+        CategoryDetails.name == "Transformer Oil Test",
+    ).first()
+    if not detail:
+        detail = CategoryDetails(
+            category_master_id=master.id,
+            name="Transformer Oil Test",
+            description="Insulating oil quality test — BDV, moisture, acidity, tan delta per IS 335 / IEC 60296",
+            is_active=True,
+        )
+        session.add(detail)
+        session.flush()
+
+    OIL_KEY = "transformer_oil_test"
+    template_data = TEST_TEMPLATES[OIL_KEY]
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == OIL_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=OIL_KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] Transformer Oil Test template seeded (detail_id={detail.id}).")
+    return count
+
+
+def seed_capacitance_tandelta_template(session) -> int:
+    """Seed the Capacitance & Tan Delta Test (Transformer) OrgTestTemplate."""
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(name="Testing Equipment", description="Testing Equipment", is_active=True)
+        session.add(master)
+        session.flush()
+
+    detail = session.query(CategoryDetails).filter(
+        CategoryDetails.category_master_id == master.id,
+        CategoryDetails.name == "Capacitance & Tan Delta Test (Transformer)",
+    ).first()
+    if not detail:
+        detail = CategoryDetails(
+            category_master_id=master.id,
+            name="Capacitance & Tan Delta Test (Transformer)",
+            description="Capacitance and tan delta insulation quality test per IEC 60450",
+            is_active=True,
+        )
+        session.add(detail)
+        session.flush()
+
+    KEY = "capacitance_tandelta_transformer"
+    template_data = TEST_TEMPLATES[KEY]
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] Capacitance & Tan Delta template seeded (detail_id={detail.id}).")
+    return count
+
+
 def seed_tr_workflows(session):
     """
     Seed the IntegratedWorkflowEngine with three workflows:
@@ -7583,6 +7704,10 @@ def run_seed():
         print(f"[OK] Cumulative / Operations Tracking template: {n4} seeded.")
         n5 = seed_calibration_template(session)
         print(f"[OK] Calibration template: {n5} seeded.")
+        n6 = seed_transformer_oil_template(session)
+        print(f"[OK] Transformer Oil Test template: {n6} seeded.")
+        n7 = seed_capacitance_tandelta_template(session)
+        print(f"[OK] Capacitance & Tan Delta template: {n7} seeded.")
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")

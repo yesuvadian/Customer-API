@@ -837,7 +837,7 @@ def preview_test_result(
         # Extract headers from first dict
         headers = list(data_list[0].keys())
 
-        html = '<table class="data-table"><thead><tr>'
+        html = '<div class="data-table-wrap"><table class="data-table"><thead><tr>'
         for header in headers:
             html += f'<th>{format_field_name(header)}</th>'
         html += '</tr></thead><tbody>'
@@ -849,7 +849,7 @@ def preview_test_result(
                 html += f'<td>{value}</td>'
             html += '</tr>'
 
-        html += '</tbody></table>'
+        html += '</tbody></table></div>'
         return html
 
     def render_two_column_layout(data_dict: dict) -> str:
@@ -895,7 +895,7 @@ def preview_test_result(
                     # Render table
                     if isinstance(field_value, list) and field_value:
                         cols = field.get("columns", [])
-                        display_value = "<table class='data-table'><thead><tr>"
+                        display_value = "<div class='data-table-wrap'><table class='data-table'><thead><tr>"
                         for col in cols:
                             display_value += f"<th>{col.get('label', col.get('key', ''))}</th>"
                         display_value += "</tr></thead><tbody>"
@@ -905,7 +905,7 @@ def preview_test_result(
                                 cell_val = row.get(col.get('key', ''), '-')
                                 display_value += f"<td>{cell_val}</td>"
                             display_value += "</tr>"
-                        display_value += "</tbody></table>"
+                        display_value += "</tbody></table></div>"
                     else:
                         display_value = "-"
                 else:
@@ -913,8 +913,9 @@ def preview_test_result(
                     if unit and display_value != "-":
                         display_value += f" {unit}"
 
+                field_class = "field field-table" if field_type == "table" else "field"
                 fields_html += f'''
-                <div class="field">
+                <div class="{field_class}">
                     <label>{field_label}</label>
                     <div class="value">{display_value}</div>
                 </div>
@@ -1177,7 +1178,6 @@ def preview_test_result(
             background: white;
             border-radius: 12px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            overflow: hidden;
         }}
         .header {{
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
@@ -1251,6 +1251,11 @@ def preview_test_result(
             color: #222;
             font-size: 15px;
             word-wrap: break-word;
+            overflow-x: auto;
+        }}
+        .field.field-table {{
+            grid-column: 1 / -1;
+            overflow-x: auto;
         }}
         .remarks {{
             background: #fff3cd;
@@ -1278,16 +1283,22 @@ def preview_test_result(
             border-radius: 6px;
             border-left: 3px solid #ff9800;
         }}
+        .data-table-wrap {{
+            width: 100%;
+            overflow-x: auto;
+        }}
         .data-table {{
             width: 100%;
+            min-width: max-content;
             border-collapse: collapse;
             margin-top: 10px;
         }}
         .data-table th,
         .data-table td {{
-            padding: 10px;
+            padding: 8px 10px;
             text-align: left;
             border: 1px solid #ddd;
+            white-space: nowrap;
         }}
         .data-table th {{
             background: #667eea;

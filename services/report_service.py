@@ -6,6 +6,7 @@ following the KPTCL CVT test report layout style.
 """
 
 import io
+import textwrap
 from typing import Optional
 from uuid import UUID
 
@@ -356,92 +357,63 @@ class ReportService:
                 pass
 
         if sections_order:
-            # Render by template sections
+            # Render by template sections — maintain field order (scalars & tables)
             for sec_title, field_keys in sections_order:
-                sec_data = []        # for scalar key-value pairs
-                table_elements = []  # for table-type fields
-
-                # Skip fields already shown in the test metadata section
+                sec_elements = []
+                pending_scalars = []
                 _skip_keys = {"overall_result", "overall_remarks"}
 
-                for key in field_keys:
-                    if key in _skip_keys:
-                        continue
-                    if key in test_data:
-                        val = test_data[key]
-                        label = field_labels.get(key, key.replace("_", " ").title())
-                        meta = field_meta.get(key, {})
-
-                        # Check if this is a table-type field with list data
-                        if meta.get("type") == "table" and isinstance(val, list):
-                            # Flush any pending scalar data first
-                            if sec_data:
-                                rows = []
-                                for i in range(0, len(sec_data), 2):
-                                    row = [sec_data[i][0], sec_data[i][1]]
-                                    if i + 1 < len(sec_data):
-                                        row += [sec_data[i + 1][0], sec_data[i + 1][1]]
-                                    else:
-                                        row += ["", ""]
-                                    rows.append(row)
-                                table_elements.append(self._detail_table_raw(rows))
-                                table_elements.append(Spacer(1, 2 * mm))
-                                sec_data = []
-
-                            # Render as a proper data table
-                            columns = meta.get("columns", [])
-                            table_elements.extend(
-                                self._build_list_table(label, val, columns)
-                            )
-                        elif isinstance(val, list) and val and isinstance(val[0], dict):
-                            # List of dicts without template metadata — auto-detect columns
-                            if sec_data:
-                                rows = []
-                                for i in range(0, len(sec_data), 2):
-                                    row = [sec_data[i][0], sec_data[i][1]]
-                                    if i + 1 < len(sec_data):
-                                        row += [sec_data[i + 1][0], sec_data[i + 1][1]]
-                                    else:
-                                        row += ["", ""]
-                                    rows.append(row)
-                                table_elements.append(self._detail_table_raw(rows))
-                                table_elements.append(Spacer(1, 2 * mm))
-                                sec_data = []
-
-                            table_elements.extend(
-                                self._build_list_table(label, val, [])
-                            )
+                def _flush_scalars():
+                    """Flush pending scalars as a 2-column detail table."""
+                    if not pending_scalars:
+                        return
+                    rows = []
+                    for i in range(0, len(pending_scalars), 2):
+                        row = [pending_scalars[i][0], pending_scalars[i][1]]
+                        if i + 1 < len(pending_scalars):
+                            row += [pending_scalars[i + 1][0], pending_scalars[i + 1][1]]
                         else:
-                            display_val = self._format_value(val)
-                            sec_data.append([label, display_val])
+                            row += ["", ""]
+                        rows.append(row)
+                    sec_elements.append(self._detail_table_raw(rows))
+                    pending_scalars.clear()
 
-                if sec_data or table_elements:
+                for key in field_keys:
+                    if key in _skip_keys or key not in test_data:
+                        continue
+                    val = test_data[key]
+                    label = field_labels.get(key, key.replace("_", " ").title())
+                    meta = field_meta.get(key, {})
+
+                    # Table field → flush pending scalars, add table
+                    if meta.get("type") == "table" and isinstance(val, list):
+                        _flush_scalars()
+                        if sec_elements:
+                            sec_elements.append(Spacer(1, 2 * mm))
+                        columns = meta.get("columns", [])
+                        sec_elements.extend(self._build_list_table(label, val, columns))
+                    elif isinstance(val, list) and val and isinstance(val[0], dict):
+                        # List of dicts without metadata
+                        _flush_scalars()
+                        if sec_elements:
+                            sec_elements.append(Spacer(1, 2 * mm))
+                        sec_elements.extend(self._build_list_table(label, val, []))
+                    else:
+                        # Scalar field → accumulate for next flush
+                        pending_scalars.append([label, self._format_value(val)])
+
+                # Flush remaining scalars at end of section
+                _flush_scalars()
+
+                # Add section heading + content if any
+                if sec_elements:
                     elements.append(Paragraph(
                         f"<b>{sec_title}</b>",
-                        ParagraphStyle(
-                            "SubSection", fontSize=9,
-                            textColor=colors.HexColor("#2c5f8a"),
-                            spaceBefore=2 * mm, spaceAfter=1 * mm,
-                        ),
+                        ParagraphStyle("SubSection", fontSize=9,
+                                       textColor=colors.HexColor("#2c5f8a"),
+                                       spaceBefore=2 * mm, spaceAfter=1 * mm),
                     ))
-
-                    # Render remaining scalar data
-                    if sec_data:
-                        rows = []
-                        for i in range(0, len(sec_data), 2):
-                            row = [sec_data[i][0], sec_data[i][1]]
-                            if i + 1 < len(sec_data):
-                                row += [sec_data[i + 1][0], sec_data[i + 1][1]]
-                            else:
-                                row += ["", ""]
-                            rows.append(row)
-                        elements.append(self._detail_table_raw(rows))
-
-                    # Append any table elements
-                    if table_elements:
-                        if sec_data:
-                            elements.append(Spacer(1, 2 * mm))
-                        elements.extend(table_elements)
+                    elements.extend(sec_elements)
         else:
             # Fallback: render all key-value pairs (use field_labels for friendly names if available)
             rows = []
@@ -473,45 +445,23 @@ class ReportService:
                 elements.append(Spacer(1, 2 * mm))
                 elements.extend(self._build_list_table(label, data_list, columns))
 
-        # Show any test_data fields NOT covered by template sections
-        if sections_order:
-            covered_keys = {key for _, keys in sections_order for key in keys}
-            covered_keys |= {"overall_result", "overall_remarks"}
-            extra_rows = []
-            extra_tables = []
-            for k, v in test_data.items():
-                if k in covered_keys:
-                    continue
-                label = field_labels.get(k, k.replace("_", " ").title())
-                if isinstance(v, list) and v and isinstance(v[0], dict):
-                    extra_tables.append((label, v, field_meta.get(k, {}).get("columns", [])))
-                else:
-                    extra_rows.append((label, self._format_value(v)))
-            if extra_rows or extra_tables:
-                elements.append(Paragraph(
-                    "<b>Additional Fields</b>",
-                    ParagraphStyle("SubSection", fontSize=9, textColor=colors.HexColor("#2c5f8a"),
-                                   spaceBefore=2 * mm, spaceAfter=1 * mm),
-                ))
-                if extra_rows:
-                    table_rows = []
-                    for i in range(0, len(extra_rows), 2):
-                        row = [extra_rows[i][0], extra_rows[i][1]]
-                        if i + 1 < len(extra_rows):
-                            row += [extra_rows[i + 1][0], extra_rows[i + 1][1]]
-                        else:
-                            row += ["", ""]
-                        table_rows.append(row)
-                    elements.append(self._detail_table_raw(table_rows))
-                for label, data_list, columns in extra_tables:
-                    elements.append(Spacer(1, 2 * mm))
-                    elements.extend(self._build_list_table(label, data_list, columns))
-
+        # Skip "Additional Fields" — template should cover all relevant data.
+        # Any extra keys in test_data are artifacts from old submissions.
         return elements
 
     # ───────────────────────────────────────────────────
     # Helper: Build a data table from list of dicts
     # ───────────────────────────────────────────────────
+    @staticmethod
+    def _pdf_safe(text: str) -> str:
+        """Replace Unicode chars unsupported by Helvetica with ASCII equivalents."""
+        return (str(text)
+                .replace("δ", "d").replace("Δ", "D")
+                .replace("×", "x").replace("⁻", "-").replace("³", "3").replace("²", "2")
+                .replace("°", "deg ").replace("µ", "u").replace("Ω", "Ohm")
+                .replace("α", "a").replace("β", "b").replace("γ", "g")
+                .replace("⁠", "").replace("​", ""))
+
     def _build_list_table(self, title: str, data: list, columns: list):
         """Render a list of dicts as a proper table with headers.
 
@@ -525,37 +475,51 @@ class ReportService:
         if not data:
             return elements
 
-        # Determine column keys and labels
+        # Determine column keys and labels — skip hidden columns
         if columns:
-            col_keys = [c["key"] for c in columns]
-            col_labels = [c.get("label", c["key"].replace("_", " ").title()) for c in columns]
+            visible_cols = [c for c in columns if not c.get("hidden")]
+            col_keys   = [c["key"] for c in visible_cols]
+            col_labels = [self._pdf_safe(c.get("label", c["key"].replace("_", " ").title())) for c in visible_cols]
+            print(f"[PDF DEBUG] {title}: col_keys from template = {col_keys}")
         else:
-            # Auto-detect from first row
-            col_keys = list(data[0].keys())
-            col_labels = [k.replace("_", " ").title() for k in col_keys]
+            # Auto-detect from first row, strip internal keys
+            col_keys   = [k for k in data[0].keys() if not k.startswith("__")]
+            col_labels = [self._pdf_safe(k.replace("_", " ").title()) for k in col_keys]
+            print(f"[PDF DEBUG] {title}: col_keys auto-detected = {col_keys}")
 
-        # Build header row
+        if not col_keys:
+            return elements
+
+        # Build header row — pre-wrap long labels so pdfx doesn't clip them
         lbl_style = ParagraphStyle("tblHdr", fontSize=8, textColor=colors.white,
-                                   fontName="Helvetica-Bold")
-        val_style = ParagraphStyle("tblVal", fontSize=8, textColor=colors.black)
+                                   fontName="Helvetica-Bold", leading=10)
+        val_style = ParagraphStyle("tblVal", fontSize=8, textColor=colors.black, leading=10)
 
-        header_row = [Paragraph(lbl, lbl_style) for lbl in col_labels]
+        def _wrap_label(text: str, width: int = 12) -> str:
+            return '<br/>'.join(textwrap.wrap(text, width=width)) or text
+
+        header_row = [Paragraph(_wrap_label(lbl), lbl_style) for lbl in col_labels]
         table_data = [header_row]
 
-        # Build data rows
+        # Build data rows — skip locked/internal rows
         for row_dict in data:
+            if row_dict.get("__locked"):
+                continue
             row = []
             for key in col_keys:
-                val = row_dict.get(key, "")
-                row.append(Paragraph(self._format_value(val), val_style))
+                val = self._pdf_safe(self._format_value(row_dict.get(key, "")))
+                row.append(Paragraph(val, val_style))
             table_data.append(row)
 
-        # Calculate column widths
+        # Calculate column widths — short labels get narrower columns
         page_width = A4[0] - 30 * mm
         num_cols = len(col_keys)
-        col_width = page_width / num_cols
+        # Assign weight by label length (min 1) so long labels get more space
+        weights = [max(1, len(lbl)) for lbl in col_labels]
+        total_weight = sum(weights)
+        col_widths = [page_width * w / total_weight for w in weights]
 
-        table = Table(table_data, colWidths=[col_width] * num_cols)
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
             # Header row styling
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c5f8a")),

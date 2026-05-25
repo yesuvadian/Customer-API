@@ -742,6 +742,7 @@ async def startup_event():
     )
     # Register workflow lifecycle hooks (import = self-registration side-effect)
     import calibration_hooks  # noqa: F401
+    import overhaul_hooks  # noqa: F401
     logger.info("[Hooks] Workflow lifecycle hooks registered")
 
     # Seed default notification templates + variables (idempotent)
