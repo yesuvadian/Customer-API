@@ -94,10 +94,7 @@ def get_surveillance_dashboard(
 
     if dept_filter:
         workflow_query = workflow_query.filter(
-            or_(
-                Equipment.department_id == dept_filter,
-                RepairWorkflow.department_id == dept_filter,
-            )
+            Equipment.department_id == dept_filter
         )
 
     # Count by status
