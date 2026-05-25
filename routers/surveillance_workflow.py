@@ -85,12 +85,12 @@ def _serialize_workflow(wf: RepairWorkflow, current_stage: Optional[RepairStageI
         'workflow_type': wf.workflow_type,
         'status': wf.status,
         'equipment_id': str(wf.equipment_id) if wf.equipment_id else None,
-        'equipment_name': wf.equipment.name if wf.equipment else None,
+        'equipment_name': wf.equipment.ueic if wf.equipment else None,  # Equipment uses ueic, not name
         'parent_workflow_id': str(wf.parent_workflow_id) if wf.parent_workflow_id else None,
         'organization_id': str(wf.organization_id) if wf.organization_id else None,
-        'department_id': str(wf.department_id) if wf.department_id else None,
-        'start_date': wf.start_date.isoformat() if wf.start_date else None,
-        'end_date': wf.end_date.isoformat() if wf.end_date else None,
+        'department_id': str(wf.equipment.department_id) if wf.equipment else None,  # From Equipment, not RepairWorkflow
+        'start_date': wf.started_at.isoformat() if wf.started_at else None,  # started_at, not start_date
+        'end_date': wf.completed_at.isoformat() if wf.completed_at else None,  # completed_at, not end_date
         'current_stage': {
             'stage_number': current_stage.stage.stage_number if current_stage and current_stage.stage else None,
             'stage_name': current_stage.stage.name if current_stage and current_stage.stage else None,

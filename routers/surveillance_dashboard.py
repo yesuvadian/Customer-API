@@ -266,7 +266,7 @@ def get_surveillance_dashboard(
 
     # Alert 1: Workflows with failed tests
     workflows_with_failures = (
-        db.query(RepairWorkflow.id, Equipment.name, func.count(RepairSurveillanceTest.id))
+        db.query(RepairWorkflow.id, Equipment.ueic, func.count(RepairSurveillanceTest.id))
         .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .join(
             RepairSurveillanceTest,
@@ -278,7 +278,7 @@ def get_surveillance_dashboard(
             RepairSurveillanceTest.is_abnormal.is_(True),
             Equipment.organization_id == org_id
         )
-        .group_by(RepairWorkflow.id, Equipment.name)
+        .group_by(RepairWorkflow.id, Equipment.ueic)
         .all()
     )
 
@@ -293,7 +293,7 @@ def get_surveillance_dashboard(
 
     # Alert 2: Workflows with incomplete tests (pending submission)
     workflows_with_pending = (
-        db.query(RepairWorkflow.id, Equipment.name, RepairStageInstance.quarter_number)
+        db.query(RepairWorkflow.id, Equipment.ueic, RepairStageInstance.quarter_number)
         .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .join(
             RepairStageInstance,
@@ -313,7 +313,7 @@ def get_surveillance_dashboard(
             TestingRequest.status.in_(['submitted', 'in_progress']),
             Equipment.organization_id == org_id
         )
-        .group_by(RepairWorkflow.id, Equipment.name, RepairStageInstance.quarter_number)
+        .group_by(RepairWorkflow.id, Equipment.ueic, RepairStageInstance.quarter_number)
         .all()
     )
 
