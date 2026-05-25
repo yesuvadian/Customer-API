@@ -156,8 +156,11 @@ def list_surveillance_workflows(
     )
 
     # Department filter (if not org admin)
+    # Note: RepairWorkflow doesn't have department_id, department info comes from Equipment
     if not is_org_admin and user_dept_id:
-        query = query.filter(RepairWorkflow.department_id == user_dept_id)
+        query = query.join(Equipment, Equipment.id == RepairWorkflow.equipment_id).filter(
+            Equipment.department_id == user_dept_id
+        )
 
     # Apply optional filters
     if status:

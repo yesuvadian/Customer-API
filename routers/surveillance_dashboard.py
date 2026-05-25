@@ -234,7 +234,7 @@ def get_surveillance_dashboard(
                 RepairWorkflow.status == 'active',
                 and_(
                     RepairWorkflow.status == 'completed',
-                    RepairWorkflow.end_date >= datetime.now(timezone.utc) - timedelta(days=30)
+                    RepairWorkflow.completed_at >= datetime.now(timezone.utc) - timedelta(days=30)
                 )
             )
         )
@@ -382,10 +382,7 @@ def get_surveillance_trends(
 
     if not is_org_admin and user_dept_id:
         workflow_query = workflow_query.filter(
-            or_(
-                Equipment.department_id == user_dept_id,
-                RepairWorkflow.department_id == user_dept_id,
-            )
+            Equipment.department_id == user_dept_id
         )
 
     workflows = workflow_query.all()
@@ -501,7 +498,7 @@ def get_equipment_surveillance_history(
     workflows = db.query(RepairWorkflow).filter(
         RepairWorkflow.equipment_id == equipment_id,
         RepairWorkflow.workflow_type == 'surveillance'
-    ).order_by(RepairWorkflow.start_date.desc()).all()
+    ).order_by(RepairWorkflow.started_at.desc()).all()
 
     # Calculate overall quality
     quality_ratings = []
