@@ -201,6 +201,8 @@ class EquipmentService:
         model_number: Optional[str] = None,
         factory_serial_number: Optional[str] = None,
         year_of_manufacture: Optional[int] = None,
+         latitude: Optional[float] = None,   
+         longitude: Optional[float] = None, 
         created_by: Optional[UUID] = None,
     ) -> Equipment:
         """Register a new equipment unit with auto-generated UEIC."""
@@ -235,6 +237,8 @@ class EquipmentService:
             model_number=model_number,
             factory_serial_number=factory_serial_number,
             year_of_manufacture=year_of_manufacture,
+            latitude=latitude,    
+            longitude=longitude, 
             created_by=created_by,
         )
         db.add(equipment)
@@ -422,6 +426,7 @@ class EquipmentService:
             "nameplate_data", "voltage_class", "bay_number", "manufacturer",
             "model_number", "factory_serial_number", "year_of_manufacture",
             "commissioned_date", "retirement_reason",
+            "latitude", "longitude",   
         ]
         for key, value in kwargs.items():
             if key in allowed_fields and value is not None:

@@ -88,6 +88,7 @@ MODULE_PATH_TO_VIEW: Dict[str, str] = {
     "see_dashboard":     "see_cee",
     "cee_dashboard":     "see_cee",
     "asset_dashboard":   "asset",
+    "test_coordinator_dashboard": "test_coordinator",
 }
 
 OPEN_STATUSES = (

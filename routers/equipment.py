@@ -170,6 +170,8 @@ def _to_response(db: Session, eq: Equipment) -> dict:
         "model_number": eq.model_number,
         "factory_serial_number": eq.factory_serial_number,
         "year_of_manufacture": eq.year_of_manufacture,
+        "latitude": eq.latitude,    
+        "longitude": eq.longitude,
         "created_by": eq.created_by,
         "modified_by": eq.modified_by,
         "cts": eq.cts,
@@ -340,6 +342,8 @@ def create_equipment(
         model_number=data.model_number,
         factory_serial_number=data.factory_serial_number,
         year_of_manufacture=data.year_of_manufacture,
+        latitude=data.latitude,    
+        longitude=data.longitude,  
         created_by=current_user.id,
     )
     db.commit()

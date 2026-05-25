@@ -1347,6 +1347,7 @@ def seed_modules(session):
 # ✅ DASHBOARD KPI MODULES - Role-specific dashboards
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
 {"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
+{"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
@@ -3027,6 +3028,7 @@ def seed_role_templates(session):
     # Role-specific dashboard module IDs
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
     asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
+    test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
     aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
     see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
     cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
@@ -8635,7 +8637,7 @@ _DFT_ROLE_MODULE_PATH = {
     "Asset Data Officer":               "asset_dashboard",
     "Maintenance Officer":              "aee_dashboard",
     "Test Engineer":                    "aee_dashboard",
-    "Test & Work Coordinator":          "aee_dashboard",
+    "Test & Work Coordinator":          "test_coordinator_dashboard",
     "Reviewing Officer":                "ee_tlss_dashboard",
     "Supervisory Officer":              "see_dashboard",
     "Senior Management Approver":       "cee_dashboard",
