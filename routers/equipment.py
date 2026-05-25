@@ -340,6 +340,12 @@ def create_equipment(
         model_number=data.model_number,
         factory_serial_number=data.factory_serial_number,
         year_of_manufacture=data.year_of_manufacture,
+        phase=data.phase,
+        ct_ratio_actual=data.ct_ratio_actual,
+        ct_ratio_current=data.ct_ratio_current,
+        pt_ratio=data.pt_ratio,
+        vector_group=data.vector_group,
+        impedance_pct=data.impedance_pct,
         created_by=current_user.id,
     )
     db.commit()
@@ -816,6 +822,12 @@ async def replace_equipment(
     factory_serial_number: Optional[str] = Form(None),
     year_of_manufacture: Optional[int] = Form(None),
     commissioned_date: Optional[str] = Form(None, description="ISO date string"),
+    phase: Optional[str] = Form(None, description="R, Y, or B"),
+    ct_ratio_actual: Optional[str] = Form(None),
+    ct_ratio_current: Optional[str] = Form(None),
+    pt_ratio: Optional[str] = Form(None),
+    vector_group: Optional[str] = Form(None),
+    impedance_pct: Optional[float] = Form(None),
     analysis_report: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -891,6 +903,12 @@ async def replace_equipment(
         model_number=model_number,
         factory_serial_number=factory_serial_number,
         year_of_manufacture=year_of_manufacture,
+        phase=phase,
+        ct_ratio_actual=ct_ratio_actual,
+        ct_ratio_current=ct_ratio_current,
+        pt_ratio=pt_ratio,
+        vector_group=vector_group,
+        impedance_pct=impedance_pct,
     )
     db.commit()
     db.refresh(old)

@@ -2419,44 +2419,6 @@ def seed_test_type_categories(session, master_ids):
             "Open circuit test",
             "Magnetic balance test",
         ],
-        # ── Additional equipment from KPTCL flow (PDF) ──
-        "Relay": [
-            "Relay Testing",
-        ],
-        "Meter": [
-            "Meter Testing",
-        ],
-        # ── Power Transformer (from HTML mockups) ──
-        "Power Transformer": [
-            "Power Transformer Nameplate Details",
-            "Transformer Physical Inspection",
-            "Ratio Test HV-IV",
-            "Ratio Test HV-LV",
-            "Short Circuit Test HV-IV",
-            "Short Circuit Test HV-LV",
-            "Magnetic Balance Test HV",
-            "Magnetic Balance Test IV",
-            "Magnetic Balance Test LV",
-            "Open Circuit Test HV-IV (1Ph)",
-            "Open Circuit Test HV-IV (3Ph)",
-            "Open Circuit Test HV-LV (1Ph)",
-            "Open Circuit Test HV-LV (3Ph)",
-            "Open Circuit Test IV-LV (1Ph)",
-            "Open Circuit Test IV-LV (3Ph)",
-            "Capacitance & Tan Delta Test (Transformer)",
-            "Capacitance & Tan Delta Comparison",
-        ],
-        # ── Current Transformer (additional tests from HTML mockups) ──
-        "Current Transformer": [
-            "CT Insulation Test",
-            "CT Ratio Test (Detailed)",
-            "Capacitance & Tan Delta Test (CT)",
-            "Tan Delta NCT Test",
-        ],
-        # ── CVT (new equipment type from HTML mockups) ──
-        "CVT": [
-            "CVT Test Report",
-        ],
     }
 
     # ── NEW: Category-based types structure (SRS-compliant) ──
@@ -2537,6 +2499,7 @@ def seed_test_type_categories(session, master_ids):
         "Protection Relay": {
             "test": [
                 "Protection Relay Functional Test",
+                "Relay Testing",
             ],
             "maintenance": [
                 "Protection Relay Calibration and History",  # calibration lifecycle
@@ -2561,8 +2524,8 @@ def seed_test_type_categories(session, master_ids):
                 "Documentation",
             ],
         },
-        # ── Lightning Arrester ───────────────────────────────────────────────
-        "Lightning Arrester": {
+        # ── Surge Arrestor ───────────────────────────────────────────────────
+        "Surge Arrestor": {
             "test": [
                 "Insulation Resistance / Leakage Current Test",
                 "V-I Characteristic Test",
@@ -2583,8 +2546,8 @@ def seed_test_type_categories(session, master_ids):
                 "S3: Replacement / Repair",
             ],
         },
-        # ── Battery Bank ─────────────────────────────────────────────────────
-        "Battery Bank": {
+        # ── Battery Set ──────────────────────────────────────────────────────
+        "Battery Set": {
             "test": [
                 "Specific Gravity Check",
                 "Float Voltage per Cell",
@@ -2605,6 +2568,24 @@ def seed_test_type_categories(session, master_ids):
             "repair_lifecycle": [
                 "S1: Failure Report",
                 "S2: Battery Replacement",
+            ],
+        },
+        # ── Current Transformer ──────────────────────────────────────────────
+        "Current Transformer": {
+            "test": [
+                "CT Insulation Test",
+                "CT Ratio Test (Detailed)",
+                "Capacitance & Tan Delta Test (CT)",
+                "Tan Delta NCT Test",
+                "Core Insulation Test",
+                "CT Ratio Test",
+                "Insulation Resistance (IR) Test",
+            ],
+        },
+        # ── Capacitor Voltage Transformer ────────────────────────────────────
+        "Capacitor Voltage Transformer": {
+            "test": [
+                "CVT Test Report",
             ],
         },
     }
@@ -5321,6 +5302,174 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     print(f"{'='*60}\n")
 
 
+def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
+    """
+    Seed KPTCL equipment assets from equipment_seed.xlsx.
+
+    The workbook must contain an "Equipment" sheet with columns:
+      substation, equipment_type, voltage_class, bay_name, phase,
+      manufacturer, yom, doc, factory_serial_number,
+      ct_ratio_actual, ct_ratio_current, pt_ratio,
+      capacity_mva, vector_group, impedance_pct, status
+
+    Each row is linked to the OrgDepartment whose name matches the
+    "substation" column value.
+    """
+    import os
+    from models import Equipment, CategoryMaster
+
+    print("\n--- KPTCL Equipment Seeding ---")
+
+    org = session.query(Organization).filter(Organization.id == uuid.UUID(org_id)).first()
+    if not org:
+        print(f"[ERROR] Organization {org_id} not found")
+        return
+
+    if excel_path is None:
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        excel_path = os.path.join(project_root, "equipment_seed.xlsx")
+
+    if not os.path.exists(excel_path):
+        raise FileNotFoundError(f"Equipment seed file not found: {excel_path}")
+
+    try:
+        df = pd.read_excel(excel_path, sheet_name="Equipment", dtype=str)
+        df = df.where(pd.notna(df), None)
+        print(f"[OK] Loaded {len(df)} equipment rows")
+    except Exception as e:
+        print(f"[ERROR] Failed to read Equipment sheet: {e}")
+        return
+
+    # Resolve admin user for created_by
+    admin = (
+        session.query(User)
+        .filter(User.organization_id == uuid.UUID(org_id), User.email.ilike("%orgadmin%"))
+        .first()
+        or session.query(User).filter(User.organization_id == uuid.UUID(org_id)).first()
+    )
+    created_by = admin.id if admin else None
+
+    # Load equipment type (CategoryMaster) lookup
+    equip_types = (
+        session.query(CategoryMaster)
+        .filter(CategoryMaster.description == "Testing Equipment", CategoryMaster.is_active.is_(True))
+        .all()
+    )
+    # Normalise type names for fuzzy lookup
+    type_map = {}
+    for et in equip_types:
+        type_map[et.name.lower()] = et.id
+        # short aliases
+        if "current transformer" in et.name.lower():
+            type_map["ct"] = et.id
+        elif "potential transformer" in et.name.lower() or "voltage transformer" in et.name.lower():
+            type_map["pt"] = et.id
+            type_map["cvt"] = et.id
+        elif "power transformer" in et.name.lower():
+            type_map["power transformer"] = et.id
+
+    # Load all departments for this org into a name→id map
+    depts = session.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == uuid.UUID(org_id)
+    ).all()
+    dept_map = {d.name.strip().lower(): d.id for d in depts}
+
+    created = skipped = 0
+
+    for _, row in df.iterrows():
+        substation_name = (row.get("substation") or "").strip()
+        dept_id = dept_map.get(substation_name.lower())
+        if not dept_id:
+            print(f"  [WARN] Department not found for substation: '{substation_name}' — skipping row")
+            skipped += 1
+            continue
+
+        raw_type = (row.get("equipment_type") or "").strip()
+        equip_type_id = None
+        for key in (raw_type.lower(), raw_type.split("(")[0].strip().lower()):
+            equip_type_id = type_map.get(key)
+            if equip_type_id:
+                break
+        if not equip_type_id:
+            print(f"  [WARN] Equipment type not found: '{raw_type}' — skipping")
+            skipped += 1
+            continue
+
+        # Parse numeric fields safely
+        def _float(val):
+            try:
+                return float(val) if val else None
+            except (ValueError, TypeError):
+                return None
+
+        def _int(val):
+            try:
+                v = str(val).split(".")[0] if val else None
+                return int(v) if v else None
+            except (ValueError, TypeError):
+                return None
+
+        voltage_class = row.get("voltage_class") or ""
+        # Strip trailing "kV" suffix if present for storage consistency
+        voltage_class = voltage_class.replace("kV", "").replace("KV", "").strip() or None
+
+        yom = _int(row.get("yom"))
+        doc_raw = row.get("doc")
+        doc_date = None
+        if doc_raw:
+            try:
+                doc_date = pd.to_datetime(doc_raw, dayfirst=True).date()
+            except Exception:
+                doc_date = None
+
+        # Determine status enum  (values: active, retired, scrapped, under_repair)
+        raw_status = (row.get("status") or "In-service").strip().lower()
+        from models import EquipmentStatus
+        status_map = {
+            "in-service": EquipmentStatus.active,
+            "in service": EquipmentStatus.active,
+            "operational": EquipmentStatus.active,
+            "active": EquipmentStatus.active,
+            "retired": EquipmentStatus.retired,
+            "decommissioned": EquipmentStatus.scrapped,
+            "scrapped": EquipmentStatus.scrapped,
+            "under maintenance": EquipmentStatus.under_repair,
+            "maintenance": EquipmentStatus.under_repair,
+            "under repair": EquipmentStatus.under_repair,
+        }
+        status = status_map.get(raw_status, EquipmentStatus.active)
+
+        from services.equipment_service import EquipmentService
+        try:
+            EquipmentService.create_equipment(
+                db=session,
+                organization_id=uuid.UUID(org_id),
+                department_id=dept_id,
+                equipment_type_id=equip_type_id,
+                voltage_class=voltage_class,
+                bay_number=row.get("bay_name"),
+                manufacturer=row.get("manufacturer"),
+                factory_serial_number=row.get("factory_serial_number"),
+                year_of_manufacture=yom,
+                commissioned_date=doc_date,
+                phase=row.get("phase"),
+                ct_ratio_actual=row.get("ct_ratio_actual"),
+                ct_ratio_current=row.get("ct_ratio_current"),
+                pt_ratio=row.get("pt_ratio"),
+                vector_group=row.get("vector_group"),
+                impedance_pct=_float(row.get("impedance_pct")),
+                created_by=created_by,
+            )
+            session.commit()
+            created += 1
+        except Exception as e:
+            session.rollback()
+            print(f"  [WARN] Failed to create equipment row: {e}")
+            skipped += 1
+
+    print(f"\n[OK] Equipment seeding complete: {created} created, {skipped} skipped")
+
+
 # ----------------- Reporting Suite Seed -----------------
 
 def migrate_report_tables(session):
@@ -5626,11 +5775,11 @@ _MASTER_SCHEDULE_SEED = {
     "Electronic Tri-vector Meter": [
         ("Meter Testing", "yearly", 30, "IS 16444"),
     ],
-    "Lightning Arrester": [
+    "Surge Arrestor": [
         ("Insulation Resistance / Leakage Current Test", "yearly",    30, "IEC 60099-4"),
         ("V-I Characteristic Test",                      "triennial", 45, "IEC 60099-4"),
     ],
-    "Battery Bank": [
+    "Battery Set": [
         ("Specific Gravity Check",    "quarterly", 15, None),
         ("Discharge / Capacity Test", "yearly",    30, "IEEE 450"),
         ("Float Voltage per Cell",    "quarterly", 15, None),
@@ -6833,6 +6982,95 @@ def seed_capacitance_tandelta_template(session) -> int:
     return count
 
 
+def seed_inspection_templates(session) -> int:
+    """
+    Migrate equipment-specific inspection templates.
+
+    Previously all equipment inspection types (Circuit Breaker, Surge Arrestor,
+    Battery Set, Protection Relay, ETM) shared the transformer_inspection template.
+    This function updates those rows to use equipment-specific template keys and
+    template_data, and inserts any missing rows.
+
+    Idempotent — safe to run multiple times.
+    """
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    # Maps equipment master name → (template_key, inspection subtype names)
+    equipment_inspection_map = {
+        "Circuit Breaker": (
+            "circuit_breaker_inspection",
+            ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"],
+        ),
+        "Surge Arrestor": (
+            "surge_arrestor_inspection",
+            ["Electrical Safety", "General Maintenance", "Documentation"],
+        ),
+        "Battery Set": (
+            "battery_inspection",
+            ["Electrical Safety", "General Maintenance", "Documentation", "Environmental"],
+        ),
+        "Protection Relay": (
+            "protection_relay_inspection",
+            ["Electrical Safety", "General Maintenance", "Documentation"],
+        ),
+        "Electronic Tri-vector Meter": (
+            "etm_inspection",
+            ["Electrical Safety", "General Maintenance", "Documentation"],
+        ),
+    }
+
+    updated = 0
+    inserted = 0
+
+    for equip_name, (template_key, subtypes) in equipment_inspection_map.items():
+        master = session.query(CategoryMaster).filter_by(name=equip_name).first()
+        if not master:
+            print(f"  [SKIP] CategoryMaster '{equip_name}' not found — skipping.")
+            continue
+
+        template_data = TEST_TEMPLATES.get(template_key)
+        if not template_data:
+            print(f"  [SKIP] Template '{template_key}' not in TEST_TEMPLATES — skipping.")
+            continue
+
+        for subtype_name in subtypes:
+            detail = session.query(CategoryDetails).filter_by(
+                name=subtype_name,
+                category_master_id=master.id,
+                category_type="inspection",
+            ).first()
+            if not detail:
+                print(f"  [SKIP] CategoryDetails '{subtype_name}' for '{equip_name}' not found — skipping.")
+                continue
+
+            existing = session.query(OrgTestTemplate).filter_by(
+                test_type_id=detail.id,
+                org_id=None,
+            ).first()
+
+            if existing:
+                if existing.template_key != template_key or existing.template_data != template_data:
+                    existing.template_key = template_key
+                    existing.template_data = template_data
+                    existing.is_system = True
+                    updated += 1
+            else:
+                session.add(OrgTestTemplate(
+                    template_key=template_key,
+                    org_id=None,
+                    test_type_id=detail.id,
+                    template_data=template_data,
+                    is_system=True,
+                    version=1,
+                ))
+                inserted += 1
+
+    session.commit()
+    print(f"[OK] Equipment inspection templates: {updated} updated, {inserted} inserted.")
+    return updated + inserted
+
+
 def seed_tr_workflows(session):
     """
     Seed the IntegratedWorkflowEngine with three workflows:
@@ -7814,6 +8052,8 @@ def run_seed():
         print(f"[OK] Transformer Oil Test template: {n6} seeded.")
         n7 = seed_capacitance_tandelta_template(session)
         print(f"[OK] Capacitance & Tan Delta template: {n7} seeded.")
+        n8 = seed_inspection_templates(session)
+        print(f"[OK] Equipment-specific inspection templates: {n8} migrated.")
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")
@@ -7836,6 +8076,13 @@ def run_seed():
                 print(f"[WARN] KPTCL department seeding failed: {e}")
                 print("[INFO] You can retry with:")
                 print(f"       python seed.py --kptcl {kptcl_org.id}")
+
+            try:
+                seed_kptcl_equipment(session, str(kptcl_org.id))
+            except FileNotFoundError:
+                print("[WARN] equipment_seed.xlsx not found. Skipping equipment seeding.")
+            except Exception as e:
+                print(f"[WARN] KPTCL equipment seeding failed: {e}")
 
         # Annual Audit role mappings for KPTCL (stages must already exist from seed_annual_audit_stages above)
         if kptcl_org:
@@ -8115,10 +8362,10 @@ def seed_sample_equipment(session, org):
         ("Power Transformer", "110", "02", "ABB", "PT-110-B", "PT2024002", 2019),
         ("Current Transformer", "220", "01", "Siemens", "CT-220-X", "CT2024001", 2021),
         ("Current Transformer", "110", "01", "CGL", "CT-110-Y", "CT2024002", 2022),
-        ("CVT", "220", "01", "BHEL", "CVT-220-A", "CVT2024001", 2020),
+        ("Capacitor Voltage Transformer", "220", "01", "BHEL", "CVT-220-A", "CVT2024001", 2020),
         ("Power Transformer", "66", "01", "Crompton Greaves", "PT-66-C", "PT2024003", 2018),
-        ("Relay", "220", "01", "L&T", "REL-220-A", "REL2024001", 2023),
-        ("Meter", "110", "01", "Secure Meters", "MTR-110-A", "MTR2024001", 2021),
+        ("Protection Relay", "220", "01", "L&T", "REL-220-A", "REL2024001", 2023),
+        ("Electronic Tri-vector Meter", "110", "01", "Secure Meters", "MTR-110-A", "MTR2024001", 2021),
         # Cumulative lifecycle
         ("Circuit Breaker", "220", "01", "ABB", "CB-220-A", "CB2024001", 2021),
         ("Circuit Breaker", "110", "02", "Siemens", "CB-110-B", "CB2024002", 2020),
@@ -8735,7 +8982,7 @@ def seed_surveillance_workflow(session):
         if not _os.path.exists(path):
             print(f"[WARN] File not found: {fname} - skipping")
             return None
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             return _json.load(fh)
 
     stages_raw      = _load("SURVEILLANCE_WORKFLOW_STAGES.json")
@@ -8763,8 +9010,7 @@ def seed_surveillance_workflow(session):
         wf_def = RepairWorkflowDefinition(
             id=uuid.uuid4(),
             workflow_code="SURVEILLANCE",
-            workflow_name="Post-Commissioning Surveillance",
-            description="24-month surveillance workflow with quarterly testing and final evaluation",
+            name="Post-Commissioning Surveillance",
             is_active=True,
         )
         session.add(wf_def)
@@ -8806,11 +9052,10 @@ def seed_surveillance_workflow(session):
             id=uuid.uuid4(),
             name=name,
             code=code,
-            stage_number=s["sequence"],
+            sequence=s["sequence"],
             is_active=True,
             is_mandatory=True,
             workflow_definition_id=wf_def.id,
-            requires_approval=True,
         )
         session.add(stage)
         session.flush()
@@ -8877,7 +9122,6 @@ def seed_surveillance_workflow(session):
                 from_stage_id=from_id,
                 to_stage_id=to_id,
                 action=action,
-                label=f"Complete {CODE_TO_NAME.get(from_code, from_code)}",
             ))
 
     session.commit()
@@ -8904,17 +9148,12 @@ def seed_surveillance_config(session):
     if not system_config:
         system_config = SurveillanceConfig(
             id=uuid.uuid4(),
-            organization_id=None,  # System-wide default
+            organization_id=None,
             department_id=None,
-            surveillance_period_months=24,  # 24-month surveillance period
-            frequency_multiplier=2.0,        # 2x normal test frequency (12mo → 6mo)
+            surveillance_period_months=24,
+            frequency_multiplier=2.0,
             abnormal_statuses=['FAIL', 'MARGINAL', 'CRITICAL', 'ALERT'],
-            quality_thresholds={
-                'excellent': 0,      # 0% abnormal
-                'good': 20,          # <20% abnormal
-                'fair': 50,          # 20-50% abnormal
-                'poor': 51           # ≥50% abnormal
-            },
+            quality_threshold_fair=20.0,
             is_active=True,
         )
         session.add(system_config)
@@ -8926,84 +9165,48 @@ def seed_surveillance_config(session):
     # ── 2. Surveillance Test Configurations ───────────────────────────────────
     # Get equipment types and test types from CategoryDetails
 
-    # Find "Power Transformer" equipment type
-    equipment_type = session.query(CategoryDetails).filter(
-        CategoryDetails.category == 'asset',
-        CategoryDetails.name.ilike('%transformer%')
-    ).first()
+    # Find "Power Transformer" equipment master
+    equip_master = session.query(CategoryMaster).filter_by(name="Power Transformer").first()
 
-    if not equipment_type:
-        print("[WARN] Power Transformer equipment type not found - skipping test config")
+    if not equip_master:
+        print("[WARN] Power Transformer CategoryMaster not found - skipping test config")
         return
 
-    # Find required test types
-    test_type_names = ['DGA', 'BDV', 'IR', 'Oil Quality']
-    test_types = session.query(CategoryDetails).filter(
-        CategoryDetails.category == 'test',
-        CategoryDetails.name.in_(test_type_names)
-    ).all()
-
-    if not test_types:
-        print("[WARN] Test types not found in CategoryDetails - skipping test config")
-        return
-
-    test_type_map = {t.name: t for t in test_types}
-
-    # Create surveillance test configs
+    # Surveillance test types mapped to existing CategoryDetails names
     surveillance_tests = [
-        {
-            'test_name': 'DGA',
-            'is_required': True,
-            'default_priority': 'high',
-            'description': 'Dissolved Gas Analysis - monitors transformer health through gas levels'
-        },
-        {
-            'test_name': 'BDV',
-            'is_required': True,
-            'default_priority': 'high',
-            'description': 'Breakdown Voltage - measures insulating oil dielectric strength'
-        },
-        {
-            'test_name': 'IR',
-            'is_required': True,
-            'default_priority': 'medium',
-            'description': 'Insulation Resistance - checks winding insulation integrity'
-        },
-        {
-            'test_name': 'Oil Quality',
-            'is_required': True,
-            'default_priority': 'medium',
-            'description': 'Oil Quality Analysis - comprehensive oil condition assessment'
-        },
+        ("Transformer Oil Test",       "high",   True),
+        ("Capacitance & Tan Delta Test (Transformer)", "high", True),
+        ("Transformer Physical Inspection", "medium", True),
+        ("Insulation resistance test", "medium", True),
     ]
 
-    for test_config in surveillance_tests:
-        test_name = test_config['test_name']
-        test_type = test_type_map.get(test_name)
+    for test_name, priority, required in surveillance_tests:
+        test_type = session.query(CategoryDetails).filter_by(
+            name=test_name,
+            category_master_id=equip_master.id,
+        ).first()
 
         if not test_type:
-            print(f"[WARN] Test type not found: {test_name}")
+            print(f"[WARN] Test type not found for surveillance config: {test_name}")
             continue
 
-        # Check if config already exists
         existing = session.query(SurveillanceTestConfig).filter_by(
-            equipment_type_id=equipment_type.id,
-            test_type_id=test_type.id
+            equipment_type_id=equip_master.id,
+            test_type_id=test_type.id,
         ).first()
 
         if existing:
             print(f"[SKIP] Surveillance test config exists: {test_name}")
             continue
 
-        config = SurveillanceTestConfig(
+        session.add(SurveillanceTestConfig(
             id=uuid.uuid4(),
-            equipment_type_id=equipment_type.id,
+            equipment_type_id=equip_master.id,
             test_type_id=test_type.id,
-            is_required=test_config['is_required'],
-            default_priority=test_config['default_priority'],
-            description=test_config.get('description'),
-        )
-        session.add(config)
+            is_required=required,
+            default_priority=priority,
+            is_active=True,
+        ))
         print(f"[OK] Surveillance test config created: {test_name}")
 
     session.commit()
@@ -9228,7 +9431,7 @@ def _seed_dft_equipment(session, org, dept_map: dict):
     "south": [
         ("Power Transformer", "220", "01", "BHEL", "PT-220-S", "STH2024001", 2021),
         ("Current Transformer", "110", "01", "CGL", "CT-110-S", "STH2024002", 2022),
-        ("CVT", "220", "01", "BHEL", "CVT-220-S", "STH2024003", 2020),
+        ("Capacitor Voltage Transformer", "220", "01", "BHEL", "CVT-220-S", "STH2024003", 2020),
     ],
 
     "mysuru": [
@@ -9441,7 +9644,7 @@ Department-filter validation matrix:
 
 def seed_kptcl_only(org_id: str):
     """
-    Run only KPTCL department seeding for a specific organization.
+    Run KPTCL department + equipment seeding for a specific organization.
     Usage: python seed.py --kptcl <org_id>
     """
     with get_db_session() as session:
@@ -9450,7 +9653,11 @@ def seed_kptcl_only(org_id: str):
         print("=" * 80 + "\n")
         seed_kptcl_departments(session, org_id)
         print("\n" + "=" * 80)
-        print("  [OK] KPTCL DEPARTMENTS SEEDED SUCCESSFULLY")
+        print("  KPTCL EQUIPMENT SEEDING")
+        print("=" * 80 + "\n")
+        seed_kptcl_equipment(session, org_id)
+        print("\n" + "=" * 80)
+        print("  [OK] KPTCL SEEDING COMPLETED SUCCESSFULLY")
         print("=" * 80 + "\n")
 
 
@@ -9470,9 +9677,10 @@ if __name__ == "__main__":
             # --with-kptcl <org_id>  → also seed KPTCL departments after full seed
             if len(sys.argv) > 2 and sys.argv[1] == "--with-kptcl":
                 org_id = sys.argv[2]
-                print("\n[INFO] Seeding KPTCL departments...")
+                print("\n[INFO] Seeding KPTCL departments + equipment...")
                 with get_db_session() as session:
                     seed_kptcl_departments(session, org_id)
+                    seed_kptcl_equipment(session, org_id)
 
     except Exception as e:
         import traceback

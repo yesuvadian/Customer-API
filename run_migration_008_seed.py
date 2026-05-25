@@ -35,6 +35,7 @@ def run_seed():
 
         session.execute(text("""
             INSERT INTO public.surveillance_config (
+                id,
                 organization_id,
                 department_id,
                 surveillance_period_months,
@@ -44,12 +45,13 @@ def run_seed():
                 is_active
             )
             VALUES (
+                gen_random_uuid(),
                 NULL,  -- system-wide default
                 NULL,
                 24,    -- 24-month surveillance period
-                2.0,   -- 2x frequency (normal 12mo → surveillance 6mo)
+                2.0,   -- 2x frequency
                 '["FAIL", "MARGINAL", "CRITICAL", "ALERT"]'::jsonb,
-                20.0,  -- ≥20% abnormal = POOR quality rating
+                20.0,  -- >=20% abnormal = POOR quality rating
                 true
             )
             ON CONFLICT DO NOTHING
@@ -139,7 +141,7 @@ def run_seed():
                 "periodicity": periodicity
             })
             session.commit()
-            print(f"  [OK] {test_full_name} → {periodicity} days, priority: {priority}")
+            print(f"  [OK] {test_full_name} -> {periodicity} days, priority: {priority}")
             inserted_count += 1
 
         # ───────────────────────────────────────────────────────────────────

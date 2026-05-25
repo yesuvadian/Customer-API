@@ -1039,7 +1039,7 @@ class Equipment(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    ueic = Column(String(50), unique=True, nullable=False)  # Auto-generated: BZ-PNYA-220-01-CB-01
+    ueic = Column(String(200), unique=True, nullable=False)  # Auto-generated
 
     # Location — linked to department hierarchy (substation level)
     organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
@@ -1049,8 +1049,8 @@ class Equipment(Base):
     equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=False)
 
     # UEIC components
-    voltage_class = Column(String(10), nullable=True)   # "400", "220", "110", "66"
-    bay_number = Column(String(10), nullable=True)       # "01", "02"
+    voltage_class = Column(String(20), nullable=True)   # "400", "220", "110", "66", "400/220/33"
+    bay_number = Column(String(255), nullable=True)      # bay name text, e.g. "Hoody-Begur line"
     serial_in_bay = Column(String(10), nullable=True)    # "01"
 
     # Nameplate data — dynamic JSONB (template-driven, same pattern as OrgTestTemplate)
@@ -1077,6 +1077,20 @@ class Equipment(Base):
     model_number = Column(String(255), nullable=True)
     factory_serial_number = Column(String(100), nullable=True)
     year_of_manufacture = Column(Integer, nullable=True)
+
+    # Phase identifier (R / Y / B — null for Power Transformers)
+    phase = Column(String(1), nullable=True)
+
+    # CT-specific nameplate fields
+    ct_ratio_actual = Column(String(100), nullable=True)   # e.g. "800-600-400-300/1-1-1-1-1A"
+    ct_ratio_current = Column(String(100), nullable=True)  # e.g. "800/1-1-1-1-1A" (active tap)
+
+    # PT-specific nameplate fields
+    pt_ratio = Column(String(100), nullable=True)   # e.g. "220kV/110V-110V"
+
+    # Power Transformer-specific nameplate fields
+    vector_group = Column(String(20), nullable=True) # e.g. "YNyn0d11", "Dyn11", "YNa0d11"
+    impedance_pct = Column(Float, nullable=True)     # % impedance, e.g. 9.8, 13.5
 
     # Audit
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)

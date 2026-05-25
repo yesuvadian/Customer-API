@@ -1,32 +1,32 @@
 [
   {
     "stage_code": "Q1_SURVEILLANCE",
-    "roles": ["Reviewing Officer", "Maintenance Officer", "EE TLSS"],
+    "roles": ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
     "assign_also": ["Reviewing Officer"],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "Q2_SURVEILLANCE",
-    "roles": ["Reviewing Officer", "Maintenance Officer", "EE TLSS"],
+    "roles": ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
     "assign_also": ["Reviewing Officer"],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "Q3_SURVEILLANCE",
-    "roles": ["Reviewing Officer", "Maintenance Officer", "EE TLSS"],
+    "roles": ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
     "assign_also": ["Reviewing Officer"],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "Q4_SURVEILLANCE",
-    "roles": ["Reviewing Officer", "Maintenance Officer", "EE TLSS"],
+    "roles": ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
     "assign_also": ["Reviewing Officer"],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "FINAL_EVALUATION",
-    "roles": ["Senior Management Approver", "EE TLSS", "Department Head"],
-    "assign_also": ["EE TLSS"],
+    "roles": ["Senior Management Approver", "Supervisory Officer", "Reviewing Officer"],
+    "assign_also": ["Supervisory Officer"],
     "assignment_role": "Transformer Repair Coordinator"
   }
 ]
