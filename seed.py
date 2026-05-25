@@ -5409,6 +5409,12 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             except (ValueError, TypeError):
                 return None
 
+        def _clean_str(val):
+            """Convert pandas nan strings and empty strings to None."""
+            if val is None or val == "" or str(val).lower() in ("nan", "none", "null"):
+                return None
+            return str(val).strip() if val else None
+
         voltage_class = row.get("voltage_class") or ""
         # Strip trailing "kV" suffix if present for storage consistency
         voltage_class = voltage_class.replace("kV", "").replace("KV", "").strip() or None
@@ -5447,16 +5453,16 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
                 department_id=dept_id,
                 equipment_type_id=equip_type_id,
                 voltage_class=voltage_class,
-                bay_number=row.get("bay_name"),
-                manufacturer=row.get("manufacturer"),
-                factory_serial_number=row.get("factory_serial_number"),
+                bay_number=_clean_str(row.get("bay_name")),
+                manufacturer=_clean_str(row.get("manufacturer")),
+                factory_serial_number=_clean_str(row.get("factory_serial_number")),
                 year_of_manufacture=yom,
                 commissioned_date=doc_date,
-                phase=row.get("phase"),
-                ct_ratio_actual=row.get("ct_ratio_actual"),
-                ct_ratio_current=row.get("ct_ratio_current"),
-                pt_ratio=row.get("pt_ratio"),
-                vector_group=row.get("vector_group"),
+                phase=_clean_str(row.get("phase")),
+                ct_ratio_actual=_clean_str(row.get("ct_ratio_actual")),
+                ct_ratio_current=_clean_str(row.get("ct_ratio_current")),
+                pt_ratio=_clean_str(row.get("pt_ratio")),
+                vector_group=_clean_str(row.get("vector_group")),
                 impedance_pct=_float(row.get("impedance_pct")),
                 created_by=created_by,
             )
