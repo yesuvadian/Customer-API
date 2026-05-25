@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 from uuid import UUID
 
@@ -6,6 +7,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from models import TestingRequest, TestingRequestStatus, TestResult, TestResultImage, CategoryDetails, Recommendation, RecommendationType, TestSession
 from utils.common_service import UTCDateTimeMixin
+
+logger = logging.getLogger(__name__)
 
 
 def _deduplicated_overall_sections(main_sections: list, overall_sections: list) -> list:
@@ -164,6 +167,25 @@ class TestingService:
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
+
+        # ── Surveillance tracking: update if this is a surveillance test ──────
+        if request.surveillance_workflow_id:
+            try:
+                from services.surveillance_tracking_service import SurveillanceTrackingService
+
+                # Get result status from latest test result
+                latest_result = results[-1] if results else None
+                result_status = latest_result.overall_result if latest_result else None
+                tested_at = latest_result.tested_at if latest_result else None
+
+                SurveillanceTrackingService(self.db).update_test_result(
+                    testing_request_id=request_id,
+                    test_status='completed',
+                    result_status=result_status,
+                    tested_at=tested_at
+                )
+            except Exception as _surv:
+                logger.warning("[TestingService] Surveillance tracking update failed: %s", _surv)
 
         # ── Notification: test submitted → notify approvers ───────────────────
         try:

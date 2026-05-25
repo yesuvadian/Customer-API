@@ -467,6 +467,15 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 "source_schedule_id": (
                     schedule.id
                 ),
+
+                # Surveillance workflow linkage (if applicable)
+                "surveillance_workflow_id": (
+                    schedule.surveillance_workflow_id if hasattr(schedule, 'surveillance_workflow_id') else None
+                ),
+
+                "surveillance_quarter": (
+                    schedule.surveillance_quarter if hasattr(schedule, 'surveillance_quarter') else None
+                ),
             }
 
             new_request = svc.create_request(
