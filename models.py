@@ -7,6 +7,7 @@ from sqlalchemy import (
     Column, Float, LargeBinary, Numeric, String, Boolean, Date, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
 )
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB, ARRAY
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import relationship
 from database import Base
 from utils.common_service import UTCDateTimeMixin
@@ -3184,7 +3185,7 @@ class OrgTestTemplate(Base):
     org_id = Column(UUID(as_uuid=True), nullable=True)   # NULL = global default
     template_key = Column(String(100), nullable=False)
     test_type_id = Column(Integer, nullable=True)            # soft ref to CategoryDetails.id
-    template_data = Column(JSONB, nullable=False)            # full template JSON
+    template_data = Column(MutableDict.as_mutable(JSONB), nullable=False)  # full template JSON
     is_system = Column(Boolean, default=True)
     version = Column(Integer, default=1)
 
@@ -4213,3 +4214,84 @@ class RepairSurveillanceTest(Base):
     surveillance_workflow = relationship("RepairWorkflow", foreign_keys=[surveillance_workflow_id])
     testing_request = relationship("TestingRequest", foreign_keys=[testing_request_id])
     test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NOTIFICATION ENGINE - EVENT QUEUE
+# ═══════════════════════════════════════════════════════════════════════════
+
+class NotificationEvent(Base):
+    """
+    Notification event queue for decoupled notification processing.
+
+    Application emits events to this table, then a separate worker process
+    picks them up and dispatches notifications asynchronously.
+
+    Benefits:
+    - Non-blocking: API requests don't wait for email/SMS delivery
+    - Reliable: Events persisted, won't lose notifications if worker crashes
+    - Scalable: Can run multiple worker instances in parallel
+    - Retry logic: Auto-retry failed notifications with exponential backoff
+    """
+    __tablename__ = "notification_events"
+    __table_args__ = (
+        Index('idx_events_status_scheduled', 'status', 'scheduled_for'),
+        Index('idx_events_organization', 'organization_id'),
+        Index('idx_events_type', 'event_type'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Event metadata
+    event_type = Column(String(100), nullable=False)  # 'test_submitted', 'status_changed', etc.
+    event_source = Column(String(100), nullable=True)  # 'testing_service', 'workflow_service', etc.
+
+    # Context for routing rules (used to match NotificationRoutingRule filters)
+    workflow_type = Column(String(100), nullable=True)     # 'testing_request', 'taqc_inspection', etc.
+    equipment_type = Column(String(200), nullable=True)
+    test_category = Column(String(100), nullable=True)     # 'test', 'maintenance', 'inspection'
+    status_from = Column(String(100), nullable=True)
+    status_to = Column(String(100), nullable=True)
+
+    # Event payload (flexible JSON with all context data for template rendering)
+    # Example: {
+    #   "request_id": "uuid",
+    #   "request_number": "TR-2024-001",
+    #   "tester_name": "John Doe",
+    #   "equipment_name": "Circuit Breaker CB-01",
+    #   "department": "Substation A",
+    #   ... all template variables ...
+    # }
+    payload = Column(JSONB, nullable=False, server_default='{}')
+
+    # Processing state
+    status = Column(
+        String(50),
+        nullable=False,
+        default='pending',
+        index=True,
+    )  # 'pending', 'processing', 'sent', 'failed'
+
+    attempts = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    last_error = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    scheduled_for = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )  # For delayed notifications
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
