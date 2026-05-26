@@ -7,6 +7,7 @@ from sqlalchemy import (
     Column, Float, LargeBinary, Numeric, String, Boolean, Date, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
 )
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB, ARRAY
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import relationship
 from database import Base
 from utils.common_service import UTCDateTimeMixin
@@ -123,17 +124,31 @@ class RepairWorkflowDefinition(Base):
 
 
 class RepairStageTemplate(Base):
-    """1-to-1 mapping: one stage → one form template."""
+    """Stage → form template mapping.
+
+    Generic stages (OBSERVATION_ASSIGNMENT, COMPLIANCE_REVIEW, OBSERVATION_CLOSURE)
+    have category_detail_id = NULL.  Category-specific stages (OBSERVATION_REPORTING,
+    COMPLIANCE_SUBMISSION) have one row per CategoryDetail so the form rendered
+    matches the observation's category.
+    """
     __tablename__ = "repair_stage_templates"
 
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     stage_id = Column(
         UUID(as_uuid=True),
         ForeignKey("repair_stage_definitions.id", ondelete="CASCADE"),
-        primary_key=True,
+        nullable=False,
+        index=True,
     )
     template_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.org_test_templates.id", ondelete="CASCADE"),
+    )
+    # NULL → generic (shown for all categories); non-NULL → category-specific
+    category_detail_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
 
@@ -188,11 +203,25 @@ class RepairStageDefinition(Base):
 
     is_mandatory = Column(Boolean, default=True)
 
+    workflow_definition_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflow_definitions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    default_duration_days = Column(Integer, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
 
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # relationships
+    workflow_definition = relationship(
+        "RepairWorkflowDefinition",
+        foreign_keys=[workflow_definition_id],
+    )
+
     stage_instances = relationship(
         "RepairStageInstance",
         back_populates="stage",
@@ -219,7 +248,7 @@ class RepairWorkflow(Base):
     equipment_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.equipment.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
 
@@ -245,6 +274,13 @@ class RepairWorkflow(Base):
         nullable=True,
     )
 
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     workflow_type = Column(String(50), default="BREAKDOWN", nullable=True)  # BREAKDOWN / OVERHAUL
     source = Column(String(50), nullable=True)  # manual / cumulative / scheduled
 
@@ -261,6 +297,11 @@ class RepairWorkflow(Base):
     completed_at = Column(DateTime)
 
     cancelled_at = Column(DateTime)
+
+    work_award_at = Column(DateTime, nullable=True)
+    work_award_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    vendor_name = Column(String(255), nullable=True)
+    contracted_completion = Column(Date, nullable=True)
 
     created_by = Column(
         UUID(as_uuid=True),
@@ -316,6 +357,11 @@ class RepairWorkflow(Base):
         foreign_keys=[modified_by],
     )
 
+    work_award_officer = relationship(
+        "User",
+        foreign_keys=[work_award_by],
+    )
+
     stage_instances = relationship(
         "RepairStageInstance",
         back_populates="workflow",
@@ -356,6 +402,9 @@ class RepairStageInstance(Base):
 
     status = Column(String, default="not_started")
 
+    # Surveillance workflow support — quarter number for quarterly surveillance stages (1-4)
+    quarter_number = Column(Integer, nullable=True)  # NULL for non-surveillance stages
+
     assigned_user_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.users.id"),
@@ -376,6 +425,13 @@ class RepairStageInstance(Base):
     )
 
     remarks = Column(Text)
+
+    contracted_date = Column(Date, nullable=True)
+    delay_days = Column(Integer, nullable=True)
+    delay_attribution = Column(String(20), nullable=True)
+    delay_reason = Column(Text, nullable=True)
+    delay_attributed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    delay_attributed_at = Column(DateTime, nullable=True)
 
     created_by = Column(
         UUID(as_uuid=True),
@@ -430,6 +486,11 @@ class RepairStageInstance(Base):
     modifier = relationship(
         "User",
         foreign_keys=[modified_by],
+    )
+
+    delay_attributed_officer = relationship(
+        "User",
+        foreign_keys=[delay_attributed_by],
     )
 
     data_entries = relationship(
@@ -657,7 +718,14 @@ class EquipmentOverhaulConfig(Base):
 
 
 class OverhaulRecommendation(Base):
-    """Records an auto-triggered overhaul recommendation when cumulative threshold is crossed."""
+    """Records an auto-triggered overhaul recommendation when cumulative threshold is crossed.
+
+    Lifecycle:
+      OPEN               — triggered automatically; awaiting overhaul completion record
+      PENDING_VERIFICATION — EE uploaded completion record; awaiting Officer verification
+      CLOSED             — Officer verified; overhaul confirmed complete
+      REJECTED           — Officer rejected the completion record; back to OPEN flow
+    """
     __tablename__ = "overhaul_recommendations"
     __table_args__ = {"schema": "public"}
 
@@ -666,10 +734,27 @@ class OverhaulRecommendation(Base):
     workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True)
     cumulative_value = Column(Float, nullable=False)
     threshold_value = Column(Float, nullable=False)
-    status = Column(String(20), default="OPEN")  # OPEN / CLOSED
+
+    # Status: OPEN / PENDING_VERIFICATION / CLOSED / REJECTED
+    status = Column(String(30), default="OPEN", index=True)
+
     triggered_at = Column(DateTime(timezone=True), server_default=func.now())
-    closed_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+
+    # ── Completion record (submitted by EE) ──────────────────────────────────
+    completion_notes = Column(Text, nullable=True)
+    completion_file_name = Column(String(500), nullable=True)   # uploaded file name
+    completion_file_data = Column(LargeBinary, nullable=True)   # file bytes
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # ── Verification (by designated Officer) ─────────────────────────────────
+    verified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    verification_notes = Column(Text, nullable=True)
+
+    # ── Closure ──────────────────────────────────────────────────────────────
+    closed_at = Column(DateTime(timezone=True), nullable=True)
 
     equipment = relationship("Equipment", foreign_keys=[equipment_id])
 
@@ -712,7 +797,7 @@ class TAQCAnnualInspection(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     inspection_number = Column(String(50), unique=True, nullable=False, index=True)
     organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=False)
-    substation_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=False)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
     inspection_date = Column(Date, nullable=False)
     inspected_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     remarks = Column(Text, nullable=True)
@@ -721,7 +806,7 @@ class TAQCAnnualInspection(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     organization = relationship("Organization", foreign_keys=[organization_id])
-    substation = relationship("Equipment", foreign_keys=[substation_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
     inspector = relationship("User", foreign_keys=[inspected_by])
     observations = relationship(
         "TAQCObservation",
@@ -955,7 +1040,7 @@ class Equipment(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    ueic = Column(String(50), unique=True, nullable=False)  # Auto-generated: BZ-PNYA-220-01-CB-01
+    ueic = Column(String(200), unique=True, nullable=False)  # Auto-generated
 
     # Location — linked to department hierarchy (substation level)
     organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
@@ -965,8 +1050,8 @@ class Equipment(Base):
     equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=False)
 
     # UEIC components
-    voltage_class = Column(String(10), nullable=True)   # "400", "220", "110", "66"
-    bay_number = Column(String(10), nullable=True)       # "01", "02"
+    voltage_class = Column(String(20), nullable=True)   # "400", "220", "110", "66", "400/220/33"
+    bay_number = Column(String(255), nullable=True)      # bay name text, e.g. "Hoody-Begur line"
     serial_in_bay = Column(String(10), nullable=True)    # "01"
 
     # Nameplate data — dynamic JSONB (template-driven, same pattern as OrgTestTemplate)
@@ -994,11 +1079,28 @@ class Equipment(Base):
     factory_serial_number = Column(String(100), nullable=True)
     year_of_manufacture = Column(Integer, nullable=True)
 
+    # Phase identifier (R / Y / B — null for Power Transformers)
+    phase = Column(String(1), nullable=True)
+
+    # CT-specific nameplate fields
+    ct_ratio_actual = Column(String(100), nullable=True)   # e.g. "800-600-400-300/1-1-1-1-1A"
+    ct_ratio_current = Column(String(100), nullable=True)  # e.g. "800/1-1-1-1-1A" (active tap)
+
+    # PT-specific nameplate fields
+    pt_ratio = Column(String(100), nullable=True)   # e.g. "220kV/110V-110V"
+
+    # Power Transformer-specific nameplate fields
+    vector_group = Column(String(20), nullable=True) # e.g. "YNyn0d11", "Dyn11", "YNa0d11"
+    impedance_pct = Column(Float, nullable=True)     # % impedance, e.g. 9.8, 13.5
+
     # Audit
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
 
     # Relationships
     organization = relationship("Organization", foreign_keys=[organization_id])
@@ -1187,8 +1289,8 @@ class UserAddress(Base):
     state_id = Column(Integer, ForeignKey("public.states.id", ondelete="SET NULL"))
     country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="SET NULL"))
     postal_code = Column(String(20))
-    latitude = Column(Numeric(10, 8))
-    longitude = Column(Numeric(11, 8))
+    latitude = Column(Float)
+    longitude = Column(Float)
 
     erp_sync_status = Column(String(10), default="pending")
     erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)
@@ -2283,8 +2385,18 @@ class TestingRequest(Base):
     # Calibration tracking — stamped at creation from template's enable_calibration flag
     is_calibration = Column(Boolean, default=False, nullable=False)
 
+    # Surveillance workflow linkage — for testing requests auto-created during post-commissioning surveillance
+    surveillance_workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    surveillance_quarter = Column(Integer, nullable=True)  # 1, 2, 3, or 4 (NULL for non-surveillance tests)
+
     # Direct submission (Failure Registry / TA&QC — no tester assignment step)
     is_direct_submission = Column(Boolean, default=False)  # True = filler IS the submitter
+    form_data = Column(JSONB, nullable=True)               # FR: template fields + recommendation snapshot
 
     # Failure Registry → Repair Lifecycle traceability
     # Populated when approve_recommendation() auto-creates a repair_lifecycle TR from an FR- record
@@ -2300,7 +2412,11 @@ class TestingRequest(Base):
     # Notes
     notes = Column(Text, nullable=True)
     rejection_reason = Column(Text, nullable=True)
-
+    source_schedule_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("public.test_request_schedules.id"),
+    nullable=True,
+)
     # Audit
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -2323,45 +2439,388 @@ class TestingRequest(Base):
     source_failure = relationship("TestingRequest", foreign_keys=[source_failure_id], remote_side="TestingRequest.id")
 
 
-# ------------------------------
-# TestRequestSchedule Model
-# ------------------------------
+# ============================================================
+# TEST REQUEST SCHEDULE MODEL
+# ============================================================
+
 class TestRequestSchedule(Base):
+
     __tablename__ = "test_request_schedules"
-    __table_args__ = {"schema": "public"}
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    test_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False, unique=True)
-    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    __table_args__ = (
 
-    frequency = Column(Enum(ScheduleFrequency), nullable=False)
-    start_date = Column(DateTime(timezone=True), nullable=False)  # = first request's due_date
-    end_date = Column(DateTime(timezone=True), nullable=True)
-    next_run_date = Column(DateTime(timezone=True), nullable=False)  # first request due_date + frequency
-    last_run_date = Column(DateTime(timezone=True), nullable=True)
-    advance_days = Column(Integer, default=1, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
+        UniqueConstraint(
+            "equipment_id",
+            "test_type_id",
+            name="uq_equipment_test_schedule"
+        ),
 
-    # Test Register columns — populated only on template-derived schedules
-    revised_periodicity_days = Column(Integer, nullable=True)  # overrides frequency after ALERT result
-    oem_reference = Column(Text, nullable=True)                # OEM/IS standard clause that mandates this test
-    responsible_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
-    reviewing_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+        {"schema": "public"},
+    )
 
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
-    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
-    cts = Column(DateTime(timezone=True), server_default=func.now())
-    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # ============================================================
+    # PRIMARY
+    # ============================================================
 
-    # Relationships
-    test_request = relationship("TestingRequest", foreign_keys=[test_request_id])
-    organization = relationship("Organization", foreign_keys=[organization_id])
-    creator = relationship("User", foreign_keys=[created_by])
-    responsible_role = relationship("OrgRole", foreign_keys=[responsible_role_id])
-    reviewing_role = relationship("OrgRole", foreign_keys=[reviewing_role_id])
-    logs = relationship("TestRequestScheduleLog", back_populates="schedule", cascade="all, delete-orphan")
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
 
+    # ============================================================
+    # ORGANIZATION
+    # ============================================================
 
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.organizations.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    # ============================================================
+    # MASTER TARGET
+    # NULL FOR OPERATIONAL
+    # ============================================================
+
+    equipment_type_id = Column(
+        Integer,
+        ForeignKey(
+            "public.CategoryMaster.id",
+            ondelete="CASCADE",
+        ),
+        nullable=True,   # NULL for site-level schedules (e.g. taqc_inspection)
+        index=True,
+    )
+
+    # ============================================================
+    # OPERATIONAL TARGET
+    # NULL = MASTER SCHEDULE
+    # NOT NULL = OPERATIONAL SCHEDULE
+    # ============================================================
+
+    equipment_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.equipment.id",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    # ============================================================
+    # SITE-LEVEL TARGET (taqc_inspection schedules)
+    # ============================================================
+
+    department_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.org_departments.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    # ============================================================
+    # TEST DEFINITION
+    # ============================================================
+
+    test_type_id = Column(
+        Integer,
+        ForeignKey(
+            "public.CategoryDetails.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    title = Column(
+        Text,
+        nullable=False,
+    )
+
+    description = Column(
+        Text,
+        nullable=True,
+    )
+
+    request_category = Column(
+        Enum(RequestCategory),
+        nullable=True,
+    )
+
+    priority = Column(
+        String,
+        nullable=True,
+    )
+
+    notes = Column(
+        Text,
+        nullable=True,
+    )
+
+    assigned_tester_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    # ============================================================
+    # TRANSFORMER FIELDS
+    # ============================================================
+
+    transformer_type = Column(
+        Text,
+        nullable=True,
+    )
+
+    transformer_rating = Column(
+        Text,
+        nullable=True,
+    )
+
+    # ============================================================
+    # LOCATION FIELDS
+    # ============================================================
+
+    zone = Column(Text, nullable=True)
+
+    ce_circle = Column(Text, nullable=True)
+
+    se_division = Column(Text, nullable=True)
+
+    ee_subdivision = Column(Text, nullable=True)
+
+    aee_section = Column(Text, nullable=True)
+
+    ae_je = Column(Text, nullable=True)
+
+    # ============================================================
+    # SCHEDULING
+    # ============================================================
+
+    frequency = Column(
+        Enum(ScheduleFrequency),
+        nullable=False,
+    )
+
+    start_date = Column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    end_date = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    next_run_date = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    last_run_date = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    advance_days = Column(
+        Integer,
+        default=1,
+        nullable=False,
+    )
+
+    is_active = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    # ============================================================
+    # TEST REGISTER / OEM
+    # ============================================================
+
+    revised_periodicity_days = Column(
+        Integer,
+        nullable=True,
+    )
+
+    oem_reference = Column(
+        Text,
+        nullable=True,
+    )
+
+    # ============================================================
+    # EXECUTION TRACKING
+    # ============================================================
+
+    last_success_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    last_failure_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    consecutive_failures = Column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    # ============================================================
+    # PAUSE CONTROL
+    # ============================================================
+
+    paused_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    paused_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    pause_reason = Column(
+        Text,
+        nullable=True,
+    )
+
+    # ============================================================
+    # SURVEILLANCE WORKFLOW LINKAGE
+    # ============================================================
+
+    surveillance_workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "repair_workflows.id",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    surveillance_quarter = Column(
+        Integer,
+        nullable=True,
+    )
+
+    # ============================================================
+    # SOFT DELETE
+    # ============================================================
+
+    is_deleted = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    deleted_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    deleted_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    # ============================================================
+    # AUDIT
+    # ============================================================
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    modified_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "public.users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    cts = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    mts = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # ============================================================
+    # RELATIONSHIPS
+    # ============================================================
+
+    organization = relationship(
+        "Organization",
+        foreign_keys=[organization_id],
+    )
+
+    equipment_type = relationship(
+        "CategoryMaster",
+        foreign_keys=[equipment_type_id],
+    )
+
+    equipment = relationship(
+        "Equipment",
+        foreign_keys=[equipment_id],
+    )
+
+    test_type = relationship(
+        "CategoryDetails",
+        foreign_keys=[test_type_id],
+    )
+
+    assigned_tester = relationship(
+        "User",
+        foreign_keys=[assigned_tester_id],
+    )
+
+    creator = relationship(
+        "User",
+        foreign_keys=[created_by],
+    )
+
+   
+
+    logs = relationship(
+        "TestRequestScheduleLog",
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+    )
 # ------------------------------
 # TestRequestScheduleLog Model
 # ------------------------------
@@ -2646,6 +3105,7 @@ class Recommendation(Base):
     # Next action dispatch — set by Tester when submitting result
     next_action = Column(Enum(NextActionType), nullable=True)
     schedule_frequency = Column(Enum(ScheduleFrequency), nullable=True)  # for maintenance/inspection
+    test_types = Column(JSONB, nullable=True)  # [{id, name}] — recommended test types from FR wizard
 
     # Approval
     approval_status = Column(String(20), default="pending")
@@ -2725,7 +3185,7 @@ class OrgTestTemplate(Base):
     org_id = Column(UUID(as_uuid=True), nullable=True)   # NULL = global default
     template_key = Column(String(100), nullable=False)
     test_type_id = Column(Integer, nullable=True)            # soft ref to CategoryDetails.id
-    template_data = Column(JSONB, nullable=False)            # full template JSON
+    template_data = Column(MutableDict.as_mutable(JSONB), nullable=False)  # full template JSON
     is_system = Column(Boolean, default=True)
     version = Column(Integer, default=1)
 
@@ -3551,3 +4011,287 @@ class NotificationRoutingRule(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     cts       = Column(DateTime(timezone=True), server_default=func.now())
     mts       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# POST-COMMISSIONING SURVEILLANCE WORKFLOW MODELS
+# ═══════════════════════════════════════════════════════════════════════════
+
+class SurveillanceConfig(Base):
+    """
+    Hierarchical configuration for post-commissioning surveillance periods.
+
+    Determines surveillance duration and test frequency after Stage 10 (Commissioning) completes.
+    Resolution order: Department → Organization → System (.env fallback).
+
+    Example:
+    - Zone A: 24-month surveillance (default)
+    - Zone B (rural): 18-month surveillance (department override)
+    - System default: 24 months (from .env SURVEILLANCE_PERIOD_MONTHS=24)
+    """
+    __tablename__ = "surveillance_config"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Scope (NULL = system-wide default)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    department_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.org_departments.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    # Surveillance period in months (default: 24)
+    surveillance_period_months = Column(Integer, nullable=False, default=24)
+
+    # Enhanced test frequency multiplier (default: 2x normal frequency)
+    # Normal DGA = 12 months → Surveillance DGA = 12/2 = 6 months
+    frequency_multiplier = Column(Float, nullable=False, default=2.0)
+
+    # Abnormal result detection config
+    # Test results matching these statuses trigger "abnormal" flagging
+    abnormal_statuses = Column(
+        JSONB,
+        nullable=False,
+        server_default='["FAIL", "MARGINAL", "CRITICAL", "ALERT"]'
+    )
+
+    # Quality rating thresholds (% abnormal tests)
+    # GOOD: 0% abnormal
+    # FAIR: 1-19% abnormal
+    # POOR: ≥20% abnormal
+    quality_threshold_fair = Column(Float, nullable=False, default=20.0)  # ≥20% = POOR
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+
+
+class SurveillanceTestConfig(Base):
+    """
+    Defines which test types are auto-created during surveillance periods.
+
+    Links to CategoryDetails (test types) to maintain single source of truth.
+    Each surveillance workflow gets these tests created automatically every 6 months
+    (or per configured frequency).
+
+    Example config row:
+    - equipment_type_id: Power Transformer
+    - test_type_id: DGA (from CategoryDetails where category='test' and name='DGA')
+    - is_required: True
+    - default_priority: high
+    """
+    __tablename__ = "surveillance_test_config"
+    __table_args__ = (
+        UniqueConstraint('equipment_type_id', 'test_type_id', name='uq_surveillance_equipment_test'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Equipment type (FK → CategoryMaster where category='equipment')
+    equipment_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryMaster.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # Test type (FK → CategoryDetails where category='test')
+    # References same table as testing_requests.test_type_id
+    test_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # Whether this test is mandatory during surveillance
+    is_required = Column(Boolean, default=True, nullable=False)
+
+    # Default priority for auto-created testing requests
+    default_priority = Column(String(20), default="high")
+
+    # Test frequency in days (overrides general frequency_multiplier if set)
+    # NULL = use general multiplier logic (normal_period / frequency_multiplier)
+    custom_periodicity_days = Column(Integer, nullable=True)
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+
+
+class RepairSurveillanceTest(Base):
+    """
+    Tracking table linking testing_requests back to surveillance workflows.
+
+    Provides fast reverse lookup and test result aggregation for quality rating calculations.
+    Denormalizes key fields from testing_requests for efficient queries without JOIN.
+
+    Updated automatically when:
+    1. Surveillance scheduler creates testing requests
+    2. Testing request status changes to 'completed'
+    3. Testing request result_status changes (PASS/FAIL/MARGINAL)
+
+    Used for:
+    - Dashboard queries: "Show all abnormal tests for this surveillance workflow"
+    - Quality rating: COUNT(is_abnormal=true) / COUNT(*) per surveillance_workflow_id
+    - Quarter summaries: Pre-populate surveillance stage forms with test results
+    """
+    __tablename__ = "repair_surveillance_tests"
+    __table_args__ = (
+        UniqueConstraint('surveillance_workflow_id', 'testing_request_id', name='uq_surveillance_test_link'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Surveillance workflow (FK → repair_workflows where workflow_type='surveillance')
+    surveillance_workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Testing request created by surveillance scheduler
+    testing_request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.testing_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Quarter number (1-4) — denormalized from surveillance_quarter for fast filtering
+    quarter_number = Column(Integer, nullable=False, index=True)
+
+    # Test type (denormalized from testing_requests.test_type_id)
+    test_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id"),
+        nullable=True,
+    )
+
+    # Test completion status (denormalized from testing_requests.status)
+    test_status = Column(String(50), nullable=True)  # completed, in_progress, etc.
+
+    # Test result (denormalized from testing_requests.result_status or form_data evaluation)
+    result_status = Column(String(50), nullable=True)  # PASS, FAIL, MARGINAL, etc.
+
+    # Abnormal flag — TRUE if result_status matches surveillance_config.abnormal_statuses
+    is_abnormal = Column(Boolean, default=False, nullable=False, index=True)
+
+    # Test completion timestamp (denormalized from testing_requests.completed_at)
+    tested_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    surveillance_workflow = relationship("RepairWorkflow", foreign_keys=[surveillance_workflow_id])
+    testing_request = relationship("TestingRequest", foreign_keys=[testing_request_id])
+    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NOTIFICATION ENGINE - EVENT QUEUE
+# ═══════════════════════════════════════════════════════════════════════════
+
+class NotificationEvent(Base):
+    """
+    Notification event queue for decoupled notification processing.
+
+    Application emits events to this table, then a separate worker process
+    picks them up and dispatches notifications asynchronously.
+
+    Benefits:
+    - Non-blocking: API requests don't wait for email/SMS delivery
+    - Reliable: Events persisted, won't lose notifications if worker crashes
+    - Scalable: Can run multiple worker instances in parallel
+    - Retry logic: Auto-retry failed notifications with exponential backoff
+    """
+    __tablename__ = "notification_events"
+    __table_args__ = (
+        Index('idx_events_status_scheduled', 'status', 'scheduled_for'),
+        Index('idx_events_organization', 'organization_id'),
+        Index('idx_events_type', 'event_type'),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Event metadata
+    event_type = Column(String(100), nullable=False)  # 'test_submitted', 'status_changed', etc.
+    event_source = Column(String(100), nullable=True)  # 'testing_service', 'workflow_service', etc.
+
+    # Context for routing rules (used to match NotificationRoutingRule filters)
+    workflow_type = Column(String(100), nullable=True)     # 'testing_request', 'taqc_inspection', etc.
+    equipment_type = Column(String(200), nullable=True)
+    test_category = Column(String(100), nullable=True)     # 'test', 'maintenance', 'inspection'
+    status_from = Column(String(100), nullable=True)
+    status_to = Column(String(100), nullable=True)
+
+    # Event payload (flexible JSON with all context data for template rendering)
+    # Example: {
+    #   "request_id": "uuid",
+    #   "request_number": "TR-2024-001",
+    #   "tester_name": "John Doe",
+    #   "equipment_name": "Circuit Breaker CB-01",
+    #   "department": "Substation A",
+    #   ... all template variables ...
+    # }
+    payload = Column(JSONB, nullable=False, server_default='{}')
+
+    # Processing state
+    status = Column(
+        String(50),
+        nullable=False,
+        default='pending',
+        index=True,
+    )  # 'pending', 'processing', 'sent', 'failed'
+
+    attempts = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    last_error = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    scheduled_for = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )  # For delayed notifications
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])

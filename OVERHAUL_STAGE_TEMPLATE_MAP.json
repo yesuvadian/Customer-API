@@ -1,0 +1,6 @@
+{
+  "Overhaul Triggered":       "overhaul_stage_trigger",
+  "Overhaul Execution":       "overhaul_stage_execution",
+  "Completion Record Upload": "overhaul_stage_completion_upload",
+  "Officer Verification":     "overhaul_stage_officer_verification"
+}

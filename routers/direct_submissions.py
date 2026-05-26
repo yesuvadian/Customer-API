@@ -80,6 +80,10 @@ def list_direct_submissions(
         False,
         description="If true, return only submissions created by the current user",
     ),
+    department_id: Optional[UUID] = Query(
+        None,
+        description="Filter by department (overrides automatic user-scope filtering)",
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -93,6 +97,7 @@ def list_direct_submissions(
         skip=skip,
         limit=limit,
         own_only=own_only,
+        department_id=department_id,
     )
 
 

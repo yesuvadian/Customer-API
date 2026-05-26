@@ -29,6 +29,7 @@ from models import (
     EquipmentStatus,
     OrgRole,
     OrgUserRole,
+    OverhaulRecommendation,
     RepairAssignmentQueue,
     RepairStageAuditLog,
     RepairStageData,
@@ -39,7 +40,9 @@ from models import (
     RepairStageTemplate,
     RepairStageTransition,
     RepairWorkflow,
+    RepairWorkflowDefinition,
     OrgTestTemplate,
+    TAQCObservation,
     User,
 )
 
@@ -378,25 +381,47 @@ class RepairWorkflowService:
                 "An active repair workflow already exists for this equipment."
             )
 
+        # GET WORKFLOW DEFINITION
+        workflow_definition = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter(
+                RepairWorkflowDefinition.workflow_code
+                == "BREAKDOWN"
+            )
+            .first()
+        )
+
+        if not workflow_definition:
+            raise ValueError(
+                "BREAKDOWN workflow definition not found."
+            )
+
+        # GET ONLY BREAKDOWN STAGES
         stages = (
             self.db.query(RepairStageDefinition)
-            .filter(RepairStageDefinition.is_active.is_(True))
+            .filter(
+                RepairStageDefinition.workflow_definition_id
+                == workflow_definition.id,
+                RepairStageDefinition.is_active.is_(True),
+            )
             .order_by(RepairStageDefinition.sequence)
             .all()
         )
 
         if not stages:
             raise ValueError(
-                "No active stage definitions found. Configure stages first."
+                "No active BREAKDOWN stages found."
             )
 
         first_stage = stages[0]
 
-        # GENERATE NUMBER
+        # GENERATE WORKFLOW NUMBER
         workflow_number = self.generate_workflow_number()
 
+        # CREATE WORKFLOW
         workflow = RepairWorkflow(
             workflow_number=workflow_number,
+            workflow_code="BREAKDOWN",
             equipment_id=equipment_id,
             source_failure_id=source_failure_id,
             current_stage_id=first_stage.id,
@@ -412,7 +437,7 @@ class RepairWorkflowService:
 
         first_stage_instance = None
 
-        # Create stage instances
+        # CREATE STAGE INSTANCES
         for s in stages:
 
             is_first = s.id == first_stage.id
@@ -439,7 +464,7 @@ class RepairWorkflowService:
             else None
         )
 
-        # Assignment queue
+        # CREATE ASSIGNMENT QUEUE
         self.db.add(
             RepairAssignmentQueue(
                 workflow_id=workflow.id,
@@ -448,12 +473,13 @@ class RepairWorkflowService:
             )
         )
 
-        # Equipment status update
+        # UPDATE EQUIPMENT STATUS
         equipment.status = EquipmentStatus.under_repair
 
         self.db.commit()
         self.db.refresh(workflow)
 
+        # LOG AUDIT
         self._log_audit(
             workflow.id,
             first_stage.id,
@@ -486,7 +512,7 @@ class RepairWorkflowService:
         self._check_can_assign_stage(coordinator_id, stage_id)
 
         instance = self._get_instance(workflow_id, stage_id)
-        if instance.status not in ("pending", "not_started"):
+        if instance.status in ("completed", "rejected"):
             raise ValueError(f"Stage is already '{instance.status}' — cannot reassign.")
 
         # Resolve assignee's role name for display
@@ -570,6 +596,51 @@ class RepairWorkflowService:
         if instance.assigned_user_id and str(instance.assigned_user_id) != str(user_id):
             self._check_stage_rbac(stage_id, user_id)
 
+        # Validate required fields at submit time (not at save/draft time).
+        # Use the same category-aware resolution as get_current_form so that
+        # ANNUAL_AUDIT workflows validate against the right template.
+        category_detail_id = None
+        if workflow.workflow_code == "ANNUAL_AUDIT":
+            obs = (
+                self.db.query(TAQCObservation)
+                .filter(TAQCObservation.workflow_id == workflow_id)
+                .first()
+            )
+            if obs:
+                category_detail_id = obs.category_detail_id
+
+        tmpl_link = None
+        if category_detail_id is not None:
+            tmpl_link = (
+                self.db.query(RepairStageTemplate)
+                .filter(
+                    RepairStageTemplate.stage_id == stage_id,
+                    RepairStageTemplate.category_detail_id == category_detail_id,
+                )
+                .first()
+            )
+        if tmpl_link is None:
+            tmpl_link = (
+                self.db.query(RepairStageTemplate)
+                .filter(
+                    RepairStageTemplate.stage_id == stage_id,
+                    RepairStageTemplate.category_detail_id.is_(None),
+                )
+                .first()
+            )
+        if tmpl_link and tmpl_link.template_id:
+            data_row = (
+                self.db.query(RepairStageData)
+                .filter(RepairStageData.stage_instance_id == instance.id)
+                .first()
+            )
+            saved_data = data_row.form_data if data_row else {}
+            self._validate_form_data(tmpl_link.template_id, saved_data or {})
+
+        # Surveillance-specific validation: quarterly stages require all tests completed
+        if workflow.workflow_type == 'surveillance' and instance.quarter_number:
+            self._validate_surveillance_tests_completed(workflow_id, instance.quarter_number)
+
         instance.status = "submitted"
         if remarks:
             instance.remarks = remarks
@@ -634,7 +705,22 @@ class RepairWorkflowService:
             equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
             if equipment:
                 equipment.status = EquipmentStatus.active
+
+            # Close associated OverhaulRecommendation if this is an OVERHAUL workflow
+            if workflow.workflow_type == "OVERHAUL":
+                rec = self.db.query(OverhaulRecommendation).filter(
+                    OverhaulRecommendation.workflow_id == workflow_id,
+                    OverhaulRecommendation.status == "OPEN"
+                ).first()
+                if rec:
+                    rec.status = "CLOSED"
+                    rec.closed_at = self._utc_now()
+
             self.db.commit()
+            # Fire registered completion hooks (e.g. calibration schedule upsert).
+            # Hooks are registered by *_hooks.py modules imported at startup.
+            from workflow_hooks import fire
+            fire(workflow.workflow_code or "", "completed", self.db, workflow, user_id)
             return {"message": "Workflow completed", "status": "completed", "progress": 100}
 
         workflow.current_stage_id = next_stage_id
@@ -655,12 +741,22 @@ class RepairWorkflowService:
         self._recalculate_progress(workflow)
         self.db.commit()
         next_stage = self.db.query(RepairStageDefinition).filter(RepairStageDefinition.id == next_stage_id).first()
-      
+
         self._fire_notification_safe(
             "repair_stage_changed",
             workflow,
             next_stage,
             user_id,
+        )
+        # Fire stage_approved hook so listeners can react to specific stages
+        # without touching this service (e.g. certificate upload processing).
+        current_stage_def = self.db.query(RepairStageDefinition).filter(
+            RepairStageDefinition.id == current_stage_id
+        ).first()
+        from workflow_hooks import fire
+        fire(
+            workflow.workflow_code or "", "stage_approved", self.db, workflow, user_id,
+            stage_code=current_stage_def.code if current_stage_def else None,
         )
         if not next_stage_id:
             workflow.status = "completed"
@@ -807,6 +903,16 @@ class RepairWorkflowService:
         if equipment:
             equipment.status = EquipmentStatus.active
 
+        # Close associated OverhaulRecommendation if this is an OVERHAUL workflow
+        if workflow.workflow_type == "OVERHAUL":
+            rec = self.db.query(OverhaulRecommendation).filter(
+                OverhaulRecommendation.workflow_id == workflow_id,
+                OverhaulRecommendation.status == "OPEN"
+            ).first()
+            if rec:
+                rec.status = "CLOSED"
+                rec.closed_at = self._utc_now()
+
         self.db.commit()
         self._log_audit(workflow_id, workflow.current_stage_id, "cancel", user_id, reason or "Workflow cancelled")
 
@@ -883,7 +989,12 @@ class RepairWorkflowService:
         limit: int = 20,
     ) -> list:
         q = self.db.query(RepairWorkflow)
-        q = q.filter(or_(RepairWorkflow.workflow_code.is_(None), RepairWorkflow.workflow_code != "ANNUAL_AUDIT"))
+        if status == "annual_audit":
+            # Annual Audit workflows are a separate type — show only them
+            q = q.filter(RepairWorkflow.workflow_code == "ANNUAL_AUDIT")
+            status = None  # don't apply status filter below
+        else:
+            q = q.filter(or_(RepairWorkflow.workflow_code.is_(None), RepairWorkflow.workflow_code != "ANNUAL_AUDIT"))
         if equipment_id:
             q = q.filter(RepairWorkflow.equipment_id == equipment_id)
         if status:
@@ -1026,27 +1137,20 @@ class RepairWorkflowService:
         if not workflow:
             raise ValueError("Workflow not found")
 
-        # Multi-tenant security
-        equipment = (
-            self.db.query(Equipment)
-            .filter(
-                Equipment.id == workflow.equipment_id
+        # Multi-tenant security — ANNUAL_AUDIT workflows have no equipment_id
+        if workflow.equipment_id:
+            equipment = (
+                self.db.query(Equipment)
+                .filter(Equipment.id == workflow.equipment_id)
+                .first()
             )
-            .first()
-        )
-
-        if not equipment:
-            raise ValueError(
-                "Equipment not found"
-            )
-
-        if (
-            str(equipment.organization_id)
-            != str(current_user.organization_id)
-        ):
-            raise ValueError(
-                "Unauthorized workflow access"
-            )
+            if not equipment:
+                raise ValueError("Equipment not found")
+            if str(equipment.organization_id) != str(current_user.organization_id):
+                raise ValueError("Unauthorized workflow access")
+        elif workflow.organization_id:
+            if str(workflow.organization_id) != str(current_user.organization_id):
+                raise ValueError("Unauthorized workflow access")
 
         # Validate stage
         stage_def = (
@@ -1062,16 +1166,21 @@ class RepairWorkflowService:
 
         # Roles allowed to receive assignments
         role_ids = [
-            r.role_id
-            for r in (
-                self.db.query(RepairStageRole)
-                .filter(
-                    RepairStageRole.stage_id == stage_id,
-                    RepairStageRole.can_edit.is_(True),
-                )
-                .all()
-            )
-        ]
+    r.role_id
+    for r in (
+        self.db.query(RepairStageRole)
+        .join(
+            OrgRole,
+            OrgRole.id == RepairStageRole.role_id,
+        )
+        .filter(
+            RepairStageRole.stage_id == stage_id,
+            RepairStageRole.can_edit.is_(True),
+            OrgRole.organization_id == current_user.organization_id,
+        )
+        .all()
+    )
+]
 
         if not role_ids:
             raise ValueError(
@@ -1152,9 +1261,9 @@ class RepairWorkflowService:
 
         stage_status = instance.status
 
-        # can_assign: coordinator (can_assign=True) when stage is pending
+        # can_assign: coordinator (can_assign=True) when stage awaits assignment
         if self._can_assign_stage(user_id, instance.stage_id):
-            if stage_status == "pending":
+            if stage_status in ("pending", "not_started"):
                 result["can_assign"] = True
 
         # can_submit: assigned actor with can_edit=True
@@ -1202,11 +1311,39 @@ class RepairWorkflowService:
             RepairStageDefinition.id == workflow.current_stage_id
         ).first()
 
-        tmpl_link = (
-            self.db.query(RepairStageTemplate)
-            .filter(RepairStageTemplate.stage_id == workflow.current_stage_id)
-            .first()
-        )
+        # For ANNUAL_AUDIT workflows resolve category-specific template first,
+        # then fall back to the generic (category_detail_id IS NULL) template.
+        category_detail_id = None
+        if workflow.workflow_code == "ANNUAL_AUDIT":
+            obs = (
+                self.db.query(TAQCObservation)
+                .filter(TAQCObservation.workflow_id == workflow_id)
+                .first()
+            )
+            if obs:
+                category_detail_id = obs.category_detail_id
+
+        tmpl_link = None
+        if category_detail_id is not None:
+            tmpl_link = (
+                self.db.query(RepairStageTemplate)
+                .filter(
+                    RepairStageTemplate.stage_id == workflow.current_stage_id,
+                    RepairStageTemplate.category_detail_id == category_detail_id,
+                )
+                .first()
+            )
+        if tmpl_link is None:
+            # Generic fallback (also used by all non-ANNUAL_AUDIT workflows)
+            tmpl_link = (
+                self.db.query(RepairStageTemplate)
+                .filter(
+                    RepairStageTemplate.stage_id == workflow.current_stage_id,
+                    RepairStageTemplate.category_detail_id.is_(None),
+                )
+                .first()
+            )
+
         template_data = None
         if tmpl_link and tmpl_link.template_id:
             tmpl = self.db.query(OrgTestTemplate).filter(
@@ -1227,11 +1364,40 @@ class RepairWorkflowService:
             if data_row:
                 saved_data = data_row.form_data or {}
 
+        # Prefill CAL_REVIEW readonly fields from calibration service if not yet saved
+        stage_code = stage.code if stage else None
+        if stage_code == "CAL_REVIEW" and workflow.equipment_id and not saved_data.get("last_calibration_date"):
+            try:
+                from datetime import date, timezone
+                from services.calibration_service import CalibrationService
+                cal_svc = CalibrationService(self.db)
+                reading = cal_svc._get_latest_reading(workflow.equipment_id)
+                if reading:
+                    cal_date = reading["calibration_date"]        # str YYYY-MM-DD
+                    validity = reading["validity_months"]          # int
+                    from dateutil.relativedelta import relativedelta
+                    next_due = (
+                        date.fromisoformat(cal_date) + relativedelta(months=int(validity))
+                    )
+                    today = date.today()
+                    days_delta = (today - next_due).days  # positive = overdue, negative = days remaining
+                    saved_data = {
+                        **saved_data,
+                        "last_calibration_date": cal_date,
+                        "next_due_date": next_due.isoformat(),
+                        "days_overdue": days_delta,
+                    }
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[CAL_REVIEW prefill] Failed to prefill calibration data: %s", exc
+                )
+
         return {
             "workflow_id": str(workflow_id),
             "stage_id": str(workflow.current_stage_id),
             "stage_name": stage.name if stage else None,
-            "stage_code": stage.code if stage else None,
+            "stage_code": stage_code,
             "stage_status": instance.status if instance else None,
             "assignment_pending": workflow.assignment_pending,
             "template_data": template_data,
@@ -1247,14 +1413,6 @@ class RepairWorkflowService:
 
         self._check_stage_rbac(stage_id, user_id)
 
-        tmpl_link = (
-            self.db.query(RepairStageTemplate)
-            .filter(RepairStageTemplate.stage_id == stage_id)
-            .first()
-        )
-        if tmpl_link and tmpl_link.template_id:
-            self._validate_form_data(tmpl_link.template_id, form_data)
-
         instance = self._get_instance(workflow_id, stage_id)
         if not instance:
             raise ValueError("Stage instance not found.")
@@ -1268,6 +1426,7 @@ class RepairWorkflowService:
             merged = {**(data_row.form_data or {}), **form_data}
             data_row.form_data = merged
         else:
+            merged = form_data
             data_row = RepairStageData(
                 stage_instance_id=instance.id,
                 form_data=form_data,
@@ -1275,6 +1434,7 @@ class RepairWorkflowService:
             )
             self.db.add(data_row)
 
+        # Save is always a draft — required-field validation happens at submit time
         self.db.commit()
         self._log_audit(workflow_id, stage_id, "saved", user_id, "Form data saved")
         return {"message": "Stage data saved successfully", "stage_id": str(stage_id)}
@@ -1489,28 +1649,80 @@ class RepairWorkflowService:
             entry.completed_at = self._utc_now()
 
     def _recalculate_progress(self, workflow: RepairWorkflow) -> None:
+
+        # Get workflow definition using workflow_code
+        workflow_definition = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter(
+                RepairWorkflowDefinition.workflow_code
+                == workflow.workflow_code
+            )
+            .first()
+        )
+
+        if not workflow_definition:
+            workflow.progress = 0
+            return
+
+        # Get only stages belonging to this workflow
         stages = (
             self.db.query(RepairStageDefinition)
-            .filter(RepairStageDefinition.is_active.is_(True))
+            .filter(
+                RepairStageDefinition.workflow_definition_id
+                == workflow_definition.id,
+                RepairStageDefinition.is_active.is_(True),
+            )
+            .order_by(RepairStageDefinition.sequence)
             .all()
         )
-        stage_map = {s.id: s for s in stages}
-        total_weight = sum(s.weight for s in stages)
+
+        if not stages:
+            workflow.progress = 0
+            return
+
+        # Create stage map
+        stage_map = {
+            str(stage.id): stage
+            for stage in stages
+        }
+
+        # Total workflow weight
+        total_weight = sum(
+            stage.weight or 0
+            for stage in stages
+        )
+
         if total_weight == 0:
             workflow.progress = 0
             return
 
+        # Fetch workflow instances
         instances = (
             self.db.query(RepairStageInstance)
-            .filter(RepairStageInstance.workflow_id == workflow.id)
+            .filter(
+                RepairStageInstance.workflow_id
+                == workflow.id
+            )
             .all()
         )
-        completed_weight = sum(
-            stage_map[inst.stage_id].weight
-            for inst in instances
-            if inst.status == "completed" and inst.stage_id in stage_map
+
+        # Calculate completed weight
+        completed_weight = 0
+
+        for inst in instances:
+
+            if (
+                inst.status == "completed"
+                and str(inst.stage_id) in stage_map
+            ):
+                completed_weight += (
+                    stage_map[str(inst.stage_id)].weight or 0
+                )
+
+        # Calculate percentage
+        workflow.progress = int(
+            (completed_weight / total_weight) * 100
         )
-        workflow.progress = int(completed_weight / total_weight * 100)
 
     def _log_audit(
         self,
@@ -1530,8 +1742,17 @@ class RepairWorkflowService:
         ))
 
     def _workflow_to_dict(self, workflow: RepairWorkflow) -> dict:
-        equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+        from datetime import timedelta
+
+        equipment = (
+            self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+            if workflow.equipment_id else None
+        )
         current_stage = None
+        current_stage_deadline = None
+        days_remaining = None
+        is_overdue = False
+
         if workflow.current_stage_id:
             stage = self.db.query(RepairStageDefinition).filter(
                 RepairStageDefinition.id == workflow.current_stage_id
@@ -1543,18 +1764,42 @@ class RepairWorkflowService:
                     "code": stage.code,
                     "sequence": stage.sequence,
                 }
+
+                # Calculate deadline for current stage instance
+                if workflow.current_stage_instance_id:
+                    stage_instance = self.db.query(RepairStageInstance).filter(
+                        RepairStageInstance.id == workflow.current_stage_instance_id
+                    ).first()
+
+                    if (stage_instance and stage_instance.started_at and
+                        stage.default_duration_days is not None):
+                        deadline = stage_instance.started_at + timedelta(days=stage.default_duration_days)
+                        current_stage_deadline = deadline.isoformat()
+
+                        now = datetime.now(timezone.utc)
+                        days_remaining = (deadline - now).days
+                        is_overdue = days_remaining < 0
+
         return {
             "id": str(workflow.id),
+            "workflow_number": workflow.workflow_number,
+            "workflow_type": workflow.workflow_type or "BREAKDOWN",  # BREAKDOWN / OVERHAUL
+            "source": workflow.source,                               # manual / cumulative / scheduled
             "workflow_code": workflow.workflow_code,
             "entity_type": workflow.entity_type,
             "entity_id": str(workflow.entity_id) if workflow.entity_id else None,
-            "equipment_id": str(workflow.equipment_id),
+            "equipment_id": str(workflow.equipment_id) if workflow.equipment_id else None,
             "equipment_ueic": equipment.ueic if equipment else None,
+            "equipment_name": equipment.nameplate_data.get("name") if equipment and equipment.nameplate_data else None,
             "source_failure_id": str(workflow.source_failure_id) if workflow.source_failure_id else None,
             "status": workflow.status,
             "assignment_pending": workflow.assignment_pending,
             "progress": workflow.progress,
+            "priority": workflow.priority,
             "current_stage": current_stage,
+            "current_stage_deadline": current_stage_deadline,
+            "days_remaining": days_remaining,
+            "is_overdue": is_overdue,
             "created_at": workflow.created_at.isoformat() if workflow.created_at else None,
         }
 
@@ -1584,6 +1829,51 @@ class RepairWorkflowService:
 
         if errors:
             raise ValueError("; ".join(errors))
+
+    def _validate_surveillance_tests_completed(self, workflow_id: UUID, quarter_number: int) -> None:
+        """
+        Validate that all surveillance testing requests for this quarter are completed.
+        Raises ValueError if any tests are pending/in-progress.
+
+        Args:
+            workflow_id: Surveillance workflow ID
+            quarter_number: Quarter number (1-4)
+        """
+        from models import TestingRequest
+
+        # Get all testing requests for this quarter
+        testing_requests = (
+            self.db.query(TestingRequest)
+            .filter(
+                TestingRequest.surveillance_workflow_id == workflow_id,
+                TestingRequest.surveillance_quarter == quarter_number
+            )
+            .all()
+        )
+
+        if not testing_requests:
+            # No tests created yet - this shouldn't happen but allow submission
+            # (tests will be created by daily scheduler)
+            return
+
+        # Check for incomplete tests
+        incomplete = [
+            tr for tr in testing_requests
+            if tr.status not in ['completed', 'cancelled']
+        ]
+
+        if incomplete:
+            test_names = [tr.title or f"Test {tr.test_type.name if tr.test_type else 'Unknown'}"
+                         for tr in incomplete[:3]]  # Show first 3
+            count = len(incomplete)
+            msg = (
+                f"Cannot submit quarterly review: {count} testing request(s) still in progress. "
+                f"Please complete all tests before submitting this stage. "
+                f"Incomplete tests: {', '.join(test_names)}"
+            )
+            if count > 3:
+                msg += f" and {count - 3} more"
+            raise ValueError(msg)
 
     def _fire_notification_safe(self, event_type: str, workflow: RepairWorkflow, stage, user_id: UUID) -> None:
         try:

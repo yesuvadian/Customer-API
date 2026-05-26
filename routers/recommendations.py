@@ -32,6 +32,9 @@ def create_recommendation(
         summary=data.summary,
         submitted_by=current_user.id,
         detailed_notes=data.detailed_notes,
+        next_action=data.next_action,
+        schedule_frequency=data.schedule_frequency,
+        test_types=data.test_types,
     )
 
 

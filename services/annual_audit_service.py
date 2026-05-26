@@ -19,9 +19,8 @@ from models import (
     RepairStageAuditLog,
     RepairStageDefinition,
     RepairStageInstance,
-    RepairStageRole,
-    RepairStageTransition,
     RepairWorkflow,
+    RepairWorkflowDefinition,
     TAQCAnnualInspection,
     TAQCObservation,
     User,
@@ -32,58 +31,6 @@ from services.repair_workflow_service import RepairWorkflowService
 ANNUAL_AUDIT_WORKFLOW_CODE = "ANNUAL_AUDIT"
 ANNUAL_AUDIT_ENTITY_TYPE = "annual_audit_observation"
 
-ANNUAL_AUDIT_STAGES = [
-    {
-        "code": "OBSERVATION_REPORTING",
-        "name": "Observation Reporting",
-        "sequence": 2100,
-        "edit_roles": ["TA&QC Officer"],
-        "approve_roles": ["TA&QC Officer"],
-        "assign_roles": ["TA&QC Officer", "Workflow Coordinator"],
-    },
-    {
-        "code": "OBSERVATION_ASSIGNMENT",
-        "name": "Observation Assignment",
-        "sequence": 2110,
-        "edit_roles": ["Workflow Coordinator"],
-        "approve_roles": ["Workflow Coordinator"],
-        "assign_roles": ["Workflow Coordinator"],
-    },
-    {
-        "code": "COMPLIANCE_SUBMISSION",
-        "name": "Compliance Submission",
-        "sequence": 2120,
-        "edit_roles": ["AEE Maintenance"],
-        "approve_roles": ["AEE Maintenance"],
-        "assign_roles": ["Workflow Coordinator"],
-    },
-    {
-        "code": "COMPLIANCE_REVIEW",
-        "name": "Compliance Review",
-        "sequence": 2130,
-        "edit_roles": ["TA&QC Officer"],
-        "approve_roles": ["TA&QC Officer"],
-        "assign_roles": ["Workflow Coordinator", "TA&QC Officer"],
-    },
-    {
-        "code": "OBSERVATION_CLOSURE",
-        "name": "Observation Closure",
-        "sequence": 2140,
-        "edit_roles": ["TA&QC Officer"],
-        "approve_roles": ["TA&QC Officer"],
-        "assign_roles": ["Workflow Coordinator", "TA&QC Officer"],
-    },
-]
-
-ANNUAL_AUDIT_TRANSITIONS = [
-    ("OBSERVATION_REPORTING", "approve", "OBSERVATION_ASSIGNMENT"),
-    ("OBSERVATION_ASSIGNMENT", "approve", "COMPLIANCE_SUBMISSION"),
-    ("COMPLIANCE_SUBMISSION", "approve", "COMPLIANCE_REVIEW"),
-    ("COMPLIANCE_REVIEW", "approve", "OBSERVATION_CLOSURE"),
-    ("OBSERVATION_CLOSURE", "approve", None),
-    ("COMPLIANCE_REVIEW", "reject", "COMPLIANCE_SUBMISSION"),
-]
-
 # Semantic action label per stage — used in audit log for meaningful timeline display
 STAGE_ACTION_LABELS: dict[str, str] = {
     "OBSERVATION_REPORTING": "assign",
@@ -92,6 +39,15 @@ STAGE_ACTION_LABELS: dict[str, str] = {
     "COMPLIANCE_REVIEW": "approve",
     "OBSERVATION_CLOSURE": "close",
 }
+
+# Stage codes in workflow order — used for DB queries only, not for seeding
+ANNUAL_AUDIT_STAGE_CODES = [
+    "OBSERVATION_REPORTING",
+    "OBSERVATION_ASSIGNMENT",
+    "COMPLIANCE_SUBMISSION",
+    "COMPLIANCE_REVIEW",
+    "OBSERVATION_CLOSURE",
+]
 
 ANNUAL_AUDIT_CATEGORIES = [
     ("Electrical Safety", "audit_electrical_safety"),
@@ -112,145 +68,41 @@ class AnnualAuditService:
         return datetime.now(timezone.utc)
 
     def ensure_configuration(self, organization_id: Optional[UUID] = None) -> None:
-        """Idempotently create Annual Audit categories, templates, stages, transitions, and stage roles."""
-        master = (
-            self.db.query(CategoryMaster)
-            .filter(CategoryMaster.name == "Annual Audit Categories")
-            .first()
+        """
+        Verify that annual audit stages exist in DB (seeded via seed_annual_audit.py)
+        and wire up org-specific role mappings for the given organization.
+
+        Stage definitions and transitions are seeded once by seed_annual_audit_stages()
+        during database setup — this method no longer owns that data.
+        """
+        missing = (
+            self.db.query(RepairStageDefinition)
+            .filter(RepairStageDefinition.code.in_(ANNUAL_AUDIT_STAGE_CODES))
+            .count()
         )
-        if not master:
-            master = CategoryMaster(
-                name="Annual Audit Categories",
-                description="Annual Substation Audit Observation Categories",
-                is_active=True,
+        if missing < len(ANNUAL_AUDIT_STAGE_CODES):
+            raise ValueError(
+                "Annual Audit workflow stages are not seeded. "
+                "Run seed_annual_audit_stages(db) first."
             )
-            self.db.add(master)
-            self.db.flush()
 
-        for category_name, template_key in ANNUAL_AUDIT_CATEGORIES:
-            detail = (
-                self.db.query(CategoryDetails)
-                .filter(
-                    CategoryDetails.category_master_id == master.id,
-                    CategoryDetails.name == category_name,
-                )
-                .first()
-            )
-            if not detail:
-                detail = CategoryDetails(
-                    category_master_id=master.id,
-                    name=category_name,
-                    description=f"{category_name} annual audit observations",
-                    category_type="annual_audit",
-                    is_active=True,
-                )
-                self.db.add(detail)
-                self.db.flush()
+        # Re-run stage template seeding (idempotent) so that new templates added
+        # to ANNUAL_AUDIT_STAGE_TEMPLATES.json / ANNUAL_AUDIT_STAGE_TEMPLATE_MAP.json
+        # are picked up without a full seed restart.
+        from seed_annual_audit import seed_annual_audit_stages
+        seed_annual_audit_stages(self.db)
 
-            existing_template = (
-                self.db.query(OrgTestTemplate)
-                .filter(
-                    OrgTestTemplate.org_id.is_(None),
-                    OrgTestTemplate.template_key == template_key,
-                )
-                .first()
-            )
-            new_template_data = self._template_for(category_name, template_key)
-            if not existing_template:
-                self.db.add(
-                    OrgTestTemplate(
-                        org_id=None,
-                        template_key=template_key,
-                        test_type_id=detail.id,
-                        template_data=new_template_data,
-                        is_system=True,
-                        version=1,
-                    )
-                )
-            else:
-                # Update to latest category-specific template content
-                existing_template.template_data = new_template_data
-                existing_template.test_type_id = detail.id
-
-        stage_by_code: dict[str, RepairStageDefinition] = {}
-        for cfg in ANNUAL_AUDIT_STAGES:
-            stage = (
-                self.db.query(RepairStageDefinition)
-                .filter(RepairStageDefinition.code == cfg["code"])
-                .first()
-            )
-            if not stage:
-                stage = RepairStageDefinition(
-                    name=cfg["name"],
-                    code=cfg["code"],
-                    sequence=cfg["sequence"],
-                    weight=20,
-                    is_active=True,
-                    is_mandatory=True,
-                )
-                self.db.add(stage)
-                self.db.flush()
-            stage_by_code[cfg["code"]] = stage
-
-            if organization_id:
-                for role_name in set(cfg["edit_roles"] + cfg["approve_roles"] + cfg["assign_roles"]):
-                    role = (
-                        self.db.query(OrgRole)
-                        .filter(
-                            OrgRole.organization_id == organization_id,
-                            OrgRole.name == role_name,
-                            OrgRole.is_active.is_(True),
-                        )
-                        .first()
-                    )
-                    if not role:
-                        continue
-                    stage_role = (
-                        self.db.query(RepairStageRole)
-                        .filter(
-                            RepairStageRole.stage_id == stage.id,
-                            RepairStageRole.role_id == role.id,
-                        )
-                        .first()
-                    )
-                    if not stage_role:
-                        stage_role = RepairStageRole(stage_id=stage.id, role_id=role.id)
-                        self.db.add(stage_role)
-                    stage_role.can_edit = role_name in cfg["edit_roles"]
-                    stage_role.can_approve = role_name in cfg["approve_roles"]
-                    stage_role.can_assign = role_name in cfg["assign_roles"]
-
-        for from_code, action, to_code in ANNUAL_AUDIT_TRANSITIONS:
-            from_stage = stage_by_code[from_code]
-            to_stage = stage_by_code[to_code] if to_code else None
-            transition = (
-                self.db.query(RepairStageTransition)
-                .filter(
-                    RepairStageTransition.from_stage_id == from_stage.id,
-                    RepairStageTransition.action == action,
-                )
-                .first()
-            )
-            if not transition:
-                self.db.add(
-                    RepairStageTransition(
-                        from_stage_id=from_stage.id,
-                        to_stage_id=to_stage.id if to_stage else None,
-                        action=action,
-                    )
-                )
-            else:
-                transition.to_stage_id = to_stage.id if to_stage else None
-
-        self.db.commit()
+        if organization_id:
+            from seed_annual_audit import seed_annual_audit_role_mappings
+            seed_annual_audit_role_mappings(self.db, organization_id)
 
     def create_inspection(self, data: dict, user: User) -> dict:
         self.ensure_configuration(user.organization_id)
-        substation = self._get_substation(UUID(str(data["substation_id"])), user)
+        dept_id = data.get("department_id") or getattr(user, "department_id", None)
         inspection = TAQCAnnualInspection(
             inspection_number=self._next_number("TR-ANU-INSP"),
-            organization_id=user.organization_id or substation.organization_id,
-            substation_id=substation.id,
+            organization_id=user.organization_id,
+            department_id=dept_id,
             inspection_date=data["inspection_date"],
             inspected_by=data.get("inspected_by") or user.id,
             remarks=data.get("remarks"),
@@ -453,8 +305,8 @@ class AnnualAuditService:
         self.db.commit()
         return result
 
-    # Escalation roles (design §14F)
-    _ESCALATION_ROLES = ["EE TLSS", "SEE W&M", "CEE Transmission Zone"]
+    # Escalation roles (design §14F) — updated to new functional role names
+    _ESCALATION_ROLES = ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]
 
     def _get_escalation_users(self, organization_id) -> list:
         """Return users that hold any of the three escalation roles in the org."""
@@ -579,14 +431,23 @@ class AnnualAuditService:
         observation: TAQCObservation,
         user: User,
     ) -> RepairWorkflow:
+        wf_def = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter_by(workflow_code=ANNUAL_AUDIT_WORKFLOW_CODE, is_active=True)
+            .first()
+        )
+        if not wf_def:
+            raise ValueError(
+                "Annual Audit workflow definition not found. Run seed.py first."
+            )
         stages = (
             self.db.query(RepairStageDefinition)
-            .filter(RepairStageDefinition.code.in_([s["code"] for s in ANNUAL_AUDIT_STAGES]))
+            .filter(RepairStageDefinition.workflow_definition_id == wf_def.id)
             .order_by(RepairStageDefinition.sequence)
             .all()
         )
-        if len(stages) != len(ANNUAL_AUDIT_STAGES):
-            raise ValueError("Annual Audit workflow stages are not configured.")
+        if not stages:
+            raise ValueError("Annual Audit workflow stages are not configured. Run seed.py first.")
 
         first_stage = stages[0]
         workflow = RepairWorkflow(
@@ -594,7 +455,8 @@ class AnnualAuditService:
             workflow_code=ANNUAL_AUDIT_WORKFLOW_CODE,
             entity_type=ANNUAL_AUDIT_ENTITY_TYPE,
             entity_id=observation.id,
-            equipment_id=inspection.substation_id,
+            equipment_id=None,
+            organization_id=inspection.organization_id,
             current_stage_id=first_stage.id,
             status="active",
             assignment_pending=False,
@@ -611,10 +473,10 @@ class AnnualAuditService:
             inst = RepairStageInstance(
                 workflow_id=workflow.id,
                 stage_id=stage.id,
-                status="assigned" if is_first else "not_started",
-                assigned_user_id=user.id if is_first else None,
-                assignment_pending=False,
-                started_at=self._utc_now() if is_first else None,
+                status="not_started",
+                assigned_user_id=None,
+                assignment_pending=is_first,
+                started_at=None,
                 created_by=user.id,
             )
             self.db.add(inst)
@@ -623,15 +485,7 @@ class AnnualAuditService:
                 first_instance = inst
 
         workflow.current_stage_instance_id = first_instance.id if first_instance else None
-        self.db.add(
-            RepairAssignmentQueue(
-                workflow_id=workflow.id,
-                stage_id=first_stage.id,
-                status="assigned",
-                assigned_to_user_id=user.id,
-                assigned_at=self._utc_now(),
-            )
-        )
+        workflow.assignment_pending = True
         self.db.add(
             RepairStageAuditLog(
                 workflow_id=workflow.id,
@@ -678,13 +532,12 @@ class AnnualAuditService:
             .first()
         )
 
-    def _get_substation(self, substation_id: UUID, user: User) -> Equipment:
-        substation = self.db.query(Equipment).filter(Equipment.id == substation_id).first()
-        if not substation:
-            raise ValueError("Substation/equipment not found.")
-        if user.organization_id and substation.organization_id != user.organization_id:
-            raise ValueError("Unauthorized substation access.")
-        return substation
+    def _get_department(self, department_id: UUID, user: User):
+        from models import OrgDepartment
+        dept = self.db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
+        if not dept:
+            raise ValueError("Department/substation not found.")
+        return dept
 
     def _get_inspection(self, inspection_id: UUID, user: User) -> TAQCAnnualInspection:
         inspection = self.db.query(TAQCAnnualInspection).filter(TAQCAnnualInspection.id == inspection_id).first()
@@ -707,8 +560,8 @@ class AnnualAuditService:
             "id": str(inspection.id),
             "inspection_number": inspection.inspection_number,
             "organization_id": str(inspection.organization_id),
-            "substation_id": str(inspection.substation_id),
-            "substation_ueic": inspection.substation.ueic if inspection.substation else None,
+            "department_id": str(inspection.department_id) if inspection.department_id else None,
+            "department_name": inspection.department.name if inspection.department else None,
             "inspection_date": inspection.inspection_date.isoformat() if inspection.inspection_date else None,
             "inspected_by": str(inspection.inspected_by) if inspection.inspected_by else None,
             "remarks": inspection.remarks,
@@ -736,8 +589,8 @@ class AnnualAuditService:
             ),
             "reviewer_id": str(observation.reviewer_id) if observation.reviewer_id else None,
             "is_overdue": observation.is_overdue,
-            "substation_id": str(observation.inspection.substation_id) if observation.inspection else None,
-            "substation_ueic": observation.inspection.substation.ueic if observation.inspection and observation.inspection.substation else None,
+            "department_id": str(observation.inspection.department_id) if observation.inspection and observation.inspection.department_id else None,
+            "department_name": observation.inspection.department.name if observation.inspection and observation.inspection.department else None,
             "created_at": observation.cts.isoformat() if observation.cts else None,
         }
 

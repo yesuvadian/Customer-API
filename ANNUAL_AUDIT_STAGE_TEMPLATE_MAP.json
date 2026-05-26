@@ -1,0 +1,27 @@
+{
+  "generic": {
+    "Observation Reporting":  "audit_obs_reporting_generic",
+    "Compliance Submission":  "audit_compliance_submission_generic",
+    "Observation Assignment": "audit_stage_observation_assignment",
+    "Compliance Review":      "audit_stage_compliance_review",
+    "Observation Closure":    "audit_stage_observation_closure"
+  },
+  "by_category": {
+    "Observation Reporting": {
+      "Electrical Safety":    "audit_obs_reporting_electrical_safety",
+      "Civil":                "audit_obs_reporting_civil",
+      "Fire Safety":          "audit_obs_reporting_fire_safety",
+      "Documentation":        "audit_obs_reporting_documentation",
+      "Environmental":        "audit_obs_reporting_environmental",
+      "General Maintenance":  "audit_obs_reporting_general_maintenance"
+    },
+    "Compliance Submission": {
+      "Electrical Safety":    "audit_compliance_submission_electrical_safety",
+      "Civil":                "audit_compliance_submission_civil",
+      "Fire Safety":          "audit_compliance_submission_fire_safety",
+      "Documentation":        "audit_compliance_submission_documentation",
+      "Environmental":        "audit_compliance_submission_environmental",
+      "General Maintenance":  "audit_compliance_submission_general_maintenance"
+    }
+  }
+}

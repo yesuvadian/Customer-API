@@ -1,12 +1,13 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
+from models import RepairWorkflow
 from schemas import (
     RepairWorkflowStartRequest,
     RepairWorkflowResponse,
@@ -21,6 +22,7 @@ from schemas import (
     RepairTransitionUpsert,
 )
 from services.repair_workflow_service import RepairWorkflowService
+from services.repair_timeliness_service import RepairTimelinessService
 
 router = APIRouter(
     prefix="/repair-workflows",
@@ -98,7 +100,7 @@ def deactivate_stage(
 @router.put("/config/stages/{stage_id}/template")
 def set_stage_template(
     stage_id: UUID,
-    payload: dict,
+    payload: dict = Body(...),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -186,7 +188,7 @@ def list_workflows(
     equipment_id: Optional[UUID] = Query(None),
     status: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
     """List repair workflows. Filter by equipment_id and/or status."""
@@ -446,5 +448,58 @@ def cancel_workflow(
     """
     try:
         return RepairWorkflowService(db).cancel_workflow(workflow_id, user.id, payload.reason)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+# =============================================================================
+# Timeliness & Delay Attribution
+# =============================================================================
+
+@router.get("/{workflow_id}/timeliness")
+def get_timeliness(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Timeliness summary for a workflow.
+
+    Returns per-stage contracted_date, actual_date, delay_days, timeliness_status,
+    delay attribution, and workflow-level total_vendor_delay_days.
+    """
+    try:
+        return RepairTimelinessService(db).get_timeliness_summary(workflow_id)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.put("/{workflow_id}/stages/{stage_instance_id}/attribute-delay")
+def attribute_delay(
+    workflow_id: UUID,
+    stage_instance_id: UUID,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Officer records delay attribution for a completed stage that has delay_days > 0.
+
+    Body:
+    {
+      "attribution": "vendor" | "kptcl",
+      "reason": "Late delivery of core components"
+    }
+
+    Requires can_approve role on the stage or org-admin.
+    """
+    try:
+        return RepairTimelinessService(db).record_delay_attribution(
+            workflow_id, stage_instance_id, payload, user.id
+        )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(400, str(e))

@@ -5,6 +5,7 @@ import pandas as pd
 from typing import Dict, Optional
 from requests import session
 from sqlalchemy import text
+from sqlalchemy.orm.attributes import flag_modified
 from database import VendorSessionLocal, Base, vendor_engine
 from models import (
     CategoryDetails, CategoryMaster, Country, Division, OrgTestTemplate, Plan, Product,
@@ -18,9 +19,13 @@ from models import (
     ReportDefinition,
     # Repair Workflow
     RepairStageDefinition, RepairStageTemplate, RepairStageRole,
-    RepairStageTransition, OrgTestTemplate,
+    RepairStageTransition, RepairWorkflowDefinition, OrgTestTemplate,
+    # Surveillance Workflow
+    SurveillanceConfig, SurveillanceTestConfig,
     # Notification config tables
     NotificationEventCatalogue, NotificationRoutingRule, NotificationScheduleRule,
+    # Schedule
+    TestRequestSchedule, ScheduleFrequency,
 )
 from security_utils import get_password_hash  # password hashing utils
 
@@ -32,6 +37,70 @@ def get_db_session():
         yield session
     finally:
         session.close()
+
+
+def run_migration_from_file(session, migration_file: str, migration_name: str) -> bool:
+    """
+    Execute a SQL migration file.
+
+    Args:
+        session: SQLAlchemy session
+        migration_file: Path to .sql file (e.g., "migrations/008_surveillance_workflow.sql")
+        migration_name: Display name (e.g., "Migration 008: Surveillance Workflow")
+
+    Returns:
+        True if successful, False if failed
+    """
+    import os
+
+    if not os.path.exists(migration_file):
+        print(f"[WARN] Migration file not found: {migration_file} — skipping")
+        return False
+
+    # Read with UTF-8 encoding (handle encoding issues on Windows)
+    try:
+        with open(migration_file, encoding='utf-8') as fh:
+            sql_content = fh.read()
+    except UnicodeDecodeError:
+        # Fallback to latin-1 if UTF-8 fails
+        with open(migration_file, encoding='latin-1') as fh:
+            sql_content = fh.read()
+
+    # Split on semicolons, skip blank/comment-only chunks
+    statements = []
+    for raw in sql_content.split(";"):
+        lines = [l.split("--")[0].strip() for l in raw.split("\n")]
+        clean = "\n".join(l for l in lines if l).strip()
+        if clean:
+            statements.append(clean)
+
+    if not statements:
+        print(f"[WARN] {migration_name}: No statements found — skipping")
+        return True
+
+    print(f"\n[MIGRATION] {migration_name}: {len(statements)} statement(s)")
+
+    for i, stmt in enumerate(statements, 1):
+        # Show truncated statement for progress
+        preview = stmt[:60].replace("\n", " ")
+        print(f"  [{i}/{len(statements)}] {preview}...", end=" ")
+        try:
+            session.execute(text(stmt))
+            session.commit()
+            print("[OK]")
+        except Exception as exc:
+            msg = str(exc).lower()
+            # Graceful handling for "already exists" or "does not exist" errors (idempotency)
+            if "already exists" in msg or "does not exist" in msg:
+                print(f"[SKIP - already applied]")
+                session.rollback()
+            else:
+                print(f"[ERROR] {exc}")
+                session.rollback()
+                return False
+
+    print(f"[OK] {migration_name} completed")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +201,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "sld_bay",          "label": "SLD of Bay",              "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -208,8 +277,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -256,8 +325,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -302,8 +371,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -347,8 +416,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -392,8 +461,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -439,8 +508,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -485,8 +554,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -532,8 +601,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -578,8 +647,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -622,8 +691,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -666,8 +735,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -708,8 +777,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -754,8 +823,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -797,8 +866,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -841,8 +910,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -888,8 +957,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -935,8 +1004,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -983,8 +1052,8 @@ NAMEPLATE_TEMPLATES = {
             {
                 "title": "Documents",
                 "fields": [
-                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
-                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg"], "max_size_kb": 10240},
+                    {"key": "nameplate_photo",  "label": "Photograph of Nameplate", "type": "file", "required": True,  "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
+                    {"key": "equipment_photo",  "label": "Equipment Photograph",    "type": "file", "required": False, "read_only": False, "accept": ["image/jpeg", "image/png"], "max_size_kb": 10240},
                     {"key": "test_certificate", "label": "Test Certificate",        "type": "file", "required": False, "read_only": False, "accept": ["application/pdf"], "max_size_kb": 10240},
                 ]
             },
@@ -1343,14 +1412,16 @@ def seed_modules(session):
 {"name": "Equipment", "description": "Equipment asset register with UEIC auto-generation", "path": "equipment", "group_name": "Testing"},
 # ✅ DASHBOARD KPI MODULES - Role-specific dashboards
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
+{"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
+{"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
-{"name": "Notification Templates", "description": "Configure email/SMS/in-app notification templates per event type", "path": "org_notification_templates", "group_name": "Organization"},
-{"name": "Notification Routing",   "description": "Configure routing rules — which roles receive which notifications", "path": "org_notification_routing",   "group_name": "Organization"},
-{"name": "Notification Schedules", "description": "Configure scheduled notification rules (due-date reminders, digests)", "path": "org_notification_schedules", "group_name": "Organization"},
+{"name": "Notification Templates", "description": "Configure email/SMS/in-app notification templates per event type", "path": "org_notification_templates", "group_name": "Organization", "is_menu": False},
+{"name": "Notification Routing",   "description": "Configure routing rules — which roles receive which notifications", "path": "org_notification_routing",   "group_name": "Organization", "is_menu": False},
+{"name": "Notification Schedules", "description": "Configure scheduled notification rules (due-date reminders, digests)", "path": "org_notification_schedules", "group_name": "Organization", "is_menu": False},
 # ✅ REPORTING SUITE MODULE
 {"name": "Reports", "description": "Generic report engine — 14 SRS operational reports with Excel/PDF export", "path": "reports", "group_name": "Testing"},
 # ✅ DIRECT SUBMISSION MODULES (Stage 2 & Stage 10 — no tester assignment)
@@ -1382,19 +1453,88 @@ def seed_modules(session):
                 "Accessible to: EE TLSS, Department Head, AEE Maintenance.",
  "path": "test_register",
  "group_name": "Condition Monitoring"},
-# ✅ REPAIR WORKFLOW MODULE
-{"name": "Repair Workflows",
- "description": "Transformer repair lifecycle — 10-stage workflow from Failure Reporting to Commissioning. "
+# ✅ WORKFLOW OPERATIONS DASHBOARD — unified view across all workflow types
+{"name": "Workflow Dashboard",
+ "description": "Unified operations dashboard — dynamically shows counts, stage breakdown, "
+                "equipment at risk, and recent activity for all workflow types defined in "
+                "repair_workflow_definitions. New workflow types appear automatically.",
+ "path": "workflow-dashboard",
+ "group_name": "Field Operations"},
+# ✅ BREAKDOWN WORKFLOW MODULE  (renamed from "Repair Workflows" — path unchanged: repair-workflows)
+{"name": "Breakdown Workflows",
+ "rename_from": "Repair Workflows",
+ "description": "Unplanned breakdown repair lifecycle — 10-stage workflow from Failure Reporting to Commissioning. "
                 "Config (org-admin only): define stages, forms, roles, transitions. "
                 "Execution: stage-role RBAC driven; each stage locks to authorized roles only.",
  "path": "repair-workflows",
  "group_name": "Field Operations"},
+# ✅ OVERHAUL WORKFLOW MODULE
+{"name": "Overhaul Workflows",
+ "description": "Overhaul lifecycle — auto-triggered when cumulative ops count crosses threshold. "
+                "Stages: Trigger Review, Execution, Completion Upload, Officer Verification. "
+                "Stage-role RBAC driven; each stage locks to authorised roles only.",
+ "path": "overhaul-workflows",
+ "group_name": "Field Operations"},
+# ✅ CALIBRATION WORKFLOW MODULE
+{"name": "Calibration Workflows",
+ "description": "Calibration lifecycle workflow — auto-triggered when a calibration result is Fail. "
+                "Stages: Due Review, Send to Lab, Certificate Upload, Officer Verification. "
+                "Stage-role RBAC driven; each stage locks to authorised roles only.",
+ "path": "calibration-workflows",
+ "group_name": "Field Operations"},
+# ✅ ANNUAL AUDIT WORKFLOW MODULE
+{"name": "Annual Audit Workflows",
+ "description": "Annual audit 5-stage workflow: Observation Reporting to Closure. TA&QC Inspector executes; Reviewing Officer reviews compliance.",
+ "path": "annual-audit-workflows",
+ "group_name": "Field Operations"},
+# ✅ SURVEILLANCE WORKFLOW MODULE (SRS §7.3)
+{"name": "Surveillance Workflows",
+ "description": "24-month post-commissioning surveillance with quarterly testing (Q1-Q4) and final evaluation. "
+                "Tracks DGA, BDV, IR, Oil Quality tests at enhanced frequency with quality ratings.",
+ "path": "surveillance-workflows",
+ "group_name": "Field Operations"},
+# ✅ SURVEILLANCE DASHBOARD MODULE
+{"name": "Surveillance Dashboard",
+ "description": "Surveillance analytics dashboard — organization-wide surveillance metrics including "
+                "quality ratings distribution, abnormal test rates, quarterly completion status, "
+                "and equipment health trends.",
+ "path": "surveillance-dashboard",
+ "group_name": "Field Operations"},
+# ✅ TEST SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
+{"name": "Test Schedule Templates",
+ "rename_from": "Schedule Templates",
+ "description": "SRS §5.1.2 — Automated periodic test ticket generation: master test schedule templates "
+                "and operational schedules per equipment. Org-admin manages master set; "
+                "operational schedules auto-created on equipment commissioning.",
+ "path": "testing_schedules",
+ "group_name": "Condition Monitoring"},
+# ✅ MAINTENANCE SCHEDULE TEMPLATES MODULE
+{"name": "Maintenance Schedule Templates",
+ "description": "Automated periodic maintenance ticket generation: master maintenance schedule templates "
+                "and operational schedules per equipment. Mirrors test schedule structure but scoped "
+                "to maintenance request category.",
+ "path": "maintenance_schedules",
+ "group_name": "Condition Monitoring"},
+# ✅ SCHEDULE COMPLIANCE MODULE
+{"name": "Test Schedules",
+ "description": "Visual compliance tracker — shows per-equipment test schedule status "
+                "(overdue, due-imminent, due-soon, ok) with filter by equipment type, "
+                "substation, and compliance band. Accessible to EE TLSS, AEE, org-admin.",
+ "path": "schedule_compliance",
+ "group_name": "Condition Monitoring"},
     ]
 
     module_ids = {}
 
     for m in modules_data:
         existing = session.query(Module).filter_by(name=m["name"]).first()
+
+        # Support rename_from: if new name not found, look up old name and rename in-place
+        if not existing and m.get("rename_from"):
+            existing = session.query(Module).filter_by(name=m["rename_from"]).first()
+            if existing:
+                existing.name = m["name"]
+                print(f"  [RENAME] Module '{m['rename_from']}' → '{m['name']}'")
 
         if not existing:
             module = Module(
@@ -1592,46 +1732,46 @@ def seed_privileges(session, role_ids, module_ids):
     testing_privileges = [
         # ORIGINATOR — dashboard + procurement + testing requests (no Testing itself)
         {
-            "role": "Originator", "module": "Testing Requests",
+            "role": "Asset Data Officer", "module": "Testing Requests",
             "can_view": True, "can_add": True, "can_edit": True,
             "can_delete": True, "can_search": True, "can_assign": True
         },
         # Removed: Validation Requests privilege (module not implemented)
-        {"role": "Originator", "module": "Dashboard", "can_view": True},
+       {"role": "Asset Data Officer","module": "Asset Dashboard", "can_view": True},
         # Originator — Procurement modules (full add/edit)
-        {"role": "Originator", "module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Originator", "module": "RQ with Vendor",      "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Originator", "module": "Request Product",     "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Originator", "module": "Quotes",              "can_view": True},
-        {"role": "Originator", "module": "Sales Orders",        "can_view": True},
-        {"role": "Originator", "module": "Invoices",            "can_view": True},
-        {"role": "Originator", "module": "Retainer Invoices",   "can_view": True},
-        {"role": "Originator", "module": "Payments Made",       "can_view": True},
-        {"role": "Originator", "module": "Statements",          "can_view": True},
-        {"role": "Originator", "module": "Enquiry",             "can_view": True, "can_add": True},
-        {"role": "Originator", "module": "Contact Us",          "can_view": True},
+        {"role": "Asset Data Officer","module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Asset Data Officer","module": "RQ with Vendor",      "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Asset Data Officer","module": "Request Product",     "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Asset Data Officer","module": "Quotes",              "can_view": True},
+        {"role": "Asset Data Officer","module": "Sales Orders",        "can_view": True},
+        {"role": "Asset Data Officer","module": "Invoices",            "can_view": True},
+        {"role": "Asset Data Officer","module": "Retainer Invoices",   "can_view": True},
+        {"role": "Asset Data Officer","module": "Payments Made",       "can_view": True},
+        {"role": "Asset Data Officer","module": "Statements",          "can_view": True},
+        {"role": "Asset Data Officer","module": "Enquiry",             "can_view": True, "can_add": True},
+        {"role": "Asset Data Officer","module": "Contact Us",          "can_view": True},
 
         # FIELD TESTER — view Testing Requests, full on Testing
-        {"role": "Field Tester", "module": "Testing Requests", "can_view": True},
+        {"role": "Test Engineer", "module": "Testing Requests", "can_view": True},
         {
-            "role": "Field Tester", "module": "Testing",
+            "role": "Test Engineer", "module": "Testing",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
 
         # LAB TESTER — same as Field Tester
-        {"role": "Lab Tester", "module": "Testing Requests", "can_view": True},
+        {"role": "Test Engineer", "module": "Testing Requests", "can_view": True},
         {
-            "role": "Lab Tester", "module": "Testing",
+            "role": "Test Engineer", "module": "Testing",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
 
         # TEST ASSIGNER (Approver) — approve/assign on Testing Request Approvals
         {
-            "role": "Test Assigner", "module": "Testing Request Approvals",
+            "role": "Test & Work Coordinator", "module": "Testing Request Approvals",
             "can_view": True, "can_approve": True, "can_assign": True
         },
-        {"role": "Test Assigner", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "Test Assigner", "module": "Dashboard", "can_view": True},
+        {"role": "Test & Work Coordinator", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Test & Work Coordinator", "module": "Dashboard", "can_view": True},
 
         # DOC-VIEWER — view only for Vendor Documents
         {
@@ -1641,26 +1781,26 @@ def seed_privileges(session, role_ids, module_ids):
         },
 
         # DEPARTMENT HEAD — approve on Recommendations + Approvals
-        {"role": "Department Head", "module": "Dashboard", "can_view": True},
-        {"role": "Department Head", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "Department Head", "module": "Recommendations",
+        {"role": "Reviewing Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Reviewing Officer", "module": "Recommendations",
          "can_view": True, "can_approve": True},
-        {"role": "Department Head", "module": "Approvals",
+        {"role": "Reviewing Officer", "module": "Approvals",
          "can_view": True, "can_approve": True},
 
         # PURCHASER — dashboard + full procurement
-        {"role": "Purchaser", "module": "Dashboard",            "can_view": True},
-        {"role": "Purchaser", "module": "Request Quote",        "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Purchaser", "module": "RQ with Vendor",       "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Purchaser", "module": "Request Product",      "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Purchaser", "module": "Quotes",               "can_view": True},
-        {"role": "Purchaser", "module": "Sales Orders",         "can_view": True},
-        {"role": "Purchaser", "module": "Invoices",             "can_view": True},
-        {"role": "Purchaser", "module": "Retainer Invoices",    "can_view": True},
-        {"role": "Purchaser", "module": "Payments Made",        "can_view": True},
-        {"role": "Purchaser", "module": "Statements",           "can_view": True},
-        {"role": "Purchaser", "module": "Enquiry",              "can_view": True, "can_add": True},
-        {"role": "Purchaser", "module": "Contact Us",           "can_view": True},
+        {"role": "Procurement Officer", "module": "Dashboard",            "can_view": True},
+        {"role": "Procurement Officer", "module": "Request Quote",        "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Procurement Officer", "module": "RQ with Vendor",       "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Procurement Officer", "module": "Request Product",      "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Procurement Officer", "module": "Quotes",               "can_view": True},
+        {"role": "Procurement Officer", "module": "Sales Orders",         "can_view": True},
+        {"role": "Procurement Officer", "module": "Invoices",             "can_view": True},
+        {"role": "Procurement Officer", "module": "Retainer Invoices",    "can_view": True},
+        {"role": "Procurement Officer", "module": "Payments Made",        "can_view": True},
+        {"role": "Procurement Officer", "module": "Statements",           "can_view": True},
+        {"role": "Procurement Officer", "module": "Enquiry",              "can_view": True, "can_add": True},
+        {"role": "Procurement Officer", "module": "Contact Us",           "can_view": True},
 
         # TESTER MAPPING — Admin full, Originator view-only
         {
@@ -1668,148 +1808,148 @@ def seed_privileges(session, role_ids, module_ids):
             "can_view": True, "can_add": True, "can_edit": True,
             "can_delete": True, "can_search": True
         },
-        {"role": "Originator", "module": "Tester Mapping", "can_view": True},
+        {"role": "Asset Data Officer","module": "Tester Mapping", "can_view": True},
 
         # TEST TEMPLATE MANAGEMENT — Admin full (via bulk), Originator view-only
-        {"role": "Originator", "module": "Test Template Management", "can_view": True},
+        {"role": "Asset Data Officer","module": "Test Template Management", "can_view": True},
 
         # ✅ EQUIPMENT ASSET REGISTER — role-based access
         {
-            "role": "Originator", "module": "Equipment",
+            "role": "Asset Data Officer", "module": "Equipment",
             "can_view": True, "can_add": True, "can_edit": True,
             "can_search": True
         },
-        {"role": "Field Tester", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "Lab Tester", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "Test Assigner", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "Department Head", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Test Engineer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Test Engineer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Test & Work Coordinator", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Reviewing Officer", "module": "Equipment", "can_view": True, "can_search": True},
 
         # ✅ SRS DESIGNATION ROLES — Permissions per role hierarchy
         # AEE Maintenance — Field supervisor
-        {"role": "AEE Maintenance", "module": "Dashboard", "can_view": True},
-        {"role": "AEE Maintenance", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True, "can_assign": True},
-        {"role": "AEE Maintenance", "module": "Testing", "can_view": True, "can_add": True},
-        {"role": "AEE Maintenance", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
-        {"role": "AEE Maintenance", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "AEE Maintenance", "module": "Notifications", "can_view": True},
-        {"role": "AEE Maintenance", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Maintenance Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Maintenance Officer", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True, "can_assign": True},
+        {"role": "Maintenance Officer", "module": "Testing", "can_view": True, "can_add": True},
+        {"role": "Maintenance Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "Maintenance Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Maintenance Officer", "module": "Notifications", "can_view": True},
+        {"role": "Maintenance Officer", "module": "Reports", "can_view": True, "can_export": True},
 
         # EE TLSS — Primary reviewer (most critical role)
         # NOTE: Does NOT have Testing Request Approvals access (not applicable for this role)
-        {"role": "EE TLSS", "module": "Dashboard", "can_view": True},
-        {"role": "EE TLSS", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "EE TLSS", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "EE TLSS", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "EE TLSS", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "EE TLSS", "module": "Notifications", "can_view": True},
-        {"role": "EE TLSS", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "EE TLSS", "module": "Request Quote", "can_view": True},
-        {"role": "EE TLSS", "module": "Quotes", "can_view": True},
-        {"role": "EE TLSS", "module": "Sales Orders", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer", "module": "Notifications", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer", "module": "Request Quote", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Quotes", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Sales Orders", "can_view": True},
 
         # SEE W&M — Circle supervisor (equivalent to Test Assigner in SRS)
-        {"role": "SEE W&M", "module": "Dashboard", "can_view": True},
-        {"role": "SEE W&M", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "SEE W&M", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "SEE W&M", "module": "Testing", "can_view": True},
-        {"role": "SEE W&M", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "SEE W&M", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "SEE W&M", "module": "Notifications", "can_view": True},
-        {"role": "SEE W&M", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "SEE W&M", "module": "Request Quote", "can_view": True, "can_add": True},
-        {"role": "SEE W&M", "module": "Quotes", "can_view": True, "can_approve": True},
-        {"role": "SEE W&M", "module": "Vendor Directory", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Supervisory Officer", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Supervisory Officer", "module": "Testing", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Supervisory Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer", "module": "Notifications", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer", "module": "Request Quote", "can_view": True, "can_add": True},
+        {"role": "Supervisory Officer", "module": "Quotes", "can_view": True, "can_approve": True},
+        {"role": "Supervisory Officer", "module": "Vendor Directory", "can_view": True},
 
         # EE RT — Research & Testing engineer
-        {"role": "EE RT", "module": "Dashboard", "can_view": True},
-        {"role": "EE RT", "module": "Testing Requests", "can_view": True, "can_add": True, "can_approve": True, "can_assign": True},
-        {"role": "EE RT", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "EE RT", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
-        {"role": "EE RT", "module": "Test Template Management", "can_view": True, "can_edit": True},
-        {"role": "EE RT", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "EE RT", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Testing Requests", "can_view": True, "can_add": True, "can_approve": True, "can_assign": True},
+        {"role": "Reviewing Officer", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "Reviewing Officer", "module": "Test Template Management", "can_view": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer", "module": "Reports", "can_view": True, "can_export": True},
 
         # SEE RT — Senior Research & Testing
-        {"role": "SEE RT", "module": "Dashboard", "can_view": True},
-        {"role": "SEE RT", "module": "Testing Requests", "can_view": True},
-        {"role": "SEE RT", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True, "can_export": True},
-        {"role": "SEE RT", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "SEE RT", "module": "Test Template Management", "can_view": True, "can_edit": True},
-        {"role": "SEE RT", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "SEE RT", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "SEE RT", "module": "Vendor Directory", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Dashboard", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Testing Requests", "can_view": True},
+        {"role": "Supervisory Officer", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True, "can_export": True},
+        {"role": "Supervisory Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Supervisory Officer", "module": "Test Template Management", "can_view": True, "can_edit": True},
+        {"role": "Supervisory Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer", "module": "Vendor Directory", "can_view": True},
 
         # CEE Transmission Zone — Zone management
-        {"role": "CEE Transmission Zone", "module": "Dashboard", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "CEE Transmission Zone", "module": "Testing", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
-        {"role": "CEE Transmission Zone", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "CEE Transmission Zone", "module": "Notifications", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "CEE Transmission Zone", "module": "Request Quote", "can_view": True, "can_approve": True},
-        {"role": "CEE Transmission Zone", "module": "Quotes", "can_view": True, "can_approve": True},
-        {"role": "CEE Transmission Zone", "module": "Sales Orders", "can_view": True},
-        {"role": "CEE Transmission Zone", "module": "Vendor Directory", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Dashboard", "can_view": True},
+        {"role": "Senior Management Approver", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Senior Management Approver", "module": "Testing", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver", "module": "Notifications", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver", "module": "Request Quote", "can_view": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Quotes", "can_view": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Sales Orders", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Vendor Directory", "can_view": True},
 
         # CEE RT&R&D — Research & Development chief
-        {"role": "CEE RT&R&D", "module": "Dashboard", "can_view": True},
-        {"role": "CEE RT&R&D", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "CEE RT&R&D", "module": "Testing", "can_view": True},
-        {"role": "CEE RT&R&D", "module": "Testing Request Approvals", "can_view": True},
-        {"role": "CEE RT&R&D", "module": "Test Template Management", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True},
-        {"role": "CEE RT&R&D", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "CEE RT&R&D", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "CEE RT&R&D", "module": "Vendor Directory", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Dashboard", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Senior Management Approver", "module": "Testing", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Testing Request Approvals", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Test Template Management", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True},
+        {"role": "Senior Management Approver", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Senior Management Approver", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver", "module": "Vendor Directory", "can_view": True},
 
         # ✅ EE TLSS DASHBOARD — role-based access
         # All operational roles can view the dashboard; it auto-renders the
         # correct widget set based on the user's OrgRole inside dashboard_service.py.
-        {"role": "Originator",      "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Field Tester",    "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Lab Tester",      "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Test Assigner",   "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Department Head", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Purchaser",       "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Asset Data Officer",     "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Test Engineer",    "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Test Engineer",      "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Test & Work Coordinator",   "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Reviewing Officer", "module": "EE TLSS Dashboard", "can_view": True},
+        {"role": "Procurement Officer",       "module": "EE TLSS Dashboard", "can_view": True},
 
         # ✅ NOTIFICATIONS — all active roles can view their own notification centre
-        {"role": "Originator",      "module": "Notifications", "can_view": True},
-        {"role": "Field Tester",    "module": "Notifications", "can_view": True},
-        {"role": "Lab Tester",      "module": "Notifications", "can_view": True},
-        {"role": "Test Assigner",   "module": "Notifications", "can_view": True},
-        {"role": "Department Head", "module": "Notifications", "can_view": True},
-        {"role": "Purchaser",       "module": "Notifications", "can_view": True},
+        {"role": "Asset Data Officer",     "module": "Notifications", "can_view": True},
+        {"role": "Test Engineer",    "module": "Notifications", "can_view": True},
+        {"role": "Test Engineer",      "module": "Notifications", "can_view": True},
+        {"role": "Test & Work Coordinator",   "module": "Notifications", "can_view": True},
+        {"role": "Reviewing Officer", "module": "Notifications", "can_view": True},
+        {"role": "Procurement Officer",       "module": "Notifications", "can_view": True},
         {"role": "Vendor",          "module": "Notifications", "can_view": True},
 
         # ✅ REPORTING SUITE — view + export for all operational roles
-        {"role": "Originator",      "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Field Tester",    "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Lab Tester",      "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Test Assigner",   "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Department Head", "module": "Reports", "can_view": True, "can_export": True},
-        {"role": "Purchaser",       "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Asset Data Officer",     "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",    "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",      "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Test & Work Coordinator",   "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer", "module": "Reports", "can_view": True, "can_export": True},
+        {"role": "Procurement Officer",       "module": "Reports", "can_view": True, "can_export": True},
 
         # ✅ FAILURE REGISTRY — Stage 2 (SRS Sec 3.3.3)
         # Accessible to field-level and supervisory roles; TA&QC can also submit.
-        {"role": "AEE Maintenance",         "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "EE TLSS",                 "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "EE RT",                   "module": "Failure Registry", "can_view": True, "can_add": True, "can_search": True},
-        {"role": "SEE W&M",                 "module": "Failure Registry", "can_view": True, "can_search": True},
-        {"role": "SEE RT",                  "module": "Failure Registry", "can_view": True, "can_search": True},
-        {"role": "CEE Transmission Zone",   "module": "Failure Registry", "can_view": True, "can_search": True},
-        {"role": "CEE RT&R&D",             "module": "Failure Registry", "can_view": True, "can_search": True},
-        {"role": "Field Tester",            "module": "Failure Registry", "can_view": True, "can_add": True},
-        {"role": "Lab Tester",              "module": "Failure Registry", "can_view": True, "can_add": True},
+        {"role": "Maintenance Officer",         "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer",                 "module": "Failure Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer",                   "module": "Failure Registry", "can_view": True, "can_add": True, "can_search": True},
+        {"role": "Supervisory Officer",                 "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer",                  "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver",   "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver",             "module": "Failure Registry", "can_view": True, "can_search": True},
+        {"role": "Test Engineer",            "module": "Failure Registry", "can_view": True, "can_add": True},
+        {"role": "Test Engineer",              "module": "Failure Registry", "can_view": True, "can_add": True},
 
         # ✅ TA&QC INSPECTIONS — Stage 10 (SRS Sec 6)
-        # Restricted to TA&QC Officers and supervisory roles.
-        {"role": "EE RT",                   "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "SEE RT",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "CEE RT&R&D",             "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_approve": True},
-        {"role": "EE TLSS",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
-        {"role": "SEE W&M",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
-        {"role": "CEE Transmission Zone",   "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+        {"role": "Asset Data Officer",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer",                   "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Supervisory Officer",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Senior Management Approver",             "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Reviewing Officer",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver",   "module": "TA&QC Inspections", "can_view": True, "can_search": True},
 
         # ✅ REPAIR WORKFLOWS — Transformer repair lifecycle (10 stages)
         # Stage-level RBAC is enforced in the service layer via RepairStageRole.
@@ -1817,20 +1957,41 @@ def seed_privileges(session, role_ids, module_ids):
         # Config endpoints (PUT /repair-workflows/config/*) require is_org_admin.
 
         # All stage-acting roles: can view + add (save data) + approve (advance/reject)
-        {"role": "AEE Maintenance",         "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "TRC Member",              "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "CEE RT&R&D",             "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "CEE Transmission Zone",   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Vendor",                  "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Inspection Engineer",     "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Finance Officer",         "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "QA Team",                 "module": "Repair Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "EE RT",                   "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
-        {"role": "SEE RT",                  "module": "Repair Workflows", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Maintenance Officer",         "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "TRC Member",              "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",             "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",   "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Vendor",                  "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Inspection Engineer",     "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Finance Officer",         "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "QA Team",                 "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Reviewing Officer",                   "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Supervisory Officer",                  "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_approve": True},
 
         # Supervisory roles: view + export only (no stage actions)
-        {"role": "EE TLSS",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
-        {"role": "SEE W&M",                 "module": "Repair Workflows", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer",                 "module": "Breakdown Workflows", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",                 "module": "Breakdown Workflows", "can_view": True, "can_export": True},
+
+        # ✅ SURVEILLANCE WORKFLOWS — Post-commissioning 24-month monitoring (SRS §7.3)
+        # Stage-level RBAC enforced via RepairStageRole (same as repair workflows).
+        # Module-level privileges control nav visibility.
+
+        # All surveillance-acting roles: can view + add (save quarterly review data) + approve (advance stages)
+        {"role": "Maintenance Officer",         "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Reviewing Officer",           "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Supervisory Officer",         "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",  "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "TRC Member",                  "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Test Engineer",               "module": "Surveillance Workflows", "can_view": True, "can_add": True},
+
+        # ✅ SURVEILLANCE DASHBOARD — Analytics and metrics
+        # All roles that can view surveillance workflows can also view the dashboard
+        {"role": "Maintenance Officer",         "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer",           "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",         "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver",  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "TRC Member",                  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -2260,44 +2421,6 @@ def seed_test_type_categories(session, master_ids):
             "Open circuit test",
             "Magnetic balance test",
         ],
-        # ── Additional equipment from KPTCL flow (PDF) ──
-        "Relay": [
-            "Relay Testing",
-        ],
-        "Meter": [
-            "Meter Testing",
-        ],
-        # ── Power Transformer (from HTML mockups) ──
-        "Power Transformer": [
-            "Power Transformer Nameplate Details",
-            "Transformer Physical Inspection",
-            "Ratio Test HV-IV",
-            "Ratio Test HV-LV",
-            "Short Circuit Test HV-IV",
-            "Short Circuit Test HV-LV",
-            "Magnetic Balance Test HV",
-            "Magnetic Balance Test IV",
-            "Magnetic Balance Test LV",
-            "Open Circuit Test HV-IV (1Ph)",
-            "Open Circuit Test HV-IV (3Ph)",
-            "Open Circuit Test HV-LV (1Ph)",
-            "Open Circuit Test HV-LV (3Ph)",
-            "Open Circuit Test IV-LV (1Ph)",
-            "Open Circuit Test IV-LV (3Ph)",
-            "Capacitance & Tan Delta Test (Transformer)",
-            "Capacitance & Tan Delta Comparison",
-        ],
-        # ── Current Transformer (additional tests from HTML mockups) ──
-        "Current Transformer": [
-            "CT Insulation Test",
-            "CT Ratio Test (Detailed)",
-            "Capacitance & Tan Delta Test (CT)",
-            "Tan Delta NCT Test",
-        ],
-        # ── CVT (new equipment type from HTML mockups) ──
-        "CVT": [
-            "CVT Test Report",
-        ],
     }
 
     # ── NEW: Category-based types structure (SRS-compliant) ──
@@ -2322,6 +2445,7 @@ def seed_test_type_categories(session, master_ids):
                 "Open Circuit Test IV-LV (3Ph)",
                 "Capacitance & Tan Delta Test (Transformer)",
                 "Capacitance & Tan Delta Comparison",
+                "Transformer Oil Test",
             ],
             "maintenance": [
                 "Routine Preventive Maintenance",
@@ -2377,6 +2501,7 @@ def seed_test_type_categories(session, master_ids):
         "Protection Relay": {
             "test": [
                 "Protection Relay Functional Test",
+                "Relay Testing",
             ],
             "maintenance": [
                 "Protection Relay Calibration and History",  # calibration lifecycle
@@ -2401,8 +2526,8 @@ def seed_test_type_categories(session, master_ids):
                 "Documentation",
             ],
         },
-        # ── Lightning Arrester ───────────────────────────────────────────────
-        "Lightning Arrester": {
+        # ── Surge Arrestor ───────────────────────────────────────────────────
+        "Surge Arrestor": {
             "test": [
                 "Insulation Resistance / Leakage Current Test",
                 "V-I Characteristic Test",
@@ -2423,8 +2548,8 @@ def seed_test_type_categories(session, master_ids):
                 "S3: Replacement / Repair",
             ],
         },
-        # ── Battery Bank ─────────────────────────────────────────────────────
-        "Battery Bank": {
+        # ── Battery Set ──────────────────────────────────────────────────────
+        "Battery Set": {
             "test": [
                 "Specific Gravity Check",
                 "Float Voltage per Cell",
@@ -2445,6 +2570,24 @@ def seed_test_type_categories(session, master_ids):
             "repair_lifecycle": [
                 "S1: Failure Report",
                 "S2: Battery Replacement",
+            ],
+        },
+        # ── Current Transformer ──────────────────────────────────────────────
+        "Current Transformer": {
+            "test": [
+                "CT Insulation Test",
+                "CT Ratio Test (Detailed)",
+                "Capacitance & Tan Delta Test (CT)",
+                "Tan Delta NCT Test",
+                "Core Insulation Test",
+                "CT Ratio Test",
+                "Insulation Resistance (IR) Test",
+            ],
+        },
+        # ── Capacitor Voltage Transformer ────────────────────────────────────
+        "Capacitor Voltage Transformer": {
+            "test": [
+                "CVT Test Report",
             ],
         },
     }
@@ -2746,35 +2889,8 @@ def seed_test_type_categories(session, master_ids):
 
 
 def seed_sample_testing_request(session):
-    """Seeds a sample testing request in draft status for demo purposes."""
-    from models import TestingRequest, TestingRequestStatus
-
-    existing = session.query(TestingRequest).filter_by(request_number="TR-20260313-0001").first()
-    if existing:
-        print("[INFO] Sample testing request already exists.")
-        return
-
-    originator = session.query(User).filter_by(email="originator@relu.com").first()
-    if not originator:
-        print("[WARN] Originator user not found. Skipping sample testing request.")
-        return
-
-    request = TestingRequest(
-        request_number="TR-20260313-0001",
-        title="11kV Distribution Transformer 100kVA - Routine Testing",
-        description="Routine testing required for newly procured 11kV 100kVA distribution transformer before deployment.",
-        transformer_type="Distribution Transformer",
-        transformer_rating="100 kVA",
-        manufacturer="Sample Manufacturer Ltd",
-        serial_number="DT-2026-001",
-        status=TestingRequestStatus.draft,
-        priority="normal",
-        originator_id=originator.id,
-        created_by=originator.id,
-    )
-    session.add(request)
-    session.commit()
-    print("[OK] Sample testing request seeded.")
+    # removed — testing requests are created via the UI, not seeded
+    pass
 
 
 # ----------------- Migrate Equipment Asset Register -----------------
@@ -2893,6 +3009,10 @@ def migrate_testing_request_columns(session):
         session.rollback()
         print(f"[WARN] Migration skipped or failed: {e}")
 
+# ─────────────────────────────────────────────────────────────────────────────
+# KPTCL TEST USER SEEDING
+# Stable deterministic users for regression/auth automation
+# ─────────────────────────────────────────────────────────────────────────────
 
 def seed_tester_locations(session):
     """Seeds tester-to-location mappings in tester_locations table."""
@@ -2988,6 +3108,8 @@ def seed_role_templates(session):
 
     # Role-specific dashboard module IDs
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
+    asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
+    test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
     aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
     see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
     cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
@@ -3012,8 +3134,20 @@ def seed_role_templates(session):
     testing_request_approvals_module = [mid for mid in [modules_by_name.get("Testing Request Approvals")] if mid]
     recommendations_module   = [mid for mid in [modules_by_name.get("Recommendations")] if mid]
     approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
-    workflows_module         = [mid for mid in [modules_by_name.get("Workflows")] if mid]
-    repair_workflows_module  = [mid for mid in [modules_by_name.get("Repair Workflows")] if mid]
+    workflows_module          = [mid for mid in [modules_by_name.get("Workflows")] if mid]
+    workflow_dashboard_module       = [mid for mid in [modules_by_name.get("Workflow Dashboard")] if mid]
+    breakdown_workflows_module      = [mid for mid in [modules_by_name.get("Breakdown Workflows")] if mid]
+    overhaul_workflows_module       = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
+    calibration_workflows_module    = [mid for mid in [modules_by_name.get("Calibration Workflows")] if mid]
+    annual_audit_workflows_module   = [mid for mid in [modules_by_name.get("Annual Audit Workflows")] if mid]
+    surveillance_workflows_module   = [mid for mid in [modules_by_name.get("Surveillance Workflows")] if mid]
+    surveillance_dashboard_module   = [mid for mid in [modules_by_name.get("Surveillance Dashboard")] if mid]
+    schedule_compliance_module          = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
+    test_schedule_templates_module      = [mid for mid in [modules_by_name.get("Test Schedule Templates")] if mid]
+    maintenance_schedule_templates_module = [mid for mid in [modules_by_name.get("Maintenance Schedule Templates")] if mid]
+    procurement_approvals_module = [mid for mid in [modules_by_name.get("Procurement Approvals")] if mid]
+    taqc_inspections_module      = [mid for mid in [modules_by_name.get("TA&QC Inspections")] if mid]
+    failure_registry_module      = [mid for mid in [modules_by_name.get("Failure Registry")] if mid]
 
     dashboard_module = [mid for mid in [modules_by_name.get("Dashboard")] if mid]
 
@@ -3069,18 +3203,31 @@ def seed_role_templates(session):
             "default_module_id": admin_dashboard_module_id,
             "permissions_template": _full(all_module_ids),
         },
-        # ── 2. Org Admin — manages org structure only ─────────────────────────
+
+        # ════════════════════════════════════════════════════════════════════
+        # NEW FUNCTIONAL ROLES  (KPTCL v2 designation mapping)
+        # Old name kept in rename_from so idempotent re-seed renames in-place.
+        # ════════════════════════════════════════════════════════════════════
+
+        # ── 2. System Administrator (was: Org Admin) ──────────────────────────
         {
-            "name": "Org Admin",
-            "description": "Manages organization structure: users, roles, and departments. No access to testing or procurement.",
+            "name": "System Administrator",
+            "rename_from": "System Administrator",
+            "description": "Manages organisation structure: users, roles and departments. Reviews and approves Failure Registry recommendations.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "permissions_template": _full(org_modules),
+            "permissions_template": (
+                _full(org_modules) +
+                _approve(approvals_module) +
+                _approve(testing_request_approvals_module)
+            ),
         },
-        # ── 3. Originator — procurement + testing requests + equipment + repair ─
+
+        # ── 3. Asset Data Officer (was: Originator) ───────────────────────────
         {
-            "name": "Originator",
+            "name": "Asset Data Officer",
+            "rename_from": "Asset Data Officer",
             "description": "Creates testing requests and raises procurement. Can start repair workflows.",
             "is_org_admin": False,
             "is_dept_admin": False,
@@ -3090,78 +3237,255 @@ def seed_role_templates(session):
                 _readwrite(procurement_modules) +
                 _readwrite(testing_requests_module) +
                 _readwrite(equipment_module) +
-                _readwrite(repair_workflows_module)
+                _readwrite(breakdown_workflows_module) +
+                _readwrite(taqc_inspections_module)      # can create TA&QC inspection requests
             ),
         },
-        # ── 4. Test Assigner (Approver) — testing request approvals + equipment view
+
+        # ── 4. Maintenance Officer (was: AEE Maintenance) ─────────────────────
         {
-            "name": "Test Assigner",
-            "description": "Approves testing requests and assigns testers. Access to Testing Request Approvals module and view equipment register.",
+            "name": "Maintenance Officer",
+            "rename_from": "Maintenance Officer",
+            "description": "Field-level maintenance responsible officer. Key repair and overhaul workflow actor.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+           "default_module_id": modules_by_name.get("Asset Dashboard"),
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _readonly(testing_requests_module) +
+                _approve(approvals_module) +
+                _readonly(recommendations_module) +
+                _readonly(workflow_dashboard_module) +
+                _readwrite(breakdown_workflows_module) +
+                _readwrite(overhaul_workflows_module) +      # OVERHAUL_TRIGGER, OVERHAUL_EXECUTION, COMPLETION_UPLOAD
+                _readwrite(calibration_workflows_module) +   # CAL_REVIEW, CAL_EXECUTION, CAL_CERTIFICATE
+                _readwrite(annual_audit_workflows_module)    # OBSERVATION_REPORTING, OBSERVATION_ASSIGNMENT
+            ),
+        },
+
+        # ── 5. Test Engineer (was: Field Tester, Lab Tester, Tester) ──────────
+        {
+            "name": "Test Engineer",
+            "rename_from": "Field Tester",
+            "description": "Performs on-site and laboratory transformer testing and repair/overhaul stage execution.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module) +
+                _readonly(equipment_module) +
+                _readonly(workflow_dashboard_module) +
+                _readwrite(breakdown_workflows_module) +
+                _readwrite(overhaul_workflows_module) +      # OVERHAUL_EXECUTION, COMPLETION_UPLOAD
+                _readwrite(calibration_workflows_module) +   # CAL_EXECUTION, CAL_CERTIFICATE
+                _readonly(annual_audit_workflows_module)     # view-only; TA&QC Inspector is the actor
+            ),
+        },
+
+        # ── 6. Test & Work Coordinator (was: Test Assigner + AEE duties) ──────
+        {
+            "name": "Test & Work Coordinator",
+            "rename_from": "Test Assigner",
+            "description": "Approves testing requests, assigns testers, and coordinates field maintenance work.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _approve(testing_request_approvals_module) +
-                _readonly(equipment_module)
-            ),
-        },
-        # ── 5. Field Tester — testing + repair stage execution ────────────────
-        {
-            "name": "Field Tester",
-            "description": "Performs on-site transformer testing and repair stage execution.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _readonly(testing_requests_module) +
-                _readwrite(testing_module) +
                 _readonly(equipment_module) +
-                _readwrite(repair_workflows_module)
-            ),
-        },
-        # ── 6. Lab Tester — lab testing + repair stage execution ──────────────
-        {
-            "name": "Lab Tester",
-            "description": "Performs laboratory testing and repair stage execution.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
+                _readonly(dashboard_module) +
                 _readonly(testing_requests_module) +
-                _readwrite(testing_module) +
-                _readonly(equipment_module) +
-                _readwrite(repair_workflows_module)
+                _approve(approvals_module) +
+                _readonly(recommendations_module) +
+                _readonly(workflow_dashboard_module) +
+                _readwrite(breakdown_workflows_module)
             ),
         },
-        # ── 7. Department Head — recommendations + approvals + repair approve ─
+
+        # ── 7. Reviewing Officer (was: Dept Head, EE RT, EE TLSS, Technical Approver) ─
         {
-            "name": "Department Head",
-            "description": "Reviews and approves recommendations from testers. Can approve repair workflow stages.",
+            "name": "Reviewing Officer",
+            "rename_from": "Reviewing Officer",
+            "description": "Reviews and approves recommendations, testing requests, repair and overhaul workflow stages. Covers EE-level designation responsibilities.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
+            "default_module_id": ee_tlss_dashboard_module_id,
             "permissions_template": (
-                _approve(recommendations_module) +
+                _readwrite(dashboard_module) +
                 _approve(approvals_module) +
+                _approve(recommendations_module) +
+                _readwrite(testing_requests_module) +
+                _approve(testing_request_approvals_module) +
+                _readwrite(testing_module) +
                 _readonly(equipment_module) +
-                _approve(repair_workflows_module)
+                _readonly(procurement_modules) +
+                _readonly(workflow_dashboard_module) +
+                _approve(breakdown_workflows_module) +
+                _approve(overhaul_workflows_module) +        # OVERHAUL_TRIGGER review + OFFICER_VERIFICATION
+                _approve(calibration_workflows_module) +     # CAL_REVIEW + CAL_VERIFY
+                _approve(annual_audit_workflows_module) +    # COMPLIANCE_REVIEW
+                _readonly(failure_registry_module)
             ),
         },
-        # ── 8. Purchaser — procurement + repair view ───────────────────────────
+
+        # ── 8. Supervisory Officer (was: SEE W&M, SEE RT) ─────────────────────
         {
-            "name": "Purchaser",
-            "description": "Manages procurement activities. Read-only access to repair workflows (procurement stage).",
+            "name": "Supervisory Officer",
+            "rename_from": "Supervisory Officer",
+            "description": "Circle-level supervisor. Approves repair workflow stages. Read visibility on overhaul workflows. Covers SEE-level designation responsibilities.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": see_dashboard_module_id,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _approve(approvals_module) +
+                _readonly(recommendations_module) +
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module) +
+                _approve(testing_request_approvals_module) +
+                _readonly(vendor_documents_module) +
+                _readonly(equipment_module) +
+                _readonly(workflow_dashboard_module) +
+                _approve(breakdown_workflows_module) +
+                _readonly(overhaul_workflows_module) +       # management visibility
+                _readonly(calibration_workflows_module) +    # management visibility
+                _readonly(annual_audit_workflows_module)     # management visibility
+            ),
+        },
+
+        # ── 9. Senior Management Approver (was: CEE RT&R&D, CEE Transmission Zone) ─
+        {
+            "name": "Senior Management Approver",
+            "rename_from": "Senior Management Approver",
+            "description": "Zone-level management. Final approver for all workflows including overhaul verification. Covers CEE-level designation responsibilities.",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": True,
+            "default_module_id": cee_dashboard_module_id,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _approve(approvals_module) +
+                _full(testing_module) +
+                _readwrite(equipment_module) +
+                _readonly(testing_requests_module) +
+                _readonly(procurement_modules) +
+                _readonly(vendor_documents_module) +
+                _readonly(recommendations_module) +
+                _readonly(workflow_dashboard_module) +
+                _approve(breakdown_workflows_module) +
+                _approve(overhaul_workflows_module) +        # OFFICER_VERIFICATION final sign-off
+                _approve(calibration_workflows_module) +     # CAL_VERIFY final sign-off
+                _approve(annual_audit_workflows_module)      # OBSERVATION_CLOSURE final sign-off
+            ),
+        },
+
+        # ── 10. TA&QC Inspector (was: TA&QC Officer) ──────────────────────────
+        {
+            "name": "TA&QC Inspector",
+            "rename_from": "TA&QC Inspector",
+            "description": "Technical Assurance & Quality Control Inspector. Performs annual substation inspections.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite(taqc_inspections_module) +
+                _readwrite(annual_audit_workflows_module) +  # OBSERVATION_REPORTING → COMPLIANCE_SUBMISSION
+                _readonly(failure_registry_module) +
+                _readonly(dashboard_module)
+            ),
+        },
+
+        # ── 11. Transformer Repair Coordinator (was: Workflow Coordinator) ─────
+        {
+            "name": "Transformer Repair Coordinator",
+            "rename_from": "Transformer Repair Coordinator",
+            "description": "Assigns users to transformer repair and overhaul workflow stages. Manages the assignment queue for both workflow types.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": ee_tlss_dashboard_module_id,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _readonly(workflow_dashboard_module) +
+                _readwrite(breakdown_workflows_module) +
+                _readwrite(overhaul_workflows_module) +      # assignment_role for all 4 overhaul stages
+                _readwrite(calibration_workflows_module) +   # assignment_role for all 4 calibration stages
+                _readwrite(annual_audit_workflows_module) +  # assignment_role for all 5 annual audit stages
+                _readonly(testing_requests_module)
+            ),
+        },
+
+        # ── 12. Procurement Officer (was: Purchaser) ──────────────────────────
+        {
+            "name": "Procurement Officer",
+            "rename_from": "Procurement Officer",
+            "description": "Manages procurement activities. Read-only access to repair workflows.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
                 _readwrite(dashboard_module) +
                 _readwrite(procurement_modules) +
-                _readwrite(repair_workflows_module)
+                _readwrite(breakdown_workflows_module)
             ),
         },
 
-        # ── 9. Doc Viewer — verifies uploaded documents ───────────────────────
+        # ── 13. Procurement Approver (was: Finance Approver) ──────────────────
+        {
+            "name": "Procurement Approver",
+            "rename_from": "Procurement Approver",
+            "description": "Reviews and approves replacement procurement requests.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _approve(procurement_approvals_module) +
+                _readonly(dashboard_module)
+            ),
+        },
+
+        # ── 14. AI / Analytics User (new) ─────────────────────────────────────
+        {
+            "name": "AI / Analytics User",
+            "description": "Read-only access to dashboards, test results and equipment data for analytics.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": admin_dashboard_module_id,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _readonly(testing_module) +
+                _readonly(equipment_module) +
+                _readonly(testing_requests_module) +
+                _readonly(recommendations_module)
+            ),
+        },
+
+        # ── 15. Read-Only Auditor / MIS User (new) ────────────────────────────
+        {
+            "name": "Read-Only Auditor / MIS User",
+            "description": "Broad read-only access for audit and management information purposes.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _readonly(testing_requests_module) +
+                _readonly(testing_module) +
+                _readonly(equipment_module) +
+                _readonly(recommendations_module) +
+                _readonly(failure_registry_module) +
+                _readonly(procurement_modules) +
+                _readonly(overhaul_workflows_module) +       # audit trail visibility
+                _readonly(calibration_workflows_module)      # audit trail visibility
+            ),
+        },
+
+        # ── 16. doc-viewer — verifies vendor uploaded documents ───────────────
         {
             "name": "doc-viewer",
             "description": "Verifies vendor uploaded documents. Access to Vendor Documents module only.",
@@ -3170,162 +3494,19 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": _readonly(vendor_documents_module),
         },
-
-        # ═══════════════════════════════════════════════════════════════════════════
-        # SRS-SPECIFIED DESIGNATION ROLES (SEACMS-AI v1.3 Section 2.3)
-        # ═══════════════════════════════════════════════════════════════════════════
-
-        # ── 10. AEE Maintenance — Field supervisor + repair stage executor ─────
-        {
-            "name": "AEE Maintenance",
-            "description": "Assistant Executive Engineer - Field-level maintenance responsible officer. Key repair workflow actor.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": aee_dashboard_module_id,
-            "permissions_template": (
-                _readonly(dashboard_module) +
-                _readonly(testing_requests_module) +
-                _approve(approvals_module) +
-                _readonly(recommendations_module) +
-                _readwrite(repair_workflows_module)
-            ),
-        },
-
-        # ── 11. EE TLSS — Primary reviewer + repair stage approver ───────────
-        {
-            "name": "EE TLSS",
-            "description": "Executive Engineer - Transmission Line & Substation primary reviewer. Approves repair workflow stages.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": ee_tlss_dashboard_module_id,
-            "permissions_template": (
-                _readwrite(dashboard_module) +
-                _readwrite(testing_requests_module) +
-                _approve(testing_request_approvals_module) +
-                _readwrite(testing_module) +
-                _readonly(equipment_module) +
-                _readonly(procurement_modules) +
-                _approve(repair_workflows_module)
-            ),
-        },
-
-        # ── 12. SEE W&M — Circle supervisor + repair stage approver ──────────
-        {
-            "name": "SEE W&M",
-            "description": "Superintending Engineer - Works & Maintenance circle supervisor. Approves repair workflow stages.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": see_dashboard_module_id,
-            "permissions_template": (
-                _readonly(dashboard_module) +
-                _approve(approvals_module) +
-                _readonly(vendor_documents_module) +
-                _readonly(recommendations_module) +
-                _readonly(testing_requests_module) +
-                _approve(repair_workflows_module)
-            ),
-        },
-
-        # ── 13. EE RT — R&D engineer + repair stage executor ─────────────────
-        {
-            "name": "EE RT",
-            "description": "Executive Engineer - Research & Testing. Executes repair workflow testing stages.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": ee_tlss_dashboard_module_id,
-            "permissions_template": (
-                _readonly(dashboard_module) +
-                _readwrite(testing_requests_module) +
-                _readwrite(testing_module) +
-                _readonly(equipment_module) +
-                _readwrite(repair_workflows_module)
-            ),
-        },
-
-        # ── 14. SEE RT — Senior R&D + repair stage approver ──────────────────
-        {
-            "name": "SEE RT",
-            "description": "Superintending Engineer - Research & Testing. Approves repair workflow testing stages.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": see_dashboard_module_id,
-            "permissions_template": (
-                _readonly(dashboard_module) +
-                _approve(approvals_module) +
-                # Testing Requests: view only — SEE RT is a tester, not an originator
-                _readonly(testing_requests_module) +
-                _readwrite(testing_module) +
-                _approve(testing_request_approvals_module) +
-                _readonly(vendor_documents_module) +
-                _readonly(equipment_module) +
-                _approve(repair_workflows_module)
-            ),
-        },
-
-        # ── 15. CEE Transmission Zone — Zone management + repair final approver
-        {
-            "name": "CEE Transmission Zone",
-            "description": "Chief Engineer Executive - Transmission zone management. Final approver for repair workflows.",
-            "is_org_admin": False,
-            "is_dept_admin": True,
-            "auto_provision": True,
-            "default_module_id": cee_dashboard_module_id,
-            "permissions_template": (
-                _readwrite(dashboard_module) +
-                _approve(approvals_module) +
-                _readonly(recommendations_module) +
-                _readonly(testing_requests_module) +
-                _readonly(procurement_modules) +
-                _readonly(vendor_documents_module) +
-                _readonly(equipment_module) +
-                _approve(repair_workflows_module)
-            ),
-        },
-
-        # ── 16. CEE RT&R&D — R&D chief + repair final approver ───────────────
-        {
-            "name": "CEE RT&R&D",
-            "description": "Chief Engineer Executive - Research Testing & R&D. Final approver for repair workflow R&D stages.",
-            "is_org_admin": False,
-            "is_dept_admin": True,
-            "auto_provision": True,
-            "default_module_id": cee_dashboard_module_id,
-            "permissions_template": (
-                _readonly(dashboard_module) +
-                _full(testing_module) +
-                _readwrite(equipment_module) +
-                _readonly(testing_requests_module) +
-                _readonly(recommendations_module) +
-                _approve(repair_workflows_module)
-            ),
-        },
-
-        # ── 17. Workflow Coordinator — assigns users to repair workflow stages ──
-        {
-            "name": "Workflow Coordinator",
-            "description": "Assigns users to transformer repair workflow stages and manages the assignment queue",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": ee_tlss_dashboard_module_id,
-            "permissions_template": (
-                _readwrite(dashboard_module) +
-                _readwrite(repair_workflows_module) +
-                _readonly(testing_requests_module)
-            ),
-        },
     ]
 
     created_count = 0
     updated_count = 0
 
     for template_data in templates_data:
+        rename_from = template_data.pop("rename_from", None)
         existing = session.query(RoleTemplate).filter_by(name=template_data["name"]).first()
+        if not existing and rename_from:
+            existing = session.query(RoleTemplate).filter_by(name=rename_from).first()
+            if existing:
+                existing.name = template_data["name"]
+                print(f"  [RENAME] RoleTemplate '{rename_from}' -> '{template_data['name']}'")
 
         if existing:
             existing.description = template_data["description"]
@@ -3334,6 +3515,7 @@ def seed_role_templates(session):
             existing.auto_provision = template_data["auto_provision"]
             existing.default_module_id = template_data.get("default_module_id")
             existing.permissions_template = template_data["permissions_template"]
+            flag_modified(existing, "permissions_template")  # JSONB needs explicit dirty flag
             existing.mts = datetime.now(datetime.now().astimezone().tzinfo)
             updated_count += 1
         else:
@@ -3500,6 +3682,9 @@ def seed_sample_organization(session):
     # Provision default roles from templates
     templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
 
+    # Build valid module ID set to guard against stale IDs in permissions_template
+    _valid_module_ids = {m.id for m in session.query(Module).all()}
+
     provisioned_roles = []
     for template in templates:
         # Skip if role already exists for this org
@@ -3529,13 +3714,16 @@ def seed_sample_organization(session):
         # Save all provisioned roles for later assignment
         provisioned_roles.append(role)
 
-        # Create permissions from template
+        # Create permissions from template (skip stale module IDs that no longer exist)
         if template.permissions_template:
             for perm_data in template.permissions_template:
+                mid = perm_data.get("module_id")
+                if mid not in _valid_module_ids:
+                    continue
                 permission = OrgRolePermission(
                     id=uuid.uuid4(),
                     org_role_id=role.id,
-                    module_id=perm_data.get("module_id"),
+                    module_id=mid,
                     can_view=perm_data.get("can_view", False),
                     can_add=perm_data.get("can_add", False),
                     can_edit=perm_data.get("can_edit", False),
@@ -3726,22 +3914,27 @@ def seed_sample_organization(session):
 
     tester_roles_config = [
         {
-            "name": "Field Tester",
-            "description": "Field tester role with exact module permissions for tester assignment"
+            "name": "Test Engineer",
+            "description": "Test Engineer role with exact module permissions for tester assignment"
         },
-        {
-            "name": "Lab Tester",
-            "description": "Laboratory tester role with exact module permissions for tester assignment"
-        }
     ]
 
     tester_roles = []
     for role_config in tester_roles_config:
-        # Check if role already exists
+        # Check if role already exists (also check old names for rename support)
         existing_role = session.query(OrgRole).filter_by(
             organization_id=org.id,
             name=role_config["name"]
         ).first()
+        if not existing_role:
+            # Try legacy names
+            for old_name in ("Field Tester", "Lab Tester"):
+                existing_role = session.query(OrgRole).filter_by(
+                    organization_id=org.id, name=old_name
+                ).first()
+                if existing_role:
+                    existing_role.name = role_config["name"]
+                    break
 
         if existing_role:
             role = existing_role
@@ -3789,32 +3982,32 @@ def seed_sample_organization(session):
     tester_users_config = [
         {
             "email": "fieldtester1@sampleorg.com",
-            "password": "Tester123!",
-            "role_name": "Field Tester",
+            "password": "admin123",
+            "role_name": "Test Engineer",
             "firstname": "Field",
             "lastname": "Tester One",
             "phone": "9999999001"
         },
         {
             "email": "fieldtester2@sampleorg.com",
-            "password": "Tester123!",
-            "role_name": "Field Tester",
+            "password": "admin123",
+            "role_name": "Test Engineer",
             "firstname": "Field",
             "lastname": "Tester Two",
             "phone": "9999999002"
         },
         {
             "email": "labtester1@sampleorg.com",
-            "password": "Tester123!",
-            "role_name": "Lab Tester",
+            "password": "admin123",
+            "role_name": "Test Engineer",
             "firstname": "Lab",
             "lastname": "Tester One",
             "phone": "9999999003"
         },
         {
             "email": "labtester2@sampleorg.com",
-            "password": "Tester123!",
-            "role_name": "Lab Tester",
+            "password": "admin123",
+            "role_name": "Test Engineer",
             "firstname": "Lab",
             "lastname": "Tester Two",
             "phone": "9999999004"
@@ -3880,43 +4073,43 @@ def seed_sample_organization(session):
 
     other_users_config = [
         {
-            "email": "originator@sampleorg.com",
+            "email": "assetdataofficer@sampleorg.com",
             "password": "Originator123!",
-            "role_name": "Originator",
+            "role_name": "Asset Data Officer",
             "firstname": "Sample",
-            "lastname": "Originator",
+            "lastname": "Asset Officer",
             "phone": "9999999010"
         },
         {
-            "email": "testassigner@sampleorg.com",
+            "email": "testworkcoordinator@sampleorg.com",
             "password": "Assigner123!",
-            "role_name": "Test Assigner",
-            "firstname": "Test",
-            "lastname": "Assigner",
+            "role_name": "Test & Work Coordinator",
+            "firstname": "Test Work",
+            "lastname": "Coordinator",
             "phone": "9999999011"
         },
         {
-            "email": "depthead@sampleorg.com",
+            "email": "reviewingofficer@sampleorg.com",
             "password": "DeptHead123!",
-            "role_name": "Department Head",
-            "firstname": "Department",
-            "lastname": "Head",
+            "role_name": "Reviewing Officer",
+            "firstname": "Reviewing",
+            "lastname": "Officer",
             "phone": "9999999012"
         },
         {
-            "email": "purchaser@sampleorg.com",
+            "email": "procurementofficer@sampleorg.com",
             "password": "Purchaser123!",
-            "role_name": "Purchaser",
-            "firstname": "Sample",
-            "lastname": "Purchaser",
+            "role_name": "Procurement Officer",
+            "firstname": "Procurement",
+            "lastname": "Officer",
             "phone": "9999999013"
         },
         {
-            "email": "orgadmin@sampleorg.com",
+            "email": "sysadmin@sampleorg.com",
             "password": "OrgAdmin123!",
-            "role_name": "Org Admin",
-            "firstname": "Org",
-            "lastname": "Admin",
+            "role_name": "System Administrator",
+            "firstname": "System",
+            "lastname": "Administrator",
             "phone": "9999999014"
         },
         {
@@ -3999,6 +4192,7 @@ def seed_kptcl_organization(session):
         print(f"[INFO] Provisioning missing roles for existing KPTCL org...")
         templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
         existing_role_names = {r.name for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
+        _valid_module_ids = {m.id for m in session.query(Module).all()}
 
         provisioned_count = 0
         for template in templates:
@@ -4018,13 +4212,16 @@ def seed_kptcl_organization(session):
                 session.add(role)
                 session.flush()
 
-                # Create permissions from template
+                # Create permissions from template (skip stale module IDs)
                 if template.permissions_template:
                     for perm_data in template.permissions_template:
+                        mid = perm_data.get("module_id")
+                        if mid not in _valid_module_ids:
+                            continue
                         permission = OrgRolePermission(
                             id=uuid.uuid4(),
                             org_role_id=role.id,
-                            module_id=perm_data.get("module_id"),
+                            module_id=mid,
                             can_view=perm_data.get("can_view", False),
                             can_add=perm_data.get("can_add", False),
                             can_edit=perm_data.get("can_edit", False),
@@ -4043,149 +4240,204 @@ def seed_kptcl_organization(session):
         session.commit()
         print(f"[OK] Provisioned {provisioned_count} new roles for KPTCL")
 
+        # ── Sync permissions for EXISTING roles against updated templates ──────
+        # This ensures stale permissions (e.g. missing can_add after template update)
+        # are refreshed on every seed run without needing to drop the org.
+        print(f"[INFO] Syncing permissions for existing KPTCL roles from templates...")
+        templates_by_name = {t.name: t for t in session.query(RoleTemplate).filter_by(auto_provision=True).all()}
+        _valid_module_ids = {m.id for m in session.query(Module).all()}
+        synced_roles = 0
+        for role in session.query(OrgRole).filter_by(organization_id=org.id).all():
+            template = templates_by_name.get(role.name)
+            if not template or not template.permissions_template:
+                continue
+            # Delete existing permissions and re-insert from template
+            session.query(OrgRolePermission).filter_by(org_role_id=role.id).delete()
+            for perm_data in template.permissions_template:
+                mid = perm_data.get("module_id")
+                if mid not in _valid_module_ids:
+                    continue
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mid,
+                    can_view=perm_data.get("can_view", False),
+                    can_add=perm_data.get("can_add", False),
+                    can_edit=perm_data.get("can_edit", False),
+                    can_delete=perm_data.get("can_delete", False),
+                    can_approve=perm_data.get("can_approve", False),
+                    can_assign=perm_data.get("can_assign", False),
+                    can_export=perm_data.get("can_export", False),
+                    can_import=perm_data.get("can_import", False),
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                ))
+            synced_roles += 1
+        session.commit()
+        print(f"[OK] Synced permissions for {synced_roles} existing KPTCL roles")
+
         # Build a lookup of all roles (existing + newly provisioned)
         provisioned_by_name = {r.name: r for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
 
         # Create missing test users for new SRS roles
         kptcl_users = [
             {
-                "email": "aee.maintenance@kptcl.com",
+                "email": "taqc.inspector@utility.com",
+                "password": "admin123",
+                "firstname": "TAQC",
+                "lastname": "Inspector",
+                "phone": "+91-9900000015",
+                "role_name": "TA&QC Inspector",
+                "employee_id": "KPTCL-TAQC-001",
+            },
+            {
+                "email": "aee.maintenance@utility.com",
                 "password": "admin123",
                 "firstname": "AEE",
                 "lastname": "Maintenance",
                 "phone": "+91-9900000010",
-                "role_name": "AEE Maintenance",
+                "role_name": "Maintenance Officer",
                 "employee_id": "KPTCL-AEE-M-001",
             },
             {
-                "email": "ee.tlss@kptcl.com",
+                "email": "ee.tlss@utility.com",
                 "password": "admin123",
                 "firstname": "EE",
                 "lastname": "TLSS",
                 "phone": "+91-9900000011",
-                "role_name": "EE TLSS",
+                "role_name": "Reviewing Officer",
                 "employee_id": "KPTCL-EE-TLSS-001",
             },
             {
-                "email": "see.wm@kptcl.com",
+                "email": "see.wm@utility.com",
                 "password": "admin123",
                 "firstname": "SEE",
                 "lastname": "W&M",
                 "phone": "+91-9900000012",
-                "role_name": "SEE W&M",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-WM-001",
             },
             {
-                "email": "ee.rt@kptcl.com",
+                "email": "ee.rt@utility.com",
                 "password": "admin123",
                 "firstname": "EE",
                 "lastname": "RT",
                 "phone": "+91-9900000013",
-                "role_name": "EE RT",
+                "role_name": "Reviewing Officer",
                 "employee_id": "KPTCL-EE-RT-001",
             },
             {
-                "email": "see.rt@kptcl.com",
+                "email": "see.rt@utility.com",
                 "password": "admin123",
                 "firstname": "SEE",
                 "lastname": "RT",
                 "phone": "+91-9900000014",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-001",
                 "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
                 "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
             },
             # ── Zone-based SEE RT testers ──────────────────────────────────────
             {
-                "email": "see.rt.bangalore@kptcl.com",
+                "email": "see.rt.bangalore@utility.com",
                 "password": "admin123",
-                "firstname": "SEE RT",
+                "firstname": "Supervisory Officer",
                 "lastname": "Bangalore",
                 "phone": "+91-9900000020",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-BLR-001",
                 "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
                 "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
             },
             {
-                "email": "see.rt.hubli@kptcl.com",
+                "email": "see.rt.hubli@utility.com",
                 "password": "admin123",
-                "firstname": "SEE RT",
+                "firstname": "Supervisory Officer",
                 "lastname": "Hubli",
                 "phone": "+91-9900000021",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-HBL-001",
                 "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
                 "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
             },
             {
-                "email": "see.rt.mysore@kptcl.com",
+                "email": "see.rt.mysore@utility.com",
                 "password": "admin123",
-                "firstname": "SEE RT",
+                "firstname": "Supervisory Officer",
                 "lastname": "Mysore",
                 "phone": "+91-9900000022",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-MYS-001",
                 "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
                 "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
             },
             {
-                "email": "see.rt.gulbarga@kptcl.com",
+                "email": "see.rt.gulbarga@utility.com",
                 "password": "admin123",
-                "firstname": "SEE RT",
+                "firstname": "Supervisory Officer",
                 "lastname": "Gulbarga",
                 "phone": "+91-9900000023",
-                "role_name": "SEE RT",
+                "role_name": "Supervisory Officer",
                 "employee_id": "KPTCL-SEE-RT-GLB-001",
                 "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
                 "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
             },
             {
-                "email": "cee.zone@kptcl.com",
+                "email": "cee.zone@utility.com",
                 "password": "admin123",
                 "firstname": "CEE",
                 "lastname": "Transmission Zone",
                 "phone": "+91-9900000015",
-                "role_name": "CEE Transmission Zone",
+                "role_name": "Senior Management Approver",
                 "employee_id": "KPTCL-CEE-TZ-001",
             },
             {
-                "email": "cee.rtrd@kptcl.com",
+                "email": "cee.rtrd@utility.com",
                 "password": "admin123",
                 "firstname": "CEE",
                 "lastname": "RT&R&D",
                 "phone": "+91-9900000016",
-                "role_name": "CEE RT&R&D",
+                "role_name": "Senior Management Approver",
                 "employee_id": "KPTCL-CEE-RTRD-001",
             },
             {
-                "email": "field.tester@kptcl.com",
-                "password": "Tester123!",
+                "email": "field.tester@utility.com",
+                "password": "admin123",
                 "firstname": "Field",
-                "lastname": "Tester",
+                "lastname": "Test Engineer",
                 "phone": "+91-9900000017",
-                "role_name": "Field Tester",
+                "role_name": "Test Engineer",
                 "employee_id": "KPTCL-FT-001",
             },
             {
-                "email": "lab.tester@kptcl.com",
-                "password": "Tester123!",
+                "email": "lab.tester@utility.com",
+                "password": "admin123",
                 "firstname": "Lab",
-                "lastname": "Tester",
+                "lastname": "Test Engineer",
                 "phone": "+91-9900000018",
-                "role_name": "Lab Tester",
+                "role_name": "Test Engineer",
                 "employee_id": "KPTCL-LT-001",
             },
             {
-                "email": "wf.coordinator@kptcl.com",
-                "password": "Coord123!",
+                "email": "wf.coordinator@utility.com",
+                "password": "admin123",
                 "firstname": "Workflow",
                 "lastname": "Coordinator",
                 "phone": "+91-9900000019",
-                "role_name": "Workflow Coordinator",
+                "role_name": "Transformer Repair Coordinator",
                 "employee_id": "KPTCL-WFC-001",
             },
         ]
+
+        # Pick a default substation department for site-level users (TAQC originator).
+        # Use the first leaf-level (deepest) department in the KPTCL hierarchy.
+        _default_dept = (
+            session.query(OrgDepartment)
+            .filter(OrgDepartment.organization_id == org.id, OrgDepartment.is_active == True)
+            .order_by(OrgDepartment.cts.asc())
+            .first()
+        )
+        _default_dept_id = _default_dept.id if _default_dept else None
 
         created_users = 0
         for user_data in kptcl_users:
@@ -4194,6 +4446,9 @@ def seed_kptcl_organization(session):
                 user = existing_user
                 if user.organization_id != org.id:
                     user.organization_id = org.id
+                # Assign default department if not already set
+                if not user.department_id and _default_dept_id:
+                    user.department_id = _default_dept_id
             else:
                 user = User(
                     id=uuid.uuid4(),
@@ -4204,6 +4459,7 @@ def seed_kptcl_organization(session):
                     phone_number=user_data["phone"],
                     employee_id=user_data.get("employee_id"),
                     organization_id=org.id,
+                    department_id=_default_dept_id,
                     isactive=True,
                     email_confirmed=True,
                     phone_confirmed=True,
@@ -4220,37 +4476,29 @@ def seed_kptcl_organization(session):
                 continue
 
             existing_role = session.query(OrgUserRole).filter_by(
-            user_id=user.id,
-            org_role_id=role.id,
-        ).first()
-
-        if existing_role:
-            # UPDATE existing mapping
-            existing_role.department_id = user_data.get("department_id")
-            existing_role.is_active = True
-            existing_role.assigned_at = datetime.now(datetime.now().astimezone().tzinfo)
-
-            print(
-                f"[UPDATED ROLE] "
-                f"{user.email} -> {user_data.get('department_id')}"
-            )
-
-        else:
-            # CREATE new mapping
-            session.add(OrgUserRole(
-                id=uuid.uuid4(),
                 user_id=user.id,
                 org_role_id=role.id,
-                department_id=user_data.get("department_id"),
-                is_active=True,
-                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-                assigned_by=None
-            ))
+            ).first()
 
-        print(
-            f"[CREATED ROLE] "
-            f"{user.email} -> {user_data.get('department_id')}"
-        )
+            if existing_role:
+                # UPDATE existing mapping
+                existing_role.department_id = user_data.get("department_id")
+                existing_role.is_active = True
+                existing_role.assigned_at = datetime.now(datetime.now().astimezone().tzinfo)
+                print(f"[UPDATED ROLE] {user.email} -> {user_data.get('department_id')}")
+            else:
+                # CREATE new mapping
+                session.add(OrgUserRole(
+                    id=uuid.uuid4(),
+                    user_id=user.id,
+                    org_role_id=role.id,
+                    department_id=user_data.get("department_id"),
+                    is_active=True,
+                    assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                    assigned_by=None
+                ))
+                print(f"[CREATED ROLE] {user.email} -> {user_data.get('department_id')}")
+
         session.commit()
         print(f"[OK] Created {created_users} new SRS designation users for KPTCL")
         return existing_org
@@ -4268,7 +4516,7 @@ def seed_kptcl_organization(session):
         display_name="KPTCL",
         organization_type="utility",
         industry="Power Transmission",
-        primary_email="info@kptcl.com",
+        primary_email="info@utility.com",
         primary_phone="+91-80-25801500",
         website="https://kptcl.karnataka.gov.in",
         address="Cauvery Bhavan, K.G. Road",
@@ -4296,6 +4544,7 @@ def seed_kptcl_organization(session):
 
     # Provision default roles from templates
     templates = session.query(RoleTemplate).filter_by(auto_provision=True).all()
+    _valid_module_ids = {m.id for m in session.query(Module).all()}
 
     org_admin_role = None
     engineer_role = None
@@ -4322,18 +4571,21 @@ def seed_kptcl_organization(session):
         # Save specific roles for user assignment
         if role.is_org_admin:
             org_admin_role = role
-        elif template.name == "Originator":
+        elif template.name == "Asset Data Officer":
             engineer_role = role
-        elif template.name == "Tester":
+        elif template.name == "Test Engineer":
             tester_role = role
 
-        # Create permissions from template
+        # Create permissions from template (skip stale module IDs)
         if template.permissions_template:
             for perm_data in template.permissions_template:
+                mid = perm_data.get("module_id")
+                if mid not in _valid_module_ids:
+                    continue
                 permission = OrgRolePermission(
                     id=uuid.uuid4(),
                     org_role_id=role.id,
-                    module_id=perm_data.get("module_id"),
+                    module_id=mid,
                     can_view=perm_data.get("can_view", False),
                     can_add=perm_data.get("can_add", False),
                     can_edit=perm_data.get("can_edit", False),
@@ -4353,7 +4605,7 @@ def seed_kptcl_organization(session):
     # Create KPTCL users — one per org role
     kptcl_users = [
         {
-            "email": "orgadmin@kptcl.com",
+            "email": "orgadmin@utility.com",
             "password": "admin123",
             "firstname": "Org",
             "lastname": "Admin",
@@ -4362,43 +4614,43 @@ def seed_kptcl_organization(session):
             "employee_id": "KPTCL-ADM-001",
         },
         {
-            "email": "originator@kptcl.com",
+            "email": "originator@utility.com",
             "password": "admin123",
             "firstname": "KPTCL",
-            "lastname": "Originator",
+            "lastname": "Asset Data Officer",
             "phone": "+91-9900000002",
-            "role_name": "Originator",
+            "role_name": "Asset Data Officer",
             "employee_id": "KPTCL-ORIG-001",
         },
         {
-            "email": "testassigner@kptcl.com",
+            "email": "testassigner@utility.com",
             "password": "admin123",
             "firstname": "KPTCL Test",
             "lastname": "Assigner",
             "phone": "+91-9900000005",
-            "role_name": "Test Assigner",
+            "role_name": "Test & Work Coordinator",
             "employee_id": "KPTCL-TA-001",
         },
         {
-            "email": "depthead@kptcl.com",
+            "email": "depthead@utility.com",
             "password": "admin123",
             "firstname": "Department",
             "lastname": "Head",
             "phone": "+91-9900000004",
-            "role_name": "Department Head",
+            "role_name": "Reviewing Officer",
             "employee_id": "KPTCL-DH-001",
         },
         {
-            "email": "purchaser@kptcl.com",
+            "email": "purchaser@utility.com",
             "password": "admin123",
             "firstname": "KPTCL",
-            "lastname": "Purchaser",
+            "lastname": "Procurement Officer",
             "phone": "+91-9900000006",
-            "role_name": "Purchaser",
+            "role_name": "Procurement Officer",
             "employee_id": "KPTCL-PUR-001",
         },
         {
-            "email": "docviewer@kptcl.com",
+            "email": "docviewer@utility.com",
             "password": "admin123",
             "firstname": "KPTCL Doc",
             "lastname": "Viewer",
@@ -4408,116 +4660,152 @@ def seed_kptcl_organization(session):
         },
         # ✅ SRS DESIGNATION ROLES — Test users
         {
-            "email": "aee.maintenance@kptcl.com",
+            "email": "aee.maintenance@utility.com",
             "password": "admin123",
             "firstname": "AEE",
             "lastname": "Maintenance",
             "phone": "+91-9900000010",
-            "role_name": "AEE Maintenance",
+            "role_name": "Maintenance Officer",
             "employee_id": "KPTCL-AEE-M-001",
         },
         {
-            "email": "ee.tlss@kptcl.com",
+            "email": "ee.tlss@utility.com",
             "password": "admin123",
             "firstname": "EE",
             "lastname": "TLSS",
             "phone": "+91-9900000011",
-            "role_name": "EE TLSS",
+            "role_name": "Reviewing Officer",
             "employee_id": "KPTCL-EE-TLSS-001",
         },
         {
-            "email": "see.wm@kptcl.com",
+            "email": "see.wm@utility.com",
             "password": "admin123",
             "firstname": "SEE",
             "lastname": "W&M",
             "phone": "+91-9900000012",
-            "role_name": "SEE W&M",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-WM-001",
         },
         {
-            "email": "ee.rt@kptcl.com",
+            "email": "ee.rt@utility.com",
             "password": "admin123",
             "firstname": "EE",
             "lastname": "RT",
             "phone": "+91-9900000013",
-            "role_name": "EE RT",
+            "role_name": "Reviewing Officer",
             "employee_id": "KPTCL-EE-RT-001",
         },
         {
-            "email": "see.rt@kptcl.com",
+            "email": "see.rt@utility.com",
             "password": "admin123",
             "firstname": "SEE",
             "lastname": "RT",
             "phone": "+91-9900000014",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-001",
             "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
             "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
         },
         # ── Zone-based SEE RT testers ──────────────────────────────────────
         {
-            "email": "see.rt.bangalore@kptcl.com",
+            "email": "see.rt.bangalore@utility.com",
             "password": "admin123",
-            "firstname": "SEE RT",
+            "firstname": "Supervisory Officer",
             "lastname": "Bangalore",
             "phone": "+91-9900000020",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-BLR-001",
             "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
             "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
         },
         {
-            "email": "see.rt.hubli@kptcl.com",
+            "email": "see.rt.hubli@utility.com",
             "password": "admin123",
-            "firstname": "SEE RT",
+            "firstname": "Supervisory Officer",
             "lastname": "Hubli",
             "phone": "+91-9900000021",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-HBL-001",
             "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
             "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
         },
         {
-            "email": "see.rt.mysore@kptcl.com",
+            "email": "see.rt.mysore@utility.com",
             "password": "admin123",
-            "firstname": "SEE RT",
+            "firstname": "Supervisory Officer",
             "lastname": "Mysore",
             "phone": "+91-9900000022",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-MYS-001",
             "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
             "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
         },
         {
-            "email": "see.rt.gulbarga@kptcl.com",
+            "email": "see.rt.gulbarga@utility.com",
             "password": "admin123",
-            "firstname": "SEE RT",
+            "firstname": "Supervisory Officer",
             "lastname": "Gulbarga",
             "phone": "+91-9900000023",
-            "role_name": "SEE RT",
+            "role_name": "Supervisory Officer",
             "employee_id": "KPTCL-SEE-RT-GLB-001",
             "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
             "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
         },
         {
-            "email": "cee.zone@kptcl.com",
+            "email": "cee.zone@utility.com",
             "password": "admin123",
             "firstname": "CEE",
             "lastname": "Transmission Zone",
             "phone": "+91-9900000015",
-            "role_name": "CEE Transmission Zone",
+            "role_name": "Senior Management Approver",
             "employee_id": "KPTCL-CEE-TZ-001",
         },
         {
-            "email": "cee.rtrd@kptcl.com",
+            "email": "cee.rtrd@utility.com",
             "password": "admin123",
             "firstname": "CEE",
             "lastname": "RT&R&D",
             "phone": "+91-9900000016",
-            "role_name": "CEE RT&R&D",
+            "role_name": "Senior Management Approver",
             "employee_id": "KPTCL-CEE-RTRD-001",
         },
+        {
+            "email": "field.tester@utility.com",
+            "password": "admin123",
+            "firstname": "Field",
+            "lastname": "Test Engineer",
+            "phone": "+91-9900000017",
+            "role_name": "Test Engineer",
+            "employee_id": "KPTCL-FT-001",
+        },
+        {
+            "email": "lab.tester@utility.com",
+            "password": "admin123",
+            "firstname": "Lab",
+            "lastname": "Test Engineer",
+            "phone": "+91-9900000018",
+            "role_name": "Test Engineer",
+            "employee_id": "KPTCL-LT-001",
+        },
+        {
+            "email": "wf.coordinator@utility.com",
+            "password": "admin123",
+            "firstname": "Workflow",
+            "lastname": "Coordinator",
+            "phone": "+91-9900000019",
+            "role_name": "Transformer Repair Coordinator",
+            "employee_id": "KPTCL-WFC-001",
+        },
     ]
+
+    # Pick a default substation department for all KPTCL users
+    _default_dept = (
+        session.query(OrgDepartment)
+        .filter(OrgDepartment.organization_id == org.id, OrgDepartment.is_active == True)
+        .order_by(OrgDepartment.cts.asc())
+        .first()
+    )
+    _default_dept_id = _default_dept.id if _default_dept else None
 
     for user_data in kptcl_users:
         existing_user = session.query(User).filter_by(email=user_data["email"]).first()
@@ -4525,6 +4813,8 @@ def seed_kptcl_organization(session):
             user = existing_user
             if user.organization_id != org.id:
                 user.organization_id = org.id
+            if not user.department_id and _default_dept_id:
+                user.department_id = _default_dept_id
         else:
             user = User(
                 id=uuid.uuid4(),
@@ -4535,6 +4825,7 @@ def seed_kptcl_organization(session):
                 phone_number=user_data["phone"],
                 employee_id=user_data.get("employee_id"),
                 organization_id=org.id,
+                department_id=_default_dept_id,
                 isactive=True,
                 email_confirmed=True,
                 phone_confirmed=True,
@@ -4555,19 +4846,16 @@ def seed_kptcl_organization(session):
         if existing_role:
             existing_role.department_id = user_data.get("department_id")
             existing_role.is_active = True
-            existing_role.assigned_at = datetime.now(
-            datetime.now().astimezone().tzinfo
-    )
-
+            existing_role.assigned_at = datetime.now(datetime.now().astimezone().tzinfo)
         else:
             session.add(OrgUserRole(
-            id=uuid.uuid4(),
-            user_id=user.id,
-            org_role_id=role.id,
-            department_id=user_data.get("department_id"),
-            is_active=True,
-            assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-            assigned_by=None
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_role_id=role.id,
+                department_id=user_data.get("department_id"),
+                is_active=True,
+                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
+                assigned_by=None,
             ))
 
     session.commit()
@@ -4579,28 +4867,43 @@ def seed_kptcl_organization(session):
     # Create sample tester roles with EXACT module permissions
     print(f"[INFO] Creating sample tester roles for KPTCL")
 
-    # Required modules for testers: [45, 46, 49]
-    # Removed 51 (Tester Mapping) - no longer used
-    TESTER_REQUIRED_MODULES = [45, 46, 49]
+    # Build tester module IDs dynamically to avoid hardcoded IDs that become
+    # stale after DB drops (PostgreSQL sequences advance even on rollback).
+    _tester_module_names = [
+        "Testing Requests",
+        "Testing",
+        "Testing Request Approvals",
+    ]
+    TESTER_REQUIRED_MODULES = []
+    for _mod_name in _tester_module_names:
+        _mod = session.query(Module).filter_by(name=_mod_name, is_active=True).first()
+        if _mod:
+            TESTER_REQUIRED_MODULES.append(_mod.id)
+        else:
+            print(f"[WARN] Module '{_mod_name}' not found — excluded from KPTCL tester role permissions")
 
     tester_roles_config = [
         {
-            "name": "Field Tester",
-            "description": "Field tester role with exact module permissions for tester assignment"
+            "name": "Test Engineer",
+            "description": "Test Engineer role with exact module permissions for tester assignment"
         },
-        {
-            "name": "Lab Tester",
-            "description": "Laboratory tester role with exact module permissions for tester assignment"
-        }
     ]
 
     tester_roles = []
     for role_config in tester_roles_config:
-        # Check if role already exists
+        # Check if role already exists (also support legacy rename from Field/Lab Tester)
         existing_role = session.query(OrgRole).filter_by(
             organization_id=org.id,
             name=role_config["name"]
         ).first()
+        if not existing_role:
+            for old_name in ("Field Tester", "Lab Tester"):
+                existing_role = session.query(OrgRole).filter_by(
+                    organization_id=org.id, name=old_name
+                ).first()
+                if existing_role:
+                    existing_role.name = role_config["name"]
+                    break
 
         if existing_role:
             role = existing_role
@@ -4652,37 +4955,21 @@ def seed_kptcl_organization(session):
 
     tester_users_config = [
         {
-            "email": "fieldtester1@kptcl.com",
-            "password": "Tester123!",
-            "role_name": "Field Tester",
-            "firstname": "KPTCL Field",
-            "lastname": "Tester One",
+            "email": "testengineer1@utility.com",
+            "password": "admin123",
+            "role_name": "Test Engineer",
+            "firstname": "KPTCL Test",
+            "lastname": "Engineer One",
             "phone": "9999999101"
         },
         {
-            "email": "fieldtester2@kptcl.com",
-            "password": "Tester123!",
-            "role_name": "Field Tester",
-            "firstname": "KPTCL Field",
-            "lastname": "Tester Two",
+            "email": "testengineer2@utility.com",
+            "password": "admin123",
+            "role_name": "Test Engineer",
+            "firstname": "KPTCL Test",
+            "lastname": "Engineer Two",
             "phone": "9999999102"
         },
-        {
-            "email": "labtester1@kptcl.com",
-            "password": "Tester123!",
-            "role_name": "Lab Tester",
-            "firstname": "KPTCL Lab",
-            "lastname": "Tester One",
-            "phone": "9999999103"
-        },
-        {
-            "email": "labtester2@kptcl.com",
-            "password": "Tester123!",
-            "role_name": "Lab Tester",
-            "firstname": "KPTCL Lab",
-            "lastname": "Tester Two",
-            "phone": "9999999104"
-        }
     ]
 
     created_users = 0
@@ -4768,9 +5055,9 @@ def seed_notifications_module_and_permissions(session):
     # ─────────────────────────────────────────────────────────────
     # 3. Get user
     # ─────────────────────────────────────────────────────────────
-    user = session.query(User).filter_by(email="orgadmin@kptcl.com").first()
+    user = session.query(User).filter_by(email="orgadmin@utility.com").first()
     if not user:
-        raise Exception("User orgadmin@kptcl.com not found")
+        raise Exception("User orgadmin@utility.com not found")
 
     # ─────────────────────────────────────────────────────────────
     # 4. Validate user belongs to KPTCL org
@@ -4787,7 +5074,7 @@ def seed_notifications_module_and_permissions(session):
     # ─────────────────────────────────────────────────────────────
     org_admin_role = session.query(OrgRole).filter_by(
         organization_id=kptcl_org.id,
-        name="Org Admin",
+        name="System Administrator",
         is_active=True
     ).first()
 
@@ -4852,6 +5139,18 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     ).delete()
     session.commit()
     print(f"[OK] Deleted {deleted_requests} testing requests")
+
+    # Delete annual audit inspections first (FK → equipment, observations cascade)
+    try:
+        from models import TAQCAnnualInspection
+        deleted_inspections = session.query(TAQCAnnualInspection).filter(
+            TAQCAnnualInspection.organization_id == uuid.UUID(org_id)
+        ).delete()
+        session.commit()
+        if deleted_inspections:
+            print(f"[OK] Deleted {deleted_inspections} annual audit inspections (and their observations)")
+    except Exception:
+        session.rollback()
 
     # Delete existing equipment for this organization
     print(f"[INFO] Deleting existing equipment for organization: {org.name}")
@@ -5005,6 +5304,180 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     print(f"\n{'='*60}")
     print(f"[OK] COMPLETED: Created {len(department_map) + 1} total departments (including root Zone)")
     print(f"{'='*60}\n")
+
+
+def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
+    """
+    Seed KPTCL equipment assets from equipment_seed.xlsx.
+
+    The workbook must contain an "Equipment" sheet with columns:
+      substation, equipment_type, voltage_class, bay_name, phase,
+      manufacturer, yom, doc, factory_serial_number,
+      ct_ratio_actual, ct_ratio_current, pt_ratio,
+      capacity_mva, vector_group, impedance_pct, status
+
+    Each row is linked to the OrgDepartment whose name matches the
+    "substation" column value.
+    """
+    import os
+    from models import Equipment, CategoryMaster
+
+    print("\n--- KPTCL Equipment Seeding ---")
+
+    org = session.query(Organization).filter(Organization.id == uuid.UUID(org_id)).first()
+    if not org:
+        print(f"[ERROR] Organization {org_id} not found")
+        return
+
+    if excel_path is None:
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        excel_path = os.path.join(project_root, "equipment_seed.xlsx")
+
+    if not os.path.exists(excel_path):
+        raise FileNotFoundError(f"Equipment seed file not found: {excel_path}")
+
+    try:
+        df = pd.read_excel(excel_path, sheet_name="Equipment", dtype=str)
+        df = df.where(pd.notna(df), None)
+        print(f"[OK] Loaded {len(df)} equipment rows")
+    except Exception as e:
+        print(f"[ERROR] Failed to read Equipment sheet: {e}")
+        return
+
+    # Resolve admin user for created_by
+    admin = (
+        session.query(User)
+        .filter(User.organization_id == uuid.UUID(org_id), User.email.ilike("%orgadmin%"))
+        .first()
+        or session.query(User).filter(User.organization_id == uuid.UUID(org_id)).first()
+    )
+    created_by = admin.id if admin else None
+
+    # Load equipment type (CategoryMaster) lookup
+    equip_types = (
+        session.query(CategoryMaster)
+        .filter(CategoryMaster.description == "Testing Equipment", CategoryMaster.is_active.is_(True))
+        .all()
+    )
+    # Normalise type names for fuzzy lookup
+    type_map = {}
+    for et in equip_types:
+        type_map[et.name.lower()] = et.id
+        # short aliases
+        if "current transformer" in et.name.lower():
+            type_map["ct"] = et.id
+        elif "potential transformer" in et.name.lower() or "voltage transformer" in et.name.lower():
+            type_map["pt"] = et.id
+            type_map["cvt"] = et.id
+        elif "power transformer" in et.name.lower():
+            type_map["power transformer"] = et.id
+
+    # Load all departments for this org into a name→id map
+    depts = session.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == uuid.UUID(org_id)
+    ).all()
+    dept_map = {d.name.strip().lower(): d.id for d in depts}
+
+    created = skipped = 0
+
+    for _, row in df.iterrows():
+        substation_name = (row.get("substation") or "").strip()
+        dept_id = dept_map.get(substation_name.lower())
+        if not dept_id:
+            print(f"  [WARN] Department not found for substation: '{substation_name}' — skipping row")
+            skipped += 1
+            continue
+
+        raw_type = (row.get("equipment_type") or "").strip()
+        equip_type_id = None
+        for key in (raw_type.lower(), raw_type.split("(")[0].strip().lower()):
+            equip_type_id = type_map.get(key)
+            if equip_type_id:
+                break
+        if not equip_type_id:
+            print(f"  [WARN] Equipment type not found: '{raw_type}' — skipping")
+            skipped += 1
+            continue
+
+        # Parse numeric fields safely
+        def _float(val):
+            try:
+                return float(val) if val else None
+            except (ValueError, TypeError):
+                return None
+
+        def _int(val):
+            try:
+                v = str(val).split(".")[0] if val else None
+                return int(v) if v else None
+            except (ValueError, TypeError):
+                return None
+
+        def _clean_str(val):
+            """Convert pandas nan strings and empty strings to None."""
+            if val is None or val == "" or str(val).lower() in ("nan", "none", "null"):
+                return None
+            return str(val).strip() if val else None
+
+        voltage_class = row.get("voltage_class") or ""
+        # Strip trailing "kV" suffix if present for storage consistency
+        voltage_class = voltage_class.replace("kV", "").replace("KV", "").strip() or None
+
+        yom = _int(row.get("yom"))
+        doc_raw = row.get("doc")
+        doc_date = None
+        if doc_raw:
+            try:
+                doc_date = pd.to_datetime(doc_raw, dayfirst=True).date()
+            except Exception:
+                doc_date = None
+
+        # Determine status enum  (values: active, retired, scrapped, under_repair)
+        raw_status = (row.get("status") or "In-service").strip().lower()
+        from models import EquipmentStatus
+        status_map = {
+            "in-service": EquipmentStatus.active,
+            "in service": EquipmentStatus.active,
+            "operational": EquipmentStatus.active,
+            "active": EquipmentStatus.active,
+            "retired": EquipmentStatus.retired,
+            "decommissioned": EquipmentStatus.scrapped,
+            "scrapped": EquipmentStatus.scrapped,
+            "under maintenance": EquipmentStatus.under_repair,
+            "maintenance": EquipmentStatus.under_repair,
+            "under repair": EquipmentStatus.under_repair,
+        }
+        status = status_map.get(raw_status, EquipmentStatus.active)
+
+        from services.equipment_service import EquipmentService
+        try:
+            EquipmentService.create_equipment(
+                db=session,
+                organization_id=uuid.UUID(org_id),
+                department_id=dept_id,
+                equipment_type_id=equip_type_id,
+                voltage_class=voltage_class,
+                bay_number=_clean_str(row.get("bay_name")),
+                manufacturer=_clean_str(row.get("manufacturer")),
+                factory_serial_number=_clean_str(row.get("factory_serial_number")),
+                year_of_manufacture=yom,
+                commissioned_date=doc_date,
+                phase=_clean_str(row.get("phase")),
+                ct_ratio_actual=_clean_str(row.get("ct_ratio_actual")),
+                ct_ratio_current=_clean_str(row.get("ct_ratio_current")),
+                pt_ratio=_clean_str(row.get("pt_ratio")),
+                vector_group=_clean_str(row.get("vector_group")),
+                impedance_pct=_float(row.get("impedance_pct")),
+                created_by=created_by,
+            )
+            session.commit()
+            created += 1
+        except Exception as e:
+            session.rollback()
+            print(f"  [WARN] Failed to create equipment row: {e}")
+            skipped += 1
+
+    print(f"\n[OK] Equipment seeding complete: {created} created, {skipped} skipped")
 
 
 # ----------------- Reporting Suite Seed -----------------
@@ -5278,230 +5751,475 @@ def seed_org_role_permissions_for_modules(session, module_ids):
 
 
 def seed_test_register(session, org):
+    # removed — test register templates are created via the UI, not seeded
+    pass
+
+
+def seed_default_test_register(session, org):
+    # removed — test register templates are created via the UI, not seeded
+    pass
+
+
+# ============================================================
+# MASTER SCHEDULE SEED
+# Creates TestRequestSchedule master rows (equipment_id=NULL)
+# for representative test types across all 6 equipment types.
+# Idempotent — skips if (org, equipment_type_id, test_type_id) exists.
+# ============================================================
+
+_MASTER_SCHEDULE_SEED = {
+    # equipment_type_name: [(test_detail_name, frequency, advance_days, oem_ref)]
+    "Power Transformer": [
+        ("Ratio Test HV-LV",                          "yearly",     30, "IEC 60076-1"),
+        ("Capacitance & Tan Delta Test (Transformer)", "triennial",  45, "IEC 60137"),
+        ("Magnetic Balance Test HV",                  "yearly",     30, None),
+    ],
+    "Circuit Breaker": [
+        ("Contact Resistance Test",  "yearly",    30, "IEC 62271-100"),
+        ("Insulation Resistance Test", "yearly",  30, None),
+        ("Travel and Timing Test",   "triennial", 45, "IEC 62271-100"),
+    ],
+    "Protection Relay": [
+        ("Protection Relay Functional Test", "yearly", 30, "IEC 60255"),
+    ],
+    "Electronic Tri-vector Meter": [
+        ("Meter Testing", "yearly", 30, "IS 16444"),
+    ],
+    "Surge Arrestor": [
+        ("Insulation Resistance / Leakage Current Test", "yearly",    30, "IEC 60099-4"),
+        ("V-I Characteristic Test",                      "triennial", 45, "IEC 60099-4"),
+    ],
+    "Battery Set": [
+        ("Specific Gravity Check",    "quarterly", 15, None),
+        ("Discharge / Capacity Test", "yearly",    30, "IEEE 450"),
+        ("Float Voltage per Cell",    "quarterly", 15, None),
+    ],
+}
+
+
+def seed_schedule_module_permissions(session):
     """
-    SRS §5.1.1 — Seed the Test Register for a KPTCL organisation.
-
-    Creates TestingRequest (is_schedule_template=True) + TestRequestSchedule rows
-    for each mandatory periodic test grouped by equipment type.
-
-    Idempotent — skips entries whose request_number already exists.
+    Ensure 'Test Schedule Templates' and 'Maintenance Schedule Templates' modules
+    exist and all is_org_admin OrgRoles across every organisation have full access
+    to both. Idempotent.
     """
-    if not org:
-        print("[SKIP] seed_test_register: no org supplied.")
-        return
+    MODULE_NAMES = ["Test Schedule Templates", "Maintenance Schedule Templates"]
+    total_granted = 0
 
-    from models import (
-        CategoryMaster, OrgRole, ScheduleFrequency,
-        TestingRequest, TestingRequestStatus, TestRequestSchedule, RequestCategory
+    admin_roles = session.query(OrgRole).filter_by(is_org_admin=True, is_active=True).all()
+
+    for mod_name in MODULE_NAMES:
+        mod = session.query(Module).filter_by(name=mod_name).first()
+        if not mod:
+            print(f"[WARN] '{mod_name}' module not found — run seed_modules first.")
+            continue
+
+        granted = 0
+        for role in admin_roles:
+            existing = (
+                session.query(OrgRolePermission)
+                .filter_by(org_role_id=role.id, module_id=mod.id)
+                .first()
+            )
+            if existing:
+                existing.can_view = existing.can_add = existing.can_edit = True
+                existing.can_delete = existing.can_approve = existing.can_assign = True
+                existing.can_export = existing.can_import = True
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mod.id,
+                    can_view=True, can_add=True, can_edit=True,
+                    can_delete=True, can_approve=True, can_assign=True,
+                    can_export=True, can_import=True,
+                ))
+                granted += 1
+        total_granted += granted
+        print(f"[OK] {mod_name}: full access granted/updated for {len(admin_roles)} org-admin role(s) ({granted} new).")
+
+    session.commit()
+    return total_granted
+
+
+def seed_schedule_compliance_module_permissions(session, org=None):
+    """
+    Grant 'Test Schedules' module access to OrgRoles belonging to *org*.
+    This module is KPTCL-specific — pass the KPTCL Organization object.
+    Idempotent — inserts missing rows and updates existing ones.
+
+    Access matrix:
+      is_org_admin roles              → full access (all flags)
+      Named field / supervisory roles → can_view only
+    """
+    mod = session.query(Module).filter_by(name="Test Schedules").first()
+    if not mod:
+        print("[WARN] 'Test Schedules' module not found — run seed_modules first.")
+        return 0
+
+    if org is None:
+        # Fall back to KPTCL by display_name so the function is safe to call standalone
+        org = session.query(Organization).filter_by(display_name="KPTCL").first()
+    if org is None:
+        print("[WARN] seed_schedule_compliance_module_permissions: KPTCL org not found — skipped.")
+        return 0
+
+    # Roles that get can_view only (read-only compliance tracker)
+    READONLY_ROLE_NAMES = {
+        # New functional roles
+        "System Administrator",
+        "Asset Data Officer",
+        "Maintenance Officer",
+        "Test Engineer",
+        "Test & Work Coordinator",
+        "Reviewing Officer",
+        "Supervisory Officer",
+        "Senior Management Approver",
+        "TA&QC Inspector",
+        "Transformer Repair Coordinator",
+        "Procurement Officer",
+        "Procurement Approver",
+        "AI / Analytics User",
+        "Read-Only Auditor / MIS User",
+        "Admin",
+    }
+
+    # Only roles belonging to the KPTCL org
+    kptcl_roles = (
+        session.query(OrgRole)
+        .filter(OrgRole.organization_id == org.id, OrgRole.is_active.is_(True))
+        .all()
     )
-    from datetime import datetime, timezone
-    import uuid as _uuid
 
-    now = datetime.now(timezone.utc)
+    granted = 0
+    for role in kptcl_roles:
+        is_admin = role.is_org_admin
+        is_named = role.name in READONLY_ROLE_NAMES
+        if not is_admin and not is_named:
+            continue  # skip roles that shouldn't see this module
 
-    # ── look up system user (org admin) as template originator ────────────────
-    from models import User, OrgUserRole
-    admin_role = session.query(OrgRole).filter_by(
-        organization_id=org.id, name="Org Admin"
-    ).first()
-    system_user = None
-    if admin_role:
-        link = session.query(OrgUserRole).filter_by(org_role_id=admin_role.id).first()
-        if link:
-            system_user = session.query(User).filter_by(id=link.user_id).first()
-    if not system_user:
-        system_user = session.query(User).filter_by(email="superadmin@system.com").first()
-    if not system_user:
-        print("[WARN] seed_test_register: no system user found — skipping.")
-        return
-
-    # ── look up key OrgRoles ──────────────────────────────────────────────────
-    def get_role(name):
-        return session.query(OrgRole).filter_by(
-            organization_id=org.id, name=name
-        ).first()
-
-    aee_maintenance = get_role("AEE Maintenance")
-    ee_tlss         = get_role("EE TLSS")
-    field_tester    = get_role("Field Tester")
-    aee_role        = get_role("AEE")
-
-    responsible_default = aee_maintenance
-    reviewing_default   = ee_tlss
-
-    # ── helper: get equipment type master ─────────────────────────────────────
-    def get_eq_type(name):
-        return session.query(CategoryMaster).filter_by(
-            name=name, is_active=True
-        ).first()
-
-    # ── register catalogue ────────────────────────────────────────────────────
-    # (equipment_type_name, test_name, template_key, frequency, advance_days,
-    #  responsible_role, reviewing_role, revised_periodicity_days, oem_reference)
-    REGISTER = [
-        # ── Power Transformer ─────────────────────────────────────────────────
-        ("Power Transformer", "DGA — Dissolved Gas Analysis",
-         "transformer_dga",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, 180,
-         "IS 10593 / IS 1866 Cl.4.2"),
-
-        ("Power Transformer", "BDV — Oil Dielectric Strength",
-         "transformer_bdv",
-         ScheduleFrequency.semi_annual, 10,
-         aee_maintenance, ee_tlss, 90,
-         "IS 6792 Cl.5.1"),
-
-        ("Power Transformer", "IR — Winding Insulation Resistance",
-         "transformer_ir",
-         ScheduleFrequency.semi_annual, 10,
-         aee_maintenance, ee_tlss, None,
-         "IS 2026 Pt.1"),
-
-        ("Power Transformer", "Tan Delta / Power Factor Test",
-         "transformer_tan_delta",
-         ScheduleFrequency.triennial, 30,
-         aee_maintenance, ee_tlss, None,
-         "IS 2026 Pt.1 / IEC 60076-1"),
-
-        # ── Circuit Breaker ───────────────────────────────────────────────────
-        ("Circuit Breaker", "SF6 Gas Purity Test",
-         "cb_sf6_purity",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, 180,
-         "IEC 60376 / IS 13734"),
-
-        ("Circuit Breaker", "SF6 Gas Pressure Check",
-         "cb_sf6_pressure",
-         ScheduleFrequency.quarterly, 7,
-         field_tester or aee_maintenance, aee_maintenance or ee_tlss, None,
-         "Manufacturer O&M Manual"),
-
-        ("Circuit Breaker", "IR — Insulation Resistance",
-         "cb_ir",
-         ScheduleFrequency.semi_annual, 10,
-         aee_maintenance, ee_tlss, None,
-         "IEC 62271-100"),
-
-        ("Circuit Breaker", "Contact Resistance Test",
-         "cb_contact_resistance",
-         ScheduleFrequency.semi_annual, 10,
-         aee_maintenance, ee_tlss, None,
-         "IEC 62271-100 Cl.6.4"),
-
-        # ── Current Transformer ───────────────────────────────────────────────
-        ("Current Transformer", "IR — Insulation Resistance",
-         "ct_ir",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, None,
-         "IS 2705 / IEC 61869-2"),
-
-        ("Current Transformer", "Ratio & Phase Error Test",
-         "ct_ratio",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, None,
-         "IS 2705 Cl.8"),
-
-        # ── Lightning Arrester ────────────────────────────────────────────────
-        ("Lightning Arrester", "IR / Leakage Current Test",
-         "la_ir",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, 180,
-         "IS 3070 Pt.3 / IEC 60099-4"),
-
-        ("Lightning Arrester", "V-I Characteristic Test",
-         "la_vi",
-         ScheduleFrequency.triennial, 30,
-         aee_maintenance, ee_tlss, None,
-         "IEC 60099-4 Cl.8.3"),
-
-        # ── Battery Bank ──────────────────────────────────────────────────────
-        ("Battery Bank", "Specific Gravity Check",
-         "battery_specific_gravity",
-         ScheduleFrequency.quarterly, 7,
-         field_tester or aee_maintenance, aee_maintenance or ee_tlss, None,
-         "IS 1651 / Manufacturer Manual"),
-
-        ("Battery Bank", "Float Voltage per Cell",
-         "battery_float_voltage",
-         ScheduleFrequency.monthly, 5,
-         field_tester or aee_maintenance, aee_maintenance or ee_tlss, None,
-         "IS 1652 / Manufacturer Manual"),
-
-        ("Battery Bank", "Discharge / Capacity Test",
-         "battery_capacity",
-         ScheduleFrequency.yearly, 15,
-         aee_maintenance, ee_tlss, None,
-         "IS 1651 Cl.10"),
-    ]
-
-    created = 0
-    skipped = 0
-
-    for (eq_type_name, test_name, tpl_key, freq, adv_days,
-         resp_role, rev_role, revised_days, oem_ref) in REGISTER:
-
-        eq_type = get_eq_type(eq_type_name)
-        if not eq_type:
-            print(f"  [WARN] Equipment type '{eq_type_name}' not found — skipping '{test_name}'")
-            skipped += 1
-            continue
-
-        # Idempotency: skip if a template with this title + org + eq_type already exists
-        existing = session.query(TestingRequest).filter_by(
-            title=test_name,
-            organization_id=org.id,
-            equipment_type_id=eq_type.id,
-            is_schedule_template=True,
-        ).first()
-        if existing:
-            skipped += 1
-            continue
-
-        req_num = f"TR-REG-{now.strftime('%Y%m%d')}-{(created + 1):04d}"
-        req = TestingRequest(
-            id=_uuid.uuid4(),
-            request_number=req_num,
-            title=test_name,
-            description=f"Mandatory periodic test per {oem_ref}" if oem_ref else None,
-            equipment_type_id=eq_type.id,
-            organization_id=org.id,
-            request_category=RequestCategory.test,
-            priority="normal",
-            notes=oem_ref,
-            status=TestingRequestStatus.draft,
-            is_schedule_template=True,
-            is_direct_submission=False,
-            originator_id=system_user.id,
-            created_by=system_user.id,
-            requested_date=now,
+        existing = (
+            session.query(OrgRolePermission)
+            .filter_by(org_role_id=role.id, module_id=mod.id)
+            .first()
         )
-        session.add(req)
-        session.flush()
 
-        sched = TestRequestSchedule(
-            id=_uuid.uuid4(),
-            test_request_id=req.id,
-            organization_id=org.id,
-            frequency=freq,
-            start_date=now,
-            next_run_date=now,   # placeholder; overwritten on commissioning
-            advance_days=adv_days,
-            is_active=True,
-            responsible_role_id=getattr(resp_role, "id", None),
-            reviewing_role_id=getattr(rev_role, "id", None),
-            revised_periodicity_days=revised_days,
-            oem_reference=oem_ref,
-            created_by=system_user.id,
-        )
-        session.add(sched)
-        created += 1
+        if is_admin:
+            # Full access for org-admin roles
+            if existing:
+                existing.can_view = existing.can_add = existing.can_edit = True
+                existing.can_delete = existing.can_approve = existing.can_assign = True
+                existing.can_export = existing.can_import = True
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mod.id,
+                    can_view=True, can_add=True, can_edit=True,
+                    can_delete=True, can_approve=True, can_assign=True,
+                    can_export=True, can_import=True,
+                ))
+                granted += 1
+        else:
+            # Read-only for field / supervisory roles
+            if existing:
+                existing.can_view = True  # ensure can_view is set at minimum
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=mod.id,
+                    can_view=True, can_add=False, can_edit=False,
+                    can_delete=False, can_approve=False, can_assign=False,
+                    can_export=False, can_import=False,
+                ))
+                granted += 1
 
     session.commit()
     print(
-        f"[OK] Test Register seeded: {created} templates created, "
-        f"{skipped} skipped (already exist or missing eq type)."
+        f"[OK] Test Schedules (KPTCL): permissions seeded for {len(kptcl_roles)} role(s) "
+        f"in org '{org.display_name}' ({granted} new rows inserted)."
     )
+    return granted
+
+
+def seed_approval_role_permissions(session):
+    """
+    Ensure 'Technical Approver' and 'Org Admin' roles have can_view + can_approve
+    on the 'Approvals' and 'Testing Request Approvals' modules across every org.
+
+    Idempotent — inserts missing rows and updates existing ones so re-running
+    seed.py always brings permissions to the correct state.
+
+    Equivalent to running this SQL once per org:
+        INSERT INTO public.org_role_permissions
+            (id, org_role_id, module_id,
+             can_view, can_add, can_edit, can_delete,
+             can_approve, can_assign, can_export, can_import)
+        VALUES
+            (gen_random_uuid(), '<tech_approver_role_id>', <approvals_mod_id>,
+             true, false, false, false, true, true, true, false),
+            (gen_random_uuid(), '<tech_approver_role_id>', <tr_approvals_mod_id>,
+             true, false, false, false, true, true, true, false),
+            (gen_random_uuid(), '<org_admin_role_id>',    <approvals_mod_id>,
+             true, false, false, false, true, true, true, false),
+            (gen_random_uuid(), '<org_admin_role_id>',    <tr_approvals_mod_id>,
+             true, false, false, false, true, true, true, false)
+        ON CONFLICT (org_role_id, module_id) DO NOTHING;
+    """
+    approvals_mod = session.query(Module).filter_by(path="approvals", is_active=True).first()
+    tr_approvals_mod = session.query(Module).filter_by(path="testing_request_approvals", is_active=True).first()
+
+    if not approvals_mod:
+        print("[WARN] seed_approval_role_permissions: 'Approvals' module not found — skipping")
+        return 0
+    if not tr_approvals_mod:
+        print("[WARN] seed_approval_role_permissions: 'Testing Request Approvals' module not found — skipping")
+        return 0
+
+    target_role_names = ["Reviewing Officer", "System Administrator"]
+    target_modules = [approvals_mod, tr_approvals_mod]
+
+    inserted = 0
+    updated = 0
+
+    for role_name in target_role_names:
+        roles = session.query(OrgRole).filter_by(name=role_name, is_active=True).all()
+        for role in roles:
+            for mod in target_modules:
+                existing = (
+                    session.query(OrgRolePermission)
+                    .filter_by(org_role_id=role.id, module_id=mod.id)
+                    .first()
+                )
+                if existing:
+                    # Ensure correct values even if row was created without approve
+                    changed = False
+                    if not existing.can_view:
+                        existing.can_view = True; changed = True
+                    if not existing.can_approve:
+                        existing.can_approve = True; changed = True
+                    if changed:
+                        updated += 1
+                else:
+                    session.add(OrgRolePermission(
+                        id=uuid.uuid4(),
+                        org_role_id=role.id,
+                        module_id=mod.id,
+                        can_view=True,
+                        can_add=False,
+                        can_edit=False,
+                        can_delete=False,
+                        can_approve=True,
+                        can_assign=True,
+                        can_export=True,
+                        can_import=False,
+                    ))
+                    inserted += 1
+                    print(
+                        f"  [+] Granted: {role_name} "
+                        f"(org={role.organization_id}) → {mod.name}"
+                    )
+
+    session.commit()
+    print(
+        f"[OK] Approval role permissions: "
+        f"{inserted} row(s) inserted, {updated} row(s) updated "
+        f"across {len(target_role_names)} role name(s)."
+    )
+    return inserted
+
+
+def seed_missing_role_permissions(session, org=None):
+    """
+    Backfill OrgRolePermission rows for roles that have no template
+    or had a name mismatch in _DFT_ROLES vs seed_role_templates.
+
+    Targets (KPTCL org or all orgs if org=None):
+      Finance Approver  → Procurement Approvals (approve) + Dashboard (view)
+      TA&QC Officer     → TA&QC Inspections (readwrite) + Failure Registry (view) + Dashboard (view)
+      Tester            → Testing Requests (view) + Testing (readwrite) + Equipment (view)
+      Section Head      → Testing Requests (view) + Failure Registry (view) +
+                          Recommendations (view) + Dashboard (view)
+      Dept Head         → Recommendations (approve) + Approvals (approve) +
+                          Equipment (view) + Repair Workflows (approve)
+
+    Idempotent — inserts missing rows, updates existing ones.
+    """
+    def _get_mod(name):
+        return session.query(Module).filter_by(name=name, is_active=True).first()
+
+    mods = {
+        "Procurement Approvals":    _get_mod("Procurement Approvals"),
+        "TA&QC Inspections":        _get_mod("TA&QC Inspections"),
+        "Failure Registry":         _get_mod("Failure Registry"),
+        "Dashboard":                _get_mod("Dashboard"),
+        "Testing Requests":         _get_mod("Testing Requests"),
+        "Testing":                  _get_mod("Testing"),
+        "Equipment":                _get_mod("Equipment"),
+        "Recommendations":          _get_mod("Recommendations"),
+        "Approvals":                _get_mod("Approvals"),
+        "Breakdown Workflows":      _get_mod("Breakdown Workflows"),
+        "Calibration Workflows":    _get_mod("Calibration Workflows"),
+        "Annual Audit Workflows":   _get_mod("Annual Audit Workflows"),
+        "Surveillance Workflows":   _get_mod("Surveillance Workflows"),
+        "Surveillance Dashboard":   _get_mod("Surveillance Dashboard"),
+    }
+    missing_mods = [k for k, v in mods.items() if v is None]
+    if missing_mods:
+        print(f"[WARN] seed_missing_role_permissions: modules not found: {missing_mods}")
+
+    # permission_sets: role_name → list of (module_name, can_view, can_add, can_edit, can_approve, can_assign, can_export)
+    ROLE_PERMS = {
+        "Procurement Approver": [
+            ("Procurement Approvals", True, False, False, True,  True,  True),
+            ("Dashboard",             True, False, False, False, False, False),
+        ],
+        "TA&QC Inspector": [
+            ("TA&QC Inspections",       True, True,  True,  False, False, True),
+            ("Annual Audit Workflows",  True, True,  True,  False, False, True),
+            ("Failure Registry",        True, False, False, False, False, False),
+            ("Dashboard",               True, False, False, False, False, False),
+        ],
+        "Test Engineer": [
+            ("Testing Requests", True, False, False, False, False, False),
+            ("Testing",          True, True,  True,  False, False, True),
+            ("Equipment",        True, False, False, False, False, False),
+            ("Surveillance Workflows",   True, True,  True,  False, False, False),
+            ("Surveillance Dashboard",   True, False, False, False, False, False),
+        ],
+        "Reviewing Officer": [
+            ("Recommendations",       True, False, False, True, True, True),
+            ("Approvals",             True, False, False, True, True, True),
+            ("Equipment",             True, False, False, False, False, False),
+            ("Breakdown Workflows",      True, False, False, True, True, True),
+            ("Calibration Workflows",    True, False, False, True, True, True),
+            ("Annual Audit Workflows",   True, False, False, True, True, True),
+            ("Surveillance Workflows",   True, True,  True,  True, True, True),
+            ("Surveillance Dashboard",   True, False, False, False, False, True),
+            ("Testing Requests",         True, False, False, False, False, False),
+            ("Failure Registry",      True, False, False, False, False, False),
+            ("Dashboard",             True, False, False, False, False, False),
+        ],
+    }
+
+    # Scope to one org or all orgs
+    role_filter = {}
+    if org is not None:
+        role_filter["organization_id"] = org.id
+
+    inserted = 0
+    for role_name, perm_list in ROLE_PERMS.items():
+        roles = session.query(OrgRole).filter_by(name=role_name, is_active=True, **role_filter).all()
+        for role in roles:
+            for (mod_name, cv, ca, ce, capr, cass, cexp) in perm_list:
+                mod = mods.get(mod_name)
+                if mod is None:
+                    continue
+                existing = (
+                    session.query(OrgRolePermission)
+                    .filter_by(org_role_id=role.id, module_id=mod.id)
+                    .first()
+                )
+                if existing:
+                    existing.can_view    = cv
+                    existing.can_add     = ca
+                    existing.can_edit    = ce
+                    existing.can_approve = capr
+                    existing.can_assign  = cass
+                    existing.can_export  = cexp
+                else:
+                    session.add(OrgRolePermission(
+                        id=uuid.uuid4(),
+                        org_role_id=role.id,
+                        module_id=mod.id,
+                        can_view=cv, can_add=ca, can_edit=ce,
+                        can_delete=False, can_approve=capr,
+                        can_assign=cass, can_export=cexp, can_import=False,
+                    ))
+                    inserted += 1
+
+    session.commit()
+    scope = f"org '{org.display_name}'" if org else "all orgs"
+    print(f"[OK] Missing role permissions backfilled for {scope}: {inserted} new row(s) inserted.")
+    return inserted
+
+
+def seed_master_schedules(session, org):
+    """Create master TestRequestSchedule rows for all 6 equipment types."""
+    from datetime import timezone
+    from dateutil.relativedelta import relativedelta
+
+    _FREQ_DELTA = {
+        "daily":       timedelta(days=1),
+        "weekly":      timedelta(weeks=1),
+        "biweekly":    timedelta(weeks=2),
+        "monthly":     relativedelta(months=1),
+        "quarterly":   relativedelta(months=3),
+        "semi_annual": relativedelta(months=6),
+        "yearly":      relativedelta(years=1),
+        "triennial":   relativedelta(years=3),
+    }
+
+    now = datetime.now(timezone.utc)
+    inserted = 0
+    skipped = 0
+
+    for eq_type_name, tests in _MASTER_SCHEDULE_SEED.items():
+        master = (
+            session.query(CategoryMaster)
+            .filter_by(name=eq_type_name)
+            .first()
+        )
+        if not master:
+            print(f"  [WARN] Equipment type not found: {eq_type_name!r} — skipping")
+            continue
+
+        for detail_name, freq_str, adv_days, oem_ref in tests:
+            detail = (
+                session.query(CategoryDetails)
+                .filter_by(category_master_id=master.id, name=detail_name)
+                .first()
+            )
+            if not detail:
+                print(f"  [WARN] Test detail not found: {detail_name!r} under {eq_type_name!r} — skipping")
+                continue
+
+            existing = (
+                session.query(TestRequestSchedule)
+                .filter(
+                    TestRequestSchedule.equipment_id.is_(None),
+                    TestRequestSchedule.organization_id == org.id,
+                    TestRequestSchedule.equipment_type_id == master.id,
+                    TestRequestSchedule.test_type_id == detail.id,
+                    TestRequestSchedule.is_deleted == False,
+                )
+                .first()
+            )
+            if existing:
+                skipped += 1
+                continue
+
+            sched = TestRequestSchedule(
+                organization_id=org.id,
+                equipment_type_id=master.id,
+                test_type_id=detail.id,
+                equipment_id=None,
+                title=detail_name,
+                frequency=ScheduleFrequency(freq_str),
+                advance_days=adv_days,
+                oem_reference=oem_ref,
+                start_date=now,
+                next_run_date=now + _FREQ_DELTA[freq_str],
+                is_active=True,
+                is_deleted=False,
+            )
+            session.add(sched)
+            inserted += 1
+
+    session.commit()
+    print(f"[OK] Master schedules: {inserted} inserted, {skipped} already exist.")
+    return inserted
 
 
 def migrate_new_status_values(session):
@@ -5619,14 +6337,9 @@ def seed_direct_submission_templates(session) -> int:
                         {"key": "outage_impact",         "label": "Outage Impact Description",    "type": "textarea", "required": False},
                     ],
                 },
-                {
-                    "title": "Outcome",
-                    "fields": [
-                        {"key": "outcome", "label": "Outcome / Action Taken", "type": "dropdown", "required": True,
-                         "options": ["Repair", "Replacement", "Under Investigation"]},
-                        {"key": "remarks", "label": "Remarks / Additional Notes", "type": "textarea", "required": False},
-                    ],
-                },
+                # NOTE: "Outcome" section removed — the API appends "Outcome & Scheduling"
+                # from the overall_assessment template for failure_registry forms,
+                # which covers next_action, schedule, summary and notes.
             ],
         },
     }
@@ -5638,18 +6351,59 @@ def seed_direct_submission_templates(session) -> int:
             OrgTestTemplate.org_id == None,  # noqa: E711
         ).first()
         if existing:
-            continue
-        session.add(OrgTestTemplate(
-            template_key=key,
-            org_id=None,
-            test_type_id=None,
-            template_data=data,
-            is_system=True,
-            version=1,
-        ))
-        count += 1
+            # Always update template_data so changes to sections/fields are picked up
+            existing.template_data = data
+            existing.version = (existing.version or 1) + 1
+        else:
+            session.add(OrgTestTemplate(
+                template_key=key,
+                org_id=None,
+                test_type_id=None,
+                template_data=data,
+                is_system=True,
+                version=1,
+            ))
+            count += 1
     session.commit()
     return count
+
+
+def seed_taqc_inspection_test_type(session) -> int:
+    """
+    Idempotently seed a CategoryMaster "Inspection Types" and a
+    CategoryDetails "Annual TA&QC Inspection" row.
+    Returns the CategoryDetails.id (used as test_type_id in TAQC schedules).
+    """
+    master = session.query(CategoryMaster).filter_by(name="Inspection Types").first()
+    if not master:
+        master = CategoryMaster(
+            name="Inspection Types",
+            description="Types of periodic site and equipment inspections.",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+        print("[OK] CategoryMaster 'Inspection Types' created")
+
+    detail = session.query(CategoryDetails).filter_by(
+        name="Annual TA&QC Inspection",
+        category_master_id=master.id,
+    ).first()
+    if not detail:
+        detail = CategoryDetails(
+            name="Annual TA&QC Inspection",
+            description="Annual TA&QC substation inspection (site-level, periodic).",
+            category_master_id=master.id,
+            is_active=True,
+        )
+        session.add(detail)
+        session.flush()
+        print(f"[OK] CategoryDetails 'Annual TA&QC Inspection' created id={detail.id}")
+    else:
+        print(f"[OK] CategoryDetails 'Annual TA&QC Inspection' already exists id={detail.id}")
+
+    session.commit()
+    return detail.id
 
 
 def seed_annual_audit_templates(session) -> int:
@@ -5949,6 +6703,8 @@ def seed_cumulative_template(session) -> int:
                     "group_by": "equipment_id",
                     "requires_multi_session": True,
                     "reset_on_drop": True,
+                    # Global default — overridable per equipment via EquipmentOverhaulConfig
+                    "default_threshold": 5000,  # ops
                 },
             }
         ],
@@ -6116,6 +6872,215 @@ def seed_calibration_template(session) -> int:
     return count
 
 
+def seed_transformer_oil_template(session) -> int:
+    """
+    Seed the Transformer Oil Test OrgTestTemplate.
+
+    Links to CategoryDetails "Transformer Oil Test" under the
+    "Testing Equipment" CategoryMaster (same master used by all other
+    test-type templates). Creates master/detail only when absent.
+    """
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Testing Equipment",
+            description="Testing Equipment",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+
+    detail = session.query(CategoryDetails).filter(
+        CategoryDetails.category_master_id == master.id,
+        CategoryDetails.name == "Transformer Oil Test",
+    ).first()
+    if not detail:
+        detail = CategoryDetails(
+            category_master_id=master.id,
+            name="Transformer Oil Test",
+            description="Insulating oil quality test — BDV, moisture, acidity, tan delta per IS 335 / IEC 60296",
+            is_active=True,
+        )
+        session.add(detail)
+        session.flush()
+
+    OIL_KEY = "transformer_oil_test"
+    template_data = TEST_TEMPLATES[OIL_KEY]
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == OIL_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=OIL_KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] Transformer Oil Test template seeded (detail_id={detail.id}).")
+    return count
+
+
+def seed_capacitance_tandelta_template(session) -> int:
+    """Seed the Capacitance & Tan Delta Test (Transformer) OrgTestTemplate."""
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(name="Testing Equipment", description="Testing Equipment", is_active=True)
+        session.add(master)
+        session.flush()
+
+    detail = session.query(CategoryDetails).filter(
+        CategoryDetails.category_master_id == master.id,
+        CategoryDetails.name == "Capacitance & Tan Delta Test (Transformer)",
+    ).first()
+    if not detail:
+        detail = CategoryDetails(
+            category_master_id=master.id,
+            name="Capacitance & Tan Delta Test (Transformer)",
+            description="Capacitance and tan delta insulation quality test per IEC 60450",
+            is_active=True,
+        )
+        session.add(detail)
+        session.flush()
+
+    KEY = "capacitance_tandelta_transformer"
+    template_data = TEST_TEMPLATES[KEY]
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] Capacitance & Tan Delta template seeded (detail_id={detail.id}).")
+    return count
+
+
+def seed_inspection_templates(session) -> int:
+    """
+    Migrate equipment-specific inspection templates.
+
+    Previously all equipment inspection types (Circuit Breaker, Surge Arrestor,
+    Battery Set, Protection Relay, ETM) shared the transformer_inspection template.
+    This function updates those rows to use equipment-specific template keys and
+    template_data, and inserts any missing rows.
+
+    Idempotent — safe to run multiple times.
+    """
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    # Maps equipment master name → (template_key, inspection subtype names)
+    equipment_inspection_map = {
+        "Circuit Breaker": (
+            "circuit_breaker_inspection",
+            ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"],
+        ),
+        "Surge Arrestor": (
+            "surge_arrestor_inspection",
+            ["Electrical Safety", "General Maintenance", "Documentation"],
+        ),
+        "Battery Set": (
+            "battery_inspection",
+            ["Electrical Safety", "General Maintenance", "Documentation", "Environmental"],
+        ),
+        "Protection Relay": (
+            "protection_relay_inspection",
+            ["Electrical Safety", "General Maintenance", "Documentation"],
+        ),
+        "Electronic Tri-vector Meter": (
+            "etm_inspection",
+            ["Electrical Safety", "General Maintenance", "Documentation"],
+        ),
+    }
+
+    updated = 0
+    inserted = 0
+
+    for equip_name, (template_key, subtypes) in equipment_inspection_map.items():
+        master = session.query(CategoryMaster).filter_by(name=equip_name).first()
+        if not master:
+            print(f"  [SKIP] CategoryMaster '{equip_name}' not found — skipping.")
+            continue
+
+        template_data = TEST_TEMPLATES.get(template_key)
+        if not template_data:
+            print(f"  [SKIP] Template '{template_key}' not in TEST_TEMPLATES — skipping.")
+            continue
+
+        for subtype_name in subtypes:
+            detail = session.query(CategoryDetails).filter_by(
+                name=subtype_name,
+                category_master_id=master.id,
+                category_type="inspection",
+            ).first()
+            if not detail:
+                print(f"  [SKIP] CategoryDetails '{subtype_name}' for '{equip_name}' not found — skipping.")
+                continue
+
+            existing = session.query(OrgTestTemplate).filter_by(
+                test_type_id=detail.id,
+                org_id=None,
+            ).first()
+
+            if existing:
+                if existing.template_key != template_key or existing.template_data != template_data:
+                    existing.template_key = template_key
+                    existing.template_data = template_data
+                    existing.is_system = True
+                    updated += 1
+            else:
+                session.add(OrgTestTemplate(
+                    template_key=template_key,
+                    org_id=None,
+                    test_type_id=detail.id,
+                    template_data=template_data,
+                    is_system=True,
+                    version=1,
+                ))
+                inserted += 1
+
+    session.commit()
+    print(f"[OK] Equipment inspection templates: {updated} updated, {inserted} inserted.")
+    return updated + inserted
+
+
 def seed_tr_workflows(session):
     """
     Seed the IntegratedWorkflowEngine with three workflows:
@@ -6237,8 +7202,8 @@ def seed_tr_workflows(session):
                                      color="#F44336", requires_comment=True, order=1)
 
         # Permissions
-        _permission(fr_wf.id, t_init_approve, "Test Assigner")
-        _permission(fr_wf.id, t_fr_reject,    "Test Assigner")
+        _permission(fr_wf.id, t_init_approve, "Test & Work Coordinator")
+        _permission(fr_wf.id, t_fr_reject,    "Test & Work Coordinator")
 
         session.commit()
         print("  [OK] failure_registry workflow seeded.")
@@ -6309,24 +7274,24 @@ def seed_tr_workflows(session):
                                     requires_comment=True, order=1)
 
         # ── Permissions ────────────────────────────────────────────────────────
-        _permission(tr_wf.id, t_assign,       "Test Assigner")
-        _permission(tr_wf.id, t_tr_reject,    "Test Assigner")
-        _permission(tr_wf.id, t_accept,       "Tester")
-        _permission(tr_wf.id, t_accept,       "Field Tester")
-        _permission(tr_wf.id, t_accept,       "Lab Tester")
-        _permission(tr_wf.id, t_submit_result,"Tester")
-        _permission(tr_wf.id, t_submit_result,"Field Tester")
-        _permission(tr_wf.id, t_submit_result,"Lab Tester")
+        _permission(tr_wf.id, t_assign,       "Test & Work Coordinator")
+        _permission(tr_wf.id, t_tr_reject,    "Test & Work Coordinator")
+        _permission(tr_wf.id, t_accept,       "Test Engineer")
+        _permission(tr_wf.id, t_accept,       "Test Engineer")
+        _permission(tr_wf.id, t_accept,       "Test Engineer")
+        _permission(tr_wf.id, t_submit_result,"Test Engineer")
+        _permission(tr_wf.id, t_submit_result,"Test Engineer")
+        _permission(tr_wf.id, t_submit_result,"Test Engineer")
 
         for t_appr in [t_approve_maint, t_approve_insp, t_approve_rl,
                        t_approve_none, t_approve_repl, t_tech_reject]:
-            _permission(tr_wf.id, t_appr, "Technical Approver")
+            _permission(tr_wf.id, t_appr, "Reviewing Officer")
 
-        _permission(tr_wf.id, t_resubmit,    "Tester")
-        _permission(tr_wf.id, t_resubmit,    "Field Tester")
-        _permission(tr_wf.id, t_resubmit,    "Lab Tester")
-        _permission(tr_wf.id, t_fin_approve, "Finance Approver")
-        _permission(tr_wf.id, t_fin_reject,  "Finance Approver")
+        _permission(tr_wf.id, t_resubmit,    "Test Engineer")
+        _permission(tr_wf.id, t_resubmit,    "Test Engineer")
+        _permission(tr_wf.id, t_resubmit,    "Test Engineer")
+        _permission(tr_wf.id, t_fin_approve, "Procurement Approver")
+        _permission(tr_wf.id, t_fin_reject,  "Procurement Approver")
 
         session.commit()
         print("  [OK] testing_request workflow seeded.")
@@ -6365,19 +7330,19 @@ def seed_tr_workflows(session):
                                     "resubmit", "Resubmit", color="#FF5722", order=0)
 
         # Permissions
-        _permission(taqc_wf.id, t_q_assign,    "Test Assigner")
-        _permission(taqc_wf.id, t_q_reject,    "Test Assigner")
-        _permission(taqc_wf.id, t_q_accept,    "Tester")
-        _permission(taqc_wf.id, t_q_accept,    "Field Tester")
-        _permission(taqc_wf.id, t_q_accept,    "Lab Tester")
-        _permission(taqc_wf.id, t_q_submit_ec, "Tester")
-        _permission(taqc_wf.id, t_q_submit_ec, "Field Tester")
-        _permission(taqc_wf.id, t_q_submit_ec, "Lab Tester")
-        _permission(taqc_wf.id, t_q_approve,   "Technical Approver")
-        _permission(taqc_wf.id, t_q_tech_rej,  "Technical Approver")
-        _permission(taqc_wf.id, t_q_resubmit,  "Tester")
-        _permission(taqc_wf.id, t_q_resubmit,  "Field Tester")
-        _permission(taqc_wf.id, t_q_resubmit,  "Lab Tester")
+        _permission(taqc_wf.id, t_q_assign,    "Test & Work Coordinator")
+        _permission(taqc_wf.id, t_q_reject,    "Test & Work Coordinator")
+        _permission(taqc_wf.id, t_q_accept,    "Test Engineer")
+        _permission(taqc_wf.id, t_q_accept,    "Test Engineer")
+        _permission(taqc_wf.id, t_q_accept,    "Test Engineer")
+        _permission(taqc_wf.id, t_q_submit_ec, "Test Engineer")
+        _permission(taqc_wf.id, t_q_submit_ec, "Test Engineer")
+        _permission(taqc_wf.id, t_q_submit_ec, "Test Engineer")
+        _permission(taqc_wf.id, t_q_approve,   "Reviewing Officer")
+        _permission(taqc_wf.id, t_q_tech_rej,  "Reviewing Officer")
+        _permission(taqc_wf.id, t_q_resubmit,  "Test Engineer")
+        _permission(taqc_wf.id, t_q_resubmit,  "Test Engineer")
+        _permission(taqc_wf.id, t_q_resubmit,  "Test Engineer")
 
         session.commit()
         print("  [OK] taqc_inspection workflow seeded.")
@@ -6406,7 +7371,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when equipment is retired and a replacement unit is commissioned.",
             context_vars=["old_ueic", "new_ueic", "equipment_type", "department",
                           "reason_type", "reason", "replaced_by", "replaced_on"],
-            default_roles=["EE TLSS", "SEE W&M", "CEE Transmission Zone"],
+            default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
         ),
         # ── Evaluation ────────────────────────────────────────────────────────
         dict(
@@ -6416,7 +7381,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a test evaluation result is CRITICAL (per test template thresholds).",
             context_vars=["equipment", "ueic", "test_type", "result", "dept",
                           "eval.overall", "eval.evaluated_at", "report.retriepdf"],
-            default_roles=["EE TLSS", "SEE W&M", "CEE Transmission Zone", "AEE Maintenance"],
+            default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
         ),
         dict(
             event_type="eval_alert",
@@ -6425,7 +7390,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a test evaluation result is ALERT (per test template thresholds).",
             context_vars=["equipment", "ueic", "test_type", "result", "dept",
                           "eval.overall", "eval.evaluated_at", "report.retriepdf"],
-            default_roles=["EE TLSS", "AEE Maintenance"],
+            default_roles=["Reviewing Officer", "Maintenance Officer"],
         ),
         # ── Test Workflow ─────────────────────────────────────────────────────
         dict(
@@ -6435,7 +7400,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when an originator submits a new test request.",
             context_vars=["request.number", "request.title", "request.priority",
                           "request.submitted_by", "equipment.ueic", "equipment.department"],
-            default_roles=["EE TLSS", "Department Head"],
+            default_roles=["Reviewing Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="tester_assigned",
@@ -6444,7 +7409,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a test request is assigned to a field/lab tester.",
             context_vars=["request.number", "request.title", "request.assigned_to",
                           "request.due_date", "equipment.ueic"],
-            default_roles=["Tester", "AEE Maintenance"],
+            default_roles=["Test Engineer", "Maintenance Officer"],
         ),
         dict(
             event_type="tester_declined",
@@ -6452,7 +7417,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Test Workflow",
             description="Fired when a tester declines an assignment — notifies the Test Assigner.",
             context_vars=["request.number", "tester_name", "reason"],
-            default_roles=["TestAssigner", "EE TLSS"],
+            default_roles=["TestAssigner", "Reviewing Officer"],
         ),
         dict(
             event_type="test_submitted",
@@ -6461,7 +7426,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a tester submits test results for review.",
             context_vars=["request.number", "request.title", "request.submitted_by",
                           "equipment.ueic", "eval.overall", "report.retriepdf"],
-            default_roles=["EE TLSS", "Department Head"],
+            default_roles=["Reviewing Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="recommendation_approved",
@@ -6469,7 +7434,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Test Workflow",
             description="Fired when a technical approver approves a recommendation.",
             context_vars=["request.number", "recommendation_type", "product_count"],
-            default_roles=["Originator", "AEE Maintenance"],
+            default_roles=["Asset Data Officer", "Maintenance Officer"],
         ),
         dict(
             event_type="recommendation_rejected",
@@ -6477,7 +7442,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Test Workflow",
             description="Fired when a technical approver rejects a recommendation.",
             context_vars=["request.number", "reason"],
-            default_roles=["Tester", "Originator"],
+            default_roles=["Test Engineer", "Asset Data Officer"],
         ),
         # ── Scheduling ────────────────────────────────────────────────────────
         dict(
@@ -6487,7 +7452,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired 15 days before a scheduled test is due (SRS §8.2 #1).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
-            default_roles=["AEE Maintenance", "EE TLSS"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="due_reminder_final",
@@ -6496,7 +7461,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Final reminder fired 7 days before a scheduled test is due (SRS §8.2 #2).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
-            default_roles=["AEE Maintenance", "EE TLSS", "Department Head"],
+            default_roles=["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="overdue_alert",
@@ -6505,7 +7470,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a scheduled test passes its due date without completion (SRS §8.2 #3).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_overdue"],
-            default_roles=["EE TLSS", "AEE Maintenance", "SEE W&M"],
+            default_roles=["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
         ),
         dict(
             event_type="overdue_escalation",
@@ -6514,7 +7479,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Escalation fired when a test is more than 7 days overdue (SRS §8.2 #4).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "days_overdue", "equipment.department"],
-            default_roles=["SEE W&M", "CEE Transmission Zone"],
+            default_roles=["Supervisory Officer", "Senior Management Approver"],
         ),
         # ── Recommendations / Procurement ─────────────────────────────────────
         dict(
@@ -6523,7 +7488,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Recommendations",
             description="Fired when a procurement request is created — notifies Finance Approvers.",
             context_vars=["request.number", "pr_number", "title"],
-            default_roles=["FinanceApprover", "Department Head"],
+            default_roles=["FinanceApprover", "Reviewing Officer"],
         ),
         dict(
             event_type="procurement_decision",
@@ -6531,7 +7496,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Recommendations",
             description="Fired when Finance approves or rejects a procurement request.",
             context_vars=["request.number", "pr_number", "decision", "notes"],
-            default_roles=["Originator", "TechApprover", "EE TLSS"],
+            default_roles=["Asset Data Officer", "TechApprover", "Reviewing Officer"],
         ),
         # ── Equipment ─────────────────────────────────────────────────────────
         dict(
@@ -6540,7 +7505,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment",
             description="Fired when a new equipment unit is commissioned into the register.",
             context_vars=["equipment", "equipment_type", "department", "manufacturer", "commissioned_by"],
-            default_roles=["AEE Maintenance", "EE TLSS"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="equipment_retired",
@@ -6548,7 +7513,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment",
             description="Fired when an equipment unit is decommissioned / retired.",
             context_vars=["equipment", "equipment_type", "department", "reason", "retired_by"],
-            default_roles=["AEE Maintenance", "EE TLSS", "Department Head"],
+            default_roles=["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="design_problem_alert",
@@ -6556,7 +7521,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment",
             description="Fired when a systemic design problem is identified for a make/model.",
             context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
-            default_roles=["CEE Transmission Zone", "EE TLSS", "Department Head"],
+            default_roles=["Senior Management Approver", "Reviewing Officer", "Reviewing Officer"],
         ),
         # ── Repair Lifecycle ──────────────────────────────────────────────────
         dict(
@@ -6565,7 +7530,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair",
             description="Fired each time the repair workflow advances to the next stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["AEE Maintenance", "TRC Member"],
+            default_roles=["Maintenance Officer", "TRC Member"],
         ),
         dict(
             event_type="repair_delay",
@@ -6573,7 +7538,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair",
             description="Fired when a repair stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["AEE Maintenance", "CEE Transmission Zone"],
+            default_roles=["Maintenance Officer", "Senior Management Approver"],
         ),
         dict(
             event_type="overhaul_recommended",
@@ -6581,7 +7546,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair",
             description="Fired when the repair workflow reaches completion — overhaul is done.",
             context_vars=["equipment", "equipment_type", "department", "operation_count", "operation_threshold"],
-            default_roles=["AEE Maintenance", "CEE Transmission Zone", "Department Head"],
+            default_roles=["Maintenance Officer", "Senior Management Approver", "Reviewing Officer"],
         ),
         # ── Failure Registry ──────────────────────────────────────────────────
         dict(
@@ -6590,7 +7555,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Failure Registry",
             description="Fired when a Failure Registry submission is rejected by an approver.",
             context_vars=["fr_number", "reason"],
-            default_roles=["Originator"],
+            default_roles=["Asset Data Officer"],
         ),
         # ── Reports ───────────────────────────────────────────────────────────
         dict(
@@ -6600,7 +7565,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired on the first working day of the month — distributes the monthly MIS report.",
             context_vars=["report_month", "tests_completed", "critical_count", "overdue_count",
                           "report_pdf_url", "report_xls_url"],
-            default_roles=["SEE W&M", "CEE Transmission Zone", "Department Head"],
+            default_roles=["Supervisory Officer", "Senior Management Approver", "Reviewing Officer"],
         ),
     ]
 
@@ -7062,12 +8027,43 @@ def run_seed():
         print(f"[OK] Overall assessment template: {'inserted' if inserted else 'updated'}.")
         n2 = seed_direct_submission_templates(session)
         print(f"[OK] Direct-submission templates: {n2} seeded.")
+        seed_taqc_inspection_test_type(session)
         n3 = seed_annual_audit_templates(session)
         print(f"[OK] Annual Audit templates: {n3} seeded.")
+        from seed_annual_audit import seed_annual_audit_stages
+        seed_annual_audit_stages(session)
+        # Ensure the ANNUAL_AUDIT workflow definition exists and all its stage
+        # rows carry the correct workflow_definition_id.
+        _aa_def = session.query(RepairWorkflowDefinition).filter_by(workflow_code="ANNUAL_AUDIT").first()
+        if not _aa_def:
+            _aa_def = RepairWorkflowDefinition(
+                id=uuid.uuid4(),
+                workflow_code="ANNUAL_AUDIT",
+                name="Annual Audit Workflow",
+                is_active=True,
+            )
+            session.add(_aa_def)
+            session.flush()
+        from seed_annual_audit import STAGES as _AA_STAGES
+        _aa_codes = [s["code"] for s in _AA_STAGES]
+        _aa_stages = session.query(RepairStageDefinition).filter(
+            RepairStageDefinition.code.in_(_aa_codes)
+        ).all()
+        for _s in _aa_stages:
+            if _s.workflow_definition_id != _aa_def.id:
+                _s.workflow_definition_id = _aa_def.id
+        session.flush()
+        print(f"[OK] RepairWorkflowDefinition ANNUAL_AUDIT: {_aa_def.id} ({len(_aa_stages)} stages linked)")
         n4 = seed_cumulative_template(session)
         print(f"[OK] Cumulative / Operations Tracking template: {n4} seeded.")
         n5 = seed_calibration_template(session)
         print(f"[OK] Calibration template: {n5} seeded.")
+        n6 = seed_transformer_oil_template(session)
+        print(f"[OK] Transformer Oil Test template: {n6} seeded.")
+        n7 = seed_capacitance_tandelta_template(session)
+        print(f"[OK] Capacitance & Tan Delta template: {n7} seeded.")
+        n8 = seed_inspection_templates(session)
+        print(f"[OK] Equipment-specific inspection templates: {n8} migrated.")
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")
@@ -7091,16 +8087,70 @@ def run_seed():
                 print("[INFO] You can retry with:")
                 print(f"       python seed.py --kptcl {kptcl_org.id}")
 
+            try:
+                seed_kptcl_equipment(session, str(kptcl_org.id))
+            except FileNotFoundError:
+                print("[WARN] equipment_seed.xlsx not found. Skipping equipment seeding.")
+            except Exception as e:
+                print(f"[WARN] KPTCL equipment seeding failed: {e}")
+
+        # Annual Audit role mappings for KPTCL (stages must already exist from seed_annual_audit_stages above)
+        if kptcl_org:
+            try:
+                session.rollback()  # clear any aborted transaction from earlier steps
+                from seed_annual_audit import seed_annual_audit_role_mappings
+                seed_annual_audit_role_mappings(session, kptcl_org.id)
+            except Exception as e:
+                session.rollback()
+                print(f"[WARN] Annual Audit role mapping failed: {e}")
+
         # Sample Equipment (after departments + equipment types exist)
         seed_sample_equipment(session, kptcl_org)
 
-        # Test Register (SRS §5.1.1) — after KPTCL org + roles + equipment types exist
-        print("\n--- Test Register Seeding (SRS §5.1.1) ---")
-        seed_test_register(session, kptcl_org)
+        # Master Schedules — blueprint templates for each equipment type
+        print("\n--- Master Schedule Seeding ---")
+        try:
+            seed_master_schedules(session, kptcl_org)
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Master schedule seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # Test & Maintenance Schedule Templates — full access for org-admin roles
+        print("\n--- Schedule Templates Module Permissions ---")
+        try:
+            seed_schedule_module_permissions(session)
+        except Exception as _e:
+            print(f"[WARN] Schedule module permissions failed (non-fatal): {_e}")
+
+        # Test Schedules module — KPTCL-only (pass kptcl_org to scope it)
+        print("\n--- Test Schedules Module Permissions (KPTCL) ---")
+        try:
+            seed_schedule_compliance_module_permissions(session, org=kptcl_org)
+        except Exception as _e:
+            print(f"[WARN] Test Schedules module permissions failed (non-fatal): {_e}")
+
+        # Approval module permissions — Technical Approver + Org Admin across all orgs
+        # Grants can_view + can_approve on Approvals (module 48) and
+        # Testing Request Approvals (module 49) so the FR 2-step flow works.
+        print("\n--- Approval Role Permissions (FR flow) ---")
+        try:
+            seed_approval_role_permissions(session)
+        except Exception as _e:
+            print(f"[WARN] Approval role permissions failed (non-fatal): {_e}")
+
+        # Backfill permissions for roles that had no template or name mismatch:
+        # Procurement Approver, TA&QC Inspector, Test Engineer, Reviewing Officer
+        print("\n--- Missing Role Permissions Backfill (KPTCL) ---")
+        try:
+            seed_missing_role_permissions(session, org=kptcl_org)
+        except Exception as _e:
+            print(f"[WARN] Missing role permissions backfill failed (non-fatal): {_e}")
 
         # Zoho Import Mapping (after KPTCL org + departments exist)
         seed_zoho_import_mapping(session, kptcl_org)
         seed_notifications_module_and_permissions(session)
+        
         # Org role permissions — AFTER all orgs + org_roles are created
         # DISABLED: This grants VIEW to ALL modules for ALL roles, breaking RBAC
         # Proper permissions are already set via role templates during org role provisioning
@@ -7148,6 +8198,70 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Repair workflow seed failed (non-fatal): {_e}")
 
+        # === Surveillance Migrations ===
+        print("\n" + "=" * 80)
+        print("  SURVEILLANCE WORKFLOW MIGRATIONS")
+        print("=" * 80)
+
+        # Migration 008: Create surveillance tables (surveillance_config, surveillance_test_config, repair_surveillance_tests)
+        # + Add surveillance_workflow_id/surveillance_quarter to testing_requests
+        # + Add quarter_number to repair_stage_instances
+        migration_008_ok = run_migration_from_file(
+            session,
+            "migrations/008_surveillance_workflow.sql",
+            "Migration 008: Surveillance Workflow Schema"
+        )
+
+        # Migration 013: Add surveillance linkage to test_request_schedules
+        # (surveillance_workflow_id, surveillance_quarter columns + index)
+        migration_013_ok = run_migration_from_file(
+            session,
+            "migrations/013_add_surveillance_to_schedules.sql",
+            "Migration 013: Surveillance Schedule Linkage"
+        )
+
+        if not migration_008_ok or not migration_013_ok:
+            print("\n[WARN] Some migrations failed — surveillance seeding may fail")
+
+        print("\n--- Surveillance Workflow Seeding ---")
+        try:
+            seed_surveillance_workflow(session)
+            seed_surveillance_config(session)
+        except Exception as _e:
+            print(f"[WARN] Surveillance workflow seed failed (non-fatal): {_e}")
+
+        # Overhaul Workflow — definition + stages for cumulative threshold trigger
+        try:
+            from seed_overhaul_workflow import seed_overhaul_stages
+            seed_overhaul_stages(session)
+        except Exception as _e:
+            print(f"[WARN] Overhaul workflow seed failed (non-fatal): {_e}")
+
+        # Overhaul role mappings — must run AFTER seed_overhaul_stages so stage rows exist
+        if kptcl_org:
+            try:
+                from seed_overhaul_workflow import seed_overhaul_role_mappings
+                seed_overhaul_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Overhaul role mapping failed: {_e}")
+
+        # Calibration Workflow — definition + stages for DATE_ADD fail trigger
+        try:
+            from seed_calibration_workflow import seed_calibration_stages
+            seed_calibration_stages(session)
+        except Exception as _e:
+            print(f"[WARN] Calibration workflow seed failed (non-fatal): {_e}")
+
+        # Calibration role mappings — must run AFTER seed_calibration_stages
+        if kptcl_org:
+            try:
+                from seed_calibration_workflow import seed_calibration_role_mappings
+                seed_calibration_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Calibration role mapping failed: {_e}")
+
         # TR / FR / TAQC Workflow Engine — states, transitions, permission matrix
         print("\n--- TR / FR / TAQC Workflow Engine Seeding ---")
         try:
@@ -7180,7 +8294,7 @@ def run_seed():
         print("  1. Super Admin: superadmin@system.com / Admin123!")
         print("  2. Sample Org Admin: orgadmin@sampleorg.com / OrgAdmin123!")
         if kptcl_org:
-            print("  3. KPTCL Org Admin: orgadmin@kptcl.com / admin123")
+            print("  3. KPTCL Org Admin: orgadmin@utility.com / admin123")
         print("  4. Dept-filter users: tester.north / tester.south / tester.mysuru @ kptcl.com / TestDept@123")
         print(f"  {5 if kptcl_org else 4}. View API docs: http://localhost:8000/docs")
         print("\n" + "=" * 80 + "\n")
@@ -7258,10 +8372,18 @@ def seed_sample_equipment(session, org):
         ("Power Transformer", "110", "02", "ABB", "PT-110-B", "PT2024002", 2019),
         ("Current Transformer", "220", "01", "Siemens", "CT-220-X", "CT2024001", 2021),
         ("Current Transformer", "110", "01", "CGL", "CT-110-Y", "CT2024002", 2022),
-        ("CVT", "220", "01", "BHEL", "CVT-220-A", "CVT2024001", 2020),
+        ("Capacitor Voltage Transformer", "220", "01", "BHEL", "CVT-220-A", "CVT2024001", 2020),
         ("Power Transformer", "66", "01", "Crompton Greaves", "PT-66-C", "PT2024003", 2018),
-        ("Relay", "220", "01", "L&T", "REL-220-A", "REL2024001", 2023),
-        ("Meter", "110", "01", "Secure Meters", "MTR-110-A", "MTR2024001", 2021),
+        ("Protection Relay", "220", "01", "L&T", "REL-220-A", "REL2024001", 2023),
+        ("Electronic Tri-vector Meter", "110", "01", "Secure Meters", "MTR-110-A", "MTR2024001", 2021),
+        # Cumulative lifecycle
+        ("Circuit Breaker", "220", "01", "ABB", "CB-220-A", "CB2024001", 2021),
+        ("Circuit Breaker", "110", "02", "Siemens", "CB-110-B", "CB2024002", 2020),
+        # Calibration lifecycle
+        ("Protection Relay", "220", "01", "GE", "PR-220-A", "PR2024001", 2022),
+        ("Protection Relay", "110", "02", "SEL", "PR-110-B", "PR2024002", 2021),
+        ("Electronic Tri-vector Meter", "110", "01", "Secure Meters", "TVM-110-A", "TVM2024001", 2023),
+        ("Electronic Tri-vector Meter", "220", "02", "L&T", "TVM-220-B", "TVM2024002", 2022),
     ]
 
     created = 0
@@ -7309,7 +8431,7 @@ def seed_zoho_import_mapping(session, kptcl_org):
 
     # Find the Originator org role for KPTCL
     originator_role = session.query(OrgRole).filter_by(
-        organization_id=kptcl_org.id, name="Originator"
+        organization_id=kptcl_org.id, name="Asset Data Officer"
     ).first()
 
     if not originator_role:
@@ -7590,6 +8712,33 @@ def seed_workflow(session):
     }
     CODE_TO_NAME = {v: k for k, v in NAME_TO_CODE.items()}
 
+    # Default contractual duration (calendar days) per stage — used for Work Award pre-fill
+    DEFAULT_DURATION_DAYS = {
+        "FAILURE_REPORT":   3,
+        "COMMITTEE_REVIEW": 2,
+        "VENDOR_ASSIGNMENT": 1,
+        "LIFTING":           1,
+        "JOINT_INSPECTION":  2,
+        "ESTIMATE":          3,
+        "QA":                3,
+        "FINAL_INSPECTION":  2,
+        "DISPATCH":          1,
+        "COMMISSIONING":     2,
+    }
+
+    # ── 0. Workflow definition ────────────────────────────────────────────────
+    wf_def = session.query(RepairWorkflowDefinition).filter_by(workflow_code="BREAKDOWN").first()
+    if not wf_def:
+        wf_def = RepairWorkflowDefinition(
+            id=uuid.uuid4(),
+            workflow_code="BREAKDOWN",
+            name="Transformer Repair Workflow",
+            is_active=True,
+        )
+        session.add(wf_def)
+        session.flush()
+    print(f"[OK] RepairWorkflowDefinition BREAKDOWN: {wf_def.id}")
+
     # ── 1. Templates ──────────────────────────────────────────────────────────
     template_map = {}   # key → UUID
     for key, t in templates_raw.items():
@@ -7615,7 +8764,12 @@ def seed_workflow(session):
         name = s["name"]
         code = NAME_TO_CODE.get(name, name.upper().replace(" ", "_"))
         existing = session.query(RepairStageDefinition).filter_by(code=code).first()
+        duration = DEFAULT_DURATION_DAYS.get(code)
         if existing:
+            if existing.workflow_definition_id != wf_def.id:
+                existing.workflow_definition_id = wf_def.id
+            if duration is not None and existing.default_duration_days != duration:
+                existing.default_duration_days = duration
             stage_map[name] = existing.id
             code_map[code]  = existing.id
             continue
@@ -7627,6 +8781,8 @@ def seed_workflow(session):
             weight=s.get("weight", 10),
             is_active=True,
             is_mandatory=True,
+            workflow_definition_id=wf_def.id,
+            default_duration_days=duration,
         )
         session.add(stage)
         session.flush()
@@ -7728,26 +8884,18 @@ def seed_workflow(session):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _DFT_ROLES = [
-    ("Org Admin",              False, True),
-    ("Dept Head",              False, True),
-    ("Originator",             False, False),
-    ("Tester",                 False, False),
-    ("Test Assigner",          False, False),
-    ("Technical Approver",     False, False),
-    ("Finance Approver",       False, False),
-    ("EE TLSS",                False, False),
-    ("TA&QC Officer",          False, False),
-    ("Section Head",           False, True),
-    ("AEE Maintenance",        False, False),
-    ("SEE W&M",                False, False),
-    ("EE RT",                  False, False),
-    ("SEE RT",                 False, False),
-    ("CEE Transmission Zone",  False, False),
-    ("CEE RT&R&D",             False, False),
-    ("Purchaser",              False, False),
-    ("Field Tester",           False, False),
-    ("Lab Tester",             False, False),
-    ("Workflow Coordinator",   False, False),
+    ("System Administrator",              False, True),
+    ("Asset Data Officer",                False, False),
+    ("Maintenance Officer",               False, False),
+    ("Test Engineer",                     False, False),
+    ("Test & Work Coordinator",           False, False),
+    ("Reviewing Officer",                 False, True),
+    ("Supervisory Officer",               False, False),
+    ("Senior Management Approver",        False, True),
+    ("TA&QC Inspector",                   False, False),
+    ("Transformer Repair Coordinator",    False, False),
+    ("Procurement Officer",               False, False),
+    ("Procurement Approver",              False, False),
 ]
 
 _DFT_DEPTS = [
@@ -7757,113 +8905,335 @@ _DFT_DEPTS = [
 ]
 
 _DFT_ROLE_EMAIL = {
-    "Org Admin":              "orgadmin",
-    "Dept Head":              "depthead",
-    "Originator":             "originator",
-    "Tester":                 "tester",
-    "Test Assigner":          "assigner",
-    "Technical Approver":     "techapprover",
-    "Finance Approver":       "financeapprover",
-    "EE TLSS":                "eetlss",
-    "TA&QC Officer":          "taqc",
-    "Section Head":           "sectionhead",
-    "AEE Maintenance":        "aeemaint",
-    "SEE W&M":                "seewm",
-    "EE RT":                  "eert",
-    "SEE RT":                 "seert",
-    "CEE Transmission Zone":  "ceezone",
-    "CEE RT&R&D":             "ceertrd",
-    "Purchaser":              "purchaser",
-    "Field Tester":           "fieldtester",
-    "Lab Tester":             "labtester",
-    "Workflow Coordinator":   "wfcoordinator",
+    "System Administrator":             "sysadmin",
+    "Asset Data Officer":               "assetofficer",
+    "Maintenance Officer":              "maintoff",
+    "Test Engineer":                    "testengineer",
+    "Test & Work Coordinator":          "testcoord",
+    "Reviewing Officer":                "reviewoff",
+    "Supervisory Officer":              "supervoff",
+    "Senior Management Approver":       "seniormgmt",
+    "TA&QC Inspector":                  "taqc",
+    "Transformer Repair Coordinator":   "repaircoord",
+    "Procurement Officer":              "procoff",
+    "Procurement Approver":             "procappr",
 }
 
 _DFT_ROLE_FNAME = {
-    "Org Admin":              "Admin",
-    "Dept Head":              "DeptHead",
-    "Originator":             "Originator",
-    "Tester":                 "Tester",
-    "Test Assigner":          "Assigner",
-    "Technical Approver":     "TechApprover",
-    "Finance Approver":       "FinApprover",
-    "EE TLSS":                "EETLSS",
-    "TA&QC Officer":          "TAQC",
-    "Section Head":           "SectionHead",
-    "AEE Maintenance":        "AEE",
-    "SEE W&M":                "SEE",
-    "EE RT":                  "EERT",
-    "SEE RT":                 "SEERT",
-    "CEE Transmission Zone":  "CEEZone",
-    "CEE RT&R&D":             "CEERTRD",
-    "Purchaser":              "Purchaser",
-    "Field Tester":           "FieldTester",
-    "Lab Tester":             "LabTester",
-    "Workflow Coordinator":   "WFCoord",
+    "System Administrator":             "SysAdmin",
+    "Asset Data Officer":               "AssetOfficer",
+    "Maintenance Officer":              "MaintOfficer",
+    "Test Engineer":                    "TestEngineer",
+    "Test & Work Coordinator":          "TestCoordinator",
+    "Reviewing Officer":                "ReviewOfficer",
+    "Supervisory Officer":              "SupervOfficer",
+    "Senior Management Approver":       "SeniorMgmt",
+    "TA&QC Inspector":                  "TAQCInspector",
+    "Transformer Repair Coordinator":   "RepairCoord",
+    "Procurement Officer":              "ProcOfficer",
+    "Procurement Approver":             "ProcApprover",
 }
 
 _DFT_PHONE = {
-    ("north",  "Org Admin"):              "9900001001",
-    ("north",  "Dept Head"):              "9900001002",
-    ("north",  "Originator"):             "9900001003",
-    ("north",  "Tester"):                 "9900001004",
-    ("north",  "Test Assigner"):          "9900001005",
-    ("north",  "Technical Approver"):     "9900001006",
-    ("north",  "Finance Approver"):       "9900001007",
-    ("north",  "EE TLSS"):                "9900001008",
-    ("north",  "TA&QC Officer"):          "9900001009",
-    ("north",  "Section Head"):           "9900001010",
-    ("north",  "AEE Maintenance"):        "9900001011",
-    ("north",  "SEE W&M"):                "9900001012",
-    ("north",  "EE RT"):                  "9900001013",
-    ("north",  "SEE RT"):                 "9900001014",
-    ("north",  "CEE Transmission Zone"):  "9900001015",
-    ("north",  "CEE RT&R&D"):             "9900001016",
-    ("north",  "Purchaser"):              "9900001017",
-    ("north",  "Field Tester"):           "9900001018",
-    ("north",  "Lab Tester"):             "9900001019",
-    ("north",  "Workflow Coordinator"):   "9900001020",
-    ("south",  "Org Admin"):              "9900002001",
-    ("south",  "Dept Head"):              "9900002002",
-    ("south",  "Originator"):             "9900002003",
-    ("south",  "Tester"):                 "9900002004",
-    ("south",  "Test Assigner"):          "9900002005",
-    ("south",  "Technical Approver"):     "9900002006",
-    ("south",  "Finance Approver"):       "9900002007",
-    ("south",  "EE TLSS"):                "9900002008",
-    ("south",  "TA&QC Officer"):          "9900002009",
-    ("south",  "Section Head"):           "9900002010",
-    ("south",  "AEE Maintenance"):        "9900002011",
-    ("south",  "SEE W&M"):                "9900002012",
-    ("south",  "EE RT"):                  "9900002013",
-    ("south",  "SEE RT"):                 "9900002014",
-    ("south",  "CEE Transmission Zone"):  "9900002015",
-    ("south",  "CEE RT&R&D"):             "9900002016",
-    ("south",  "Purchaser"):              "9900002017",
-    ("south",  "Field Tester"):           "9900002018",
-    ("south",  "Lab Tester"):             "9900002019",
-    ("south",  "Workflow Coordinator"):   "9900002020",
-    ("mysuru", "Org Admin"):              "9900003001",
-    ("mysuru", "Dept Head"):              "9900003002",
-    ("mysuru", "Originator"):             "9900003003",
-    ("mysuru", "Tester"):                 "9900003004",
-    ("mysuru", "Test Assigner"):          "9900003005",
-    ("mysuru", "Technical Approver"):     "9900003006",
-    ("mysuru", "Finance Approver"):       "9900003007",
-    ("mysuru", "EE TLSS"):                "9900003008",
-    ("mysuru", "TA&QC Officer"):          "9900003009",
-    ("mysuru", "Section Head"):           "9900003010",
-    ("mysuru", "AEE Maintenance"):        "9900003011",
-    ("mysuru", "SEE W&M"):                "9900003012",
-    ("mysuru", "EE RT"):                  "9900003013",
-    ("mysuru", "SEE RT"):                 "9900003014",
-    ("mysuru", "CEE Transmission Zone"):  "9900003015",
-    ("mysuru", "CEE RT&R&D"):             "9900003016",
-    ("mysuru", "Purchaser"):              "9900003017",
-    ("mysuru", "Field Tester"):           "9900003018",
-    ("mysuru", "Lab Tester"):             "9900003019",
-    ("mysuru", "Workflow Coordinator"):   "9900003020",
+    ("north",  "System Administrator"):             "9900001001",
+    ("north",  "Asset Data Officer"):               "9900001002",
+    ("north",  "Maintenance Officer"):              "9900001003",
+    ("north",  "Test Engineer"):                    "9900001004",
+    ("north",  "Test & Work Coordinator"):          "9900001005",
+    ("north",  "Reviewing Officer"):                "9900001006",
+    ("north",  "Supervisory Officer"):              "9900001007",
+    ("north",  "Senior Management Approver"):       "9900001008",
+    ("north",  "TA&QC Inspector"):                  "9900001009",
+    ("north",  "Transformer Repair Coordinator"):   "9900001010",
+    ("north",  "Procurement Officer"):              "9900001011",
+    ("north",  "Procurement Approver"):             "9900001012",
+    ("south",  "System Administrator"):             "9900002001",
+    ("south",  "Asset Data Officer"):               "9900002002",
+    ("south",  "Maintenance Officer"):              "9900002003",
+    ("south",  "Test Engineer"):                    "9900002004",
+    ("south",  "Test & Work Coordinator"):          "9900002005",
+    ("south",  "Reviewing Officer"):                "9900002006",
+    ("south",  "Supervisory Officer"):              "9900002007",
+    ("south",  "Senior Management Approver"):       "9900002008",
+    ("south",  "TA&QC Inspector"):                  "9900002009",
+    ("south",  "Transformer Repair Coordinator"):   "9900002010",
+    ("south",  "Procurement Officer"):              "9900002011",
+    ("south",  "Procurement Approver"):             "9900002012",
+    ("mysuru", "System Administrator"):             "9900003001",
+    ("mysuru", "Asset Data Officer"):               "9900003002",
+    ("mysuru", "Maintenance Officer"):              "9900003003",
+    ("mysuru", "Test Engineer"):                    "9900003004",
+    ("mysuru", "Test & Work Coordinator"):          "9900003005",
+    ("mysuru", "Reviewing Officer"):                "9900003006",
+    ("mysuru", "Supervisory Officer"):              "9900003007",
+    ("mysuru", "Senior Management Approver"):       "9900003008",
+    ("mysuru", "TA&QC Inspector"):                  "9900003009",
+    ("mysuru", "Transformer Repair Coordinator"):   "9900003010",
+    ("mysuru", "Procurement Officer"):              "9900003011",
+    ("mysuru", "Procurement Approver"):             "9900003012",
 }
+
+
+def seed_surveillance_workflow(session):
+    """
+    Seed surveillance workflow stages, templates, role assignments, and transitions.
+
+    Source files (all at repo root):
+      SURVEILLANCE_WORKFLOW_STAGES.json      — [{name, sequence}]
+      SURVEILLANCE_STAGE_TEMPLATES.json      — {template_key: {name, sections, ...}}
+      SURVEILLANCE_STAGE_TEMPLATE_MAP.json   — {stage_name: template_key}
+      SURVEILLANCE_STAGE_ROLES.json          — [{stage_code, roles:[role_name,...]}]
+    """
+    import json as _json
+    import os as _os
+
+    def _load(fname):
+        path = _os.path.join(_os.path.dirname(__file__), fname)
+        if not _os.path.exists(path):
+            print(f"[WARN] File not found: {fname} - skipping")
+            return None
+        with open(path, encoding="utf-8") as fh:
+            return _json.load(fh)
+
+    stages_raw      = _load("SURVEILLANCE_WORKFLOW_STAGES.json")
+    templates_raw   = _load("SURVEILLANCE_STAGE_TEMPLATES.json")
+    stage_tmpl_map  = _load("SURVEILLANCE_STAGE_TEMPLATE_MAP.json")
+    roles_raw       = _load("SURVEILLANCE_STAGE_ROLES.json")
+
+    if not stages_raw or not templates_raw or not stage_tmpl_map:
+        print("[WARN] Missing surveillance JSON files - skipping surveillance workflow seed")
+        return
+
+    # Stage name → code mapping
+    NAME_TO_CODE = {
+        "Q1 Surveillance Testing":     "Q1_SURVEILLANCE",
+        "Q2 Surveillance Testing":     "Q2_SURVEILLANCE",
+        "Q3 Surveillance Testing":     "Q3_SURVEILLANCE",
+        "Q4 Surveillance Testing":     "Q4_SURVEILLANCE",
+        "Final Evaluation & Report":   "FINAL_EVALUATION",
+    }
+    CODE_TO_NAME = {v: k for k, v in NAME_TO_CODE.items()}
+
+    # Default duration for each surveillance stage (in days)
+    DEFAULT_SURVEILLANCE_DURATION_DAYS = {
+        "Q1_SURVEILLANCE":    30,  # 30 days to complete quarterly review
+        "Q2_SURVEILLANCE":    30,
+        "Q3_SURVEILLANCE":    30,
+        "Q4_SURVEILLANCE":    30,
+        "FINAL_EVALUATION":   45,  # 45 days for comprehensive final report
+    }
+
+    # ── 0. Workflow definition ────────────────────────────────────────────────
+    wf_def = session.query(RepairWorkflowDefinition).filter_by(workflow_code="SURVEILLANCE").first()
+    if not wf_def:
+        wf_def = RepairWorkflowDefinition(
+            id=uuid.uuid4(),
+            workflow_code="SURVEILLANCE",
+            name="Post-Commissioning Surveillance",
+            is_active=True,
+        )
+        session.add(wf_def)
+        session.flush()
+    print(f"[OK] RepairWorkflowDefinition SURVEILLANCE: {wf_def.id}")
+
+    # ── 1. Templates ──────────────────────────────────────────────────────────
+    template_map = {}   # key → UUID
+    for key, t in templates_raw.items():
+        existing = session.query(OrgTestTemplate).filter_by(template_key=key).first()
+        if existing:
+            template_map[key] = existing.id
+            continue
+        obj = OrgTestTemplate(
+            id=uuid.uuid4(),
+            template_key=key,
+            template_data=t,
+            is_system=True,
+        )
+        session.add(obj)
+        session.flush()
+        template_map[key] = obj.id
+    print(f"[OK] Surveillance templates: {len(template_map)} ready")
+
+    # ── 2. Stages ─────────────────────────────────────────────────────────────
+    stage_map = {}      # name → UUID
+    code_map  = {}      # code → UUID
+    for s in stages_raw:
+        name = s["name"]
+        code = NAME_TO_CODE.get(name, name.upper().replace(" ", "_"))
+        duration = DEFAULT_SURVEILLANCE_DURATION_DAYS.get(code)
+        existing = session.query(RepairStageDefinition).filter_by(code=code).first()
+        if existing:
+            if existing.workflow_definition_id != wf_def.id:
+                existing.workflow_definition_id = wf_def.id
+            if duration is not None and existing.default_duration_days != duration:
+                existing.default_duration_days = duration
+            stage_map[name] = existing.id
+            code_map[code]  = existing.id
+            continue
+        stage = RepairStageDefinition(
+            id=uuid.uuid4(),
+            name=name,
+            code=code,
+            sequence=s["sequence"],
+            is_active=True,
+            is_mandatory=True,
+            workflow_definition_id=wf_def.id,
+            default_duration_days=duration,
+        )
+        session.add(stage)
+        session.flush()
+        stage_map[name] = stage.id
+        code_map[code]  = stage.id
+    print(f"[OK] Surveillance stages: {len(stage_map)} ready")
+
+    # ── 3. Stage → Template mapping ───────────────────────────────────────────
+    for stage_name, tmpl_key in stage_tmpl_map.items():
+        stage_id   = stage_map.get(stage_name)
+        template_id = template_map.get(tmpl_key)
+        if not stage_id or not template_id:
+            continue
+        exists = session.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
+        if not exists:
+            session.add(RepairStageTemplate(stage_id=stage_id, template_id=template_id))
+
+    # ── 4. Stage → Role mapping ───────────────────────────────────────────────
+    if roles_raw:
+        for entry in roles_raw:
+            stage_code = entry.get("stage_code") or entry.get("code")
+            stage_id   = code_map.get(stage_code)
+            if not stage_id:
+                print(f"[WARN] Stage code not found: {stage_code}")
+                continue
+
+            # Stage actor roles
+            for role_name in entry.get("roles", []):
+                matched_roles = session.query(OrgRole).filter(OrgRole.name == role_name).all()
+                if not matched_roles:
+                    print(f"[WARN] Role not found in any org: {role_name}")
+                    continue
+                for role in matched_roles:
+                    exists = session.query(RepairStageRole).filter_by(
+                        stage_id=stage_id, role_id=role.id
+                    ).first()
+                    if not exists:
+                        session.add(RepairStageRole(
+                            stage_id=stage_id,
+                            role_id=role.id,
+                            can_edit=True,
+                            can_approve=True,
+                        ))
+
+    # ── 5. Stage Transitions ──────────────────────────────────────────────────
+    # Q1 → Q2 → Q3 → Q4 → Final (no transition after final = workflow completes)
+    transitions = [
+        ("Q1_SURVEILLANCE", "Q2_SURVEILLANCE", "approve"),
+        ("Q2_SURVEILLANCE", "Q3_SURVEILLANCE", "approve"),
+        ("Q3_SURVEILLANCE", "Q4_SURVEILLANCE", "approve"),
+        ("Q4_SURVEILLANCE", "FINAL_EVALUATION", "approve"),
+    ]
+
+    for from_code, to_code, action in transitions:
+        from_id = code_map.get(from_code)
+        to_id   = code_map.get(to_code)
+        if not from_id or not to_id:
+            continue
+        exists = session.query(RepairStageTransition).filter_by(
+            from_stage_id=from_id, to_stage_id=to_id, action=action
+        ).first()
+        if not exists:
+            session.add(RepairStageTransition(
+                from_stage_id=from_id,
+                to_stage_id=to_id,
+                action=action,
+            ))
+
+    session.commit()
+    print("[OK] Surveillance workflow seeded successfully")
+
+
+def seed_surveillance_config(session):
+    """
+    Seed surveillance configuration data.
+
+    Creates:
+    1. System-wide default surveillance config (24 months, 2x frequency)
+    2. Test type configurations (DGA, BDV, IR, Oil Quality for surveillance)
+    """
+    print("\n[INFO] Seeding surveillance configuration...")
+
+    # ── 1. System-wide Default Config ─────────────────────────────────────────
+    # Check if system default already exists
+    system_config = session.query(SurveillanceConfig).filter_by(
+        organization_id=None,
+        department_id=None
+    ).first()
+
+    if not system_config:
+        system_config = SurveillanceConfig(
+            id=uuid.uuid4(),
+            organization_id=None,
+            department_id=None,
+            surveillance_period_months=24,
+            frequency_multiplier=2.0,
+            abnormal_statuses=['FAIL', 'MARGINAL', 'CRITICAL', 'ALERT'],
+            quality_threshold_fair=20.0,
+            is_active=True,
+        )
+        session.add(system_config)
+        session.flush()
+        print(f"[OK] System surveillance config created: {system_config.id}")
+    else:
+        print(f"[SKIP] System surveillance config already exists: {system_config.id}")
+
+    # ── 2. Surveillance Test Configurations ───────────────────────────────────
+    # Get equipment types and test types from CategoryDetails
+
+    # Find "Power Transformer" equipment master
+    equip_master = session.query(CategoryMaster).filter_by(name="Power Transformer").first()
+
+    if not equip_master:
+        print("[WARN] Power Transformer CategoryMaster not found - skipping test config")
+        return
+
+    # Surveillance test types mapped to existing CategoryDetails names
+    surveillance_tests = [
+        ("Transformer Oil Test",       "high",   True),
+        ("Capacitance & Tan Delta Test (Transformer)", "high", True),
+        ("Transformer Physical Inspection", "medium", True),
+        ("Insulation resistance test", "medium", True),
+    ]
+
+    for test_name, priority, required in surveillance_tests:
+        test_type = session.query(CategoryDetails).filter_by(
+            name=test_name,
+            category_master_id=equip_master.id,
+        ).first()
+
+        if not test_type:
+            print(f"[WARN] Test type not found for surveillance config: {test_name}")
+            continue
+
+        existing = session.query(SurveillanceTestConfig).filter_by(
+            equipment_type_id=equip_master.id,
+            test_type_id=test_type.id,
+        ).first()
+
+        if existing:
+            print(f"[SKIP] Surveillance test config exists: {test_name}")
+            continue
+
+        session.add(SurveillanceTestConfig(
+            id=uuid.uuid4(),
+            equipment_type_id=equip_master.id,
+            test_type_id=test_type.id,
+            is_required=required,
+            default_priority=priority,
+            is_active=True,
+        ))
+        print(f"[OK] Surveillance test config created: {test_name}")
+
+    session.commit()
+    print("[OK] Surveillance configuration seeded successfully")
 
 
 def _dft_get_or_create_org(session) -> Organization:
@@ -7878,7 +9248,7 @@ def _dft_get_or_create_org(session) -> Organization:
         display_name="KPTCL",
         organization_type="utility",
         industry="Power Transmission",
-        primary_email="info@kptcl.com",
+        primary_email="info@utility.com",
         primary_phone="+91-80-22207684",
         is_active=True,
         is_verified=True,
@@ -7897,6 +9267,9 @@ def _dft_get_or_create_dept(session, org_id, name, code,
         organization_id=org_id, code=code
     ).first()
     if d:
+        if parent_id and d.parent_department_id != parent_id:
+            d.parent_department_id = parent_id
+            session.flush()
         return d
     now = datetime.now()
     d = OrgDepartment(
@@ -7915,26 +9288,18 @@ def _dft_get_or_create_dept(session, org_id, name, code,
 # Maps dept-filter role names to their default dashboard module path.
 # Must match the Module.path values seeded in seed_modules().
 _DFT_ROLE_MODULE_PATH = {
-    "Org Admin":              "admin_dashboard",
-    "Dept Head":              "see_dashboard",
-    "Section Head":           "see_dashboard",
-    "Technical Approver":     "see_dashboard",
-    "Finance Approver":       "see_dashboard",
-    "SEE W&M":                "see_dashboard",
-    "SEE RT":                 "see_dashboard",
-    "CEE Transmission Zone":  "cee_dashboard",
-    "CEE RT&R&D":             "cee_dashboard",
-    "EE TLSS":                "ee_tlss_dashboard",
-    "EE RT":                  "ee_tlss_dashboard",
-    "TA&QC Officer":          "ee_tlss_dashboard",
-    "Originator":             "aee_dashboard",
-    "Tester":                 "aee_dashboard",
-    "Test Assigner":          "aee_dashboard",
-    "AEE Maintenance":        "aee_dashboard",
-    "Field Tester":           "aee_dashboard",
-    "Lab Tester":             "aee_dashboard",
-    "Purchaser":              "aee_dashboard",
-    "Workflow Coordinator":   "ee_tlss_dashboard",
+    "System Administrator":             "admin_dashboard",
+    "Asset Data Officer":               "asset_dashboard",
+    "Maintenance Officer":              "aee_dashboard",
+    "Test Engineer":                    "aee_dashboard",
+    "Test & Work Coordinator":          "test_coordinator_dashboard",
+    "Reviewing Officer":                "ee_tlss_dashboard",
+    "Supervisory Officer":              "see_dashboard",
+    "Senior Management Approver":       "cee_dashboard",
+    "TA&QC Inspector":                  "ee_tlss_dashboard",
+    "Transformer Repair Coordinator":   "ee_tlss_dashboard",
+    "Procurement Officer":              "aee_dashboard",
+    "Procurement Approver":             "see_dashboard",
 }
 
 
@@ -7952,13 +9317,14 @@ def _dft_get_or_create_role(session, org_id, name,
         if r.is_dept_admin != is_dept_admin:
             r.is_dept_admin = is_dept_admin
             updated = True
-        if not r.default_module_id:
-            module_path = _DFT_ROLE_MODULE_PATH.get(name)
-            if module_path:
-                mod = session.query(Module).filter_by(path=module_path).first()
-                if mod:
-                    r.default_module_id = mod.id
-                    updated = True
+    module_path = _DFT_ROLE_MODULE_PATH.get(name)
+
+    if module_path:
+        mod = session.query(Module).filter_by(path=module_path).first()
+
+        if mod and r.default_module_id != mod.id:
+            r.default_module_id = mod.id
+            updated = True
         if updated:
             session.flush()
         return r
@@ -8017,24 +9383,150 @@ def _dft_get_or_create_user(session, org_id, email,
     session.flush()
     return u
 
-
 def _dft_assign_role(session, user_id, role_id, dept_id):
-    exists = session.query(OrgUserRole).filter_by(
-        user_id=user_id, org_role_id=role_id
-    ).first()
+
+    exists = (
+        session.query(OrgUserRole)
+        .filter_by(
+            user_id=user_id,
+            org_role_id=role_id,
+            department_id=dept_id,
+        )
+        .first()
+    )
+
     if exists:
         return
-    now = datetime.now()
-    session.add(OrgUserRole(
+
+    now = datetime.now().astimezone()
+
+    mapping = OrgUserRole(
         user_id=user_id,
         org_role_id=role_id,
         department_id=dept_id,
         is_active=True,
         assigned_at=now,
-    ))
+    )
+
+    session.add(mapping)
+
     session.flush()
 
+def _seed_dft_equipment(session, org, dept_map: dict):
 
+    from services.equipment_service import EquipmentService
+    from models import CategoryMaster
+
+    if not org:
+        return
+
+    admin = (
+        session.query(User)
+        .filter(
+            User.organization_id == org.id,
+            User.email.ilike("%orgadmin%"),
+        )
+        .first()
+        or session.query(User)
+        .filter(User.organization_id == org.id)
+        .first()
+    )
+
+    created_by = admin.id if admin else None
+
+    equip_types = (
+        session.query(CategoryMaster)
+        .filter(
+            CategoryMaster.description == "Testing Equipment",
+            CategoryMaster.is_active.is_(True),
+        )
+        .all()
+    )
+
+    type_map = {et.name: et.id for et in equip_types}
+
+    division_configs = {
+    "north": [
+        ("Power Transformer", "220", "01", "BHEL", "PT-220-N", "NTH2024001", 2021),
+        ("Current Transformer", "220", "01", "Siemens", "CT-220-N", "NTH2024002", 2022),
+        ("Power Transformer", "110", "01", "ABB", "PT-110-N", "NTH2024003", 2020),
+    ],
+
+    "south": [
+        ("Power Transformer", "220", "01", "BHEL", "PT-220-S", "STH2024001", 2021),
+        ("Current Transformer", "110", "01", "CGL", "CT-110-S", "STH2024002", 2022),
+        ("Capacitor Voltage Transformer", "220", "01", "BHEL", "CVT-220-S", "STH2024003", 2020),
+    ],
+
+    "mysuru": [
+        ("Power Transformer", "110", "01", "Crompton Greaves", "PT-110-M", "MYS2024001", 2019),
+        ("Current Transformer", "220", "01", "Siemens", "CT-220-M", "MYS2024002", 2021),
+        ("Power Transformer", "66", "01", "ABB", "PT-066-M", "MYS2024003", 2018),
+    ],
+}
+
+    created = 0
+
+    for slug, dept_obj in dept_map.items():
+
+        configs = division_configs.get(slug, [])
+
+        for (
+            type_name,
+            voltage,
+            bay,
+            mfr,
+            model,
+            serial,
+            year,
+        ) in configs:
+
+            if type_name not in type_map:
+                print(f"  [WARN] Missing equipment type: {type_name}")
+                continue
+
+            try:
+
+                EquipmentService.create_equipment(
+                    db=session,
+                    organization_id=org.id,
+                    department_id=dept_obj.id,
+                    equipment_type_id=type_map[type_name],
+                    voltage_class=voltage,
+                    bay_number=bay,
+                    manufacturer=mfr,
+                    model_number=model,
+                    factory_serial_number=serial,
+                    year_of_manufacture=year,
+                    created_by=created_by,
+                )
+
+                session.commit()
+
+                created += 1
+
+            except Exception as e:
+
+                session.rollback()
+
+                print(
+                    f"  [WARN] Equipment seed failed "
+                    f"for {serial}: {e}"
+                )
+                print(
+        f"\n[ERROR] Equipment seed failed"
+    )
+
+                print(f"type       : {type_name}")
+                print(f"serial     : {serial}")
+                print(f"department : {slug}")
+
+                print(f"\nException:\n{repr(e)}\n")
+
+    print(
+        f"  [OK] {created} equipment items seeded "
+        f"across {len(dept_map)} divisions"
+    )
 def seed_dept_filter_users(session, org=None):
     """
     Seeds KPTCL org with 3 department divisions, each having the complete set
@@ -8045,7 +9537,7 @@ def seed_dept_filter_users(session, org=None):
     function reuses it as the default org rather than doing a separate lookup.
 
     Hierarchy:  BLR_ZONE → BLR_CIRCLE → RT_NORTH / RT_SOUTH / MYSURU
-    Email:      {role}.{dept}@kptcl.com   (e.g. tester.north@kptcl.com)
+    Email:      {role}.{dept}@utility.com   (e.g. tester.north@utility.com)
     Password:   TestDept@123
     """
     print("\n" + "=" * 72)
@@ -8108,7 +9600,7 @@ def seed_dept_filter_users(session, org=None):
     for dept_slug, dept_label, email_sfx in _DFT_DEPTS:
         dept_obj = dept_map[dept_slug]
         for role_name, is_admin, is_dept in _DFT_ROLES:
-            email     = f"{_DFT_ROLE_EMAIL[role_name]}.{email_sfx}@kptcl.com"
+            email     = f"{_DFT_ROLE_EMAIL[role_name]}.{email_sfx}@utility.com"
             firstname = _DFT_ROLE_FNAME[role_name]
             lastname  = dept_label.split()[0]          # "RT" or "Mysuru"
             phone     = _DFT_PHONE[(dept_slug, role_name)]
@@ -8123,10 +9615,10 @@ def seed_dept_filter_users(session, org=None):
     print("\n[5] Top-level hierarchy users  (circle + zone)")
     _top_level_users = [
         # (email,                   fname,  lname,    role_name,             dept_obj)
-        ("ee.circle@kptcl.com",   "EE",   "Circle", "EE TLSS",             circle),
-        ("see.circle@kptcl.com",  "SEE",  "Circle", "Technical Approver",  circle),
-        ("cee.zone@kptcl.com",    "CEE",  "Zone",   "Org Admin",           zone),
-        ("see.zone@kptcl.com",    "SEE",  "Zone",   "Technical Approver",  zone),
+        ("ee.circle@utility.com",   "EE",   "Circle", "Reviewing Officer",             circle),
+        ("see.circle@utility.com",  "SEE",  "Circle", "Reviewing Officer",  circle),
+        ("cee.zone@utility.com",    "CEE",  "Zone",   "System Administrator",           zone),
+        ("see.zone@utility.com",    "SEE",  "Zone",   "Reviewing Officer",  zone),
     ]
     for email, fname, lname, role_name, dept_obj in _top_level_users:
         phone = "9000000099"
@@ -8137,6 +9629,13 @@ def seed_dept_filter_users(session, org=None):
         if r:
             _dft_assign_role(session, u.id, r.id, dept_obj.id)
         print(f"  {email:48s}  {role_name:22s}  {dept_obj.name}")
+
+    # ── 6. Sample equipment in each division ────────────────────────────────
+    # Without this, originator/tester users see no equipment in the TR form
+    # because seed_sample_equipment() only seeds into the Excel-based KPTCL
+    # substations, which are in a different branch of the dept tree.
+    print("\n[6] Sample equipment per division")
+    _seed_dft_equipment(session, org, dept_map)
 
     session.commit()
 
@@ -8169,7 +9668,7 @@ Department-filter validation matrix:
 
 def seed_kptcl_only(org_id: str):
     """
-    Run only KPTCL department seeding for a specific organization.
+    Run KPTCL department + equipment seeding for a specific organization.
     Usage: python seed.py --kptcl <org_id>
     """
     with get_db_session() as session:
@@ -8178,7 +9677,11 @@ def seed_kptcl_only(org_id: str):
         print("=" * 80 + "\n")
         seed_kptcl_departments(session, org_id)
         print("\n" + "=" * 80)
-        print("  [OK] KPTCL DEPARTMENTS SEEDED SUCCESSFULLY")
+        print("  KPTCL EQUIPMENT SEEDING")
+        print("=" * 80 + "\n")
+        seed_kptcl_equipment(session, org_id)
+        print("\n" + "=" * 80)
+        print("  [OK] KPTCL SEEDING COMPLETED SUCCESSFULLY")
         print("=" * 80 + "\n")
 
 
@@ -8198,9 +9701,10 @@ if __name__ == "__main__":
             # --with-kptcl <org_id>  → also seed KPTCL departments after full seed
             if len(sys.argv) > 2 and sys.argv[1] == "--with-kptcl":
                 org_id = sys.argv[2]
-                print("\n[INFO] Seeding KPTCL departments...")
+                print("\n[INFO] Seeding KPTCL departments + equipment...")
                 with get_db_session() as session:
                     seed_kptcl_departments(session, org_id)
+                    seed_kptcl_equipment(session, org_id)
 
     except Exception as e:
         import traceback

@@ -26,8 +26,6 @@ Template data shape
     start_date          ← set to now() during template creation (placeholder)
     next_run_date       ← same (overwritten on commission)
     advance_days        ← how many days before due_date to trigger a live clone
-    responsible_role_id ← OrgRole that performs the test
-    reviewing_role_id   ← OrgRole that approves the result
     revised_periodicity_days ← override interval when evaluation = ALERT
     oem_reference       ← IS / OEM standard clause
 """
@@ -41,9 +39,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+from datetime import timedelta
+
 from models import (
     CategoryMaster,
     Equipment,
+    EquipmentStatus,
     OrgRole,
     RequestCategory,
     ScheduleFrequency,
@@ -66,7 +67,7 @@ _FREQ_DELTA = {
 }
 
 # ── roles allowed to create / edit templates ──────────────────────────────────
-_WRITE_ROLES = {"Admin", "SuperAdmin", "EE TLSS", "Department Head"}
+_WRITE_ROLES = {"Admin", "SuperAdmin", "Reviewing Officer", "System Administrator"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -100,7 +101,7 @@ class TestRegisterService:
         if not names.intersection(_WRITE_ROLES):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only EE TLSS, Department Head, or Admin can manage the Test Register.",
+                detail="Only Reviewing Officer, System Administrator, or Admin can manage the Test Register.",
             )
 
     @staticmethod
@@ -118,6 +119,7 @@ class TestRegisterService:
             "priority": req.priority,
             "equipment_type_id": req.equipment_type_id,
             "equipment_type_name": getattr(eq_type, "name", None),
+            "test_type_id": req.test_type_id,
             "organization_id": str(req.organization_id) if req.organization_id else None,
             "template_key": (
                 req.test_results[0].template_key
@@ -128,12 +130,12 @@ class TestRegisterService:
                     "id": str(schedule.id),
                     "frequency": schedule.frequency.value if schedule.frequency else None,
                     "advance_days": schedule.advance_days,
+                    "start_date": schedule.start_date.isoformat() if schedule.start_date else None,
+                    "next_run_date": schedule.next_run_date.isoformat() if schedule.next_run_date else None,
+                    "last_run_date": schedule.last_run_date.isoformat() if schedule.last_run_date else None,
+                    "end_date": schedule.end_date.isoformat() if schedule.end_date else None,
                     "revised_periodicity_days": schedule.revised_periodicity_days,
                     "oem_reference": schedule.oem_reference,
-                    "responsible_role_id": str(schedule.responsible_role_id) if schedule.responsible_role_id else None,
-                    "responsible_role_name": getattr(schedule.responsible_role, "name", None),
-                    "reviewing_role_id": str(schedule.reviewing_role_id) if schedule.reviewing_role_id else None,
-                    "reviewing_role_name": getattr(schedule.reviewing_role, "name", None),
                     "is_active": schedule.is_active,
                 }
                 if schedule else None
@@ -222,9 +224,9 @@ class TestRegisterService:
 
     def create_template(self, data: dict, creator: User) -> dict:
         """
-        Required keys: title, equipment_type_id, organization_id, frequency
-        Optional keys: template_key, priority, notes, advance_days,
-                       responsible_role_id, reviewing_role_id,
+        Required keys: equipment_type_id, organization_id, frequency
+        Optional keys: title (auto-generated from test_type_id if omitted),
+                       test_type_id, template_key, priority, notes, advance_days,
                        revised_periodicity_days, oem_reference
         """
         self._require_write_access(creator)
@@ -237,13 +239,35 @@ class TestRegisterService:
                 detail=f"Invalid frequency. Accepted: {[f.value for f in ScheduleFrequency]}",
             )
 
+        # Resolve title from test_type_id if not supplied
+        test_type_id = data.get("test_type_id")
+        title = data.get("title")
+        if not title:
+            if test_type_id:
+                from models import CategoryDetails
+                test_type = self.db.query(CategoryDetails).filter(
+                    CategoryDetails.id == test_type_id
+                ).first()
+                eq_type = self.db.query(CategoryMaster).filter(
+                    CategoryMaster.id == data["equipment_type_id"]
+                ).first()
+                type_name = getattr(test_type, "name", "Test")
+                eq_name = getattr(eq_type, "name", "Equipment")
+                title = f"{type_name} — {eq_name}"
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Provide either 'title' or 'test_type_id'.",
+                )
+
         now = self._now()
         req = TestingRequest(
             id=uuid4(),
             request_number=self._gen_request_number(),
-            title=data["title"],
+            title=title,
             description=data.get("description"),
             equipment_type_id=data["equipment_type_id"],
+            test_type_id=test_type_id,
             organization_id=data["organization_id"],
             department_id=data.get("department_id"),
             request_category=RequestCategory.test,
@@ -268,8 +292,6 @@ class TestRegisterService:
             next_run_date=now + self._freq_delta(freq),
             advance_days=data.get("advance_days", 15),
             is_active=True,
-            responsible_role_id=data.get("responsible_role_id"),
-            reviewing_role_id=data.get("reviewing_role_id"),
             revised_periodicity_days=data.get("revised_periodicity_days"),
             oem_reference=data.get("oem_reference"),
             created_by=creator.id,
@@ -297,8 +319,7 @@ class TestRegisterService:
 
         # Schedule-level fields
         if sched and any(k in data for k in (
-            "frequency", "advance_days", "responsible_role_id", "reviewing_role_id",
-            "revised_periodicity_days", "oem_reference", "is_active",
+            "frequency", "advance_days", "revised_periodicity_days", "oem_reference", "is_active",
         )):
             if "frequency" in data:
                 try:
@@ -308,8 +329,7 @@ class TestRegisterService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Invalid frequency '{data['frequency']}'.",
                     )
-            for field in ("advance_days", "responsible_role_id", "reviewing_role_id",
-                          "revised_periodicity_days", "oem_reference", "is_active"):
+            for field in ("advance_days", "revised_periodicity_days", "oem_reference", "is_active"):
                 if field in data:
                     setattr(sched, field, data[field])
             sched.modified_by = editor.id
@@ -340,110 +360,23 @@ class TestRegisterService:
     # ── Commission equipment ──────────────────────────────────────────────────
 
     def commission_equipment(self, equipment_id: UUID, triggered_by: User) -> dict:
-        """
-        Clone all active register templates matching equipment.equipment_type_id
-        into live TestingRequest + TestRequestSchedule records.
-
-        Returns a summary dict with the count and IDs of created requests.
-        """
-        equipment = (
-            self.db.query(Equipment)
-            .filter(Equipment.id == equipment_id)
-            .first()
-        )
+        from services.test_request_schedule_service import TestRequestScheduleService
+        equipment = self.db.query(Equipment).filter(Equipment.id == equipment_id).first()
         if not equipment:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Equipment not found.",
             )
-
-        org_id = equipment.organization_id or getattr(triggered_by, "organization_id", None)
-
-        templates = (
-            self.db.query(TestingRequest)
-            .join(
-                TestRequestSchedule,
-                TestRequestSchedule.test_request_id == TestingRequest.id,
-            )
-            .filter(
-                TestingRequest.is_schedule_template.is_(True),
-                TestingRequest.equipment_type_id == equipment.equipment_type_id,
-                TestingRequest.organization_id == org_id,
-                TestRequestSchedule.is_active.is_(True),
-            )
-            .options(joinedload(TestingRequest.test_results))
-            .all()
+        TestRequestScheduleService.instantiate_equipment_schedules(
+            self.db, equipment, triggered_by.id
         )
+        return {"message": "Operational schedules instantiated.", "equipment_id": str(equipment_id)}
 
-        now = self._now()
-        created_ids = []
+    # ── Scheduler — generate tickets from due operational schedules ──────────
 
-        for tmpl in templates:
-            tmpl_sched = self._get_schedule_for(tmpl.id)
-            if not tmpl_sched:
-                continue
-
-            # Derive due_date from frequency
-            due_date = now + self._freq_delta(tmpl_sched.frequency)
-
-            today_str = now.strftime("%Y%m%d")
-            count = (
-                self.db.query(func.count(TestingRequest.id))
-                .filter(TestingRequest.request_number.like(f"TR-{today_str}-%"))
-                .scalar()
-            )
-            req_number = f"TR-{today_str}-{(count + 1):04d}"
-
-            live_req = TestingRequest(
-                id=uuid4(),
-                request_number=req_number,
-                title=tmpl.title,
-                description=tmpl.description,
-                equipment_type_id=tmpl.equipment_type_id,
-                equipment_id=equipment.id,
-                organization_id=org_id,
-                department_id=tmpl.department_id or equipment.department_id,
-                request_category=RequestCategory.test,
-                priority=tmpl.priority,
-                notes=tmpl.notes,
-                status=TestingRequestStatus.submitted,
-                is_schedule_template=False,
-                is_direct_submission=False,
-                originator_id=triggered_by.id,
-                created_by=triggered_by.id,
-                requested_date=now,
-                due_date=due_date,
-            )
-            self.db.add(live_req)
-            self.db.flush()
-
-            live_sched = TestRequestSchedule(
-                id=uuid4(),
-                test_request_id=live_req.id,
-                organization_id=org_id,
-                frequency=tmpl_sched.frequency,
-                start_date=now,
-                next_run_date=due_date,
-                advance_days=tmpl_sched.advance_days,
-                is_active=True,
-                responsible_role_id=tmpl_sched.responsible_role_id,
-                reviewing_role_id=tmpl_sched.reviewing_role_id,
-                revised_periodicity_days=tmpl_sched.revised_periodicity_days,
-                oem_reference=tmpl_sched.oem_reference,
-                created_by=triggered_by.id,
-            )
-            self.db.add(live_sched)
-            created_ids.append(str(live_req.id))
-
-        self.db.commit()
-
-        return {
-            "equipment_id": str(equipment_id),
-            "equipment_ueic": getattr(equipment, "ueic", None),
-            "templates_matched": len(templates),
-            "requests_created": len(created_ids),
-            "created_request_ids": created_ids,
-        }
+    def run_scheduler(self, equipment_id: Optional[UUID] = None) -> dict:
+        from services.test_request_schedule_service import TestRequestScheduleService
+        return TestRequestScheduleService.run_daily_scheduler(self.db)
 
     # ── ALERT reschedule ──────────────────────────────────────────────────────
 
@@ -493,21 +426,33 @@ class TestRegisterService:
     # ── Equipment schedule view ───────────────────────────────────────────────
 
     def list_equipment_schedules(self, equipment_id: UUID) -> list:
-        """List all live test schedules for a specific equipment unit."""
+        """
+        Return the template schedules that apply to this equipment unit,
+        showing when each test is next due.
+        """
+        equipment = (
+            self.db.query(Equipment)
+            .filter(Equipment.id == equipment_id)
+            .first()
+        )
+        if not equipment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Equipment not found.",
+            )
+
         rows = (
             self.db.query(TestRequestSchedule)
-            .join(
-                TestingRequest,
-                TestingRequest.id == TestRequestSchedule.test_request_id,
-            )
+            .join(TestingRequest, TestingRequest.id == TestRequestSchedule.test_request_id)
             .options(
                 joinedload(TestRequestSchedule.responsible_role),
                 joinedload(TestRequestSchedule.reviewing_role),
                 joinedload(TestRequestSchedule.test_request).joinedload(TestingRequest.equipment_type),
             )
             .filter(
-                TestingRequest.equipment_id == equipment_id,
-                TestingRequest.is_schedule_template.is_(False),
+                TestingRequest.is_schedule_template.is_(True),
+                TestingRequest.equipment_type_id == equipment.equipment_type_id,
+                TestingRequest.organization_id == equipment.organization_id,
                 TestRequestSchedule.is_active.is_(True),
             )
             .order_by(TestRequestSchedule.next_run_date.asc())
@@ -518,8 +463,7 @@ class TestRegisterService:
             req = row.test_request
             return {
                 "schedule_id": str(row.id),
-                "request_id": str(req.id),
-                "request_number": req.request_number,
+                "template_request_id": str(req.id),
                 "title": req.title,
                 "equipment_type_name": getattr(req.equipment_type, "name", None),
                 "frequency": row.frequency.value if row.frequency else None,

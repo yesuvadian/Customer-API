@@ -10,7 +10,13 @@ from fastapi.security import HTTPBearer
 from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
-from routers import repair_workflow, websocket_routes
+from routers import (
+    repair_workflow,
+    surveillance_workflow,
+    surveillance_dashboard,
+    websocket_routes,
+    workflow_dashboard,
+)
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.test_request_schedule_service import TestRequestScheduleService
 
@@ -85,6 +91,7 @@ from routers import (
     direct_submissions,  # NEW: Failure Registry & TA&QC direct-submit modules
     annual_audits,       # Annual Audit observation workflow module
     test_register,       # NEW: Test Register — periodic maintenance catalogue
+    test_schedule_dashboard,  # Test Schedule compliance matrix dashboard
 )
 from routers import cumulative  # Cumulative / Overhaul lifecycle module
 from routers import calibration as calibration_router  # Calibration lifecycle module
@@ -98,6 +105,7 @@ from routers import equipment
 # Notification & Alert Engine
 from routers import notifications as notifications_router
 from routers import admin_notifications as admin_notifications_router
+from routers import admin_notification_events as admin_notification_events_router
 
 # Dashboard KPIs
 from routers import dashboard_kpi
@@ -690,6 +698,7 @@ app.include_router(tester_assignment.router)
 app.include_router(org_test_templates.router)
 app.include_router(org_test_templates.browser_router)
 app.include_router(test_request_schedules.router)
+app.include_router(test_schedule_dashboard.router)  # Compliance matrix dashboard
 app.include_router(direct_submissions.router)  # NEW: Failure Registry & TA&QC
 app.include_router(annual_audits.router)       # Annual Audit observations
 app.include_router(test_register.router)       # NEW: Test Register catalogue
@@ -702,6 +711,7 @@ app.include_router(equipment.router)
 # Notification & Alert Engine
 app.include_router(notifications_router.router)
 app.include_router(admin_notifications_router.router)
+app.include_router(admin_notification_events_router.router)
 
 # Dashboard KPIs
 app.include_router(dashboard_kpi.router)
@@ -721,6 +731,13 @@ app.include_router(workflows.router)
 # Repair Lifecycle Workflow
 app.include_router(repair_workflow.router)
 
+# Surveillance Workflow (Post-Commissioning Monitoring)
+app.include_router(surveillance_workflow.router)
+app.include_router(surveillance_dashboard.router)
+
+# Unified Workflow Operations Dashboard
+app.include_router(workflow_dashboard.router)
+
 # WebSocket
 app.include_router(websocket_routes.router)
 
@@ -735,6 +752,12 @@ async def startup_event():
         "[Scheduler] APScheduler started — "
         "daily test request job scheduled at 00:00 UTC"
     )
+    # Register workflow lifecycle hooks (import = self-registration side-effect)
+    import calibration_hooks  # noqa: F401
+    import overhaul_hooks  # noqa: F401
+    import surveillance_hooks  # noqa: F401
+    logger.info("[Hooks] Workflow lifecycle hooks registered")
+
     # Seed default notification templates + variables (idempotent)
     try:
         _db = SessionLocal()

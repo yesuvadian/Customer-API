@@ -1129,20 +1129,43 @@ class ScheduleFrequencyEnum(str, PyEnum):
     biweekly = "biweekly"
     monthly = "monthly"
     quarterly = "quarterly"
+    semi_annual = "semi_annual"
     yearly = "yearly"
+    triennial = "triennial"
 
 
 class TestRequestScheduleCreate(BaseModel):
+    equipment_type_id: int
+    test_type_id: int
+    title: str
     frequency: ScheduleFrequencyEnum
+    advance_days: int = 15
     end_date: Optional[datetime] = None
-    advance_days: int = 1
+    description: Optional[str] = None
+    oem_reference: Optional[str] = None
+    revised_periodicity_days: Optional[int] = None
+    priority: Optional[str] = None
+    notes: Optional[str] = None
+    request_category: Optional[Literal["test", "maintenance"]] = "test"
 
 
 class TestRequestScheduleUpdate(BaseModel):
+    title: Optional[str] = None
     frequency: Optional[ScheduleFrequencyEnum] = None
-    end_date: Optional[datetime] = None
     advance_days: Optional[int] = None
+    end_date: Optional[datetime] = None
     is_active: Optional[bool] = None
+    oem_reference: Optional[str] = None
+    revised_periodicity_days: Optional[int] = None
+    description: Optional[str] = None
+
+
+class TestRequestScheduleCreateByType(BaseModel):
+    equipment_type_id: int
+    test_type_id: int
+    frequency: ScheduleFrequencyEnum
+    advance_days: int = 1
+    end_date: Optional[datetime] = None
 
 
 class TestRequestScheduleResponse(BaseModel):
@@ -1192,6 +1215,7 @@ class TestResultCreate(BaseModel):
 class TestResultResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
+    test_session_id: Optional[UUID] = None  # Session this result belongs to
     organization_id: Optional[UUID] = None
     test_name: str
     test_category: Optional[str] = None
@@ -1408,6 +1432,7 @@ class RecommendationCreate(BaseModel):
     # next_action dispatch — set by Tester when submitting result
     next_action: Optional[str] = None          # none|maintenance|inspection|repair_cycle|replacement
     schedule_frequency: Optional[str] = None   # yearly|quarterly|monthly|semi_annual etc.
+    test_types: Optional[list] = None          # [{id, name}] — recommended follow-up test types
 
 class RecommendationUpdate(BaseModel):
     recommendation_type: Optional[str] = None
@@ -1415,6 +1440,7 @@ class RecommendationUpdate(BaseModel):
     detailed_notes: Optional[str] = None
     next_action: Optional[str] = None
     schedule_frequency: Optional[str] = None
+    test_types: Optional[list] = None
 
 class ApprovalAction(BaseModel):
     notes: Optional[str] = None
@@ -1429,8 +1455,11 @@ class SubmitTestResultsBody(BaseModel):
     recommendation_type: Optional[str] = None   # pass | fail | conditional | retest
     summary: Optional[str] = None
     detailed_notes: Optional[str] = None
-    next_action: Optional[str] = None           # none | maintenance | inspection | repair_cycle | replacement
-    schedule_frequency: Optional[str] = None    # yearly | half_yearly | quarterly | monthly
+    next_action: Optional[str] = None           # none | test | maintenance | inspection | repair_cycle | replacement
+    schedule_frequency: Optional[str] = None    # daily | weekly | biweekly | monthly | quarterly | semi_annual | yearly | triennial
+    schedule_start_date: Optional[str] = None   # YYYY-MM-DD — from wizard schedule picker
+    schedule_end_date: Optional[str] = None     # YYYY-MM-DD — from wizard schedule picker
+    test_types: Optional[list] = None           # [{id, name}] — recommended follow-up test types
 
 
 class RecommendationResponse(BaseModel):
@@ -1443,6 +1472,7 @@ class RecommendationResponse(BaseModel):
     replacement_products: Optional[list] = None
     next_action: Optional[str] = None
     schedule_frequency: Optional[str] = None
+    test_types: Optional[list] = None          # [{id, name}] — recommended follow-up test types
     approval_status: Optional[str] = None
     approved_by: Optional[UUID] = None
     approved_by_name: Optional[str] = None   # resolved display name
@@ -1455,6 +1485,11 @@ class RecommendationResponse(BaseModel):
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    # Enriched from related TR + equipment
+    request_number: Optional[str] = None
+    request_title: Optional[str] = None
+    equipment_ueic: Optional[str] = None
+    equipment_type_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -2241,6 +2276,14 @@ class EquipmentCreate(BaseModel):
     model_number: Optional[str] = None
     factory_serial_number: Optional[str] = None
     year_of_manufacture: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    phase: Optional[str] = None
+    ct_ratio_actual: Optional[str] = None
+    ct_ratio_current: Optional[str] = None
+    pt_ratio: Optional[str] = None
+    vector_group: Optional[str] = None
+    impedance_pct: Optional[float] = None
 
 
 class EquipmentUpdate(BaseModel):
@@ -2252,6 +2295,14 @@ class EquipmentUpdate(BaseModel):
     factory_serial_number: Optional[str] = None
     year_of_manufacture: Optional[int] = None
     commissioned_date: Optional[datetime] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    phase: Optional[str] = None
+    ct_ratio_actual: Optional[str] = None
+    ct_ratio_current: Optional[str] = None
+    pt_ratio: Optional[str] = None
+    vector_group: Optional[str] = None
+    impedance_pct: Optional[float] = None
 
 
 class EquipmentChainRef(BaseModel):
@@ -2282,10 +2333,10 @@ class EquipmentResponse(BaseModel):
     nameplate_data: Optional[dict] = None
     status: str
     # Replacement chain (bidirectional)
-    replaces_equipment_id: Optional[UUID] = None   # UUID of the old unit this replaced
-    replaces_equipment: Optional[EquipmentChainRef] = None  # inline summary of the old unit
-    replaced_by_id: Optional[UUID] = None          # UUID of the new unit that replaced this one
-    replaced_by: Optional[EquipmentChainRef] = None  # inline summary of the new unit
+    replaces_equipment_id: Optional[UUID] = None
+    replaces_equipment: Optional[EquipmentChainRef] = None
+    replaced_by_id: Optional[UUID] = None
+    replaced_by: Optional[EquipmentChainRef] = None
     replacement_reason_type: Optional[str] = None
     commissioned_date: Optional[datetime] = None
     retired_date: Optional[datetime] = None
@@ -2294,10 +2345,18 @@ class EquipmentResponse(BaseModel):
     model_number: Optional[str] = None
     factory_serial_number: Optional[str] = None
     year_of_manufacture: Optional[int] = None
+    phase: Optional[str] = None
+    ct_ratio_actual: Optional[str] = None
+    ct_ratio_current: Optional[str] = None
+    pt_ratio: Optional[str] = None
+    vector_group: Optional[str] = None
+    impedance_pct: Optional[float] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    latitude: Optional[float] = None   
+    longitude: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -2317,6 +2376,12 @@ class EquipmentReplaceRequest(BaseModel):
     model_number: Optional[str] = None
     factory_serial_number: Optional[str] = None
     year_of_manufacture: Optional[int] = None
+    phase: Optional[str] = None
+    ct_ratio_actual: Optional[str] = None
+    ct_ratio_current: Optional[str] = None
+    pt_ratio: Optional[str] = None
+    vector_group: Optional[str] = None
+    impedance_pct: Optional[float] = None
 
 
 class EquipmentCountResponse(BaseModel):

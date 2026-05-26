@@ -14,27 +14,7 @@ from models import (
     OrgRole, OrgUserRole,
     OrgTestTemplate,
 )
-from utils.common_service import UTCDateTimeMixin
-
-
-def get_dept_subtree_ids(db: Session, dept_id: UUID) -> List[UUID]:
-    """Return dept_id plus all its recursive child department IDs.
-
-    Uses a PostgreSQL recursive CTE to walk the org_departments tree.
-    This allows zone/circle-level users to see TRs from all child depts.
-    """
-    result = db.execute(text("""
-        WITH RECURSIVE dept_tree AS (
-            SELECT id FROM public.org_departments WHERE id = :root_id AND is_active = true
-            UNION ALL
-            SELECT d.id
-            FROM   public.org_departments d
-            JOIN   dept_tree dt ON d.parent_department_id = dt.id
-            WHERE  d.is_active = true
-        )
-        SELECT id FROM dept_tree
-    """), {"root_id": str(dept_id)})
-    return [row[0] for row in result.fetchall()]
+from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
 
 
 class TestingRequestService:
@@ -52,7 +32,10 @@ class TestingRequestService:
         return f"TR-{today}-{(count + 1):04d}"
 
     def _resolve_is_cumulative(self, test_type_id) -> bool:
-        """Return True if the OrgTestTemplate for this test_type_id has enable_cumulative=true."""
+        """
+        Return True if the template has enable_cumulative=true OR a CUMULATIVE_DIFF rule.
+        Covers both legacy flag-based templates and rule-driven templates.
+        """
         if not test_type_id:
             return False
         tpl = (
@@ -63,10 +46,19 @@ class TestingRequestService:
         )
         if not tpl:
             return False
-        return bool((tpl.template_data or {}).get("enable_cumulative", False))
+        data = tpl.template_data or {}
+        if data.get("enable_cumulative"):
+            return True
+        return any(
+            (r.get("type") or "").upper() == "CUMULATIVE_DIFF"
+            for r in data.get("rules", [])
+        )
 
     def _resolve_is_calibration(self, test_type_id) -> bool:
-        """Return True if the OrgTestTemplate for this test_type_id has enable_calibration=true."""
+        """
+        Return True if the template has enable_calibration=true OR a DATE_ADD rule.
+        Covers both legacy flag-based templates and rule-driven templates.
+        """
         if not test_type_id:
             return False
         tpl = (
@@ -77,7 +69,13 @@ class TestingRequestService:
         )
         if not tpl:
             return False
-        return bool((tpl.template_data or {}).get("enable_calibration", False))
+        data = tpl.template_data or {}
+        if data.get("enable_calibration"):
+            return True
+        return any(
+            (r.get("type") or "").upper() == "DATE_ADD"
+            for r in data.get("rules", [])
+        )
 
     def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
         request_number = self._generate_request_number()
@@ -118,6 +116,8 @@ class TestingRequestService:
             session_interval_days=data.get("session_interval_days"),
             is_cumulative=is_cumulative,
             is_calibration=is_calibration,
+            is_schedule_template=data.get("is_schedule_template", False),
+            source_schedule_id=data.get("source_schedule_id"),
         )
         self.db.add(request)
         self.db.commit()
@@ -125,7 +125,10 @@ class TestingRequestService:
         return request
 
     def get_request(self, request_id: UUID) -> TestingRequest:
-        request = self.db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+        request = self.db.query(TestingRequest).filter(
+    TestingRequest.id == request_id,
+    TestingRequest.is_schedule_template.is_(False),
+).first()
         if not request:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Testing request not found")
         return request
@@ -141,8 +144,12 @@ class TestingRequestService:
         organization_id: Optional[UUID] = None,
         department_id: Optional[UUID] = None,
         department_ids: Optional[List[UUID]] = None,  # subtree list (overrides department_id)
+        equipment_id: Optional[UUID] = None,
     ) -> List[TestingRequest]:
-        query = self.db.query(TestingRequest)
+        query = (
+            self.db.query(TestingRequest)
+            .filter(TestingRequest.is_schedule_template.is_(False))
+        )
         if status_filter:
             query = query.filter(TestingRequest.status == status_filter)
         if category_filter:
@@ -153,6 +160,8 @@ class TestingRequestService:
             query = query.filter(TestingRequest.assigned_tester_id == tester_id)
         if organization_id:
             query = query.filter(TestingRequest.organization_id == organization_id)
+        if equipment_id:
+            query = query.filter(TestingRequest.equipment_id == equipment_id)
         # department_ids (subtree) takes priority over single department_id
         if department_ids is not None:
             query = query.filter(TestingRequest.department_id.in_(department_ids))
@@ -168,12 +177,16 @@ class TestingRequestService:
         status_filter: Optional[str] = None,
     ) -> List[TestingRequest]:
         """Return requests where user is originator OR assigned tester."""
-        query = self.db.query(TestingRequest).filter(
-            or_(
-                TestingRequest.originator_id == user_id,
-                TestingRequest.assigned_tester_id == user_id,
-            )
+        query = (
+    self.db.query(TestingRequest)
+    .filter(TestingRequest.is_schedule_template.is_(False))
+    .filter(
+        or_(
+            TestingRequest.originator_id == user_id,
+            TestingRequest.assigned_tester_id == user_id,
         )
+    )
+)
         if status_filter:
             query = query.filter(TestingRequest.status == status_filter)
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
@@ -206,6 +219,11 @@ class TestingRequestService:
 
     def submit_request(self, request_id: UUID, modified_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
+        if request.is_schedule_template:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Template requests cannot be submitted",
+            )
         if request.status != TestingRequestStatus.draft:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -234,6 +252,11 @@ class TestingRequestService:
 
     def assign_tester(self, request_id: UUID, tester_id: UUID, assigned_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
+        if request.is_schedule_template:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Template requests cannot be assigned",
+            )
         if request.status != TestingRequestStatus.submitted:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -262,7 +285,10 @@ class TestingRequestService:
 
     def get_stats(self, user_id: UUID = None, organization_id: UUID = None) -> dict:
         """Return counts by testing request status."""
-        query = self.db.query(TestingRequest)
+        query = (
+    self.db.query(TestingRequest)
+    .filter(TestingRequest.is_schedule_template.is_(False))
+)
         if organization_id:
             query = query.filter(TestingRequest.organization_id == organization_id)
         elif user_id:
@@ -411,6 +437,54 @@ class TestingRequestService:
                 "name": m.name,
                 "tests": types_by_category["test"],    # legacy field
                 "types_by_category": types_by_category,
+            })
+        return result
+
+    def list_all_test_types(self, category: str = None) -> list:
+        """Return all CategoryDetails (test types) across ALL equipment types,
+        with lifecycle flags resolved from OrgTestTemplate.
+
+        Optionally filtered by category_type (test / maintenance / inspection /
+        repair_lifecycle).  Used by the form when no equipment type is selected.
+        """
+        query = (
+            self.db.query(CategoryDetails, CategoryMaster)
+            .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
+            .filter(
+                CategoryMaster.description == "Testing Equipment",
+                CategoryMaster.is_active.is_(True),
+                CategoryDetails.is_active.is_(True),
+            )
+        )
+        if category:
+            query = query.filter(CategoryDetails.category_type == category)
+        rows = query.order_by(CategoryMaster.name, CategoryDetails.name).all()
+
+        result = []
+        for t, m in rows:
+            tpl = (
+                self.db.query(OrgTestTemplate)
+                .filter(OrgTestTemplate.test_type_id == t.id)
+                .order_by(OrgTestTemplate.version.desc())
+                .first()
+            )
+            tpl_data = (tpl.template_data or {}) if tpl else {}
+            has_date_add = any(
+                (r.get("type") or "").upper() == "DATE_ADD"
+                for r in tpl_data.get("rules", [])
+            )
+            has_cumulative = any(
+                (r.get("type") or "").upper() == "CUMULATIVE_DIFF"
+                for r in tpl_data.get("rules", [])
+            )
+            result.append({
+                "id": t.id,
+                "name": t.name,
+                "category_type": t.category_type,
+                "equipment_type_id": m.id,
+                "equipment_type_name": m.name,
+                "enable_cumulative": bool(tpl_data.get("enable_cumulative", False)) or has_cumulative,
+                "enable_calibration": bool(tpl_data.get("enable_calibration", False)) or has_date_add,
             })
         return result
 
@@ -563,36 +637,7 @@ class TestingRequestService:
     ) -> tuple:
         """Return (is_org_admin: bool, department_id: UUID | None).
 
-        Routes use this to determine whether to apply a department filter
-        and which department to filter by.
+        Delegates to the shared get_user_dept_scope() utility in
+        utils.common_service so the logic is maintained in one place.
         """
-        is_org_admin = (
-            self.db.query(OrgRole)
-            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
-            .filter(
-                OrgUserRole.user_id == user_id,
-                OrgUserRole.is_active.is_(True),
-                OrgRole.is_org_admin.is_(True),
-            )
-            .first()
-        ) is not None
-
-        if is_org_admin:
-            return True, None
-
-        user_dept_role = (
-            self.db.query(OrgUserRole)
-            .filter(
-                OrgUserRole.user_id == user_id,
-                OrgUserRole.is_active.is_(True),
-                OrgUserRole.department_id.isnot(None),
-            )
-            .first()
-        )
-        if user_dept_role and user_dept_role.department_id:
-            return False, user_dept_role.department_id
-
-        # Fallback to user.department_id
-        user = self.db.query(User).filter(User.id == user_id).first()
-        dept_id = user.department_id if user else None
-        return False, dept_id
+        return get_user_dept_scope(self.db, user_id, org_id)

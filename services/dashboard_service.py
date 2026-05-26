@@ -7,11 +7,11 @@ with a 15-minute TTL.
 Cache key pattern:  dashboard::{org_id or 'global'}::{widget}
 TTL: 900 seconds (15 min)
 
-Role view mapping (checked against OrgRole.name, case-insensitive):
-  ee_tlss  ← roles containing "EE", "EE TLSS", "Electrical Engineer"
-  see_cee  ← roles containing "SEE", "CEE", "Superintending", "Chief"
-  admin    ← "System Admin", "Org Admin"
-  field    ← everything else (AEE, Tester, Field Officer…)
+Role view mapping — driven by OrgRole.default_module.path (not role name):
+  ee_tlss  ← Reviewing Officer, Test & Work Coordinator, Maintenance Officer, Test Engineer
+  see_cee  ← Supervisory Officer, Senior Management Approver, Procurement Approver
+  admin    ← System Administrator
+  field    ← everything else
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ from models import (
     ProcurementRequest,
     Recommendation,
     RequestCategory,
+    RepairWorkflow,
+    RepairStageInstance,
     TestingRequest, TestingRequestStatus,
     TestResult,
     OrgRole, OrgUserRole,
@@ -85,6 +87,8 @@ MODULE_PATH_TO_VIEW: Dict[str, str] = {
     "aee_dashboard":     "ee_tlss",
     "see_dashboard":     "see_cee",
     "cee_dashboard":     "see_cee",
+    "asset_dashboard":   "asset",
+    "test_coordinator_dashboard": "test_coordinator",
 }
 
 OPEN_STATUSES = (
@@ -183,6 +187,12 @@ def invalidate_dashboard_cache(org_id: Optional[UUID] = None) -> None:
     RedisCacheService.delete_pattern("dashboard::global::*")
 
 
+# ── Department hierarchy helpers ──────────────────────────────────────────
+# Re-exported for convenience; canonical implementation lives in utils.common_service
+
+from utils.common_service import get_dept_subtree_ids as get_dept_subtree, get_user_dept_scope
+
+
 # ── Utility ────────────────────────────────────────────────────────────────
 
 def _now() -> datetime:
@@ -210,19 +220,28 @@ class DashboardService:
         db: Session,
         org_id: Optional[UUID] = None,
         dept_id: Optional[UUID] = None,
+        dept_ids: Optional[set] = None,
     ):
         self.db = db
         self.org_id = org_id
-        # dept_id is optional: when None → show all departments (org-wide view)
-        # when provided → narrow results to that department only
+        # dept_id  = root department (used for cache key only)
+        # dept_ids = root + all descendants (used for IN filter)
+        # When None → org-wide view (no department restriction)
         self.dept_id = dept_id
+        self.dept_ids = dept_ids if dept_ids is not None else (
+            {dept_id} if dept_id else None
+        )
 
     def _org_filter(self, q, model=TestingRequest):
-        """Apply org-level filter. When dept_id is also set, narrows to that dept."""
+        """
+        Apply org-level filter.
+        When dept_ids is set, narrows to that department subtree
+        (root dept + all descendants) using an IN clause.
+        """
         if self.org_id:
             q = q.filter(model.organization_id == self.org_id)
-        if self.dept_id and hasattr(model, "department_id"):
-            q = q.filter(model.department_id == self.dept_id)
+        if self.dept_ids and hasattr(model, "department_id"):
+            q = q.filter(model.department_id.in_(self.dept_ids))
         return q
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -245,6 +264,7 @@ class DashboardService:
                              "Maintenance compliance", "green"),
             self._taqc_kpi(),
             self._failure_registry_kpi(),
+            self._pending_attribution_kpi(),
         ]
 
     def _total_active_requests_kpi(self) -> Dict:
@@ -456,6 +476,33 @@ class DashboardService:
             "colour": colour,
         }
 
+    def _pending_attribution_kpi(self) -> Dict:
+        """Count of completed-but-delayed stage instances awaiting vendor/KPTCL attribution."""
+        from sqlalchemy import func as sqlfunc
+        q = (
+            self.db.query(sqlfunc.count(RepairStageInstance.id))
+            .join(RepairWorkflow, RepairWorkflow.id == RepairStageInstance.workflow_id)
+            .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+            .filter(
+                RepairStageInstance.delay_days > 0,
+                RepairStageInstance.delay_attribution.is_(None),
+                RepairStageInstance.completed_at.isnot(None),
+                RepairWorkflow.status != "cancelled",
+            )
+        )
+        if self.org_id:
+            q = q.filter(Equipment.organization_id == self.org_id)
+        count = q.scalar() or 0
+        return {
+            "label": "Pending delay attribution",
+            "value": count,
+            "display": str(count),
+            "sub": "Delayed repair stages awaiting vendor / KPTCL attribution",
+            "trend": None,
+            "trend_dir": "up" if count > 0 else "neutral",
+            "colour": "amber" if count > 0 else "green",
+        }
+
     # ══════════════════════════════════════════════════════════════════════════
     # Panel Widgets
     # ══════════════════════════════════════════════════════════════════════════
@@ -635,55 +682,215 @@ class DashboardService:
         return _cached(key, self._compute_repair_progress)
 
     def _compute_repair_progress(self) -> List[Dict]:
-        rows = self._org_filter(
-            self.db.query(TestingRequest).filter(
-                TestingRequest.request_category == RequestCategory.repair_lifecycle,
-                TestingRequest.status.in_(OPEN_STATUSES),
-                TestingRequest.is_multi_session.is_(True),
-                TestingRequest.is_schedule_template.is_(False),  # exclude register templates
-            )
-        ).order_by(TestingRequest.cts.desc()).limit(10).all()
+        from collections import defaultdict
+
+        # Active + recently completed workflows (exclude cancelled)
+        q = (
+            self.db.query(RepairWorkflow)
+            .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+            .filter(RepairWorkflow.status != "cancelled")
+        )
+        if self.org_id:
+            q = q.filter(Equipment.organization_id == self.org_id)
+        workflows = q.order_by(RepairWorkflow.started_at.desc()).limit(10).all()
+
+        if not workflows:
+            return []
+
+        wf_ids = [wf.id for wf in workflows]
+
+        # Batch-load all stage instances for these workflows (avoids N+1)
+        instances = (
+            self.db.query(RepairStageInstance)
+            .filter(RepairStageInstance.workflow_id.in_(wf_ids))
+            .all()
+        )
+        inst_by_wf: Dict[Any, List] = defaultdict(list)
+        for inst in instances:
+            inst_by_wf[inst.workflow_id].append(inst)
 
         result = []
-        now = _now()
-        for req in rows:
-            sessions       = req.test_sessions or []
-            total_planned  = req.total_sessions_planned or max(len(sessions), 1)
-            completed_sess = sum(1 for s in sessions if s.status == "completed")
-            pct            = round(completed_sess / total_planned * 100)
+        for wf in workflows:
+            insts = inst_by_wf[wf.id]
+            completed_count = sum(1 for i in insts if i.status == "completed")
 
-            # Current / latest active session
-            active = next((s for s in sorted(sessions, key=lambda s: s.session_number, reverse=True)
-                           if s.status in ("in_progress", "completed")), None)
-            current_stage = active.session_number if active else 0
-            current_name  = active.session_name  if active else "Not started"
+            # Delay aggregations from real contracted-date tracking
+            vendor_delay = sum(
+                (i.delay_days or 0) for i in insts
+                if i.delay_attribution == "vendor" and (i.delay_days or 0) > 0
+            )
+            kptcl_delay = sum(
+                (i.delay_days or 0) for i in insts
+                if i.delay_attribution == "kptcl" and (i.delay_days or 0) > 0
+            )
+            pending_attr = sum(
+                1 for i in insts
+                if (i.delay_days or 0) > 0
+                and i.delay_attribution is None
+                and i.completed_at is not None
+            )
 
-            delay_text = ""
-            if active and active.scheduled_date:
-                sd = _make_tz(active.scheduled_date)
-                if sd < now and active.status != "completed":
-                    delay_text = f"Vendor delay: +{(now - sd).days} days attributable"
-            if not delay_text and active:
+            pct = wf.progress or 0
+            ueic = (wf.equipment.ueic if wf.equipment else None) or wf.workflow_number
+            current_name = (
+                wf.current_stage.name if wf.current_stage else
+                ("Completed" if wf.status == "completed" else "Pending")
+            )
+
+            # Human-readable delay summary (backward-compatible field)
+            if vendor_delay > 0:
+                delay_text = f"Vendor delay: +{vendor_delay} days"
+            elif pending_attr > 0:
+                delay_text = f"{pending_attr} stage(s) pending attribution"
+            elif kptcl_delay > 0:
+                delay_text = f"KPTCL delay: +{kptcl_delay} days"
+            else:
                 delay_text = "On schedule"
 
-            ueic = (req.equipment.ueic if req.equipment
-                    else (req.equipment_type.name if req.equipment_type else req.title))
+            timeliness_status = (
+                "delayed" if vendor_delay > 0 or kptcl_delay > 0 else
+                "pending_attribution" if pending_attr > 0 else
+                "on_time"
+            )
 
-            failure_date = _make_tz(req.requested_date or req.cts)
             result.append({
-                "id": str(req.id),
+                "id": str(wf.id),
+                "workflow_number": wf.workflow_number,
                 "ueic": ueic,
-                "title": req.title,
-                "request_number": req.request_number,
-                "current_stage": current_stage,
+                "title": wf.workflow_number,
+                "current_stage": completed_count,
                 "current_stage_name": current_name,
-                "total_stages": total_planned,
-                "completed_stages": completed_sess,
+                "total_stages": len(insts),
+                "completed_stages": completed_count,
                 "pct": pct,
                 "delay_text": delay_text,
-                "failure_date": failure_date.isoformat() if failure_date else None,
+                # ── Structured timeliness fields (new) ──
+                "vendor_delay_days": vendor_delay,
+                "kptcl_delay_days": kptcl_delay,
+                "pending_attribution": pending_attr,
+                "contracted_completion": (
+                    wf.contracted_completion.isoformat()
+                    if wf.contracted_completion else None
+                ),
+                "timeliness_status": timeliness_status,
+                "failure_date": wf.started_at.isoformat() if wf.started_at else None,
             })
         return result
+
+    # ── Repair timeliness summary (SEE / CEE / admin) ───────────────────────
+
+    def repair_timeliness(self) -> Dict:
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget="repair_timeliness")
+        return _cached(key, self._compute_repair_timeliness)
+
+    def _compute_repair_timeliness(self) -> Dict:
+        from collections import defaultdict
+
+        _empty = {
+            "total_active": 0, "on_time": 0, "delayed": 0,
+            "pending_attribution": 0, "total_vendor_delay_days": 0,
+            "total_kptcl_delay_days": 0, "pending_attribution_stages": 0,
+            "by_workflow": [],
+        }
+
+        q = (
+            self.db.query(RepairWorkflow)
+            .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+            .filter(RepairWorkflow.status != "cancelled")
+        )
+        if self.org_id:
+            q = q.filter(Equipment.organization_id == self.org_id)
+        workflows = q.all()
+
+        if not workflows:
+            return _empty
+
+        wf_ids = [wf.id for wf in workflows]
+        instances = (
+            self.db.query(RepairStageInstance)
+            .filter(RepairStageInstance.workflow_id.in_(wf_ids))
+            .all()
+        )
+        inst_by_wf: Dict[Any, List] = defaultdict(list)
+        for inst in instances:
+            inst_by_wf[inst.workflow_id].append(inst)
+
+        total_active       = len(workflows)
+        on_time_count      = 0
+        delayed_count      = 0
+        pending_attr_wfs   = 0
+        total_vendor_days  = 0
+        total_kptcl_days   = 0
+        total_pending_stgs = 0
+        by_workflow        = []
+
+        for wf in workflows:
+            insts = inst_by_wf[wf.id]
+
+            vendor_delay = sum(
+                (i.delay_days or 0) for i in insts
+                if i.delay_attribution == "vendor" and (i.delay_days or 0) > 0
+            )
+            kptcl_delay = sum(
+                (i.delay_days or 0) for i in insts
+                if i.delay_attribution == "kptcl" and (i.delay_days or 0) > 0
+            )
+            pending_attr = sum(
+                1 for i in insts
+                if (i.delay_days or 0) > 0
+                and i.delay_attribution is None
+                and i.completed_at is not None
+            )
+
+            total_vendor_days  += vendor_delay
+            total_kptcl_days   += kptcl_delay
+            total_pending_stgs += pending_attr
+
+            if vendor_delay > 0 or kptcl_delay > 0:
+                delayed_count += 1
+                timeliness = "delayed"
+            elif pending_attr > 0:
+                pending_attr_wfs += 1
+                timeliness = "pending_attribution"
+            else:
+                on_time_count += 1
+                timeliness = "on_time"
+
+            # Only surface problem workflows in the detail list
+            if timeliness != "on_time":
+                ueic = (wf.equipment.ueic if wf.equipment else None) or wf.workflow_number
+                by_workflow.append({
+                    "workflow_id":               str(wf.id),
+                    "workflow_number":            wf.workflow_number,
+                    "ueic":                       ueic,
+                    "vendor_delay_days":          vendor_delay,
+                    "kptcl_delay_days":           kptcl_delay,
+                    "pending_attribution_stages": pending_attr,
+                    "timeliness_status":          timeliness,
+                    "contracted_completion": (
+                        wf.contracted_completion.isoformat()
+                        if wf.contracted_completion else None
+                    ),
+                })
+
+        # Delayed first, then pending attribution; alphabetical within each group
+        by_workflow.sort(
+            key=lambda r: (
+                0 if r["timeliness_status"] == "delayed" else 1,
+                r["workflow_number"],
+            )
+        )
+
+        return {
+            "total_active":              total_active,
+            "on_time":                   on_time_count,
+            "delayed":                   delayed_count,
+            "pending_attribution":       pending_attr_wfs,
+            "total_vendor_delay_days":   total_vendor_days,
+            "total_kptcl_delay_days":    total_kptcl_days,
+            "pending_attribution_stages": total_pending_stgs,
+            "by_workflow":               by_workflow[:15],
+        }
 
     # ── Maintenance overdue list ─────────────────────────────────────────────
 
@@ -922,6 +1129,188 @@ class DashboardService:
             })
         return {"total": total, "overdue": overdue, "items": items}
 
+    # ── Projected tickets by month ───────────────────────────────────────────
+
+    def projected_tickets_by_month(self, year: int | None = None) -> Dict:
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget=f"projected_tickets_{year}")
+        return _cached(key, lambda: self._compute_projected_tickets(year))
+
+    def _compute_projected_tickets(self, year: int | None) -> Dict:
+        """
+        For every active operational schedule (equipment_id IS NOT NULL),
+        project how many tickets will fire in each month of `year` by walking
+        the schedule's frequency from next_run_date forward.
+
+        Returns:
+          {
+            "year": 2026,
+            "months": [
+              {"month": 1, "label": "Jan", "count": 12, "by_category": {...}},
+              ...
+            ],
+            "total": 84
+          }
+        """
+        from models import TestRequestSchedule, ScheduleFrequency
+        from dateutil.relativedelta import relativedelta
+
+        now = _now()
+        target_year = year or now.year
+
+        jan_1 = datetime(target_year, 1, 1, tzinfo=timezone.utc)
+        dec_31 = datetime(target_year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+
+        # Frequency → approximate delta for projection
+        def _delta(freq: ScheduleFrequency):
+            mapping = {
+                ScheduleFrequency.daily:       timedelta(days=1),
+                ScheduleFrequency.weekly:      timedelta(weeks=1),
+                ScheduleFrequency.biweekly:    timedelta(weeks=2),
+                ScheduleFrequency.monthly:     relativedelta(months=1),
+                ScheduleFrequency.quarterly:   relativedelta(months=3),
+                ScheduleFrequency.semi_annual: relativedelta(months=6),
+                ScheduleFrequency.yearly:      relativedelta(years=1),
+                ScheduleFrequency.triennial:   relativedelta(years=3),
+            }
+            return mapping.get(freq, relativedelta(years=1))
+
+        q = self.db.query(TestRequestSchedule).filter(
+            TestRequestSchedule.is_active.is_(True),
+            TestRequestSchedule.is_deleted.is_(False),
+        )
+        if self.org_id:
+            q = q.filter(TestRequestSchedule.organization_id == self.org_id)
+
+        schedules = q.all()
+
+        # month buckets: {month: {category: count}}
+        buckets: dict[int, dict[str, int]] = {m: {} for m in range(1, 13)}
+
+        for sched in schedules:
+            cat = sched.request_category.value if sched.request_category else "test"
+            delta = _delta(sched.frequency)
+
+            # Start projecting from next_run_date (or start_date if in future)
+            run_date = _make_tz(sched.next_run_date)
+
+            # Walk backwards if next_run_date is after year end — not relevant
+            # Walk forward until end of target year
+            # Cap iterations to avoid infinite loop for daily schedules
+            max_iter = 400
+            itr = 0
+            while run_date <= dec_31 and itr < max_iter:
+                if run_date >= jan_1:
+                    m = run_date.month
+                    buckets[m][cat] = buckets[m].get(cat, 0) + 1
+                run_date = run_date + delta
+                itr += 1
+
+        # Also include already-scheduled TestingRequest records (status='scheduled')
+        # that have a scheduled_start_date in the target year.
+        from models import TestingRequest, TestingRequestStatus
+        sq = self.db.query(TestingRequest).filter(
+            TestingRequest.status == TestingRequestStatus.scheduled,
+            TestingRequest.scheduled_start_date.isnot(None),
+            TestingRequest.scheduled_start_date >= jan_1,
+            TestingRequest.scheduled_start_date <= dec_31,
+        )
+        if self.org_id:
+            sq = sq.filter(TestingRequest.organization_id == self.org_id)
+        for tr in sq.all():
+            cat = tr.request_category.value if tr.request_category else "test"
+            m = tr.scheduled_start_date.month
+            buckets[m][cat] = buckets[m].get(cat, 0) + 1
+
+        month_labels = ["Jan","Feb","Mar","Apr","May","Jun",
+                         "Jul","Aug","Sep","Oct","Nov","Dec"]
+        months = []
+        total = 0
+        for m in range(1, 13):
+            count = sum(buckets[m].values())
+            total += count
+            months.append({
+                "month": m,
+                "label": month_labels[m - 1],
+                "count": count,
+                "by_category": buckets[m],
+            })
+
+        return {"year": target_year, "months": months, "total": total}
+
+    # ── Created vs Completed tickets by month ────────────────────────────────
+
+    def tickets_created_vs_completed(self, year: int | None = None) -> Dict:
+        key = _cache_key(self.org_id, dept_id=self.dept_id, widget=f"created_vs_completed_{year}")
+        return _cached(key, lambda: self._compute_created_vs_completed(year))
+
+    def _compute_created_vs_completed(self, year: int | None) -> Dict:
+        """
+        Month-by-month count of:
+          - created   : tickets whose cts falls in the month  (is_schedule_template=False)
+          - completed : tickets whose completed_at falls in the month
+
+        Returns:
+          {
+            "year": 2026,
+            "months": [
+              {"month": 1, "label": "Jan", "created": 8, "completed": 5},
+              ...
+            ]
+          }
+        """
+        from sqlalchemy import extract, case
+
+        now = _now()
+        target_year = year or now.year
+
+        # ── Created per month ──────────────────────────────────────────────
+        created_q = (
+            self.db.query(
+                extract("month", TestingRequest.cts).label("month"),
+                func.count(TestingRequest.id).label("cnt"),
+            )
+            .filter(
+                extract("year", TestingRequest.cts) == target_year,
+                TestingRequest.is_schedule_template.is_(False),
+            )
+        )
+        if self.org_id:
+            created_q = created_q.filter(TestingRequest.organization_id == self.org_id)
+        created_q = created_q.group_by("month")
+
+        created_map = {int(row.month): row.cnt for row in created_q.all()}
+
+        # ── Completed per month ────────────────────────────────────────────
+        completed_q = (
+            self.db.query(
+                extract("month", TestingRequest.completed_at).label("month"),
+                func.count(TestingRequest.id).label("cnt"),
+            )
+            .filter(
+                extract("year", TestingRequest.completed_at) == target_year,
+                TestingRequest.completed_at.isnot(None),
+                TestingRequest.is_schedule_template.is_(False),
+            )
+        )
+        if self.org_id:
+            completed_q = completed_q.filter(TestingRequest.organization_id == self.org_id)
+        completed_q = completed_q.group_by("month")
+
+        completed_map = {int(row.month): row.cnt for row in completed_q.all()}
+
+        month_labels = ["Jan","Feb","Mar","Apr","May","Jun",
+                         "Jul","Aug","Sep","Oct","Nov","Dec"]
+        months = []
+        for m in range(1, 13):
+            months.append({
+                "month": m,
+                "label": month_labels[m - 1],
+                "created":   created_map.get(m, 0),
+                "completed": completed_map.get(m, 0),
+            })
+
+        return {"year": target_year, "months": months}
+
     # ── Role view metadata ───────────────────────────────────────────────────
 
     def role_view(self, user_id: UUID) -> Dict:
@@ -935,13 +1324,13 @@ class DashboardService:
         WIDGETS: Dict[str, List[str]] = {
             "admin": [
                 "kpi_cards", "overdue_tests", "active_alerts",
-                "flagged_equipment", "repair_progress",
+                "flagged_equipment", "repair_progress", "repair_timeliness",
                 "maintenance_overdue", "procurement_pipeline",
                 "open_remediation", "failure_registry", "taqc_inspections",
             ],
             "see_cee": [
                 "kpi_cards", "overdue_tests", "active_alerts",
-                "flagged_equipment", "repair_progress",
+                "flagged_equipment", "repair_progress", "repair_timeliness",
                 "procurement_pipeline", "open_remediation",
                 "failure_registry", "taqc_inspections",
             ],
@@ -958,6 +1347,13 @@ class DashboardService:
             "generic": [
                 "overdue_tests", "open_remediation",
             ],
+             "asset": [
+                "kpi_cards",
+                "overdue_tests",
+                "failure_registry",
+                "maintenance_overdue",
+                "open_remediation",
+            ],
         }
         return {
             "view":              view,
@@ -972,9 +1368,9 @@ class DashboardService:
         """AEE / field-supervisor dashboard data — all DB access centralised here."""
         org_id = self.org_id
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-        dept_id = self.dept_id
-        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
-        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+        dept_ids = self.dept_ids
+        dept_cond_tr = (TestingRequest.department_id.in_(dept_ids)) if dept_ids else true()
+        dept_cond_eq = (Equipment.department_id.in_(dept_ids)) if dept_ids else true()
 
         pending_approvals = (
             self.db.query(func.count(TestingRequest.id))
@@ -1097,9 +1493,9 @@ class DashboardService:
         """EE TLSS condition-monitoring dashboard."""
         org_id = self.org_id
         ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
-        dept_id = self.dept_id
-        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
-        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+        dept_ids = self.dept_ids
+        dept_cond_tr = (TestingRequest.department_id.in_(dept_ids)) if dept_ids else true()
+        dept_cond_eq = (Equipment.department_id.in_(dept_ids)) if dept_ids else true()
 
         total_equipment = (
             self.db.query(func.count(Equipment.id))
@@ -1246,9 +1642,9 @@ class DashboardService:
         """SEE circle-level supervision dashboard."""
         org_id = self.org_id
         ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
-        dept_id = self.dept_id
-        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
-        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+        dept_ids = self.dept_ids
+        dept_cond_tr = (TestingRequest.department_id.in_(dept_ids)) if dept_ids else true()
+        dept_cond_eq = (Equipment.department_id.in_(dept_ids)) if dept_ids else true()
 
         total_equipment = (
             self.db.query(func.count(Equipment.id))
@@ -1326,9 +1722,9 @@ class DashboardService:
     def cee_dashboard(self) -> Dict:
         """CEE zone-level executive dashboard."""
         org_id = self.org_id
-        dept_id = self.dept_id
-        dept_cond_tr = (TestingRequest.department_id == dept_id) if dept_id else true()
-        dept_cond_eq = (Equipment.department_id == dept_id) if dept_id else true()
+        dept_ids = self.dept_ids
+        dept_cond_tr = (TestingRequest.department_id.in_(dept_ids)) if dept_ids else true()
+        dept_cond_eq = (Equipment.department_id.in_(dept_ids)) if dept_ids else true()
 
         zone_equipment = (
             self.db.query(func.count(Equipment.id))

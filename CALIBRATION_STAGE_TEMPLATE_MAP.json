@@ -1,0 +1,6 @@
+{
+  "Calibration Due Review": "cal_stage_review",
+  "Send to Lab":            "cal_stage_execution",
+  "Certificate Upload":     "cal_stage_certificate",
+  "Officer Verification":   "cal_stage_officer_verification"
+}

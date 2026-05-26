@@ -2358,6 +2358,7 @@ KPI_ENDPOINTS = [
     "/dashboard/open-remediation",
     "/dashboard/failure-registry",
     "/dashboard/taqc-inspections",
+     "/dashboard/asset", 
     # ── Typed full dashboard routes (Flutter calls based on default_module.path) ──
     "/dashboard/full",              # convenience: resolves type from default_module
     "/dashboard/admin/full",        # ->admin_dashboard module path

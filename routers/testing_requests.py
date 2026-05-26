@@ -13,7 +13,8 @@ from schemas import (
     TestingRequestAssign,
     TestingRequestResponse,
 )
-from services.testing_request_service import TestingRequestService, get_dept_subtree_ids
+from services.testing_request_service import TestingRequestService
+from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
 
 router = APIRouter(
     prefix="/testing_requests",
@@ -161,6 +162,25 @@ def list_lifecycle_types(db: Session = Depends(get_db)):
     return TestingRequestService(db).list_lifecycle_types()
 
 
+# ─── All test types by category (no equipment filter) ───────────────────────
+@router.get("/all-test-types")
+def list_all_test_types(
+    category: str = None,
+    db: Session = Depends(get_db),
+):
+    """Return all CategoryDetails (test types) grouped by category_type, with
+    lifecycle flags resolved from their OrgTestTemplate.
+
+    Optional ?category=test|maintenance|inspection|repair_lifecycle to filter.
+
+    Flutter uses this to populate the test-type dropdown when no equipment
+    type is selected — so calibration/cumulative maintenance types (Protection
+    Relay Calibration, Circuit Breaker Operations Count, etc.) are accessible
+    without first picking a specific registered equipment.
+    """
+    return TestingRequestService(db).list_all_test_types(category=category)
+
+
 # ─── Generic dropdown by master description ─────────────
 @router.get("/dropdown/{master_desc}")
 def get_dropdown_values(master_desc: str, db: Session = Depends(get_db)):
@@ -234,6 +254,7 @@ def list_testing_requests(
     originator_id: Optional[UUID] = None,
     tester_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
+    equipment_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -268,6 +289,7 @@ def list_testing_requests(
         organization_id=organization_id,
         department_id=department_id if dept_ids is None else None,
         department_ids=dept_ids,
+        equipment_id=equipment_id,
     )
     return [_enrich(r) for r in requests]
 
