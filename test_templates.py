@@ -3995,23 +3995,12 @@ REQUEST_CATEGORY_TO_TEMPLATE = {
 
 
 TEST_TYPE_TO_TEMPLATE = {
-    # Existing mappings
-    "Relay Testing Report": "relay_testing_report",
-    "Differential Protection Test": "differential_protection_test",
-    "Stability / Bias Test": "stability_bias_test",
-    "Protection Relay Functional Test": "protection_relay_functional_test",
-    "Insulation Resistance (IR) Test": "insulation_resistance_test",
-    "CT Ratio Test": "ct_ratio_test",
-    "Core Insulation Test": "core_insulation_test",
-    "Transformer Protection Commissioning": "transformer_protection_commissioning",
-    "Energy meter accuracy test": "energy_meter_accuracy_test",
-    "Physical inspection": "physical_inspection",
-    "Insulation resistance test": "insulation_resistance_test",
-    "Transformer ratio test": "transformer_ratio_test",
-    "Current ratio test": "current_ratio_test",
-    "Short circuit test": "short_circuit_test",
-    "Open circuit test": "open_circuit_test",
-    "Magnetic balance test": "magnetic_balance_test",
+    # ── Protection Relay ──
+    "Protection Relay Functional Test":    "protection_relay_functional_test",
+    # ── Current Transformer ──
+    "Insulation Resistance (IR) Test":     "insulation_resistance_test",
+    "CT Ratio Test":                       "ct_ratio_test",
+    "Core Insulation Test":                "core_insulation_test",
     # ── New mappings from HTML mockups ──
     # Meter
     "Meter Testing": "meter_testing",
@@ -4095,16 +4084,21 @@ TEST_TYPE_TO_TEMPLATE = {
     "General Maintenance":  "transformer_inspection",
 
     # Repair lifecycle stages → transformer_repair_lifecycle
-    "S1: Failure Report":                  "transformer_repair_lifecycle",
-    "S2: Repair Committee":                "transformer_repair_lifecycle",
-    "S3: Allotment to Repairer":           "transformer_repair_lifecycle",
-    "S4: Lifting by Repairer":             "transformer_repair_lifecycle",
-    "S5: Joint Inspection at Vendor":      "transformer_repair_lifecycle",
-    "S6: Estimate & Revised Work Award":   "transformer_repair_lifecycle",
-    "S7: Stage Inspections":               "transformer_repair_lifecycle",
-    "S8: Final Inspection":                "transformer_repair_lifecycle",
-    "S9: Dispatch":                        "transformer_repair_lifecycle",
+    # Power Transformer (10 stages)
+    "S1: Failure Report":                     "transformer_repair_lifecycle",
+    "S2: Repair Committee":                   "transformer_repair_lifecycle",
+    "S3: Allotment to Repairer":              "transformer_repair_lifecycle",
+    "S4: Lifting by Repairer":                "transformer_repair_lifecycle",
+    "S5: Joint Inspection at Vendor":         "transformer_repair_lifecycle",
+    "S6: Estimate & Revised Work Award":      "transformer_repair_lifecycle",
+    "S7: Stage Inspections":                  "transformer_repair_lifecycle",
+    "S8: Final Inspection":                   "transformer_repair_lifecycle",
+    "S9: Dispatch":                           "transformer_repair_lifecycle",
     "S10: Erection, Testing & Commissioning": "transformer_repair_lifecycle",
+    # Surge Arrestor (3 stages)
+    "S3: Replacement / Repair":               "transformer_repair_lifecycle",
+    # Battery Set (2 stages)
+    "S2: Battery Replacement":                "transformer_repair_lifecycle",
 }
 
 
