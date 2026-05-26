@@ -1347,6 +1347,13 @@ class DashboardService:
             "generic": [
                 "overdue_tests", "open_remediation",
             ],
+             "asset": [
+                "kpi_cards",
+                "overdue_tests",
+                "failure_registry",
+                "maintenance_overdue",
+                "open_remediation",
+            ],
         }
         return {
             "view":              view,

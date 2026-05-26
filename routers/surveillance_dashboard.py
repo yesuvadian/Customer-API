@@ -25,6 +25,7 @@ from auth_utils import get_current_user
 from database import get_db
 from models import (
     Equipment,
+    RepairStageDefinition,
     RepairStageInstance,
     RepairSurveillanceTest,
     RepairWorkflow,
@@ -325,6 +326,49 @@ def get_surveillance_dashboard(
             'equipment': equipment_name,
             'message': f'Q{quarter} has incomplete tests',
         })
+
+    # Alert 3: Overdue quarterly reviews (missed SLA deadlines)
+    now = datetime.now(timezone.utc)
+    overdue_stages = (
+        db.query(
+            RepairWorkflow.id,
+            Equipment.ueic,
+            RepairStageInstance.quarter_number,
+            RepairStageInstance.started_at,
+            RepairStageDefinition.default_duration_days
+        )
+        .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+        .join(
+            RepairStageInstance,
+            RepairStageInstance.id == RepairWorkflow.current_stage_instance_id
+        )
+        .join(
+            RepairStageDefinition,
+            RepairStageDefinition.id == RepairStageInstance.stage_id
+        )
+        .filter(
+            RepairWorkflow.workflow_type == 'surveillance',
+            RepairWorkflow.status == 'active',
+            RepairStageInstance.started_at.isnot(None),
+            RepairStageDefinition.default_duration_days.isnot(None),
+            Equipment.organization_id == org_id
+        )
+        .all()
+    )
+
+    for wf_id, equipment_name, quarter, started_at, duration_days in overdue_stages:
+        deadline = started_at + timedelta(days=duration_days)
+        days_overdue = (now - deadline).days
+
+        if days_overdue > 0:
+            alerts.append({
+                'type': 'overdue_stage',
+                'severity': 'high',
+                'workflow_id': str(wf_id),
+                'equipment': equipment_name,
+                'message': f'Q{quarter} review overdue by {days_overdue} day(s)',
+                'days_overdue': days_overdue,
+            })
 
     # ── Response ─────────────────────────────────────────────────────────────
     return {

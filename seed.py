@@ -1412,14 +1412,16 @@ def seed_modules(session):
 {"name": "Equipment", "description": "Equipment asset register with UEIC auto-generation", "path": "equipment", "group_name": "Testing"},
 # ✅ DASHBOARD KPI MODULES - Role-specific dashboards
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
+{"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
+{"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
-{"name": "Notification Templates", "description": "Configure email/SMS/in-app notification templates per event type", "path": "org_notification_templates", "group_name": "Organization"},
-{"name": "Notification Routing",   "description": "Configure routing rules — which roles receive which notifications", "path": "org_notification_routing",   "group_name": "Organization"},
-{"name": "Notification Schedules", "description": "Configure scheduled notification rules (due-date reminders, digests)", "path": "org_notification_schedules", "group_name": "Organization"},
+{"name": "Notification Templates", "description": "Configure email/SMS/in-app notification templates per event type", "path": "org_notification_templates", "group_name": "Organization", "is_menu": False},
+{"name": "Notification Routing",   "description": "Configure routing rules — which roles receive which notifications", "path": "org_notification_routing",   "group_name": "Organization", "is_menu": False},
+{"name": "Notification Schedules", "description": "Configure scheduled notification rules (due-date reminders, digests)", "path": "org_notification_schedules", "group_name": "Organization", "is_menu": False},
 # ✅ REPORTING SUITE MODULE
 {"name": "Reports", "description": "Generic report engine — 14 SRS operational reports with Excel/PDF export", "path": "reports", "group_name": "Testing"},
 # ✅ DIRECT SUBMISSION MODULES (Stage 2 & Stage 10 — no tester assignment)
@@ -1735,7 +1737,7 @@ def seed_privileges(session, role_ids, module_ids):
             "can_delete": True, "can_search": True, "can_assign": True
         },
         # Removed: Validation Requests privilege (module not implemented)
-        {"role": "Asset Data Officer","module": "Dashboard", "can_view": True},
+       {"role": "Asset Data Officer","module": "Asset Dashboard", "can_view": True},
         # Originator — Procurement modules (full add/edit)
         {"role": "Asset Data Officer","module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
         {"role": "Asset Data Officer","module": "RQ with Vendor",      "can_view": True, "can_add": True, "can_edit": True},
@@ -3106,6 +3108,8 @@ def seed_role_templates(session):
 
     # Role-specific dashboard module IDs
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
+    asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
+    test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
     aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
     see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
     cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
@@ -3246,7 +3250,7 @@ def seed_role_templates(session):
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "default_module_id": aee_dashboard_module_id,
+           "default_module_id": modules_by_name.get("Asset Dashboard"),
             "permissions_template": (
                 _readonly(dashboard_module) +
                 _readonly(testing_requests_module) +
@@ -9010,6 +9014,15 @@ def seed_surveillance_workflow(session):
     }
     CODE_TO_NAME = {v: k for k, v in NAME_TO_CODE.items()}
 
+    # Default duration for each surveillance stage (in days)
+    DEFAULT_SURVEILLANCE_DURATION_DAYS = {
+        "Q1_SURVEILLANCE":    30,  # 30 days to complete quarterly review
+        "Q2_SURVEILLANCE":    30,
+        "Q3_SURVEILLANCE":    30,
+        "Q4_SURVEILLANCE":    30,
+        "FINAL_EVALUATION":   45,  # 45 days for comprehensive final report
+    }
+
     # ── 0. Workflow definition ────────────────────────────────────────────────
     wf_def = session.query(RepairWorkflowDefinition).filter_by(workflow_code="SURVEILLANCE").first()
     if not wf_def:
@@ -9047,10 +9060,13 @@ def seed_surveillance_workflow(session):
     for s in stages_raw:
         name = s["name"]
         code = NAME_TO_CODE.get(name, name.upper().replace(" ", "_"))
+        duration = DEFAULT_SURVEILLANCE_DURATION_DAYS.get(code)
         existing = session.query(RepairStageDefinition).filter_by(code=code).first()
         if existing:
             if existing.workflow_definition_id != wf_def.id:
                 existing.workflow_definition_id = wf_def.id
+            if duration is not None and existing.default_duration_days != duration:
+                existing.default_duration_days = duration
             stage_map[name] = existing.id
             code_map[code]  = existing.id
             continue
@@ -9062,6 +9078,7 @@ def seed_surveillance_workflow(session):
             is_active=True,
             is_mandatory=True,
             workflow_definition_id=wf_def.id,
+            default_duration_days=duration,
         )
         session.add(stage)
         session.flush()
@@ -9272,10 +9289,10 @@ def _dft_get_or_create_dept(session, org_id, name, code,
 # Must match the Module.path values seeded in seed_modules().
 _DFT_ROLE_MODULE_PATH = {
     "System Administrator":             "admin_dashboard",
-    "Asset Data Officer":               "aee_dashboard",
+    "Asset Data Officer":               "asset_dashboard",
     "Maintenance Officer":              "aee_dashboard",
     "Test Engineer":                    "aee_dashboard",
-    "Test & Work Coordinator":          "aee_dashboard",
+    "Test & Work Coordinator":          "test_coordinator_dashboard",
     "Reviewing Officer":                "ee_tlss_dashboard",
     "Supervisory Officer":              "see_dashboard",
     "Senior Management Approver":       "cee_dashboard",
@@ -9300,13 +9317,14 @@ def _dft_get_or_create_role(session, org_id, name,
         if r.is_dept_admin != is_dept_admin:
             r.is_dept_admin = is_dept_admin
             updated = True
-        if not r.default_module_id:
-            module_path = _DFT_ROLE_MODULE_PATH.get(name)
-            if module_path:
-                mod = session.query(Module).filter_by(path=module_path).first()
-                if mod:
-                    r.default_module_id = mod.id
-                    updated = True
+    module_path = _DFT_ROLE_MODULE_PATH.get(name)
+
+    if module_path:
+        mod = session.query(Module).filter_by(path=module_path).first()
+
+        if mod and r.default_module_id != mod.id:
+            r.default_module_id = mod.id
+            updated = True
         if updated:
             session.flush()
         return r

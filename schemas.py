@@ -2276,6 +2276,8 @@ class EquipmentCreate(BaseModel):
     model_number: Optional[str] = None
     factory_serial_number: Optional[str] = None
     year_of_manufacture: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     phase: Optional[str] = None
     ct_ratio_actual: Optional[str] = None
     ct_ratio_current: Optional[str] = None
@@ -2293,6 +2295,8 @@ class EquipmentUpdate(BaseModel):
     factory_serial_number: Optional[str] = None
     year_of_manufacture: Optional[int] = None
     commissioned_date: Optional[datetime] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     phase: Optional[str] = None
     ct_ratio_actual: Optional[str] = None
     ct_ratio_current: Optional[str] = None
@@ -2351,6 +2355,8 @@ class EquipmentResponse(BaseModel):
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    latitude: Optional[float] = None   
+    longitude: Optional[float] = None
 
     class Config:
         from_attributes = True

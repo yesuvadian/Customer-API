@@ -201,6 +201,8 @@ class EquipmentService:
         model_number: Optional[str] = None,
         factory_serial_number: Optional[str] = None,
         year_of_manufacture: Optional[int] = None,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
         phase: Optional[str] = None,
         ct_ratio_actual: Optional[str] = None,
         ct_ratio_current: Optional[str] = None,
@@ -241,6 +243,8 @@ class EquipmentService:
             model_number=model_number,
             factory_serial_number=factory_serial_number,
             year_of_manufacture=year_of_manufacture,
+            latitude=latitude,
+            longitude=longitude,
             phase=phase,
             ct_ratio_actual=ct_ratio_actual,
             ct_ratio_current=ct_ratio_current,
@@ -290,7 +294,7 @@ class EquipmentService:
         search: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
-        # ── year filters (new) ──────────────────────────────────────────────
+        # ── year filters ────────────────────────────────────────────────────
         commission_year: Optional[int] = None,
         commission_year_from: Optional[int] = None,
         commission_year_to: Optional[int] = None,
@@ -413,9 +417,7 @@ class EquipmentService:
             .limit(limit)
             .all()
         )
-
-        print(f"[EQUIPMENT FOUND] {len(results)}")
-        return results
+        # NOTE: dead code (print + second return) that was here has been removed.
 
     @classmethod
     def update_equipment(
@@ -434,6 +436,7 @@ class EquipmentService:
             "nameplate_data", "voltage_class", "bay_number", "manufacturer",
             "model_number", "factory_serial_number", "year_of_manufacture",
             "commissioned_date", "retirement_reason",
+            "latitude", "longitude",
             "phase", "ct_ratio_actual", "ct_ratio_current",
             "pt_ratio", "vector_group", "impedance_pct",
         ]
@@ -568,12 +571,14 @@ class EquipmentService:
         organization_id: Optional[UUID] = None,
         department_id: Optional[UUID] = None,
     ) -> dict:
-        """Get equipment counts by status."""
+        """Get equipment counts by status, optionally scoped to department subtree."""
         query = db.query(Equipment.status, func.count(Equipment.id))
         if organization_id:
             query = query.filter(Equipment.organization_id == organization_id)
         if department_id:
-            query = query.filter(Equipment.department_id == department_id)
+            # Include descendant departments
+            dept_ids = cls._get_department_subtree_ids(db, department_id)
+            query = query.filter(Equipment.department_id.in_(dept_ids))
 
         rows = query.group_by(Equipment.status).all()
         counts = {s.value: 0 for s in EquipmentStatus}
