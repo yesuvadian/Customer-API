@@ -4083,22 +4083,6 @@ TEST_TYPE_TO_TEMPLATE = {
     "Environmental":        "transformer_inspection",
     "General Maintenance":  "transformer_inspection",
 
-    # Repair lifecycle stages → transformer_repair_lifecycle
-    # Power Transformer (10 stages)
-    "S1: Failure Report":                     "transformer_repair_lifecycle",
-    "S2: Repair Committee":                   "transformer_repair_lifecycle",
-    "S3: Allotment to Repairer":              "transformer_repair_lifecycle",
-    "S4: Lifting by Repairer":                "transformer_repair_lifecycle",
-    "S5: Joint Inspection at Vendor":         "transformer_repair_lifecycle",
-    "S6: Estimate & Revised Work Award":      "transformer_repair_lifecycle",
-    "S7: Stage Inspections":                  "transformer_repair_lifecycle",
-    "S8: Final Inspection":                   "transformer_repair_lifecycle",
-    "S9: Dispatch":                           "transformer_repair_lifecycle",
-    "S10: Erection, Testing & Commissioning": "transformer_repair_lifecycle",
-    # Surge Arrestor (3 stages)
-    "S3: Replacement / Repair":               "transformer_repair_lifecycle",
-    # Battery Set (2 stages)
-    "S2: Battery Replacement":                "transformer_repair_lifecycle",
 }
 
 

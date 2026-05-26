@@ -2426,18 +2426,7 @@ def seed_test_type_categories(session, master_ids):
                 "Environmental",
                 "General Maintenance",
             ],
-            "repair_lifecycle": [
-                "S1: Failure Report",
-                "S2: Repair Committee",
-                "S3: Allotment to Repairer",
-                "S4: Lifting by Repairer",
-                "S5: Joint Inspection at Vendor",
-                "S6: Estimate & Revised Work Award",
-                "S7: Stage Inspections",
-                "S8: Final Inspection",
-                "S9: Dispatch",
-                "S10: Erection, Testing & Commissioning",
-            ],
+            # repair_lifecycle stages removed — handled by RepairWorkflow stage system
         },
         "Circuit Breaker": {
             "test": [
@@ -2508,11 +2497,7 @@ def seed_test_type_categories(session, master_ids):
                 "General Maintenance",
                 "Documentation",
             ],
-            "repair_lifecycle": [
-                "S1: Failure Report",
-                "S2: Repair Committee",
-                "S3: Replacement / Repair",
-            ],
+            # repair_lifecycle stages removed — handled by RepairWorkflow stage system
         },
         # ── Battery Set ──────────────────────────────────────────────────────
         "Battery Set": {
@@ -2533,10 +2518,7 @@ def seed_test_type_categories(session, master_ids):
                 "Documentation",
                 "Environmental",
             ],
-            "repair_lifecycle": [
-                "S1: Failure Report",
-                "S2: Battery Replacement",
-            ],
+            # repair_lifecycle stages removed — handled by RepairWorkflow stage system
         },
         # ── Current Transformer ──────────────────────────────────────────────
         "Current Transformer": {
