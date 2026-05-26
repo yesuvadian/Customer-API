@@ -1339,15 +1339,36 @@ def _get_org_roles(db: Session, organization_id=None) -> list:
 
 
 def _get_equipment_types(db: Session) -> list:
-    """Return [{value, label}] of active equipment categories from CategoryMaster."""
-    from models import CategoryMaster
-    rows = (
-        db.query(CategoryMaster.name)
-        .filter(CategoryMaster.is_active.is_(True))
-        .order_by(CategoryMaster.name)
-        .all()
-    )
-    return [{"value": r[0], "label": r[0]} for r in rows]
+    """
+    Return equipment types with their test types grouped by activity category.
+    Uses the same rich structure as the testing request form for consistency.
+
+    Returns:
+        [{
+            "id": int,
+            "name": str,
+            "value": str,  # For backwards compatibility
+            "label": str,  # For backwards compatibility
+            "types_by_category": {
+                "test": [{id, name, category_type, enable_cumulative, enable_calibration}, ...],
+                "maintenance": [...],
+                "inspection": [...],
+                "repair_lifecycle": [...]
+            }
+        }]
+    """
+    from services.testing_request_service import TestingRequestService
+
+    # Reuse the testing request service logic to get equipment types with tests
+    service = TestingRequestService(db)
+    equipment_types = service.list_equipment_types()
+
+    # Add backwards-compatible value/label fields
+    for eq in equipment_types:
+        eq['value'] = eq['name']
+        eq['label'] = eq['name']
+
+    return equipment_types
 
 
 @router.get("/routing-rules/meta")

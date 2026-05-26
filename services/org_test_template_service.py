@@ -167,6 +167,7 @@ class OrgTestTemplateService:
         tmpl.modified_by = modified_by
 
         # When a global (system) template is updated, cascade the new
+<<<<<<< HEAD
         # template_data to ALL other rows with the same template_key so
         # that the tester always sees the latest definition regardless of
         # which test_type_id or org_id it resolves to.
@@ -188,6 +189,24 @@ class OrgTestTemplateService:
                 sibling.template_data = template_data
                 flag_modified(sibling, "template_data")
                 sibling.version = tmpl.version
+=======
+        # template_data to every org-specific clone so the tester form
+        # always renders the latest field definitions regardless of which
+        # row get_for_test_type resolves to.
+        if tmpl.org_id is None:
+            clones = (
+                self.db.query(OrgTestTemplate)
+                .filter(
+                    OrgTestTemplate.template_key == tmpl.template_key,
+                    OrgTestTemplate.org_id.isnot(None),
+                )
+                .all()
+            )
+            for clone in clones:
+                clone.template_data = template_data
+                flag_modified(clone, "template_data")
+                clone.version = tmpl.version
+>>>>>>> fb75308b3237b69730f522d96ff7ca1a97c45a5c
 
         self.db.commit()
         self.db.refresh(tmpl)
