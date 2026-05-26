@@ -87,6 +87,8 @@ MODULE_PATH_TO_VIEW: Dict[str, str] = {
     "aee_dashboard":     "ee_tlss",
     "see_dashboard":     "see_cee",
     "cee_dashboard":     "see_cee",
+    "asset_dashboard":   "asset",
+    "test_coordinator_dashboard": "test_coordinator",
 }
 
 OPEN_STATUSES = (
@@ -1344,6 +1346,13 @@ class DashboardService:
             ],
             "generic": [
                 "overdue_tests", "open_remediation",
+            ],
+             "asset": [
+                "kpi_cards",
+                "overdue_tests",
+                "failure_registry",
+                "maintenance_overdue",
+                "open_remediation",
             ],
         }
         return {

@@ -1412,6 +1412,8 @@ def seed_modules(session):
 {"name": "Equipment", "description": "Equipment asset register with UEIC auto-generation", "path": "equipment", "group_name": "Testing"},
 # ✅ DASHBOARD KPI MODULES - Role-specific dashboards
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
+{"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
+{"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
@@ -1735,7 +1737,7 @@ def seed_privileges(session, role_ids, module_ids):
             "can_delete": True, "can_search": True, "can_assign": True
         },
         # Removed: Validation Requests privilege (module not implemented)
-        {"role": "Asset Data Officer","module": "Dashboard", "can_view": True},
+       {"role": "Asset Data Officer","module": "Asset Dashboard", "can_view": True},
         # Originator — Procurement modules (full add/edit)
         {"role": "Asset Data Officer","module": "Request Quote",       "can_view": True, "can_add": True, "can_edit": True},
         {"role": "Asset Data Officer","module": "RQ with Vendor",      "can_view": True, "can_add": True, "can_edit": True},
@@ -3106,6 +3108,8 @@ def seed_role_templates(session):
 
     # Role-specific dashboard module IDs
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
+    asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
+    test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
     aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
     see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
     cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
@@ -3246,7 +3250,7 @@ def seed_role_templates(session):
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-            "default_module_id": aee_dashboard_module_id,
+           "default_module_id": modules_by_name.get("Asset Dashboard"),
             "permissions_template": (
                 _readonly(dashboard_module) +
                 _readonly(testing_requests_module) +
@@ -5409,6 +5413,12 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             except (ValueError, TypeError):
                 return None
 
+        def _clean_str(val):
+            """Convert pandas nan strings and empty strings to None."""
+            if val is None or val == "" or str(val).lower() in ("nan", "none", "null"):
+                return None
+            return str(val).strip() if val else None
+
         voltage_class = row.get("voltage_class") or ""
         # Strip trailing "kV" suffix if present for storage consistency
         voltage_class = voltage_class.replace("kV", "").replace("KV", "").strip() or None
@@ -5447,16 +5457,16 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
                 department_id=dept_id,
                 equipment_type_id=equip_type_id,
                 voltage_class=voltage_class,
-                bay_number=row.get("bay_name"),
-                manufacturer=row.get("manufacturer"),
-                factory_serial_number=row.get("factory_serial_number"),
+                bay_number=_clean_str(row.get("bay_name")),
+                manufacturer=_clean_str(row.get("manufacturer")),
+                factory_serial_number=_clean_str(row.get("factory_serial_number")),
                 year_of_manufacture=yom,
                 commissioned_date=doc_date,
-                phase=row.get("phase"),
-                ct_ratio_actual=row.get("ct_ratio_actual"),
-                ct_ratio_current=row.get("ct_ratio_current"),
-                pt_ratio=row.get("pt_ratio"),
-                vector_group=row.get("vector_group"),
+                phase=_clean_str(row.get("phase")),
+                ct_ratio_actual=_clean_str(row.get("ct_ratio_actual")),
+                ct_ratio_current=_clean_str(row.get("ct_ratio_current")),
+                pt_ratio=_clean_str(row.get("pt_ratio")),
+                vector_group=_clean_str(row.get("vector_group")),
                 impedance_pct=_float(row.get("impedance_pct")),
                 created_by=created_by,
             )
@@ -9279,10 +9289,10 @@ def _dft_get_or_create_dept(session, org_id, name, code,
 # Must match the Module.path values seeded in seed_modules().
 _DFT_ROLE_MODULE_PATH = {
     "System Administrator":             "admin_dashboard",
-    "Asset Data Officer":               "aee_dashboard",
+    "Asset Data Officer":               "asset_dashboard",
     "Maintenance Officer":              "aee_dashboard",
     "Test Engineer":                    "aee_dashboard",
-    "Test & Work Coordinator":          "aee_dashboard",
+    "Test & Work Coordinator":          "test_coordinator_dashboard",
     "Reviewing Officer":                "ee_tlss_dashboard",
     "Supervisory Officer":              "see_dashboard",
     "Senior Management Approver":       "cee_dashboard",
@@ -9307,13 +9317,14 @@ def _dft_get_or_create_role(session, org_id, name,
         if r.is_dept_admin != is_dept_admin:
             r.is_dept_admin = is_dept_admin
             updated = True
-        if not r.default_module_id:
-            module_path = _DFT_ROLE_MODULE_PATH.get(name)
-            if module_path:
-                mod = session.query(Module).filter_by(path=module_path).first()
-                if mod:
-                    r.default_module_id = mod.id
-                    updated = True
+    module_path = _DFT_ROLE_MODULE_PATH.get(name)
+
+    if module_path:
+        mod = session.query(Module).filter_by(path=module_path).first()
+
+        if mod and r.default_module_id != mod.id:
+            r.default_module_id = mod.id
+            updated = True
         if updated:
             session.flush()
         return r

@@ -35,11 +35,13 @@ ROUTE ORDER RULE (FastAPI matches top-to-bottom):
 """
 
 import os
+import json
 import uuid as _uuid
 from io import BytesIO
 from typing import List, Optional
 from uuid import UUID
-
+from fastapi.responses import JSONResponse
+from fastapi import Response
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -75,6 +77,16 @@ router = APIRouter(
 # ═══════════════════════════════════════════════════════════════════════════════
 # MODULE-LEVEL HELPERS  (not routes)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def _dt(val) -> Optional[str]:
+    """
+    Safely convert a datetime (or date) value to an ISO-8601 string.
+    Returns None if the value is None, so json.dumps never sees a raw datetime.
+    """
+    if val is None:
+        return None
+    return val.isoformat() if hasattr(val, "isoformat") else str(val)
+
 
 def _get_equipment_module_id(db: Session) -> int:
     """Resolve the Equipment module row; raises 500 if not seeded."""
@@ -126,54 +138,74 @@ def _enforce_org_scope(user: User) -> UUID:
     return user.organization_id
 
 
-def _chain_ref(eq_obj) -> dict | None:
-    """Lightweight replacement-chain reference dict from an Equipment ORM object."""
+def _chain_ref(eq_obj) -> Optional[dict]:
+    """
+    Lightweight replacement-chain reference dict from an Equipment ORM object.
+    All datetime fields are converted to ISO strings to ensure JSON serialisability.
+    """
     if eq_obj is None:
         return None
     return {
-        "id": eq_obj.id,
+        "id": str(eq_obj.id) if eq_obj.id else None,
         "ueic": eq_obj.ueic,
         "status": eq_obj.status.value if eq_obj.status else None,
         "manufacturer": eq_obj.manufacturer,
         "model_number": eq_obj.model_number,
-        "commissioned_date": eq_obj.commissioned_date,
-        "retired_date": eq_obj.retired_date,
+        "commissioned_date": _dt(eq_obj.commissioned_date),   # FIX: was raw datetime
+        "retired_date":      _dt(eq_obj.retired_date),         # FIX: was raw datetime
     }
 
 
 def _to_response(db: Session, eq: Equipment) -> dict:
-    """Convert Equipment ORM object to response dict with computed fields."""
+    """
+    Convert Equipment ORM object to response dict with computed fields.
+    All datetime/date fields are serialised to ISO strings via _dt().
+    """
     return {
-        "id": eq.id,
+        "id": str(eq.id) if eq.id else None,
         "ueic": eq.ueic,
-        "organization_id": eq.organization_id,
-        "department_id": eq.department_id,
+        "organization_id": str(eq.organization_id) if eq.organization_id else None,
+       "department_id": str(eq.department_id) if eq.department_id else None,
         "equipment_type_id": eq.equipment_type_id,
         "equipment_type_name": eq.equipment_type.name if eq.equipment_type else None,
         "department_name": eq.department.name if eq.department else None,
         "voltage_class": eq.voltage_class,
         "bay_number": eq.bay_number,
         "serial_in_bay": eq.serial_in_bay,
-        "nameplate_data": eq.nameplate_data,
+        "nameplate_data": json.loads(json.dumps(eq.nameplate_data, default=str))
+        if eq.nameplate_data else {},
         "status": eq.status.value if eq.status else None,
-        "replaces_equipment_id": eq.replaces_equipment_id,
+       "replaces_equipment_id": str(eq.replaces_equipment_id) if eq.replaces_equipment_id else None,
         "replaces_equipment": _chain_ref(eq.replaces_equipment),
-        "replaced_by_id": eq.replaced_by_id,
+       "replaced_by_id": str(eq.replaced_by_id) if eq.replaced_by_id else None,
         "replaced_by": _chain_ref(
             eq.replaced_by_equipment[0] if eq.replaced_by_equipment else None
         ),
         "replacement_reason_type": eq.replacement_reason_type,
-        "commissioned_date": eq.commissioned_date,
-        "retired_date": eq.retired_date,
+        "commissioned_date": _dt(eq.commissioned_date),        # FIX: was raw datetime
+        "retired_date":      _dt(eq.retired_date),             # FIX: was raw datetime
         "retirement_reason": eq.retirement_reason,
         "manufacturer": eq.manufacturer,
         "model_number": eq.model_number,
         "factory_serial_number": eq.factory_serial_number,
         "year_of_manufacture": eq.year_of_manufacture,
-        "created_by": eq.created_by,
-        "modified_by": eq.modified_by,
-        "cts": eq.cts,
-        "mts": eq.mts,
+        "latitude": float(eq.latitude) if eq.latitude is not None else None,
+        "longitude": float(eq.longitude) if eq.longitude is not None else None,
+        "phase": eq.phase,
+        "ct_ratio_actual": eq.ct_ratio_actual,
+        "ct_ratio_current": eq.ct_ratio_current,
+        "pt_ratio": eq.pt_ratio,
+        "vector_group": eq.vector_group,
+      "impedance_pct": (
+            float(eq.impedance_pct)
+            if eq.impedance_pct is not None
+            and str(eq.impedance_pct).lower() != "nan"
+            else None
+        ),
+       "created_by": str(eq.created_by) if eq.created_by else None,
+        "modified_by": str(eq.modified_by) if eq.modified_by else None,
+        "cts": _dt(eq.cts),                                    # FIX: was raw datetime
+        "mts": _dt(eq.mts),                                    # FIX: was raw datetime
         "types_by_category": _types_by_category_for_equipment(db, eq),
     }
 
@@ -340,6 +372,8 @@ def create_equipment(
         model_number=data.model_number,
         factory_serial_number=data.factory_serial_number,
         year_of_manufacture=data.year_of_manufacture,
+        latitude=data.latitude,
+        longitude=data.longitude,
         phase=data.phase,
         ct_ratio_actual=data.ct_ratio_actual,
         ct_ratio_current=data.ct_ratio_current,
@@ -378,7 +412,6 @@ def create_equipment(
 
 
 # ── 2. LIST (with ALL filters) ────────────────────────────────────────────────
-# ── 2. LIST (with ALL filters) ────────────────────────────────────────────────
 @router.get("/", response_model=List[EquipmentResponse])
 def list_equipment(
     # Basic filters
@@ -413,9 +446,6 @@ def list_equipment(
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
 
-    # ← Only pass what EquipmentService.list_equipment currently supports.
-    # The new filter params (model_number, tlss_division, etc.) are accepted
-    # by the route but ignored until equipment_service.py is also updated.
     items = EquipmentService.list_equipment(
         db=db,
         organization_id=org_id,
@@ -442,7 +472,45 @@ def list_equipment(
         replacement_year_from=replacement_year_from,
         replacement_year_to=replacement_year_to,
     )
-    return [_to_response(db, eq) for eq in items]
+    responses = []
+
+    for i, eq in enumerate(items):
+        try:
+            responses.append(_to_response(db, eq))
+        except Exception as e:
+            print(f"\nBROKEN EQUIPMENT INDEX: {i}")
+            print(f"BROKEN EQUIPMENT ID: {eq.id}")
+            print(f"BROKEN UEIC: {eq.ueic}")
+            print(f"ERROR: {e}\n")
+            raise
+
+    from fastapi.encoders import jsonable_encoder
+
+    import json
+
+    try:
+        json.dumps(responses, default=str)
+    except Exception as e:
+        print("\nJSON SERIALIZATION FAILED")
+        print(e)
+        print(type(e))
+        raise
+
+    safe = []
+
+    for i, item in enumerate(responses):
+        try:
+            json.dumps(item, default=str)
+            safe.append(item)
+        except Exception as e:
+            print(f"\nBROKEN RESPONSE INDEX: {i}")
+            print(f"BROKEN RESPONSE DATA: {item}")
+            print(f"ERROR: {e}\n")
+
+    return Response(
+        content=json.dumps(safe, default=str),
+        media_type="application/json"
+    )
 
 
 # ── 3. EXPORT CSV ─────────────────────────────────────────────────────────────
@@ -489,11 +557,11 @@ def export_equipment_csv(
         ("Model Number",            lambda eq: eq.model_number or ""),
         ("Factory Serial Number",   lambda eq: eq.factory_serial_number or ""),
         ("Year of Manufacture",     lambda eq: str(eq.year_of_manufacture) if eq.year_of_manufacture else ""),
-        ("Commissioned Date",       lambda eq: str(eq.commissioned_date).split("T")[0] if eq.commissioned_date else ""),
-        ("Retired Date",            lambda eq: str(eq.retired_date).split("T")[0] if eq.retired_date else ""),
+        ("Commissioned Date",       lambda eq: _dt(eq.commissioned_date) or ""),
+        ("Retired Date",            lambda eq: _dt(eq.retired_date) or ""),
         ("Retirement Reason",       lambda eq: eq.retirement_reason or ""),
-        ("Created",                 lambda eq: str(eq.cts).split("T")[0] if eq.cts else ""),
-        ("Last Modified",           lambda eq: str(eq.mts).split("T")[0] if eq.mts else ""),
+        ("Created",                 lambda eq: _dt(eq.cts) or ""),
+        ("Last Modified",           lambda eq: _dt(eq.mts) or ""),
     ]
 
     output = io.StringIO()
@@ -520,7 +588,7 @@ def get_equipment_counts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Equipment counts by status — scoped to user's organization."""
+    """Equipment counts by status — scoped to user's organization and optional department."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
     return EquipmentService.get_equipment_count(db, org_id, department_id)
@@ -838,7 +906,7 @@ async def replace_equipment(
     reason_type='recommendation_compliance' → recommendation_id is mandatory.
     """
     import json
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt_cls
 
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_add")
@@ -878,7 +946,7 @@ async def replace_equipment(
     parsed_date = None
     if commissioned_date:
         try:
-            parsed_date = _dt.fromisoformat(commissioned_date)
+            parsed_date = _dt_cls.fromisoformat(commissioned_date)
         except Exception:
             raise HTTPException(status_code=400, detail="commissioned_date must be a valid ISO date.")
 
@@ -932,7 +1000,7 @@ async def replace_equipment(
                 "reason_type":    reason_type,
                 "reason":         reason,
                 "replaced_by":    f"{current_user.firstname} {current_user.lastname}",
-                "replaced_on":    old.retired_date.strftime("%d/%m/%Y") if old.retired_date else "-",
+                "replaced_on":    _dt(old.retired_date) or "-",
             },
             organization_id=org_id,
             source_id=new.id,
@@ -1082,7 +1150,7 @@ def get_equipment_history(
                 if originator
                 else None
             ),
-            "cts": r.cts.isoformat() if r.cts else None,
+            "cts": _dt(r.cts),   # FIX: was .isoformat() called inline
         }
 
     return {
@@ -1130,7 +1198,7 @@ async def upload_nameplate_file(
     current_user: User = Depends(get_current_user),
 ):
     """Upload a file for a 'file'-type field in the nameplate template."""
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt_cls
 
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_edit")
@@ -1176,7 +1244,7 @@ async def upload_nameplate_file(
         "path": relative_path,
         "size_bytes": len(content),
         "mime_type": content_type,
-        "uploaded_at": _dt.utcnow().isoformat(),
+        "uploaded_at": _dt_cls.utcnow().isoformat(),
         "uploaded_by": str(current_user.id),
     }
 
