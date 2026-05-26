@@ -1742,11 +1742,17 @@ class RepairWorkflowService:
         ))
 
     def _workflow_to_dict(self, workflow: RepairWorkflow) -> dict:
+        from datetime import timedelta
+
         equipment = (
             self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
             if workflow.equipment_id else None
         )
         current_stage = None
+        current_stage_deadline = None
+        days_remaining = None
+        is_overdue = False
+
         if workflow.current_stage_id:
             stage = self.db.query(RepairStageDefinition).filter(
                 RepairStageDefinition.id == workflow.current_stage_id
@@ -1758,6 +1764,22 @@ class RepairWorkflowService:
                     "code": stage.code,
                     "sequence": stage.sequence,
                 }
+
+                # Calculate deadline for current stage instance
+                if workflow.current_stage_instance_id:
+                    stage_instance = self.db.query(RepairStageInstance).filter(
+                        RepairStageInstance.id == workflow.current_stage_instance_id
+                    ).first()
+
+                    if (stage_instance and stage_instance.started_at and
+                        stage.default_duration_days is not None):
+                        deadline = stage_instance.started_at + timedelta(days=stage.default_duration_days)
+                        current_stage_deadline = deadline.isoformat()
+
+                        now = datetime.now(timezone.utc)
+                        days_remaining = (deadline - now).days
+                        is_overdue = days_remaining < 0
+
         return {
             "id": str(workflow.id),
             "workflow_number": workflow.workflow_number,
@@ -1775,6 +1797,9 @@ class RepairWorkflowService:
             "progress": workflow.progress,
             "priority": workflow.priority,
             "current_stage": current_stage,
+            "current_stage_deadline": current_stage_deadline,
+            "days_remaining": days_remaining,
+            "is_overdue": is_overdue,
             "created_at": workflow.created_at.isoformat() if workflow.created_at else None,
         }
 
