@@ -6,6 +6,7 @@ from typing import Dict, Optional
 from requests import session
 from sqlalchemy import text
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.exc import IntegrityError
 from database import VendorSessionLocal, Base, vendor_engine
 from models import (
     CategoryDetails, CategoryMaster, Country, Division, OrgTestTemplate, Plan, Product,
@@ -1253,6 +1254,63 @@ def seed_category_master(session):
     print("[OK] Category Master seeded successfully.")
     return master_ids
 
+
+def _get_or_create_category_detail(session, name: str, category_master_id: int,
+                                   description: str = None, category_type: str = None,
+                                   is_active: bool = True) -> CategoryDetails:
+    """
+    Safely get or create a CategoryDetails row with duplicate prevention.
+
+    Uses filter_by to check for existing records first. If insert fails due to
+    unique constraint violation (race condition), retries the query.
+
+    Returns the CategoryDetails object (existing or newly created).
+    """
+    # Try to find existing
+    existing = session.query(CategoryDetails).filter_by(
+        name=name,
+        category_master_id=category_master_id
+    ).first()
+
+    if existing:
+        # Update fields if provided
+        if description is not None:
+            existing.description = description
+        if category_type is not None:
+            existing.category_type = category_type
+        if is_active is not None:
+            existing.is_active = is_active
+        return existing
+
+    # Create new
+    detail = CategoryDetails(
+        name=name,
+        description=description or f"Detail for {name}",
+        category_master_id=category_master_id,
+        category_type=category_type,
+        is_active=is_active
+    )
+    session.add(detail)
+
+    try:
+        session.flush()
+        return detail
+    except IntegrityError as e:
+        # Duplicate was inserted by another process/transaction
+        session.rollback()
+        # Query again to get the existing row
+        existing = session.query(CategoryDetails).filter_by(
+            name=name,
+            category_master_id=category_master_id
+        ).first()
+        if existing:
+            print(f"  [INFO] CategoryDetails '{name}' already exists (concurrent insert detected)")
+            return existing
+        else:
+            # Should never happen, but re-raise if we can't find it
+            raise
+
+
 def seed_category_details(session, master_ids):
     """Seeds the CategoryDetails table for all masters."""
 
@@ -1308,21 +1366,13 @@ def seed_category_details(session, master_ids):
             print(f"[WARN] Master not found: {d['master_name']}")
             continue
 
-        existing = session.query(CategoryDetails).filter_by(
+        _get_or_create_category_detail(
+            session,
             name=d["name"],
-            category_master_id=master_id
-        ).first()
-
-        if not existing:
-            session.add(CategoryDetails(
-                name=d["name"],
-                description=d["description"],
-                category_master_id=master_id,
-                is_active=True
-            ))
-        else:
-            existing.description = d["description"]
-            existing.is_active = True
+            category_master_id=master_id,
+            description=d["description"],
+            is_active=True
+        )
 
     session.commit()
     print("[OK] Category Details seeded successfully.")
@@ -2575,21 +2625,14 @@ def seed_test_type_categories(session, master_ids):
             lm.is_active = True
 
         for detail_name in cfg["details"]:
-            existing_d = session.query(CategoryDetails).filter_by(
+            _get_or_create_category_detail(
+                session,
                 name=detail_name,
                 category_master_id=lm.id,
-            ).first()
-            if not existing_d:
-                session.add(CategoryDetails(
-                    name=detail_name,
-                    description=f"Lifecycle test type: {detail_name}",
-                    category_type="maintenance",
-                    category_master_id=lm.id,
-                    is_active=True,
-                ))
-            else:
-                existing_d.category_type = "maintenance"
-                existing_d.is_active = True
+                description=f"Lifecycle test type: {detail_name}",
+                category_type="maintenance",
+                is_active=True
+            )
 
     session.flush()
 
@@ -2614,21 +2657,14 @@ def seed_test_type_categories(session, master_ids):
 
         # ---- upsert CategoryDetails (Test Types) ----
         for test_name in test_list:
-            existing_detail = session.query(CategoryDetails).filter_by(
+            _get_or_create_category_detail(
+                session,
                 name=test_name,
                 category_master_id=master_id,
-            ).first()
-            if not existing_detail:
-                session.add(CategoryDetails(
-                    name=test_name,
-                    description=f"Test for {equipment_name}",
-                    category_type="test",
-                    category_master_id=master_id,
-                    is_active=True,
-                ))
-            else:
-                existing_detail.is_active = True
-                existing_detail.category_type = "test"
+                description=f"Test for {equipment_name}",
+                category_type="test",
+                is_active=True
+            )
 
     # ── Seed category-based types (new SRS-compliant structure) ──
     for equipment_name, categories in equipment_types_by_category.items():
@@ -2651,27 +2687,14 @@ def seed_test_type_categories(session, master_ids):
         # Add types for each category (test, maintenance, inspection, repair_lifecycle)
         for category_type, type_list in categories.items():
             for type_name in type_list:
-                # Check if this type already exists
-                existing_detail = session.query(CategoryDetails).filter_by(
+                _get_or_create_category_detail(
+                    session,
                     name=type_name,
                     category_master_id=master_id,
-                ).first()
-
-                if not existing_detail:
-                    # Create new CategoryDetail with category_type
-                    detail = CategoryDetails(
-                        name=type_name,
-                        description=f"{category_type.replace('_', ' ').title()} for {equipment_name}",
-                        category_type=category_type,
-                        category_master_id=master_id,
-                        is_active=True,
-                    )
-                    session.add(detail)
-                else:
-                    existing_detail.is_active = True
-                    # Update description and category_type
-                    existing_detail.description = f"{category_type.replace('_', ' ').title()} for {equipment_name}"
-                    existing_detail.category_type = category_type
+                    description=f"{category_type.replace('_', ' ').title()} for {equipment_name}",
+                    category_type=category_type,
+                    is_active=True
+                )
 
     session.commit()
     print("[OK] Equipment & Test Type categories seeded successfully.")
@@ -2694,22 +2717,15 @@ def seed_test_type_categories(session, master_ids):
             master_id = existing_master.id
         master_ids[equipment_name] = master_id
 
-        existing_detail = session.query(CategoryDetails).filter_by(
+        _get_or_create_category_detail(
+            session,
             name="Nameplate",
             category_master_id=master_id,
-        ).first()
-        if not existing_detail:
-            session.add(CategoryDetails(
-                name="Nameplate",
-                description=f"Nameplate data entry for {equipment_name}",
-                category_type="nameplate",
-                category_master_id=master_id,
-                is_active=True,
-            ))
-            nameplate_created += 1
-        else:
-            existing_detail.is_active = True
-            existing_detail.category_type = "nameplate"
+            description=f"Nameplate data entry for {equipment_name}",
+            category_type="nameplate",
+            is_active=True
+        )
+        nameplate_created += 1
 
     session.commit()
     print(f"[OK] Nameplate test types seeded: {nameplate_created} new entries.")
@@ -2728,9 +2744,13 @@ def seed_test_type_categories(session, master_ids):
     master_ids[priority_master_name] = pm_id
 
     for p in ["Low", "Normal", "Medium", "High", "Critical"]:
-        existing_p = session.query(CategoryDetails).filter_by(name=p, category_master_id=pm_id).first()
-        if not existing_p:
-            session.add(CategoryDetails(name=p, description=f"{p} priority", category_master_id=pm_id, is_active=True))
+        _get_or_create_category_detail(
+            session,
+            name=p,
+            category_master_id=pm_id,
+            description=f"{p} priority",
+            is_active=True
+        )
 
     # ── Transformer Rating master ──
     rating_master_name = "Transformer Rating"
@@ -2748,9 +2768,13 @@ def seed_test_type_categories(session, master_ids):
     for r in ["5 kVA", "10 kVA", "16 kVA", "25 kVA", "63 kVA", "100 kVA", "200 kVA",
               "315 kVA", "500 kVA", "1 MVA", "2 MVA", "5 MVA", "10 MVA",
               "20 MVA", "31.5 MVA", "50 MVA", "100 MVA", "160 MVA", "315 MVA"]:
-        existing_r = session.query(CategoryDetails).filter_by(name=r, category_master_id=rm_id).first()
-        if not existing_r:
-            session.add(CategoryDetails(name=r, description=f"Rating {r}", category_master_id=rm_id, is_active=True))
+        _get_or_create_category_detail(
+            session,
+            name=r,
+            category_master_id=rm_id,
+            description=f"Rating {r}",
+            is_active=True
+        )
 
     session.commit()
     print("[OK] Priority & Transformer Rating categories seeded successfully.")
@@ -2828,9 +2852,13 @@ def seed_test_type_categories(session, master_ids):
         master_ids[master_name] = m_id
 
         for detail_name in details_list:
-            existing_d = session.query(CategoryDetails).filter_by(name=detail_name, category_master_id=m_id).first()
-            if not existing_d:
-                session.add(CategoryDetails(name=detail_name, description=master_name, category_master_id=m_id, is_active=True))
+            _get_or_create_category_detail(
+                session,
+                name=detail_name,
+                category_master_id=m_id,
+                description=master_name,
+                is_active=True
+            )
 
     session.commit()
     print("[OK] Organizational hierarchy categories seeded successfully.")
@@ -6378,22 +6406,14 @@ def seed_taqc_inspection_test_type(session) -> int:
         session.flush()
         print("[OK] CategoryMaster 'Inspection Types' created")
 
-    detail = session.query(CategoryDetails).filter_by(
+    detail = _get_or_create_category_detail(
+        session,
         name="Annual TA&QC Inspection",
         category_master_id=master.id,
-    ).first()
-    if not detail:
-        detail = CategoryDetails(
-            name="Annual TA&QC Inspection",
-            description="Annual TA&QC substation inspection (site-level, periodic).",
-            category_master_id=master.id,
-            is_active=True,
-        )
-        session.add(detail)
-        session.flush()
-        print(f"[OK] CategoryDetails 'Annual TA&QC Inspection' created id={detail.id}")
-    else:
-        print(f"[OK] CategoryDetails 'Annual TA&QC Inspection' already exists id={detail.id}")
+        description="Annual TA&QC substation inspection (site-level, periodic).",
+        is_active=True
+    )
+    print(f"[OK] CategoryDetails 'Annual TA&QC Inspection' ready id={detail.id}")
 
     session.commit()
     return detail.id
@@ -6529,22 +6549,14 @@ def seed_annual_audit_templates(session) -> int:
 
     count = 0
     for category_name, template_key, template_name, category_sections in template_specs:
-        detail = session.query(CategoryDetails).filter(
-            CategoryDetails.category_master_id == master.id,
-            CategoryDetails.name == category_name,
-        ).first()
-        if not detail:
-            detail = CategoryDetails(
-                category_master_id=master.id,
-                name=category_name,
-                description=f"{category_name} annual audit observations",
-                category_type="annual_audit",
-                is_active=True,
-            )
-            session.add(detail)
-            session.flush()
-        else:
-            detail.category_type = "annual_audit"
+        detail = _get_or_create_category_detail(
+            session,
+            name=category_name,
+            category_master_id=master.id,
+            description=f"{category_name} annual audit observations",
+            category_type="annual_audit",
+            is_active=True
+        )
 
         template_data = {
             "key": template_key,
@@ -6596,6 +6608,64 @@ def seed_annual_audit_templates(session) -> int:
     return count
 
 
+def _rename_duplicate_templates(session) -> int:
+    """
+    Rename duplicate test templates by appending their category/test type name.
+
+    Example: "Battery Set Annual Inspection" becomes:
+      - "Battery Set Annual Inspection - Environmental"
+      - "Battery Set Annual Inspection - Documentation"
+      - "Battery Set Annual Inspection - General Maintenance"
+
+    This makes templates unique and easier to identify in the UI.
+    """
+    from models import OrgTestTemplate
+    from collections import defaultdict
+    import json
+
+    # Get all templates with their test type names
+    templates = session.execute(text("""
+        SELECT
+            ott.id,
+            ott.template_data,
+            cd.name as test_type_name
+        FROM org_test_templates ott
+        LEFT JOIN "CategoryDetails" cd ON ott.test_type_id = cd.id
+        ORDER BY ott.template_data->>'name'
+    """)).fetchall()
+
+    # Group by name to find duplicates
+    templates_by_name = defaultdict(list)
+    for t in templates:
+        data = t.template_data
+        name = data.get('name')
+        if name:
+            templates_by_name[name].append(t)
+
+    # Rename duplicates
+    renamed_count = 0
+    for name, template_list in templates_by_name.items():
+        if len(template_list) > 1:
+            for t in template_list:
+                data = dict(t.template_data)
+                test_type = t.test_type_name or 'Unknown Type'
+                old_name = data.get('name')
+
+                # Create new name with test type (if not already there)
+                if test_type and test_type not in old_name:
+                    new_name = f"{old_name} - {test_type}"
+                    data['name'] = new_name
+
+                    session.execute(
+                        text("UPDATE org_test_templates SET template_data = :data WHERE id = :id"),
+                        {"id": t.id, "data": json.dumps(data)}
+                    )
+                    renamed_count += 1
+
+    session.commit()
+    return renamed_count
+
+
 def seed_cumulative_template(session) -> int:
     """
     Seed the Operations Tracking OrgTestTemplate (CUMULATIVE_DIFF rules).
@@ -6636,21 +6706,14 @@ def seed_cumulative_template(session) -> int:
     ]
     detail_ids = {}
     for name, desc, cat_type in subtypes:
-        d = session.query(CategoryDetails).filter(
-            CategoryDetails.category_master_id == master.id,
-            CategoryDetails.name == name,
-        ).first()
-        if not d:
-            d = CategoryDetails(
-                category_master_id=master.id,
-                name=name,
-                description=desc,
-                category_type=cat_type,
-                is_active=True,
-            )
-            session.add(d)
-            session.flush()
-        # Never update existing rows — they belong to the live system.
+        d = _get_or_create_category_detail(
+            session,
+            name=name,
+            category_master_id=master.id,
+            description=desc,
+            category_type=cat_type,
+            is_active=True
+        )
         detail_ids[name] = d.id
 
     # ── Operations Tracking template with rules[] ─────────────────────────────
@@ -6756,21 +6819,14 @@ def seed_calibration_template(session) -> int:
 
     # ── CategoryDetails — look up, create if absent ───────────────────────────
     cal_name = "Calibration"
-    d = session.query(CategoryDetails).filter(
-        CategoryDetails.category_master_id == master.id,
-        CategoryDetails.name == cal_name,
-    ).first()
-    if not d:
-        d = CategoryDetails(
-            category_master_id=master.id,
-            name=cal_name,
-            description="Equipment calibration lifecycle — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
-            category_type="maintenance",
-            is_active=True,
-        )
-        session.add(d)
-        session.flush()
-    # Never update existing rows.
+    d = _get_or_create_category_detail(
+        session,
+        name=cal_name,
+        category_master_id=master.id,
+        description="Equipment calibration lifecycle — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
+        category_type="maintenance",
+        is_active=True
+    )
 
     # ── Calibration template with DATE_ADD rule ───────────────────────────────
     CAL_KEY = "calibration"
@@ -6888,19 +6944,13 @@ def seed_transformer_oil_template(session) -> int:
         session.add(master)
         session.flush()
 
-    detail = session.query(CategoryDetails).filter(
-        CategoryDetails.category_master_id == master.id,
-        CategoryDetails.name == "Transformer Oil Test",
-    ).first()
-    if not detail:
-        detail = CategoryDetails(
-            category_master_id=master.id,
-            name="Transformer Oil Test",
-            description="Insulating oil quality test — BDV, moisture, acidity, tan delta per IS 335 / IEC 60296",
-            is_active=True,
-        )
-        session.add(detail)
-        session.flush()
+    detail = _get_or_create_category_detail(
+        session,
+        name="Transformer Oil Test",
+        category_master_id=master.id,
+        description="Insulating oil quality test — BDV, moisture, acidity, tan delta per IS 335 / IEC 60296",
+        is_active=True
+    )
 
     OIL_KEY = "transformer_oil_test"
     template_data = TEST_TEMPLATES[OIL_KEY]
@@ -8304,6 +8354,14 @@ def run_seed():
             import traceback
             print(f"[WARN] Dept-filter seed failed (non-fatal): {_e}")
             traceback.print_exc()
+
+        # Rename duplicate test templates (add category to name for uniqueness)
+        print("\n--- Renaming Duplicate Test Templates ---")
+        try:
+            renamed = _rename_duplicate_templates(session)
+            print(f"[OK] Renamed {renamed} duplicate templates")
+        except Exception as _e:
+            print(f"[WARN] Template renaming failed (non-fatal): {_e}")
 
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")

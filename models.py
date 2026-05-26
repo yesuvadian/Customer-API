@@ -2026,7 +2026,10 @@ class CategoryMaster(Base):
 
 class CategoryDetails(Base):
     __tablename__ = "CategoryDetails"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        UniqueConstraint("name", "category_master_id", name="uq_category_details_name_master"),
+        {"schema": "public"}
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     category_master_id = Column(
