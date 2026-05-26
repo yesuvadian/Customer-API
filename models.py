@@ -1288,8 +1288,8 @@ class UserAddress(Base):
     state_id = Column(Integer, ForeignKey("public.states.id", ondelete="SET NULL"))
     country_id = Column(Integer, ForeignKey("public.countries.id", ondelete="SET NULL"))
     postal_code = Column(String(20))
-    latitude = Column(Numeric(10, 8))
-    longitude = Column(Numeric(11, 8))
+    latitude = Column(Float)
+    longitude = Column(Float)
 
     erp_sync_status = Column(String(10), default="pending")
     erp_last_sync_at = Column(DateTime(timezone=True), nullable=True)

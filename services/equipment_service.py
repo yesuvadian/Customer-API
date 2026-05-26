@@ -2,7 +2,7 @@
 Equipment Asset Register Service
 Handles UEIC generation, CRUD, lifecycle management, and department-based querying.
 """
-from uuid import UUIDP
+from uuid import UUID
 from typing import Optional, List
 from datetime import datetime, timezone
 
@@ -294,7 +294,7 @@ class EquipmentService:
         search: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
-        # ── year filters (new) ──────────────────────────────────────────────
+        # ── year filters ────────────────────────────────────────────────────
         commission_year: Optional[int] = None,
         commission_year_from: Optional[int] = None,
         commission_year_to: Optional[int] = None,
@@ -417,9 +417,7 @@ class EquipmentService:
             .limit(limit)
             .all()
         )
-
-        print(f"[EQUIPMENT FOUND] {len(results)}")
-        return results
+        # NOTE: dead code (print + second return) that was here has been removed.
 
     @classmethod
     def update_equipment(
