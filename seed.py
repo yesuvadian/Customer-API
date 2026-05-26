@@ -2385,43 +2385,9 @@ def seed_test_type_categories(session, master_ids):
     Description='Testing Equipment' tags these masters for filtering.
     """
 
-    # Updated structure: equipment types now have types grouped by request category
-    # Per SRS: test, maintenance, inspection, repair_lifecycle all need type dropdowns
-    equipment_tests = {
-        # ── From user's Equipment → Test mapping (legacy, kept for backward compat) ──
-        "Feeder protection relays": [
-            "Relay Testing Report",
-        ],
-        "Power transformers": [
-            "Differential Protection Test",
-        ],
-        "Transformer differential relay": [
-            "Stability / Bias Test",
-        ],
-        "Protection relays": [
-            "Protection Relay Functional Test",
-        ],
-        "Current transformers": [
-            "Insulation Resistance (IR) Test",
-            "CT Ratio Test",
-            "Core Insulation Test",
-        ],
-        "Protection system": [
-            "Transformer Protection Commissioning",
-        ],
-        "Feeder Metering": [
-            "Energy meter accuracy test",
-        ],
-        "Transformer": [
-            "Physical inspection",
-            "Insulation resistance test",
-            "Transformer ratio test",
-            "Current ratio test",
-            "Short circuit test",
-            "Open circuit test",
-            "Magnetic balance test",
-        ],
-    }
+    # Legacy equipment_tests dict removed — all types now defined in
+    # equipment_types_by_category below (SRS-compliant, singular names).
+    equipment_tests = {}
 
     # ── NEW: Category-based types structure (SRS-compliant) ──
     # Power Transformer with all 4 categories defined
