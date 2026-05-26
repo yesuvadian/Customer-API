@@ -2,7 +2,7 @@
 Equipment Asset Register Service
 Handles UEIC generation, CRUD, lifecycle management, and department-based querying.
 """
-from uuid import UUID
+from uuid import UUIDP
 from typing import Optional, List
 from datetime import datetime, timezone
 
