@@ -571,12 +571,14 @@ class EquipmentService:
         organization_id: Optional[UUID] = None,
         department_id: Optional[UUID] = None,
     ) -> dict:
-        """Get equipment counts by status."""
+        """Get equipment counts by status, optionally scoped to department subtree."""
         query = db.query(Equipment.status, func.count(Equipment.id))
         if organization_id:
             query = query.filter(Equipment.organization_id == organization_id)
         if department_id:
-            query = query.filter(Equipment.department_id == department_id)
+            # Include descendant departments
+            dept_ids = cls._get_department_subtree_ids(db, department_id)
+            query = query.filter(Equipment.department_id.in_(dept_ids))
 
         rows = query.group_by(Equipment.status).all()
         counts = {s.value: 0 for s in EquipmentStatus}

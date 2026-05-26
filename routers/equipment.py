@@ -588,7 +588,7 @@ def get_equipment_counts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Equipment counts by status — scoped to user's organization."""
+    """Equipment counts by status — scoped to user's organization and optional department."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
     return EquipmentService.get_equipment_count(db, org_id, department_id)
