@@ -4599,6 +4599,51 @@ def seed_kptcl_organization(session):
                 )
                 session.add(permission)
 
+    # Grant ALL module permissions to org admin roles (Admin role)
+    # This ensures org admins have full access to all modules
+    all_modules = session.query(Module).filter_by(is_active=True).all()
+    org_admin_roles = session.query(OrgRole).filter_by(
+        organization_id=org.id,
+        is_org_admin=True
+    ).all()
+
+    for admin_role in org_admin_roles:
+        for module in all_modules:
+            # Check if permission already exists
+            existing_perm = session.query(OrgRolePermission).filter_by(
+                org_role_id=admin_role.id,
+                module_id=module.id
+            ).first()
+
+            if existing_perm:
+                # Update to grant full access
+                existing_perm.can_view = True
+                existing_perm.can_add = True
+                existing_perm.can_edit = True
+                existing_perm.can_delete = True
+                existing_perm.can_approve = True
+                existing_perm.can_assign = True
+                existing_perm.can_export = True
+                existing_perm.can_import = True
+            else:
+                # Create new permission with full access
+                permission = OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=admin_role.id,
+                    module_id=module.id,
+                    can_view=True,
+                    can_add=True,
+                    can_edit=True,
+                    can_delete=True,
+                    can_approve=True,
+                    can_assign=True,
+                    can_export=True,
+                    can_import=True,
+                    cts=datetime.now(datetime.now().astimezone().tzinfo),
+                    mts=datetime.now(datetime.now().astimezone().tzinfo)
+                )
+                session.add(permission)
+
     # Build a lookup of provisioned roles by name for easy access
     provisioned_by_name = {r.name: r for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
 
@@ -6938,57 +6983,54 @@ def seed_transformer_oil_template(session) -> int:
 
 
 def seed_capacitance_tandelta_template(session) -> int:
-    """Seed the Capacitance & Tan Delta Test (Transformer) OrgTestTemplate."""
-    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    """Seed the Capacitance & Tan Delta Test (Transformer) OrgTestTemplate.
+
+    This test type exists under MULTIPLE CategoryMaster rows
+    (e.g. 'Power Transformer' and 'Feeder protection relays').
+    We create one org_test_templates row per CategoryDetails row so that
+    get_for_test_type() resolves correctly regardless of which equipment
+    type the testing request was created against.
+    """
+    from models import CategoryDetails, OrgTestTemplate
+    from sqlalchemy.orm.attributes import flag_modified
     from test_templates import TEST_TEMPLATES
-
-    master = session.query(CategoryMaster).filter(
-        CategoryMaster.description == "Testing Equipment"
-    ).first()
-    if not master:
-        master = CategoryMaster(name="Testing Equipment", description="Testing Equipment", is_active=True)
-        session.add(master)
-        session.flush()
-
-    detail = session.query(CategoryDetails).filter(
-        CategoryDetails.category_master_id == master.id,
-        CategoryDetails.name == "Capacitance & Tan Delta Test (Transformer)",
-    ).first()
-    if not detail:
-        detail = CategoryDetails(
-            category_master_id=master.id,
-            name="Capacitance & Tan Delta Test (Transformer)",
-            description="Capacitance and tan delta insulation quality test per IEC 60450",
-            is_active=True,
-        )
-        session.add(detail)
-        session.flush()
 
     KEY = "capacitance_tandelta_transformer"
     template_data = TEST_TEMPLATES[KEY]
 
-    existing = session.query(OrgTestTemplate).filter(
-        OrgTestTemplate.template_key == KEY,
-        OrgTestTemplate.org_id == None,  # noqa: E711
-    ).first()
+    # Find ALL CategoryDetails rows with this test type name
+    all_details = session.query(CategoryDetails).filter(
+        CategoryDetails.name == "Capacitance & Tan Delta Test (Transformer)",
+    ).all()
+
+    if not all_details:
+        print("  [WARN] No CategoryDetails found for 'Capacitance & Tan Delta Test (Transformer)' — skipping")
+        return 0
+
     count = 0
-    if existing:
-        existing.test_type_id = detail.id
-        existing.template_data = template_data
-        existing.is_system = True
-    else:
-        session.add(OrgTestTemplate(
-            template_key=KEY,
-            org_id=None,
-            test_type_id=detail.id,
-            template_data=template_data,
-            is_system=True,
-            version=1,
-        ))
-        count = 1
+    for detail in all_details:
+        existing = session.query(OrgTestTemplate).filter(
+            OrgTestTemplate.template_key == KEY,
+            OrgTestTemplate.test_type_id == detail.id,
+            OrgTestTemplate.org_id == None,  # noqa: E711
+        ).first()
+        if existing:
+            existing.template_data = template_data
+            flag_modified(existing, "template_data")
+            existing.is_system = True
+        else:
+            session.add(OrgTestTemplate(
+                template_key=KEY,
+                org_id=None,
+                test_type_id=detail.id,
+                template_data=template_data,
+                is_system=True,
+                version=1,
+            ))
+            count += 1
 
     session.commit()
-    print(f"[OK] Capacitance & Tan Delta template seeded (detail_id={detail.id}).")
+    print(f"[OK] Capacitance & Tan Delta template seeded ({len(all_details)} detail rows, {count} new).")
     return count
 
 
