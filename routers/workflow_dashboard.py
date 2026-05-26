@@ -7,7 +7,7 @@ Returns a unified dashboard payload built dynamically from repair_workflow_defin
 Adding a new workflow type to that table automatically appears in the response.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -20,6 +20,7 @@ from models import (
     Equipment,
     RepairStageAuditLog,
     RepairStageDefinition,
+    RepairStageInstance,
     RepairWorkflow,
     RepairWorkflowDefinition,
     User,
@@ -212,10 +213,62 @@ def get_workflow_dashboard(
             "note":            log.note,
         })
 
+    # ── 6. Alerts — Overdue stages across all workflow types ─────────────────
+    alerts = []
+    now = datetime.now(timezone.utc)
+
+    # Get all active workflows with stage deadlines
+    overdue_workflows = (
+        db.query(
+            RepairWorkflow.id,
+            RepairWorkflow.workflow_code,
+            Equipment.ueic,
+            RepairStageDefinition.name.label("stage_name"),
+            RepairStageInstance.started_at,
+            RepairStageDefinition.default_duration_days,
+        )
+        .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+        .join(
+            RepairStageInstance,
+            RepairStageInstance.id == RepairWorkflow.current_stage_instance_id,
+        )
+        .join(
+            RepairStageDefinition,
+            RepairStageDefinition.id == RepairStageInstance.stage_id,
+        )
+        .filter(
+            Equipment.organization_id == org_id,
+            RepairWorkflow.status == "active",
+            RepairStageInstance.started_at.isnot(None),
+            RepairStageDefinition.default_duration_days.isnot(None),
+        )
+        .all()
+    )
+
+    for wf_id, wf_code, ueic, stage_name, started_at, duration_days in overdue_workflows:
+        deadline = started_at + timedelta(days=duration_days)
+        days_overdue = (now - deadline).days
+
+        if days_overdue > 0:
+            alerts.append({
+                "type": "overdue_stage",
+                "severity": "high",
+                "workflow_id": str(wf_id),
+                "workflow_code": wf_code,
+                "equipment": ueic,
+                "stage_name": stage_name,
+                "message": f"{stage_name} overdue by {days_overdue} day(s)",
+                "days_overdue": days_overdue,
+            })
+
+    # Sort alerts by days_overdue (most overdue first)
+    alerts.sort(key=lambda x: x.get("days_overdue", 0), reverse=True)
+
     return {
         "workflow_types":   workflow_types,
         "totals":           totals,
         "stage_breakdown":  stage_breakdown,
         "equipment_at_risk": equipment_at_risk,
         "recent_activity":  recent_activity,
+        "alerts":           alerts[:10],  # Limit to 10 most overdue
     }

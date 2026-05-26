@@ -1419,9 +1419,9 @@ def seed_modules(session):
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
-{"name": "Notification Templates", "description": "Configure email/SMS/in-app notification templates per event type", "path": "org_notification_templates", "group_name": "Organization"},
-{"name": "Notification Routing",   "description": "Configure routing rules — which roles receive which notifications", "path": "org_notification_routing",   "group_name": "Organization"},
-{"name": "Notification Schedules", "description": "Configure scheduled notification rules (due-date reminders, digests)", "path": "org_notification_schedules", "group_name": "Organization"},
+{"name": "Notification Templates", "description": "Configure email/SMS/in-app notification templates per event type", "path": "org_notification_templates", "group_name": "Organization", "is_menu": False},
+{"name": "Notification Routing",   "description": "Configure routing rules — which roles receive which notifications", "path": "org_notification_routing",   "group_name": "Organization", "is_menu": False},
+{"name": "Notification Schedules", "description": "Configure scheduled notification rules (due-date reminders, digests)", "path": "org_notification_schedules", "group_name": "Organization", "is_menu": False},
 # ✅ REPORTING SUITE MODULE
 {"name": "Reports", "description": "Generic report engine — 14 SRS operational reports with Excel/PDF export", "path": "reports", "group_name": "Testing"},
 # ✅ DIRECT SUBMISSION MODULES (Stage 2 & Stage 10 — no tester assignment)
@@ -9014,6 +9014,15 @@ def seed_surveillance_workflow(session):
     }
     CODE_TO_NAME = {v: k for k, v in NAME_TO_CODE.items()}
 
+    # Default duration for each surveillance stage (in days)
+    DEFAULT_SURVEILLANCE_DURATION_DAYS = {
+        "Q1_SURVEILLANCE":    30,  # 30 days to complete quarterly review
+        "Q2_SURVEILLANCE":    30,
+        "Q3_SURVEILLANCE":    30,
+        "Q4_SURVEILLANCE":    30,
+        "FINAL_EVALUATION":   45,  # 45 days for comprehensive final report
+    }
+
     # ── 0. Workflow definition ────────────────────────────────────────────────
     wf_def = session.query(RepairWorkflowDefinition).filter_by(workflow_code="SURVEILLANCE").first()
     if not wf_def:
@@ -9051,10 +9060,13 @@ def seed_surveillance_workflow(session):
     for s in stages_raw:
         name = s["name"]
         code = NAME_TO_CODE.get(name, name.upper().replace(" ", "_"))
+        duration = DEFAULT_SURVEILLANCE_DURATION_DAYS.get(code)
         existing = session.query(RepairStageDefinition).filter_by(code=code).first()
         if existing:
             if existing.workflow_definition_id != wf_def.id:
                 existing.workflow_definition_id = wf_def.id
+            if duration is not None and existing.default_duration_days != duration:
+                existing.default_duration_days = duration
             stage_map[name] = existing.id
             code_map[code]  = existing.id
             continue
@@ -9066,6 +9078,7 @@ def seed_surveillance_workflow(session):
             is_active=True,
             is_mandatory=True,
             workflow_definition_id=wf_def.id,
+            default_duration_days=duration,
         )
         session.add(stage)
         session.flush()

@@ -105,6 +105,7 @@ from routers import equipment
 # Notification & Alert Engine
 from routers import notifications as notifications_router
 from routers import admin_notifications as admin_notifications_router
+from routers import admin_notification_events as admin_notification_events_router
 
 # Dashboard KPIs
 from routers import dashboard_kpi
@@ -710,6 +711,7 @@ app.include_router(equipment.router)
 # Notification & Alert Engine
 app.include_router(notifications_router.router)
 app.include_router(admin_notifications_router.router)
+app.include_router(admin_notification_events_router.router)
 
 # Dashboard KPIs
 app.include_router(dashboard_kpi.router)
