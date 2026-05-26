@@ -164,14 +164,20 @@ def start_workflow(
     user=Depends(get_current_user),
 ):
     """Start a new repair workflow for a piece of equipment."""
+    import logging, traceback
     try:
         return RepairWorkflowService(db).start_workflow(
-    equipment_id=payload.equipment_id,
-    user_id=user.id,
-    source_failure_id=payload.source_failure_id,
-)
+            equipment_id=payload.equipment_id,
+            user_id=user.id,
+            source_failure_id=payload.source_failure_id,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except Exception as e:
+        logging.getLogger(__name__).error(
+            "start_workflow unexpected error: %s\n%s", e, traceback.format_exc()
+        )
+        raise HTTPException(500, f"Internal error: {e}")
 
 
 @router.get("/pending-assignments")

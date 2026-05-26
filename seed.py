@@ -7382,6 +7382,34 @@ def _seed_notification_event_catalogue(session) -> int:
                           "eval.overall", "eval.evaluated_at", "report.retriepdf"],
             default_roles=["Reviewing Officer", "Maintenance Officer"],
         ),
+        # ── Test Result Thresholds (New System) ───────────────────────────────
+        dict(
+            event_type="test_result_normal",
+            label="Test Result - Normal",
+            group_name="Testing",
+            description="Test completed successfully with all values in normal range",
+            context_vars=["equipment_name", "equipment_type", "test_type_name", "request_number",
+                          "tester_name", "substation_name", "overall_result"],
+            default_roles=[],
+        ),
+        dict(
+            event_type="test_result_alert",
+            label="Test Result - Alert",
+            group_name="Testing",
+            description="Test completed with one or more values in alert/warning range",
+            context_vars=["equipment_name", "equipment_type", "test_type_name", "request_number",
+                          "tester_name", "substation_name", "overall_result"],
+            default_roles=["EE TLSS"],
+        ),
+        dict(
+            event_type="test_result_critical",
+            label="Test Result - Critical",
+            group_name="Testing",
+            description="Test completed with one or more values in critical/failure range",
+            context_vars=["equipment_name", "equipment_type", "test_type_name", "request_number",
+                          "tester_name", "substation_name", "overall_result"],
+            default_roles=["EE TLSS", "Department Head"],
+        ),
         # ── Test Workflow ─────────────────────────────────────────────────────
         dict(
             event_type="request_submitted",
