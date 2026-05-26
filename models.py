@@ -4,8 +4,22 @@ from sqlalchemy import Enum
 
 import uuid
 from sqlalchemy import (
-    Column, Float, LargeBinary, Numeric, String, Boolean, Date, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
+    Column,
+    Float,
+    LargeBinary,
+    Numeric,
+    String,
+    Boolean,
+    Date,
+    DateTime,
+    Integer,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
+    func,
+    Text,
 )
+ 
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB, ARRAY
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import relationship
