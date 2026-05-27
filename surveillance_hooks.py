@@ -273,7 +273,8 @@ def _create_surveillance_test_schedules(
             title = f"{test_type.name} - Surveillance - {equipment_name}"
 
             # Calculate end date (24 months from start)
-            # surveillance_period_months comes from outer scope (e.g., 24)
+            # Reconstruct total period from quarter_months (e.g., 6 months * 4 quarters = 24 months)
+            surveillance_period_months = quarter_months * 4
             end_date = start_date + relativedelta(months=surveillance_period_months)
 
             # Create single repeating schedule (runs every 6 months until end_date)
