@@ -254,7 +254,7 @@ def get_surveillance_dashboard(
 
         recent_activities.append({
             'workflow_id': str(wf.id),
-            'equipment_name': wf.equipment.name if wf.equipment else 'Unknown',
+            'equipment_name': wf.equipment.ueic if wf.equipment else 'Unknown',
             'status': wf.status,
             'current_stage': current_stage.stage.name if current_stage and current_stage.stage else 'N/A',
             'quarter': current_stage.quarter_number if current_stage else None,
@@ -577,7 +577,7 @@ def get_equipment_surveillance_history(
 
     return {
         'equipment_id': str(equipment_id),
-        'equipment_name': equipment.name,
+        'equipment_name': equipment.ueic,
         'equipment_type': equipment.equipment_type.name if equipment.equipment_type else None,
         'workflows': workflow_list,
         'total_workflows': len(workflows),
