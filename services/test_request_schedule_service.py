@@ -378,6 +378,23 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             if existing_generated:
                 return True
 
+            # Check if schedule has ended (for surveillance workflows with end_date)
+            if schedule.end_date and now > schedule.end_date:
+                # Schedule has expired, mark as inactive
+                schedule.is_active = False
+                db.commit()
+                return False
+
+            # Calculate surveillance quarter dynamically (if this is a surveillance schedule)
+            surveillance_quarter = None
+            if schedule.surveillance_workflow_id:
+                from utils.surveillance_utils import calculate_surveillance_quarter
+                surveillance_quarter = calculate_surveillance_quarter(
+                    db,
+                    schedule.surveillance_workflow_id,
+                    now
+                )
+
             svc = TestingRequestService(db)
 
             new_data = {
@@ -469,13 +486,12 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 ),
 
                 # Surveillance workflow linkage (if applicable)
+                # surveillance_quarter is calculated dynamically above (not from schedule)
                 "surveillance_workflow_id": (
                     schedule.surveillance_workflow_id if hasattr(schedule, 'surveillance_workflow_id') else None
                 ),
 
-                "surveillance_quarter": (
-                    schedule.surveillance_quarter if hasattr(schedule, 'surveillance_quarter') else None
-                ),
+                "surveillance_quarter": surveillance_quarter,  # Calculated dynamically for surveillance schedules
             }
 
             new_request = svc.create_request(

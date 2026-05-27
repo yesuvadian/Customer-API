@@ -234,85 +234,85 @@ def _create_surveillance_test_schedules(
 
     created_count = 0
 
-    # Create schedules for each quarter (1-4)
-    for quarter in range(1, 5):
-        # Calculate quarter start date
-        quarter_start = start_date + relativedelta(months=(quarter - 1) * quarter_months)
+    # Create ONE repeating schedule per test type (runs every 6 months for 24 months)
+    # Quarter is calculated dynamically when test is created by daily scheduler
+    for test_config in test_configs:
+        try:
+            from models import CategoryDetails
+            test_type = db.query(CategoryDetails).filter(
+                CategoryDetails.id == test_config.test_type_id
+            ).first()
 
-        # Create schedule for each test type
-        for test_config in test_configs:
-            try:
-                from models import CategoryDetails
-                test_type = db.query(CategoryDetails).filter(
-                    CategoryDetails.id == test_config.test_type_id
-                ).first()
-
-                if not test_type:
-                    logger.warning(
-                        "[SurveillanceHook] Test type %s not found",
-                        test_config.test_type_id
-                    )
-                    continue
-
-                # Check if schedule already exists for this surveillance workflow + quarter + test type
-                existing_schedule = db.query(TestRequestSchedule).filter(
-                    TestRequestSchedule.surveillance_workflow_id == surveillance_workflow.id,
-                    TestRequestSchedule.surveillance_quarter == quarter,
-                    TestRequestSchedule.test_type_id == test_config.test_type_id,
-                    TestRequestSchedule.equipment_id == equipment.id
-                ).first()
-
-                if existing_schedule:
-                    logger.debug(
-                        "[SurveillanceHook] Schedule already exists for %s Q%d - skipping",
-                        test_type.name, quarter
-                    )
-                    continue
-
-                # Generate title
-                equipment_name = (
-                    equipment.name or
-                    equipment.nameplate_data.get('substation_name') if equipment.nameplate_data else None or
-                    str(equipment.id)
+            if not test_type:
+                logger.warning(
+                    "[SurveillanceHook] Test type %s not found",
+                    test_config.test_type_id
                 )
-                title = f"{test_type.name} - Q{quarter} Surveillance - {equipment_name}"
+                continue
 
-                # Create schedule record
-                schedule = TestRequestSchedule(
-                    organization_id=surveillance_workflow.organization_id,
-                    department_id=equipment.department_id,  # From equipment, not workflow
-                    equipment_id=equipment.id,
-                    equipment_type_id=equipment.equipment_type_id,
-                    test_type_id=test_config.test_type_id,
-                    title=title,
-                    description=f"Auto-scheduled surveillance test for Quarter {quarter}",
-                    request_category='test',
-                    priority=test_config.default_priority or 'high',
-                    frequency=ScheduleFrequency.semi_annual,  # 6 months for surveillance
-                    start_date=quarter_start,
-                    next_run_date=quarter_start,  # Create immediately at quarter start
-                    advance_days=1,  # Create 1 day in advance
-                    is_active=True,
-                    created_by=user_id,
-                    # Surveillance linkage - will be copied to testing_requests
-                    surveillance_workflow_id=surveillance_workflow.id,
-                    surveillance_quarter=quarter,
-                    notes=f"Auto-created for surveillance workflow {surveillance_workflow.id}",
-                )
-                db.add(schedule)
-                created_count += 1
+            # Check if schedule already exists for this surveillance workflow + test type
+            existing_schedule = db.query(TestRequestSchedule).filter(
+                TestRequestSchedule.surveillance_workflow_id == surveillance_workflow.id,
+                TestRequestSchedule.test_type_id == test_config.test_type_id,
+                TestRequestSchedule.equipment_id == equipment.id
+            ).first()
 
+            if existing_schedule:
                 logger.debug(
-                    "[SurveillanceHook] Created schedule for %s Q%d (next_run: %s)",
-                    test_type.name, quarter, quarter_start.isoformat()
+                    "[SurveillanceHook] Schedule already exists for %s - skipping",
+                    test_type.name
                 )
+                continue
 
-            except Exception as exc:
-                logger.error(
-                    "[SurveillanceHook] Failed creating schedule for test_type=%s Q%d: %s",
-                    test_config.test_type_id, quarter, exc
-                )
-                # Continue with other schedules even if one fails
+            # Generate title
+            equipment_name = (
+                equipment.name or
+                equipment.nameplate_data.get('substation_name') if equipment.nameplate_data else None or
+                str(equipment.id)
+            )
+            title = f"{test_type.name} - Surveillance - {equipment_name}"
+
+            # Calculate end date (24 months from start)
+            # surveillance_period_months comes from outer scope (e.g., 24)
+            end_date = start_date + relativedelta(months=surveillance_period_months)
+
+            # Create single repeating schedule (runs every 6 months until end_date)
+            schedule = TestRequestSchedule(
+                organization_id=surveillance_workflow.organization_id,
+                department_id=equipment.department_id,  # From equipment, not workflow
+                equipment_id=equipment.id,
+                equipment_type_id=equipment.equipment_type_id,
+                test_type_id=test_config.test_type_id,
+                title=title,
+                description=f"Auto-scheduled surveillance test (runs quarterly for {surveillance_period_months} months)",
+                request_category='test',
+                priority=test_config.default_priority or 'high',
+                frequency=ScheduleFrequency.semi_annual,  # Every 6 months
+                start_date=start_date,
+                next_run_date=start_date,  # First run immediately (Q1)
+                end_date=end_date,  # Stop after 24 months
+                advance_days=1,  # Create 1 day in advance
+                is_active=True,
+                created_by=user_id,
+                # Surveillance linkage - quarter calculated dynamically when test created
+                surveillance_workflow_id=surveillance_workflow.id,
+                surveillance_quarter=None,  # Don't set on schedule - calculated when test created
+                notes=f"Surveillance schedule for workflow {surveillance_workflow.id} - runs 4 times over {surveillance_period_months} months",
+            )
+            db.add(schedule)
+            created_count += 1
+
+            logger.debug(
+                "[SurveillanceHook] Created repeating schedule for %s (next_run: %s, end: %s)",
+                test_type.name, start_date.isoformat(), end_date.isoformat()
+            )
+
+        except Exception as exc:
+            logger.error(
+                "[SurveillanceHook] Failed creating schedule for test_type=%s: %s",
+                test_config.test_type_id, exc
+            )
+            # Continue with other schedules even if one fails
 
     db.flush()
     logger.info(
