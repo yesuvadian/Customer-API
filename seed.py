@@ -8273,7 +8273,8 @@ def run_seed():
 
         print("\n--- Surveillance Workflow Seeding ---")
         try:
-            seed_surveillance_workflow(session)
+            from seed_surveillance_workflow import seed_surveillance_stages
+            seed_surveillance_stages(session)
             seed_surveillance_config(session)
         except Exception as _e:
             print(f"[WARN] Surveillance workflow seed failed (non-fatal): {_e}")
@@ -8309,6 +8310,15 @@ def run_seed():
             except Exception as _e:
                 session.rollback()
                 print(f"[WARN] Calibration role mapping failed: {_e}")
+
+        # Surveillance role mappings — must run AFTER seed_surveillance_stages
+        if kptcl_org:
+            try:
+                from seed_surveillance_workflow import seed_surveillance_role_mappings
+                seed_surveillance_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Surveillance role mapping failed: {_e}")
 
         # TR / FR / TAQC Workflow Engine — states, transitions, permission matrix
         print("\n--- TR / FR / TAQC Workflow Engine Seeding ---")
@@ -9204,7 +9214,49 @@ def seed_surveillance_workflow(session):
             ))
 
     session.commit()
-    print("[OK] Surveillance workflow seeded successfully")
+
+    # ── 6. Validation ─────────────────────────────────────────────────────────
+    print("\n[INFO] Validating surveillance workflow seed...")
+
+    # Verify workflow definition
+    verify_wf = session.query(RepairWorkflowDefinition).filter_by(
+        workflow_code="SURVEILLANCE"
+    ).first()
+
+    if not verify_wf:
+        print("[ERROR] SURVEILLANCE workflow definition not found after seeding!")
+        return False
+
+    print(f"  [OK] Workflow definition: {verify_wf.name} (ID: {verify_wf.id})")
+
+    # Verify stages
+    verify_stages = session.query(RepairStageDefinition).filter_by(
+        workflow_definition_id=verify_wf.id
+    ).order_by(RepairStageDefinition.sequence).all()
+
+    if len(verify_stages) != 5:
+        print(f"[ERROR] Expected 5 stages, found {len(verify_stages)}")
+        return False
+
+    print(f"  [OK] Stages ({len(verify_stages)}):")
+    for stage in verify_stages:
+        print(f"       {stage.sequence}. {stage.name} ({stage.code}, {stage.default_duration_days} days)")
+
+    # Verify transitions
+    verify_transitions = session.query(RepairStageTransition).filter(
+        RepairStageTransition.from_stage_id.in_([s.id for s in verify_stages])
+    ).all()
+
+    print(f"  [OK] Transitions: {len(verify_transitions)} configured")
+
+    # Verify templates
+    verify_templates = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key.in_(template_map.keys())
+    ).all()
+
+    print(f"  [OK] Templates: {len(verify_templates)} ready")
+
+    print("\n[SUCCESS] Surveillance workflow seed validation passed!")
 
 
 def seed_surveillance_config(session):
