@@ -105,19 +105,23 @@ def _on_repair_workflow_completed(
             return
 
         # Create surveillance workflow
+        # Calculate surveillance period (used for stage/schedule calculations)
         start_date = datetime.now(timezone.utc)
-        end_date = start_date + relativedelta(months=surveillance_period_months)
+        # Note: We don't store end_date on workflow - it's calculated from surveillance_period_months
+
+        # Generate workflow number
+        from services.repair_workflow_service import RepairWorkflowService
+        wf_service = RepairWorkflowService(db)
+        workflow_number = wf_service.generate_workflow_number()
 
         surveillance_workflow = RepairWorkflow(
-            workflow_definition_id=surveillance_def.id,
+            workflow_number=workflow_number,
+            workflow_code='SURVEILLANCE',
             equipment_id=workflow.equipment_id,
-            organization_id=workflow.organization_id,
-            department_id=workflow.department_id,
+            organization_id=workflow.equipment.organization_id if workflow.equipment else None,
             workflow_type='surveillance',
             parent_workflow_id=workflow.id,  # Link back to parent repair workflow
             status='active',
-            start_date=start_date,
-            end_date=end_date,
             created_by=user_id,
             modified_by=user_id,
         )

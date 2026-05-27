@@ -288,6 +288,14 @@ class RepairWorkflow(Base):
         nullable=True,
     )
 
+    parent_workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Links surveillance workflows back to their parent repair workflow"
+    )
+
     organization_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.organizations.id", ondelete="SET NULL"),
@@ -295,7 +303,7 @@ class RepairWorkflow(Base):
         index=True,
     )
 
-    workflow_type = Column(String(50), default="BREAKDOWN", nullable=True)  # BREAKDOWN / OVERHAUL
+    workflow_type = Column(String(50), default="BREAKDOWN", nullable=True)  # BREAKDOWN / OVERHAUL / SURVEILLANCE
     source = Column(String(50), nullable=True)  # manual / cumulative / scheduled
 
     status = Column(String(20), default="active")
