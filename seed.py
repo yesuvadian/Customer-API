@@ -9327,6 +9327,15 @@ def _dft_get_or_create_dept(session, org_id, name, code,
             d.parent_department_id = parent_id
             session.flush()
         return d
+    # Fallback: match by name + parent to avoid creating duplicates when the
+    # same dept was already seeded with a different code (e.g. KPTCL zones).
+    d = session.query(OrgDepartment).filter_by(
+        organization_id=org_id,
+        name=name,
+        parent_department_id=parent_id,
+    ).first()
+    if d:
+        return d
     now = datetime.now()
     d = OrgDepartment(
         organization_id=org_id,
