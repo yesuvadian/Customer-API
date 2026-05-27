@@ -2383,182 +2383,179 @@ TEST_TEMPLATES = {
     # overall_condition aggregates oil_test_results.condition via AGGREGATE_STATUS.
     # ────────────────────────────────────────────────────────────────────────────
     "transformer_oil_test": {
-        "key": "transformer_oil_test",
-        "name": "Transformer Oil Test",
-        "equipment_type": "Power Transformer",
-        "description": "Insulating oil sample analysis as per IS 1866:2017.",
-        "supports_multi_session": False,
-        "typical_session_interval_days": 365,
-        "typical_total_sessions": 1,
-        "sections": [
-            # ── Section 1 — Equipment & Test Details ─────────────────────────────
-            {
-                "title": "Equipment & Test Details",
-                "fields": [
-                    {"key": "reference_no",          "label": "Reference No.",           "type": "text",     "required": False},
-                    {"key": "substation_name",        "label": "Substation Name",         "type": "text",     "required": True},
-                    {"key": "sample_no",              "label": "Sample No.",              "type": "text",     "required": False},
-                    {"key": "capacity_mva",           "label": "Capacity",                "type": "number",   "required": False, "unit": "MVA"},
-                    {"key": "make",                   "label": "Make",                    "type": "text",     "required": False},
-                    {"key": "serial_number",          "label": "Serial Number",           "type": "text",     "required": False},
-                    {"key": "doc",                    "label": "Date of Commissioning",   "type": "date",     "required": False},
-                    {"key": "yom",                    "label": "Year of Manufacture",     "type": "text",     "required": False},
-                    {"key": "date_of_filtration",     "label": "Date of Last Filtration", "type": "date",     "required": False},
-                    {"key": "date_of_test",           "label": "Date of Test",            "type": "date",     "required": True},
-                    {"key": "transformer_voltage",    "label": "Transformer Voltage",     "type": "dropdown", "required": True,
-                     "options": ["11kV", "33kV", "66kV", "110kV", "132kV", "220kV", "400kV"]},
-                ],
-            },
-            # ── Section 2 — Oil Test Measurements ───────────────────────────────
-            {
-                "title": "Oil Test Measurements",
-                "fields": [
-                    {
-                        "key": "threshold_reference",
-                        "label": "IS 1866:2017 Acceptable Limits (Good Range)",
-                        "type": "calculated",
-                        "rule": {
-                            "type": "LOOKUP",
-                            "config": {
-                                "field": "$form.transformer_voltage",
-                                "mapping": {
-                                    "11kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
-                                    "33kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
-                                    "66kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
-                                    "110kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
-                                    "132kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
-                                    "220kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
-                                    "400kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
-                                }
+    "key": "transformer_oil_test",
+    "name": "Transformer Oil Test",
+    "equipment_type": "Power Transformer",
+    "description": "Insulating oil sample analysis as per IS 1866:2017.",
+    "supports_multi_session": False,
+    "typical_session_interval_days": 365,
+    "typical_total_sessions": 1,
+    "sections": [
+
+        # ── Section 1 — Equipment & Test Details (NO CHANGE) ─────────────────
+        {
+            "title": "Equipment & Test Details",
+            "fields": [
+                {"key": "reference_no",          "label": "Reference No.",           "type": "text",     "required": False},
+                {"key": "substation_name",        "label": "Substation Name",         "type": "text",     "required": True},
+                {"key": "sample_no",              "label": "Sample No.",              "type": "text",     "required": False},
+                {"key": "doc",                    "label": "Date of Commissioning",   "type": "date",     "required": False},
+                {"key": "yom",                    "label": "Year of Manufacture",     "type": "text",     "required": False},
+                {"key": "date_of_filtration",     "label": "Date of Last Filtration", "type": "date",     "required": False},
+                {"key": "date_of_test",           "label": "Date of Test",            "type": "date",     "required": True},
+                {"key": "transformer_voltage",    "label": "Transformer Voltage",     "type": "dropdown", "required": True,
+                 "options": ["11kV", "33kV", "66kV", "110kV", "132kV", "220kV", "400kV"]},
+            ],
+        },
+
+        # ── Section 2 — Oil Test Measurements ───────────────────────────────
+        {
+            "title": "Oil Test Measurements",
+            "fields": [
+                {
+                    "key": "threshold_reference",
+                    "label": "IS 1866:2017 Acceptable Limits (Good Range)",
+                    "type": "calculated",
+                    "rule": {
+                        "type": "LOOKUP",
+                        "config": {
+                            "field": "$form.transformer_voltage",
+                            "mapping": {
+                                "11kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
+                                "33kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
+                                "66kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
+                                "110kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
+                                "132kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
+                                "220kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
+                                "400kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
                             }
                         }
-                    },
-                    {
-                        "key": "oil_test_results",
-                        "label": "Test Results as per IS 1866:2017",
-                        "type": "table",
-                        "allow_add_rows": False,
-                        "allow_delete_rows": False,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "test_name",      "label": "Parameter",       "type": "readonly"},
-                            {"key": "unit",           "label": "Unit",            "type": "readonly"},
-                            {"key": "measured_value", "label": "Measured Value",  "type": "number"},
-                            {
-                                "key": "condition",
-                                "label": "Condition",
-                                "type": "calculated",
-                                "rule": {
-                                    "type": "THRESHOLD",
-                                    "config": {
-                                        "input_field": "measured_value",
-                                        "lookup_fields": [
-                                            "test_name",
-                                            {
-                                                "field": "$form.transformer_voltage",
-                                                "mapping": {
-                                                    "11kV":  "<=72.5kV",
-                                                    "33kV":  "<=72.5kV",
-                                                    "66kV":  "<=72.5kV",
-                                                    "110kV": "72.5-170kV",
-                                                    "132kV": "72.5-170kV",
-                                                    "220kV": ">170kV",
-                                                    "400kV": ">170kV",
-                                                },
+                    }
+                },
+
+                # ── Oil Test Results Table (NO CHANGE to existing) ───────────
+                {
+                    "key": "oil_test_results",
+                    "label": "Test Results as per IS 1866:2017",
+                    "type": "table",
+                    "allow_add_rows": False,
+                    "allow_delete_rows": False,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "test_name",      "label": "Parameter",       "type": "readonly"},
+                        {"key": "unit",           "label": "Unit",            "type": "readonly"},
+                        {"key": "measured_value", "label": "Measured Value",  "type": "number"},
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "measured_value",
+                                    "lookup_fields": [
+                                        "test_name",
+                                        {
+                                            "field": "$form.transformer_voltage",
+                                            "mapping": {
+                                                "11kV":  "<=72.5kV",
+                                                "33kV":  "<=72.5kV",
+                                                "66kV":  "<=72.5kV",
+                                                "110kV": "72.5-170kV",
+                                                "132kV": "72.5-170kV",
+                                                "220kV": ">170kV",
+                                                "400kV": ">170kV",
                                             },
-                                        ],
-                                        "thresholds": {
-                                            # Acidity (mg KOH/g) — lower is better
-                                            "Acidity": {
-                                                ">170kV":     {"Good": [0, 0.10], "Fair": [0.10, 0.15], "Poor": [0.15, None]},
-                                                "72.5-170kV": {"Good": [0, 0.10], "Fair": [0.10, 0.20], "Poor": [0.20, None]},
-                                                "<=72.5kV":   {"Good": [0, 0.15], "Fair": [0.15, 0.30], "Poor": [0.30, None]},
-                                            },
-                                            # Resistivity at 90 deg C (T-ohm.m) — higher is better
-                                            "Resistivity at 90C": {
-                                                ">170kV":     {"Poor": [0, 3],   "Fair": [3,   10],   "Good": [10,  None]},
-                                                "72.5-170kV": {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
-                                                "<=72.5kV":   {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
-                                            },
-                                            # Tan Delta at 90 deg C — lower is better, Good/Poor only
-                                            "Tan Delta at 90C": {
-                                                ">170kV":     {"Good": [0, 0.2], "Poor": [0.2, None]},
-                                                "72.5-170kV": {"Good": [0, 0.5], "Poor": [0.5, None]},
-                                                "<=72.5kV":   {"Good": [0, 0.5], "Poor": [0.5, None]},
-                                            },
-                                            # BDV Top sample — higher is better
-                                            "BDV Top (T)": {
-                                                ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
-                                                "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
-                                                "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
-                                            },
-                                            # BDV Bottom sample — higher is better
-                                            "BDV Bottom (B)": {
-                                                ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
-                                                "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
-                                                "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
-                                            },
-                                            # Interfacial Tension (mN/m) — higher is better, fixed limits
-                                            "Interfacial Tension": {
-                                                ">170kV":     {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
-                                                "72.5-170kV": {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
-                                                "<=72.5kV":   {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
-                                            },
-                                            # Flash Point (deg C) — higher is better, fixed limits
-                                            "Flash Point": {
-                                                ">170kV":     {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
-                                                "72.5-170kV": {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
-                                                "<=72.5kV":   {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
-                                            },
-                                            # Water Content (ppm) — lower is better
-                                            "Water Content": {
-                                                ">170kV":     {"Good": [0, 15], "Fair": [15, 20], "Poor": [20, None]},
-                                                "72.5-170kV": {"Good": [0, 20], "Fair": [20, 30], "Poor": [30, None]},
-                                                "<=72.5kV":   {"Good": [0, 30], "Fair": [30, 40], "Poor": [40, None]},
-                                            },
+                                        },
+                                    ],
+                                    "thresholds": {
+                                        "Acidity": {
+                                            ">170kV":     {"Good": [0, 0.10], "Fair": [0.10, 0.15], "Poor": [0.15, None]},
+                                            "72.5-170kV": {"Good": [0, 0.10], "Fair": [0.10, 0.20], "Poor": [0.20, None]},
+                                            "<=72.5kV":   {"Good": [0, 0.15], "Fair": [0.15, 0.30], "Poor": [0.30, None]},
+                                        },
+                                        "Resistivity at 90C": {
+                                            ">170kV":     {"Poor": [0, 3],   "Fair": [3,   10],   "Good": [10,  None]},
+                                            "72.5-170kV": {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
+                                            "<=72.5kV":   {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
+                                        },
+                                        "Tan Delta at 90C": {
+                                            ">170kV":     {"Good": [0, 0.2], "Poor": [0.2, None]},
+                                            "72.5-170kV": {"Good": [0, 0.5], "Poor": [0.5, None]},
+                                            "<=72.5kV":   {"Good": [0, 0.5], "Poor": [0.5, None]},
+                                        },
+                                        "BDV Top (T)": {
+                                            ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
+                                            "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
+                                            "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
+                                        },
+                                        "BDV Bottom (B)": {
+                                            ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
+                                            "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
+                                            "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
+                                        },
+                                        "Interfacial Tension": {
+                                            ">170kV":     {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
+                                            "72.5-170kV": {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
+                                            "<=72.5kV":   {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
+                                        },
+                                        "Flash Point": {
+                                            ">170kV":     {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
+                                            "72.5-170kV": {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
+                                            "<=72.5kV":   {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
+                                        },
+                                        "Water Content": {
+                                            ">170kV":     {"Good": [0, 15], "Fair": [15, 20], "Poor": [20, None]},
+                                            "72.5-170kV": {"Good": [0, 20], "Fair": [20, 30], "Poor": [30, None]},
+                                            "<=72.5kV":   {"Good": [0, 30], "Fair": [30, 40], "Poor": [40, None]},
                                         },
                                     },
                                 },
                             },
-                            {"key": "remarks", "label": "Remarks", "type": "text"},
-                        ],
-                        "default_rows": [
-                            {"test_name": "Acidity",              "unit": "mg KOH/g"},
-                            {"test_name": "Resistivity at 90C",   "unit": "T-ohm.m"},
-                            {"test_name": "Tan Delta at 90C",     "unit": ""},
-                            {"test_name": "BDV Top (T)",          "unit": "kV"},
-                            {"test_name": "BDV Bottom (B)",       "unit": "kV"},
-                            {"test_name": "Interfacial Tension",  "unit": "mN/m"},
-                            {"test_name": "Flash Point",          "unit": "deg C"},
-                            {"test_name": "Water Content",        "unit": "ppm"},
-                        ],
-                    },
-                ],
-            },
-            # ── Section 3 — Overall Assessment ──────────────────────────────────
-            {
-                "title": "Overall Assessment",
-                "fields": [
-                    {
-                        "key": "overall_condition",
-                        "label": "Overall Oil Condition",
-                        "type": "calculated",
-                        "rule": {
-                            "type": "AGGREGATE_STATUS",
-                            "config": {
-                                "sources":  ["oil_test_results.condition"],
-                                "priority": ["Poor", "Fair", "Good"],
-                            },
                         },
-                    },
-                    {"key": "filtration_recommended",  "label": "Oil Filtration Recommended",  "type": "boolean",  "required": False},
-                    {"key": "replacement_recommended", "label": "Oil Replacement Recommended", "type": "boolean",  "required": False},
-                    {"key": "overall_remarks",         "label": "Remarks / Observations",      "type": "textarea", "required": False},
-                ],
-            },
-        ],
-    },
+                        {"key": "remarks", "label": "Remarks", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"test_name": "Acidity",              "unit": "mg KOH/g"},
+                        {"test_name": "Resistivity at 90C",   "unit": "G ohm m"},
+                        {"test_name": "Tan Delta at 90C",     "unit": ""},
+                        {"test_name": "BDV Top (T)",          "unit": "kV"},
+                        {"test_name": "BDV Bottom (B)",       "unit": "kV"},
+                        {"test_name": "Interfacial Tension",  "unit": "mN/m"},
+                        {"test_name": "Flash Point",          "unit": "°C"},
+                        {"test_name": "Water Content",        "unit": "ppm"},
+                    ],
+                },
 
+                # ── ✅ NEW — Dissolved Gas Analysis (DGA) Table ──────────────
+                {
+                    "key": "dga_test_results",
+                    "label": "Test Report of Dissolved Gas Analysis (as per IS 10593:2018)",
+                    "type": "table",
+                    "allow_add_rows": False,
+                    "allow_delete_rows": False,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "gas_name",       "label": "Gases",                              "type": "readonly"},
+                        {"key": "permissible_limit", "label": "Permissible Limits (IS 10593:2018)", "type": "readonly"},
+                        {"key": "bottom_value",   "label": "Bottom (ppm)",                       "type": "number"},
+                        {"key": "remarks",        "label": "Remarks",                            "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"gas_name": "Methane CH₄",         "permissible_limit": "30–130"},
+                        {"gas_name": "Ethane C₂H₆",         "permissible_limit": "20–90"},
+                        {"gas_name": "Ethylene C₂H₄",       "permissible_limit": "60–280"},
+                        {"gas_name": "Acetylene C₂H₂",      "permissible_limit": "2–20"},
+                        {"gas_name": "Hydrogen H₂",         "permissible_limit": "50–150"},
+                        {"gas_name": "Carbon-dioxide CO₂",  "permissible_limit": "3800–14000"},
+                        {"gas_name": "Carbon monoxide CO",  "permissible_limit": "400–600"},
+                    ],
+                },
+            ],
+        },
+
+    ],
+},
     # ────────────────────────────────────────────────────────────────────────────
     # Capacitance & Tan Delta Test (Transformer)
     # Point-in-time insulation quality measurement — no multi-session.
@@ -2566,383 +2563,441 @@ TEST_TEMPLATES = {
     # temperature-corrected tan δ, and trend change from previous reading.
     # ────────────────────────────────────────────────────────────────────────────
     "capacitance_tandelta_transformer": {
-        "key": "capacitance_tandelta_transformer",
-        "name": "Capacitance & Tan Delta Test (Transformer)",
-        "equipment_type": "Power Transformer",
-        "description": "Capacitance and tan delta insulation quality test per IEC 60450",
-        "supports_multi_session": False,
-        "typical_session_interval_days": None,
-        "typical_total_sessions": 1,
-        "sections": [
-            # ── Section 1 — Test Conditions ─────────────────────────────────────
-            {
-                "title": "Test Conditions",
-                "fields": [
-                    {"key": "test_voltage_kv", "label": "Applied Test Voltage",  "type": "number", "unit": "kV",  "required": True},
-                    {"key": "frequency_hz",    "label": "Supply Frequency",      "type": "number", "unit": "Hz",  "required": True, "default": "50"},
-                    {"key": "ambient_temp_c",  "label": "Ambient Temperature",   "type": "number", "unit": "°C",  "required": True},
-                    {"key": "oil_temp_c",      "label": "Oil Temperature",       "type": "number", "unit": "°C",  "required": False},
-                    {
-                        "key": "test_mode",
-                        "label": "Test Mode",
-                        "type": "dropdown",
-                        "options": ["UST (Ungrounded Specimen)", "GST (Grounded Specimen)", "GST-Guard"],
-                        "required": True,
-                    },
-                    {"key": "instrument_make", "label": "Instrument Make/Model", "type": "text",   "required": False},
-                ],
-            },
-
-            # ── Section 2 — Winding Test Results ────────────────────────────────
-            {
-                "title": "Winding Test Results",
-                "fields": [
-                    {
-                        "key": "winding_test_results",
-                        "label": "Winding Test Data",
-                        "type": "table",
-                        "allow_add_rows": False,
-                        "allow_delete_rows": False,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "sl_no",             "label": "Sl. No.",                                              "type": "readonly"},
-                            {"key": "test_configuration","label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)", "type": "readonly"},
-                            {"key": "voltage_kv",        "label": "KV",                                                   "type": "number"},
-                            {"key": "capacitance_pf",    "label": "Capacitance Measured C(pF)",                           "type": "number"},
-                            {"key": "df_measured",       "label": "% D.F Measured",                                       "type": "number"},
-                            {
-                                "key": "df_corrected_20c",
-                                "label": "% D.F After Temp Correction at 20°C (IEC — Ambient)",
-                                "type": "calculated",
-                                "read_only": True,
-                                "rule": {
-                                    "type": "FORMULA",
-                                    "config": {
-                                        "formula": "TEMP_CORRECTED_TAND",
-                                        "inputs": {
-                                            "tan_delta":   "df_measured",
-                                            "temperature": "$form.ambient_temp_c",
-                                        },
-                                        "precision": 4,
-                                    },
-                                },
-                                "alert": {
-                                    "thresholds": [
-                                        {"operator": ">", "value": 1.0, "result": "FAIL"},
-                                        {"operator": ">", "value": 0.5, "result": "ALERT"},
-                                    ],
-                                    "default": "PASS",
-                                },
-                            },
-                            {
-                                "key": "df_measured_on_date",
-                                "label": "% D.F After Temp Correction at 20°C (IEC — Oil Temp)",
-                                "type": "calculated",
-                                "read_only": True,
-                                "rule": {
-                                    "type": "FORMULA",
-                                    "config": {
-                                        "formula": "TEMP_CORRECTED_TAND",
-                                        "inputs": {
-                                            "tan_delta":   "df_measured",
-                                            "temperature": "$form.oil_temp_c",
-                                        },
-                                        "precision": 4,
-                                    },
-                                },
-                                "alert": {
-                                    "thresholds": [
-                                        {"operator": ">", "value": 1.0, "result": "FAIL"},
-                                        {"operator": ">", "value": 0.5, "result": "ALERT"},
-                                    ],
-                                    "default": "PASS",
-                                },
-                            },
-                        ],
-                        "default_rows": [
-                            {"sl_no": "1", "test_configuration": "HV-GND"},
-                            {"sl_no": "2", "test_configuration": "HV-LV"},
-                            {"sl_no": "3", "test_configuration": "LV-GND"},
-                            {"sl_no": "4", "test_configuration": "LV-TV"},
-                            {"sl_no": "5", "test_configuration": "TV-GND"},
-                            {"sl_no": "6", "test_configuration": "TV-HV"},
-                        ],
-                    },
-                ],
-            },
-
-            # ── Section 3 — HV Bushing Details ──────────────────────────────────
-            {
-                "title": "HV Bushing Details",
-                "fields": [
-                    {
-                        "key": "hv_bushing_details",
-                        "label": "HV Bushing Details",
-                        "type": "table",
-                        "allow_add_rows": False,
-                        "allow_delete_rows": False,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "detail",  "label": "Details",      "type": "readonly"},
-                            {"key": "r_phase", "label": "HV 'R' Phase", "type": "text"},
-                            {"key": "y_phase", "label": "HV 'Y' Phase", "type": "text"},
-                            {"key": "b_phase", "label": "HV 'B' Phase", "type": "text"},
-                        ],
-                        "default_rows": [
-                            {"detail": "Make"},
-                            {"detail": "Sl. No."},
-                            {"detail": "Y.O. Mfg."},
-                        ],
-                    },
-                ],
-            },
-
-            # ── Section 4 — HV Bushing Test Results ─────────────────────────────
-            {
-                "title": "HV Bushing Test Results",
-                "fields": [
-                    {
-                        "key": "hv_bushing_test_results",
-                        "label": "HV Bushing Test Data",
-                        "type": "table",
-                        "allow_add_rows": False,
-                        "allow_delete_rows": False,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "sl_no",          "label": "Sl. No.",                  "type": "readonly"},
-                            {"key": "bushing",         "label": "Bushing",                  "type": "readonly"},
-                            {"key": "voltage_kv",      "label": "KV",                       "type": "number"},
-                            {"key": "capacitance_pf",  "label": "Capacitance Measured C(pF)","type": "number"},
-                            {"key": "df_measured",     "label": "% D.F Measured",           "type": "number"},
-                            {
-                                "key": "df_corrected_20c",
-                                "label": "% D.F Corrected at 20°C (IEC)",
-                                "type": "calculated",
-                                "read_only": True,
-                                "rule": {
-                                    "type": "FORMULA",
-                                    "config": {
-                                        "formula": "TEMP_CORRECTED_TAND",
-                                        "inputs": {
-                                            "tan_delta":   "df_measured",
-                                            "temperature": "$form.ambient_temp_c",
-                                        },
-                                        "precision": 4,
-                                    },
-                                },
-                                "alert": {
-                                    "thresholds": [
-                                        {"operator": ">", "value": 1.0, "result": "FAIL"},
-                                        {"operator": ">", "value": 0.5, "result": "ALERT"},
-                                    ],
-                                    "default": "PASS",
-                                },
-                            },
-                            {"key": "df_previous_date", "label": "% D.F Corrected at 20°C (Previous Test)", "type": "number"},
-                            {
-                                "key": "df_change_pct",
-                                "label": "% Change from Previous",
-                                "type": "calculated",
-                                "read_only": True,
-                                "rule": {
-                                    "type": "FORMULA",
-                                    "config": {
-                                        "formula": "TREND_CHANGE",
-                                        "inputs": {
-                                            "current":  "df_corrected_20c",
-                                            "previous": "df_previous_date",
-                                        },
-                                        "precision": 2,
-                                    },
-                                },
-                                "alert": {
-                                    "thresholds": [
-                                        {"operator": ">", "value": 20, "result": "FAIL"},
-                                        {"operator": ">", "value": 10, "result": "ALERT"},
-                                    ],
-                                    "default": "PASS",
-                                },
-                            },
-                        ],
-                        "default_rows": [
-                            {"sl_no": "1", "bushing": "R Phase"},
-                            {"sl_no": "2", "bushing": "Y Phase"},
-                            {"sl_no": "3", "bushing": "B Phase"},
-                        ],
-                    },
-                ],
-            },
-
-            # ── Section 5 — DFR Test Results for HV 'Y' Phase Bushing ───────────
-            {
-                "title": "DFR Test Results for HV 'Y' Phase Bushing",
-                "fields": [
-                    {"key": "dfr_test_voltage", "label": "Test Voltage", "type": "text"},
-                    {
-                        "key": "dfr_test_results",
-                        "label": "DFR Test Data",
-                        "type": "table",
-                        "allow_add_rows": True,
-                        "allow_delete_rows": True,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "test_frequency", "label": "Test Frequency (Hz)",        "type": "number"},
-                            {"key": "df_percent",     "label": "HV Y Phase Bushing (%DF)",   "type": "number"},
-                        ],
-                        "default_rows": [
-                            {"test_frequency": "470"},
-                            {"test_frequency": "220"},
-                            {"test_frequency": "110"},
-                            {"test_frequency": "70"},
-                            {"test_frequency": "40"},
-                            {"test_frequency": "20"},
-                            {"test_frequency": "10"},
-                            {"test_frequency": "5"},
-                            {"test_frequency": "2"},
-                            {"test_frequency": "1"},
-                        ],
-                    },
-                ],
-            },
-
-            # ── Section 6 — LV Bushing Details ──────────────────────────────────
-            {
-                "title": "LV Bushing Details",
-                "fields": [
-                    {
-                        "key": "lv_bushing_details",
-                        "label": "LV Bushing Details",
-                        "type": "table",
-                        "allow_add_rows": False,
-                        "allow_delete_rows": False,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "detail",  "label": "Details",      "type": "readonly"},
-                            {"key": "r_phase", "label": "LV 'R' Phase", "type": "text"},
-                            {"key": "y_phase", "label": "LV 'Y' Phase", "type": "text"},
-                            {"key": "b_phase", "label": "LV 'B' Phase", "type": "text"},
-                        ],
-                        "default_rows": [
-                            {"detail": "Make"},
-                            {"detail": "Sl. No."},
-                            {"detail": "Y.O. Mfg."},
-                        ],
-                    },
-                ],
-            },
-
-            # ── Section 7 — LV Bushing Test Results ─────────────────────────────
-            {
-                "title": "LV Bushing Test Results",
-                "fields": [
-                    {
-                        "key": "lv_bushing_test_results",
-                        "label": "LV Bushing Test Data",
-                        "type": "table",
-                        "allow_add_rows": False,
-                        "allow_delete_rows": False,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "sl_no",          "label": "Sl. No.",                   "type": "readonly"},
-                            {"key": "bushing",         "label": "Bushing",                   "type": "readonly"},
-                            {"key": "voltage_kv",      "label": "KV",                        "type": "number"},
-                            {"key": "capacitance_pf",  "label": "Capacitance Measured C(pF)", "type": "number"},
-                            {"key": "df_measured",     "label": "% D.F Measured",            "type": "number"},
-                            {
-                                "key": "df_corrected_20c",
-                                "label": "% D.F Corrected at 20°C (IEC)",
-                                "type": "calculated",
-                                "read_only": True,
-                                "rule": {
-                                    "type": "FORMULA",
-                                    "config": {
-                                        "formula": "TEMP_CORRECTED_TAND",
-                                        "inputs": {
-                                            "tan_delta":   "df_measured",
-                                            "temperature": "$form.ambient_temp_c",
-                                        },
-                                        "precision": 4,
-                                    },
-                                },
-                                "alert": {
-                                    "thresholds": [
-                                        {"operator": ">", "value": 1.0, "result": "FAIL"},
-                                        {"operator": ">", "value": 0.5, "result": "ALERT"},
-                                    ],
-                                    "default": "PASS",
-                                },
-                            },
-                            {"key": "df_previous_date", "label": "% D.F Corrected at 20°C (Previous Test)", "type": "number"},
-                            {
-                                "key": "df_change_pct",
-                                "label": "% Change from Previous",
-                                "type": "calculated",
-                                "read_only": True,
-                                "rule": {
-                                    "type": "FORMULA",
-                                    "config": {
-                                        "formula": "TREND_CHANGE",
-                                        "inputs": {
-                                            "current":  "df_corrected_20c",
-                                            "previous": "df_previous_date",
-                                        },
-                                        "precision": 2,
-                                    },
-                                },
-                                "alert": {
-                                    "thresholds": [
-                                        {"operator": ">", "value": 20, "result": "FAIL"},
-                                        {"operator": ">", "value": 10, "result": "ALERT"},
-                                    ],
-                                    "default": "PASS",
-                                },
-                            },
-                        ],
-                        "default_rows": [
-                            {"sl_no": "1", "bushing": "R Phase"},
-                            {"sl_no": "2", "bushing": "Y Phase"},
-                            {"sl_no": "3", "bushing": "B Phase"},
-                        ],
-                    },
-                ],
-            },
-
-            # ── Section 8 — IDAX Test Results ───────────────────────────────────
-            {
-                "title": "IDAX Test Results (Insulation Diagnostics)",
-                "fields": [
-                    {"key": "idax_testing_kit", "label": "Testing Kit Used", "type": "text"},
-                    {
-                        "key": "idax_test_results",
-                        "label": "IDAX Test Data",
-                        "type": "table",
-                        "allow_add_rows": False,
-                        "allow_delete_rows": False,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "sl_no",               "label": "Sl. No.",                                               "type": "readonly"},
-                            {"key": "test_configuration",  "label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)", "type": "readonly"},
-                            {"key": "moisture_percent",    "label": "% Moisture",                                            "type": "number"},
-                            {"key": "tr_analysis_moisture","label": "Tr. Analysis on Basis of % Moisture",                   "type": "text"},
-                            {"key": "oil_conductivity",    "label": "Oil Conductivity (pS/m)",                               "type": "number"},
-                            {"key": "moisture_percent_oil","label": "% Moisture (from Oil)",                                 "type": "number"},
-                            {"key": "tr_analysis_oil",     "label": "Tr. Analysis on Basis of Oil Conductivity",            "type": "text"},
-                        ],
-                        "default_rows": [
-                            {"sl_no": "1", "test_configuration": "HV-GND"},
-                            {"sl_no": "2", "test_configuration": "HV-LV"},
-                            {"sl_no": "3", "test_configuration": "LV-GND"},
-                            {"sl_no": "4", "test_configuration": "LV-TV"},
-                            {"sl_no": "5", "test_configuration": "TV-GND"},
-                            {"sl_no": "6", "test_configuration": "TV-HV"},
-                        ],
-                    },
-                    {"key": "idax_observation", "label": "Observation", "type": "textarea"},
-                ],
-            },
-        ],
+  "key": "capacitance_tandelta_transformer",
+  "name": "Capacitance & Tan Delta Test (Transformer)",
+  "equipment_type": "Power Transformer",
+  "description": "Capacitance and tan delta insulation quality test per IEC 60450",
+  "supports_multi_session": False,
+  "typical_session_interval_days": None,
+  "typical_total_sessions": 1,
+  "sections": [
+    {
+      "title": "Test Conditions",
+      "fields": [
+        {
+          "key": "test_voltage_kv",
+          "label": "Applied Test Voltage",
+          "type": "number",
+          "unit": "kV",
+          "required": True
+        },
+        {
+          "key": "frequency_hz",
+          "label": "Supply Frequency",
+          "type": "number",
+          "unit": "Hz",
+          "required": True,
+          "default": "50"
+        },
+        {
+          "key": "ambient_temp_c",
+          "label": "Ambient Temperature",
+          "type": "number",
+          "unit": "°C",
+          "required": True
+        },
+        {
+          "key": "oil_temp_c",
+          "label": "Oil Temperature",
+          "type": "number",
+          "unit": "°C",
+          "required": False
+        },
+        {
+          "key": "test_mode",
+          "label": "Test Mode",
+          "type": "dropdown",
+          "options": [
+            "UST (Ungrounded Specimen)",
+            "GST (Grounded Specimen)",
+            "GST-Guard"
+          ],
+          "required": True
+        },
+        {
+          "key": "instrument_make",
+          "label": "Instrument Make/Model",
+          "type": "text",
+          "required": False
+        }
+      ]
     },
 
+    {
+      "title": "Winding Test Results",
+      "fields": [
+        {
+          "key": "winding_test_results",
+          "label": "Winding Test Data",
+          "type": "table",
+          "allow_add_rows": False,
+          "allow_delete_rows": False,
+          "lock_default_rows": False,
+          "columns": [
+            {
+              "key": "sl_no",
+              "label": "Sl. No.",
+              "type": "readonly"
+            },
+            {
+              "key": "test_configuration",
+              "label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)",
+              "type": "readonly"
+            },
+            {
+              "key": "voltage_kv",
+              "label": "KV",
+              "type": "number"
+            },
+            {
+              "key": "capacitance_pf",
+              "label": "Capacitance Measured C(pF)",
+              "type": "number"
+            },
+            {
+              "key": "df_measured",
+              "label": "% D.F Measured",
+              "type": "number"
+            },
+            {
+              "key": "df_measured_on_date",
+              "label": "% D.F After Temp Correction at 20°C",
+              "type": "calculated",
+              "read_only": True,
+              "rule": {
+                "type": "FORMULA",
+                "config": {
+                  "formula": "TEMP_CORRECTED_TAND",
+                  "inputs": {
+                    "tan_delta": "df_measured",
+                    "temperature": "$form.oil_temp_c"
+                  },
+                  "precision": 4
+                }
+              },
+              "alert": {
+                "thresholds": [
+                  { "operator": ">", "value": 1.0, "result": "FAIL" },
+                  { "operator": ">", "value": 0.5, "result": "ALERT" }
+                ],
+                "default": "PASS"
+              }
+            },
+              {
+
+                            "key": "df_measured_on_date",
+
+                            "label": "% D.F After Temp Correction at 20°C (IEC Correction on previous Date)",
+
+                            "type": "number",
+
+                        },
+          ],
+          "default_rows": [
+            { "sl_no": "1", "test_configuration": "HV-GND" },
+            { "sl_no": "2", "test_configuration": "HV-LV" },
+            { "sl_no": "3", "test_configuration": "LV-GND" },
+            { "sl_no": "4", "test_configuration": "LV-TV" },
+            { "sl_no": "5", "test_configuration": "TV-GND" },
+            { "sl_no": "6", "test_configuration": "TV-HV" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "title": "HV Bushing Details",
+      "fields": [
+        {
+          "key": "hv_bushing_details",
+          "label": "HV Bushing Details",
+          "type": "table",
+          "allow_add_rows": False,
+          "allow_delete_rows": False,
+          "lock_default_rows": False,
+          "columns": [
+            { "key": "detail",  "label": "Details",       "type": "readonly" },
+            { "key": "r_phase", "label": "HV 'R' Phase",  "type": "text" },
+            { "key": "y_phase", "label": "HV 'Y' Phase",  "type": "text" },
+            { "key": "b_phase", "label": "HV 'B' Phase",  "type": "text" }
+          ],
+          "default_rows": [
+            { "detail": "Make" },
+            { "detail": "Sl. No." },
+            { "detail": "Y.O. Mfg." }
+          ]
+        }
+      ]
+    },
+
+    {
+      "title": "HV Bushing Test Results",
+      "fields": [
+        {
+          "key": "hv_bushing_test_results",
+          "label": "HV Bushing Test Data",
+          "type": "table",
+          "allow_add_rows": False,
+          "allow_delete_rows": False,
+          "lock_default_rows": False,
+          "columns": [
+            { "key": "sl_no",   "label": "Sl. No.",  "type": "readonly" },
+            { "key": "bushing", "label": "Bushing",  "type": "readonly" },
+            {
+              "key": "voltage_kv",
+              "label": "KV",
+              "type": "number"
+            },
+            {
+              "key": "capacitance_pf",
+              "label": "Capacitance Measured C(pF)",
+              "type": "number"
+            },
+            {
+              "key": "df_measured",
+              "label": "% D.F Measured",
+              "type": "number"
+            },
+            {
+              "key": "df_corrected_20c",
+              "label": "% D.F Corrected at 20°C (IEC)",
+              "type": "calculated",
+              "read_only": True,
+              "rule": {
+                "type": "FORMULA",
+                "config": {
+                  "formula": "TEMP_CORRECTED_TAND",
+                  "inputs": {
+                    "tan_delta": "df_measured",
+                    "temperature": "$form.ambient_temp_c"
+                  },
+                  "precision": 4
+                }
+              },
+              "alert": {
+                "thresholds": [
+                  { "operator": ">", "value": 1.0, "result": "FAIL" },
+                  { "operator": ">", "value": 0.5, "result": "ALERT" }
+                ],
+                "default": "PASS"
+              }
+            },
+            {
+              "key": "df_previous_date",
+              "label": "% D.F Corrected at 20°C (Previous Test)",
+              "type": "number"
+            },
+          ],
+          "default_rows": [
+            { "sl_no": "1", "bushing": "R Phase" },
+            { "sl_no": "2", "bushing": "Y Phase" },
+            { "sl_no": "3", "bushing": "B Phase" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "title": "DFR Test Results for HV 'Y' Phase Bushing",
+      "fields": [
+        {
+          "key": "dfr_test_voltage",
+          "label": "Test Voltage",
+          "type": "text"
+        },
+        {
+          "key": "dfr_test_results",
+          "label": "DFR Test Data",
+          "type": "table",
+          "allow_add_rows": True,
+          "allow_delete_rows": True,
+          "lock_default_rows": False,
+          "columns": [
+            {
+              "key": "test_frequency",
+              "label": "Test Frequency (Hz)",
+              "type": "number"
+            },
+            {
+              "key": "df_percent",
+              "label": "HV Y Phase Bushing (%DF)",
+              "type": "number"
+            }
+          ],
+          "default_rows": [
+            { "test_frequency": "470" },
+            { "test_frequency": "220" },
+            { "test_frequency": "110" },
+            { "test_frequency": "70" },
+            { "test_frequency": "40" },
+            { "test_frequency": "20" },
+            { "test_frequency": "10" },
+            { "test_frequency": "5" },
+            { "test_frequency": "2" },
+            { "test_frequency": "1" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "title": "LV Bushing Details",
+      "fields": [
+        {
+          "key": "lv_bushing_details",
+          "label": "LV Bushing Details",
+          "type": "table",
+          "allow_add_rows": False,
+          "allow_delete_rows": False,
+          "lock_default_rows": False,
+          "columns": [
+            { "key": "detail",  "label": "Details",       "type": "readonly" },
+            { "key": "r_phase", "label": "LV 'R' Phase",  "type": "text" },
+            { "key": "y_phase", "label": "LV 'Y' Phase",  "type": "text" },
+            { "key": "b_phase", "label": "LV 'B' Phase",  "type": "text" }
+          ],
+          "default_rows": [
+            { "detail": "Make" },
+            { "detail": "Sl. No." },
+            { "detail": "Y.O. Mfg." }
+          ]
+        }
+      ]
+    },
+
+    {
+      "title": "LV Bushing Test Results",
+      "fields": [
+        {
+          "key": "lv_bushing_test_results",
+          "label": "LV Bushing Test Data",
+          "type": "table",
+          "allow_add_rows": False,
+          "allow_delete_rows": False,
+          "lock_default_rows": False,
+          "columns": [
+            { "key": "sl_no",   "label": "Sl. No.",  "type": "readonly" },
+            { "key": "bushing", "label": "Bushing",  "type": "readonly" },
+            {
+              "key": "voltage_kv",
+              "label": "KV",
+              "type": "number"
+            },
+            {
+              "key": "capacitance_pf",
+              "label": "Capacitance Measured C(pF)",
+              "type": "number"
+            },
+            {
+              "key": "df_measured",
+              "label": "% D.F Measured",
+              "type": "number"
+            },
+            {
+              "key": "df_corrected_20c",
+              "label": "% D.F Corrected at 20°C (IEC)",
+              "type": "calculated",
+              "read_only": True,
+              "rule": {
+                "type": "FORMULA",
+                "config": {
+                  "formula": "TEMP_CORRECTED_TAND",
+                  "inputs": {
+                    "tan_delta": "df_measured",
+                    "temperature": "$form.ambient_temp_c"
+                  },
+                  "precision": 4
+                }
+              },
+              "alert": {
+                "thresholds": [
+                  { "operator": ">", "value": 1.0, "result": "FAIL" },
+                  { "operator": ">", "value": 0.5, "result": "ALERT" }
+                ],
+                "default": "PASS"
+              }
+            },
+            {
+              "key": "df_previous_date",
+              "label": "% D.F Corrected at 20°C (Previous Test)",
+              "type": "number"
+            },
+            {
+              "key": "df_change_pct",
+              "label": "% Change from Previous",
+              "type": "calculated",
+              "read_only": True,
+              "rule": {
+                "type": "FORMULA",
+                "config": {
+                  "formula": "TREND_CHANGE",
+                  "inputs": {
+                    "current":  "df_corrected_20c",
+                    "previous": "df_previous_date"
+                  },
+                  "precision": 2
+                }
+              },
+              "alert": {
+                "thresholds": [
+                  { "operator": ">", "value": 20, "result": "FAIL" },
+                  { "operator": ">", "value": 10, "result": "ALERT" }
+                ],
+                "default": "PASS"
+              }
+            }
+          ],
+          "default_rows": [
+            { "sl_no": "1", "bushing": "R Phase" },
+            { "sl_no": "2", "bushing": "Y Phase" },
+            { "sl_no": "3", "bushing": "B Phase" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "title": "IDAX Test Results (Insulation Diagnostics)",
+      "fields": [
+        {
+          "key": "idax_testing_kit",
+          "label": "Testing Kit Used",
+          "type": "text"
+        },
+        {
+          "key": "idax_test_results",
+          "label": "IDAX Test Data",
+          "type": "table",
+          "allow_add_rows": False,
+          "allow_delete_rows": False,
+          "lock_default_rows": False,
+          "columns": [
+            { "key": "sl_no",             "label": "Sl. No.",                                              "type": "readonly" },
+            { "key": "test_configuration","label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)", "type": "readonly" },
+            { "key": "moisture_percent",  "label": "% Moisture",                                           "type": "number" },
+            { "key": "tr_analysis_moisture","label": "Tr. Analysis on Basis of % Moisture",               "type": "text" },
+            { "key": "oil_conductivity",  "label": "Oil Conductivity (pS/m)",                              "type": "number" },
+            { "key": "moisture_percent_oil","label": "% Moisture (from Oil)",                              "type": "number" },
+            { "key": "tr_analysis_oil",   "label": "Tr. Analysis on Basis of Oil Conductivity",           "type": "text" }
+          ],
+          "default_rows": [
+            { "sl_no": "1", "test_configuration": "HV-GND" },
+            { "sl_no": "2", "test_configuration": "HV-LV" },
+            { "sl_no": "3", "test_configuration": "LV-GND" },
+            { "sl_no": "4", "test_configuration": "LV-TV" },
+            { "sl_no": "5", "test_configuration": "TV-GND" },
+            { "sl_no": "6", "test_configuration": "TV-HV" }
+          ]
+        },
+        {
+          "key": "idax_observation",
+          "label": "Observation",
+          "type": "textarea"
+        }
+      ]
+    }
+  ]
+},
     # ════════════════════════════════════════════════════════════════════════════
     # CIRCUIT BREAKER TEMPLATES
     # ════════════════════════════════════════════════════════════════════════════

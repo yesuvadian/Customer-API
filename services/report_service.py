@@ -616,10 +616,12 @@ class ReportService:
     # ───────────────────────────────────────────────────
     # Helper: Detail Table (label-value pairs, 4 columns)
     # ───────────────────────────────────────────────────
+
     def _detail_table(self, data, styles):
         """Build a 4-column label-value table."""
         return self._detail_table_raw(data)
 
+    @staticmethod
     def _detail_table_raw(data):
         """Build a styled 4-column table from raw data."""
         page_width = A4[0] - 30 * mm
