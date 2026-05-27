@@ -83,10 +83,13 @@ def _on_repair_workflow_completed(
             return
 
         # Get surveillance configuration
+        # Get department from equipment (workflow doesn't store it directly)
+        department_id = workflow.equipment.department_id if workflow.equipment else None
+
         config = SurveillanceConfigService.get_config(
             db,
-            organization_id=workflow.organization_id,
-            department_id=workflow.department_id
+            organization_id=workflow.equipment.organization_id if workflow.equipment else None,
+            department_id=department_id
         )
         surveillance_period_months = config['surveillance_period_months']
 
