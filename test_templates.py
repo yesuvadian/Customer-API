@@ -2578,10 +2578,10 @@ TEST_TEMPLATES = {
             {
                 "title": "Test Conditions",
                 "fields": [
-                    {"key": "test_voltage_kv",  "label": "Applied Test Voltage", "type": "number", "unit": "kV",   "required": True},
-                    {"key": "frequency_hz",     "label": "Supply Frequency",     "type": "number", "unit": "Hz",   "required": True, "default": "50"},
-                    {"key": "ambient_temp_c",   "label": "Ambient Temperature",  "type": "number", "unit": "°C",   "required": True},
-                    {"key": "oil_temp_c",       "label": "Oil Temperature",      "type": "number", "unit": "°C",   "required": False},
+                    {"key": "test_voltage_kv", "label": "Applied Test Voltage",  "type": "number", "unit": "kV",  "required": True},
+                    {"key": "frequency_hz",    "label": "Supply Frequency",      "type": "number", "unit": "Hz",  "required": True, "default": "50"},
+                    {"key": "ambient_temp_c",  "label": "Ambient Temperature",   "type": "number", "unit": "°C",  "required": True},
+                    {"key": "oil_temp_c",      "label": "Oil Temperature",       "type": "number", "unit": "°C",  "required": False},
                     {
                         "key": "test_mode",
                         "label": "Test Mode",
@@ -2589,195 +2589,357 @@ TEST_TEMPLATES = {
                         "options": ["UST (Ungrounded Specimen)", "GST (Grounded Specimen)", "GST-Guard"],
                         "required": True,
                     },
-                    {"key": "instrument_make",  "label": "Instrument Make/Model", "type": "text", "required": False},
+                    {"key": "instrument_make", "label": "Instrument Make/Model", "type": "text",   "required": False},
                 ],
             },
 
-            # ── Section 2 — HV Winding Measurements ─────────────────────────────
+            # ── Section 2 — Winding Test Results ────────────────────────────────
             {
-                "title": "HV Winding (Measurements)",
+                "title": "Winding Test Results",
                 "fields": [
                     {
-                        "key": "hv_measurements",
-                        "label": "HV Winding Test Data",
+                        "key": "winding_test_results",
+                        "label": "Winding Test Data",
                         "type": "table",
                         "allow_add_rows": False,
                         "allow_delete_rows": False,
                         "lock_default_rows": False,
                         "columns": [
-                            {"key": "phase",             "label": "Phase",              "type": "readonly"},
-                            {"key": "capacitance_pf",    "label": "Capacitance (pF)",   "type": "number"},
-                            {"key": "tan_delta",         "label": "Tan δ (×10⁻³)",     "type": "number"},
-                            {"key": "temperature_c",     "label": "Temp (°C)",          "type": "number"},
+                            {"key": "sl_no",             "label": "Sl. No.",                                              "type": "readonly"},
+                            {"key": "test_configuration","label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)", "type": "readonly"},
+                            {"key": "voltage_kv",        "label": "KV",                                                   "type": "number"},
+                            {"key": "capacitance_pf",    "label": "Capacitance Measured C(pF)",                           "type": "number"},
+                            {"key": "df_measured",       "label": "% D.F Measured",                                       "type": "number"},
                             {
-                                "key": "expected_current_ma",
-                                "label": "Expected I (mA)",
+                                "key": "df_corrected_20c",
+                                "label": "% D.F After Temp Correction at 20°C (IEC — Ambient)",
                                 "type": "calculated",
-                                "rule": {
-                                    "type": "FORMULA",
-                                    "config": {
-                                        "formula": "CAP_CURRENT",
-                                        "inputs": {
-                                            "frequency": "$form.frequency_hz",
-                                            "capacitance_pf": "capacitance_pf",
-                                            "voltage_kv": "$form.test_voltage_kv",
-                                        },
-                                        "precision": 3,
-                                    },
-                                },
-                            },
-                            {
-                                "key": "corrected_tan_delta",
-                                "label": "Corrected Tan δ (20°C)",
-                                "type": "calculated",
+                                "read_only": True,
                                 "rule": {
                                     "type": "FORMULA",
                                     "config": {
                                         "formula": "TEMP_CORRECTED_TAND",
                                         "inputs": {
-                                            "tan_delta":   "tan_delta",
-                                            "temperature": "temperature_c",
+                                            "tan_delta":   "df_measured",
+                                            "temperature": "$form.ambient_temp_c",
                                         },
                                         "precision": 4,
                                     },
                                 },
+                                "alert": {
+                                    "thresholds": [
+                                        {"operator": ">", "value": 1.0, "result": "FAIL"},
+                                        {"operator": ">", "value": 0.5, "result": "ALERT"},
+                                    ],
+                                    "default": "PASS",
+                                },
+                            },
+                            {
+                                "key": "df_measured_on_date",
+                                "label": "% D.F After Temp Correction at 20°C (IEC — Oil Temp)",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "FORMULA",
+                                    "config": {
+                                        "formula": "TEMP_CORRECTED_TAND",
+                                        "inputs": {
+                                            "tan_delta":   "df_measured",
+                                            "temperature": "$form.oil_temp_c",
+                                        },
+                                        "precision": 4,
+                                    },
+                                },
+                                "alert": {
+                                    "thresholds": [
+                                        {"operator": ">", "value": 1.0, "result": "FAIL"},
+                                        {"operator": ">", "value": 0.5, "result": "ALERT"},
+                                    ],
+                                    "default": "PASS",
+                                },
                             },
                         ],
                         "default_rows": [
-                            {"phase": "R"},
-                            {"phase": "Y"},
-                            {"phase": "B"},
+                            {"sl_no": "1", "test_configuration": "HV-GND"},
+                            {"sl_no": "2", "test_configuration": "HV-LV"},
+                            {"sl_no": "3", "test_configuration": "LV-GND"},
+                            {"sl_no": "4", "test_configuration": "LV-TV"},
+                            {"sl_no": "5", "test_configuration": "TV-GND"},
+                            {"sl_no": "6", "test_configuration": "TV-HV"},
                         ],
-                    },
-                    {
-                        "key": "hv_phase_average",
-                        "label": "HV Average Tan δ (corrected, 20°C)",
-                        "type": "calculated",
-                        "rule": {
-                            "type": "AVERAGE",
-                            "config": {
-                                "table": "hv_measurements",
-                                "field": "corrected_tan_delta",
-                                "precision": 4,
-                            },
-                        },
                     },
                 ],
             },
 
-            # ── Section 3 — LV Winding Measurements ─────────────────────────────
+            # ── Section 3 — HV Bushing Details ──────────────────────────────────
             {
-                "title": "LV Winding (Measurements)",
+                "title": "HV Bushing Details",
                 "fields": [
                     {
-                        "key": "lv_measurements",
-                        "label": "LV Winding Test Data",
+                        "key": "hv_bushing_details",
+                        "label": "HV Bushing Details",
                         "type": "table",
                         "allow_add_rows": False,
                         "allow_delete_rows": False,
                         "lock_default_rows": False,
                         "columns": [
-                            {"key": "phase",             "label": "Phase",              "type": "readonly"},
-                            {"key": "capacitance_pf",    "label": "Capacitance (pF)",   "type": "number"},
-                            {"key": "tan_delta",         "label": "Tan δ (×10⁻³)",     "type": "number"},
-                            {"key": "temperature_c",     "label": "Temp (°C)",          "type": "number"},
+                            {"key": "detail",  "label": "Details",      "type": "readonly"},
+                            {"key": "r_phase", "label": "HV 'R' Phase", "type": "text"},
+                            {"key": "y_phase", "label": "HV 'Y' Phase", "type": "text"},
+                            {"key": "b_phase", "label": "HV 'B' Phase", "type": "text"},
+                        ],
+                        "default_rows": [
+                            {"detail": "Make"},
+                            {"detail": "Sl. No."},
+                            {"detail": "Y.O. Mfg."},
+                        ],
+                    },
+                ],
+            },
+
+            # ── Section 4 — HV Bushing Test Results ─────────────────────────────
+            {
+                "title": "HV Bushing Test Results",
+                "fields": [
+                    {
+                        "key": "hv_bushing_test_results",
+                        "label": "HV Bushing Test Data",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "sl_no",          "label": "Sl. No.",                  "type": "readonly"},
+                            {"key": "bushing",         "label": "Bushing",                  "type": "readonly"},
+                            {"key": "voltage_kv",      "label": "KV",                       "type": "number"},
+                            {"key": "capacitance_pf",  "label": "Capacitance Measured C(pF)","type": "number"},
+                            {"key": "df_measured",     "label": "% D.F Measured",           "type": "number"},
                             {
-                                "key": "expected_current_ma",
-                                "label": "Expected I (mA)",
+                                "key": "df_corrected_20c",
+                                "label": "% D.F Corrected at 20°C (IEC)",
                                 "type": "calculated",
-                                "rule": {
-                                    "type": "FORMULA",
-                                    "config": {
-                                        "formula": "CAP_CURRENT",
-                                        "inputs": {
-                                            "frequency": "$form.frequency_hz",
-                                            "capacitance_pf": "capacitance_pf",
-                                            "voltage_kv": "$form.test_voltage_kv",
-                                        },
-                                        "precision": 3,
-                                    },
-                                },
-                            },
-                            {
-                                "key": "corrected_tan_delta",
-                                "label": "Corrected Tan δ (20°C)",
-                                "type": "calculated",
+                                "read_only": True,
                                 "rule": {
                                     "type": "FORMULA",
                                     "config": {
                                         "formula": "TEMP_CORRECTED_TAND",
                                         "inputs": {
-                                            "tan_delta":   "tan_delta",
-                                            "temperature": "temperature_c",
+                                            "tan_delta":   "df_measured",
+                                            "temperature": "$form.ambient_temp_c",
                                         },
                                         "precision": 4,
                                     },
                                 },
+                                "alert": {
+                                    "thresholds": [
+                                        {"operator": ">", "value": 1.0, "result": "FAIL"},
+                                        {"operator": ">", "value": 0.5, "result": "ALERT"},
+                                    ],
+                                    "default": "PASS",
+                                },
+                            },
+                            {"key": "df_previous_date", "label": "% D.F Corrected at 20°C (Previous Test)", "type": "number"},
+                            {
+                                "key": "df_change_pct",
+                                "label": "% Change from Previous",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "FORMULA",
+                                    "config": {
+                                        "formula": "TREND_CHANGE",
+                                        "inputs": {
+                                            "current":  "df_corrected_20c",
+                                            "previous": "df_previous_date",
+                                        },
+                                        "precision": 2,
+                                    },
+                                },
+                                "alert": {
+                                    "thresholds": [
+                                        {"operator": ">", "value": 20, "result": "FAIL"},
+                                        {"operator": ">", "value": 10, "result": "ALERT"},
+                                    ],
+                                    "default": "PASS",
+                                },
                             },
                         ],
                         "default_rows": [
-                            {"phase": "R"},
-                            {"phase": "Y"},
-                            {"phase": "B"},
+                            {"sl_no": "1", "bushing": "R Phase"},
+                            {"sl_no": "2", "bushing": "Y Phase"},
+                            {"sl_no": "3", "bushing": "B Phase"},
                         ],
                     },
-                    {
-                        "key": "lv_phase_average",
-                        "label": "LV Average Tan δ (corrected, 20°C)",
-                        "type": "calculated",
-                        "rule": {
-                            "type": "AVERAGE",
-                            "config": {
-                                "table": "lv_measurements",
-                                "field": "corrected_tan_delta",
-                                "precision": 4,
-                            },
-                        },
-                    },
                 ],
             },
 
-            # ── Section 4 — Trend Analysis ───────────────────────────────────────
+            # ── Section 5 — DFR Test Results for HV 'Y' Phase Bushing ───────────
             {
-                "title": "Trend Analysis (vs. Previous Reading)",
+                "title": "DFR Test Results for HV 'Y' Phase Bushing",
                 "fields": [
-                    {"key": "previous_hv_avg_tand", "label": "Previous HV Avg Tan δ (20°C)", "type": "number", "required": False},
+                    {"key": "dfr_test_voltage", "label": "Test Voltage", "type": "text"},
                     {
-                        "key": "hv_trend_change_pct",
-                        "label": "HV Tan δ Trend Change (%)",
-                        "type": "calculated",
-                        "rule": {
-                            "type": "FORMULA",
-                            "config": {
-                                "formula": "TREND_CHANGE",
-                                "inputs": {
-                                    "current":  "$form.hv_phase_average",
-                                    "previous": "$form.previous_hv_avg_tand",
-                                },
-                                "precision": 1,
-                            },
-                        },
-                    },
-                    {"key": "previous_lv_avg_tand", "label": "Previous LV Avg Tan δ (20°C)", "type": "number", "required": False},
-                    {
-                        "key": "lv_trend_change_pct",
-                        "label": "LV Tan δ Trend Change (%)",
-                        "type": "calculated",
-                        "rule": {
-                            "type": "FORMULA",
-                            "config": {
-                                "formula": "TREND_CHANGE",
-                                "inputs": {
-                                    "current":  "$form.lv_phase_average",
-                                    "previous": "$form.previous_lv_avg_tand",
-                                },
-                                "precision": 1,
-                            },
-                        },
+                        "key": "dfr_test_results",
+                        "label": "DFR Test Data",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_frequency", "label": "Test Frequency (Hz)",        "type": "number"},
+                            {"key": "df_percent",     "label": "HV Y Phase Bushing (%DF)",   "type": "number"},
+                        ],
+                        "default_rows": [
+                            {"test_frequency": "470"},
+                            {"test_frequency": "220"},
+                            {"test_frequency": "110"},
+                            {"test_frequency": "70"},
+                            {"test_frequency": "40"},
+                            {"test_frequency": "20"},
+                            {"test_frequency": "10"},
+                            {"test_frequency": "5"},
+                            {"test_frequency": "2"},
+                            {"test_frequency": "1"},
+                        ],
                     },
                 ],
             },
 
+            # ── Section 6 — LV Bushing Details ──────────────────────────────────
+            {
+                "title": "LV Bushing Details",
+                "fields": [
+                    {
+                        "key": "lv_bushing_details",
+                        "label": "LV Bushing Details",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "detail",  "label": "Details",      "type": "readonly"},
+                            {"key": "r_phase", "label": "LV 'R' Phase", "type": "text"},
+                            {"key": "y_phase", "label": "LV 'Y' Phase", "type": "text"},
+                            {"key": "b_phase", "label": "LV 'B' Phase", "type": "text"},
+                        ],
+                        "default_rows": [
+                            {"detail": "Make"},
+                            {"detail": "Sl. No."},
+                            {"detail": "Y.O. Mfg."},
+                        ],
+                    },
+                ],
+            },
+
+            # ── Section 7 — LV Bushing Test Results ─────────────────────────────
+            {
+                "title": "LV Bushing Test Results",
+                "fields": [
+                    {
+                        "key": "lv_bushing_test_results",
+                        "label": "LV Bushing Test Data",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "sl_no",          "label": "Sl. No.",                   "type": "readonly"},
+                            {"key": "bushing",         "label": "Bushing",                   "type": "readonly"},
+                            {"key": "voltage_kv",      "label": "KV",                        "type": "number"},
+                            {"key": "capacitance_pf",  "label": "Capacitance Measured C(pF)", "type": "number"},
+                            {"key": "df_measured",     "label": "% D.F Measured",            "type": "number"},
+                            {
+                                "key": "df_corrected_20c",
+                                "label": "% D.F Corrected at 20°C (IEC)",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "FORMULA",
+                                    "config": {
+                                        "formula": "TEMP_CORRECTED_TAND",
+                                        "inputs": {
+                                            "tan_delta":   "df_measured",
+                                            "temperature": "$form.ambient_temp_c",
+                                        },
+                                        "precision": 4,
+                                    },
+                                },
+                                "alert": {
+                                    "thresholds": [
+                                        {"operator": ">", "value": 1.0, "result": "FAIL"},
+                                        {"operator": ">", "value": 0.5, "result": "ALERT"},
+                                    ],
+                                    "default": "PASS",
+                                },
+                            },
+                            {"key": "df_previous_date", "label": "% D.F Corrected at 20°C (Previous Test)", "type": "number"},
+                            {
+                                "key": "df_change_pct",
+                                "label": "% Change from Previous",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "FORMULA",
+                                    "config": {
+                                        "formula": "TREND_CHANGE",
+                                        "inputs": {
+                                            "current":  "df_corrected_20c",
+                                            "previous": "df_previous_date",
+                                        },
+                                        "precision": 2,
+                                    },
+                                },
+                                "alert": {
+                                    "thresholds": [
+                                        {"operator": ">", "value": 20, "result": "FAIL"},
+                                        {"operator": ">", "value": 10, "result": "ALERT"},
+                                    ],
+                                    "default": "PASS",
+                                },
+                            },
+                        ],
+                        "default_rows": [
+                            {"sl_no": "1", "bushing": "R Phase"},
+                            {"sl_no": "2", "bushing": "Y Phase"},
+                            {"sl_no": "3", "bushing": "B Phase"},
+                        ],
+                    },
+                ],
+            },
+
+            # ── Section 8 — IDAX Test Results ───────────────────────────────────
+            {
+                "title": "IDAX Test Results (Insulation Diagnostics)",
+                "fields": [
+                    {"key": "idax_testing_kit", "label": "Testing Kit Used", "type": "text"},
+                    {
+                        "key": "idax_test_results",
+                        "label": "IDAX Test Data",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "sl_no",               "label": "Sl. No.",                                               "type": "readonly"},
+                            {"key": "test_configuration",  "label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)", "type": "readonly"},
+                            {"key": "moisture_percent",    "label": "% Moisture",                                            "type": "number"},
+                            {"key": "tr_analysis_moisture","label": "Tr. Analysis on Basis of % Moisture",                   "type": "text"},
+                            {"key": "oil_conductivity",    "label": "Oil Conductivity (pS/m)",                               "type": "number"},
+                            {"key": "moisture_percent_oil","label": "% Moisture (from Oil)",                                 "type": "number"},
+                            {"key": "tr_analysis_oil",     "label": "Tr. Analysis on Basis of Oil Conductivity",            "type": "text"},
+                        ],
+                        "default_rows": [
+                            {"sl_no": "1", "test_configuration": "HV-GND"},
+                            {"sl_no": "2", "test_configuration": "HV-LV"},
+                            {"sl_no": "3", "test_configuration": "LV-GND"},
+                            {"sl_no": "4", "test_configuration": "LV-TV"},
+                            {"sl_no": "5", "test_configuration": "TV-GND"},
+                            {"sl_no": "6", "test_configuration": "TV-HV"},
+                        ],
+                    },
+                    {"key": "idax_observation", "label": "Observation", "type": "textarea"},
+                ],
+            },
         ],
     },
 
