@@ -48,7 +48,7 @@ def filter_options(
 @router.get("/compliance")
 def compliance_matrix(
     org_id: UUID = Query(...),
-    equipment_type: str = Query("Power Transformer"),
+    equipment_type: Optional[str] = Query(None, description="Equipment type name, or omit for all types"),
     voltage_class: Optional[str] = Query(None),
     department_id: Optional[UUID] = Query(None),
     search: Optional[str] = Query(None, description="Filter by UEIC (partial match)"),

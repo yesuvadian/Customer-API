@@ -88,7 +88,7 @@ class TestScheduleDashboardService:
     def get_compliance_matrix(
         self,
         org_id: UUID,
-        equipment_type_name: str = "Power Transformer",
+        equipment_type_name: Optional[str] = None,
         voltage_class: Optional[str] = None,
         department_id: Optional[UUID] = None,
         search: Optional[str] = None,
@@ -100,24 +100,28 @@ class TestScheduleDashboardService:
             rows     — one row per equipment with per-test-type cells
         """
 
-        # 1. Equipment type master
-        master = (
-            self.db.query(CategoryMaster)
-            .filter_by(name=equipment_type_name, is_active=True)
-            .first()
-        )
-        if not master:
-            return {"columns": [], "kpis": self._empty_kpis(), "rows": []}
+        # 1. Equipment type master (only if specific type requested)
+        master = None
+        if equipment_type_name:
+            master = (
+                self.db.query(CategoryMaster)
+                .filter_by(name=equipment_type_name, is_active=True)
+                .first()
+            )
+            if not master:
+                return {"columns": [], "kpis": self._empty_kpis(), "rows": []}
 
         # 2. Equipment list
         eq_q = (
             self.db.query(Equipment)
             .filter(
                 Equipment.organization_id == org_id,
-                Equipment.equipment_type_id == master.id,
                 Equipment.status == "active",
             )
         )
+        # Filter by equipment type only if specific type requested
+        if master:
+            eq_q = eq_q.filter(Equipment.equipment_type_id == master.id)
         if voltage_class:
             eq_q = eq_q.filter(Equipment.voltage_class == voltage_class)
         if department_id:
