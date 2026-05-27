@@ -336,7 +336,7 @@ def _create_surveillance_stages(
             RepairStageDefinition.workflow_definition_id == definition_id,
             RepairStageDefinition.is_active == True
         )
-        .order_by(RepairStageDefinition.stage_number)
+        .order_by(RepairStageDefinition.sequence)
         .all()
     )
 
