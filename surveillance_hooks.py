@@ -254,6 +254,21 @@ def _create_surveillance_test_schedules(
                     )
                     continue
 
+                # Check if schedule already exists for this surveillance workflow + quarter + test type
+                existing_schedule = db.query(TestRequestSchedule).filter(
+                    TestRequestSchedule.surveillance_workflow_id == surveillance_workflow.id,
+                    TestRequestSchedule.surveillance_quarter == quarter,
+                    TestRequestSchedule.test_type_id == test_config.test_type_id,
+                    TestRequestSchedule.equipment_id == equipment.id
+                ).first()
+
+                if existing_schedule:
+                    logger.debug(
+                        "[SurveillanceHook] Schedule already exists for %s Q%d - skipping",
+                        test_type.name, quarter
+                    )
+                    continue
+
                 # Generate title
                 equipment_name = (
                     equipment.name or
