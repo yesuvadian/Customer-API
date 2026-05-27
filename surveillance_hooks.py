@@ -57,8 +57,9 @@ def _on_repair_workflow_completed(
     """
     try:
         # Only create surveillance for repair-type workflows
-        # Check workflow_type field (e.g., 'repair', 'breakdown', 'overhaul')
-        if workflow.workflow_type not in ['repair', 'breakdown']:
+        # Check workflow_type field (case-insensitive: 'BREAKDOWN', 'OVERHAUL', 'REPAIR')
+        workflow_type_upper = (workflow.workflow_type or "").upper()
+        if workflow_type_upper not in ['REPAIR', 'BREAKDOWN', 'OVERHAUL']:
             logger.info(
                 "[SurveillanceHook] Skipping surveillance for workflow_type=%s (workflow_id=%s)",
                 workflow.workflow_type, workflow.id
