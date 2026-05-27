@@ -265,7 +265,7 @@ def _create_surveillance_test_schedules(
                 # Create schedule record
                 schedule = TestRequestSchedule(
                     organization_id=surveillance_workflow.organization_id,
-                    department_id=surveillance_workflow.department_id,
+                    department_id=equipment.department_id,  # From equipment, not workflow
                     equipment_id=equipment.id,
                     equipment_type_id=equipment.equipment_type_id,
                     test_type_id=test_config.test_type_id,
