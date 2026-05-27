@@ -357,6 +357,9 @@ def get_surveillance_dashboard(
     )
 
     for wf_id, equipment_name, quarter, started_at, duration_days in overdue_stages:
+        # Make started_at timezone-aware if it's naive (database timestamps are usually naive)
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
         deadline = started_at + timedelta(days=duration_days)
         days_overdue = (now - deadline).days
 
