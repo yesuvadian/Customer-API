@@ -71,7 +71,8 @@ def _check_workflow_access(db: Session, workflow_id: UUID, user: User) -> Repair
     is_org_admin, user_dept_id = get_user_dept_scope(db, user.id, None)
 
     if not is_org_admin and user_dept_id:
-        if workflow.department_id != user_dept_id:
+        workflow_dept_id = workflow.equipment.department_id if workflow.equipment else None
+        if workflow_dept_id and workflow_dept_id != user_dept_id:
             raise HTTPException(403, "Access denied: Different department")
 
     return workflow
