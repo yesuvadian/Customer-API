@@ -92,7 +92,7 @@ def _serialize_workflow(wf: RepairWorkflow, current_stage: Optional[RepairStageI
         'start_date': wf.started_at.isoformat() if wf.started_at else None,  # started_at, not start_date
         'end_date': wf.completed_at.isoformat() if wf.completed_at else None,  # completed_at, not end_date
         'current_stage': {
-            'stage_number': current_stage.stage.stage_number if current_stage and current_stage.stage else None,
+            'stage_number': current_stage.stage.sequence if current_stage and current_stage.stage else None,
             'stage_name': current_stage.stage.name if current_stage and current_stage.stage else None,
             'quarter_number': current_stage.quarter_number if current_stage else None,
             'status': current_stage.status if current_stage else None,
