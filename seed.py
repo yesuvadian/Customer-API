@@ -5201,8 +5201,8 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
         print(f"[ERROR] Failed to read Excel file: {e}")
         return
 
-    # Hierarchy levels in order
-    levels = ['Zone', 'Circle', 'Division', 'Sub Division', 'Section', 'Substation']
+    # Derive hierarchy levels directly from the Excel columns (order-preserving)
+    levels = list(df.columns)
 
     # Track created departments by full path
     department_map: Dict[str, str] = {}
