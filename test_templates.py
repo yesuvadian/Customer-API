@@ -4197,6 +4197,180 @@ TEST_TEMPLATES = {
         ],
     },
 
+    # ────────────────────────────────────────────────────────────
+    # Generic Equipment Templates (for new equipment types)
+    # ────────────────────────────────────────────────────────────
+
+    "generic_equipment_test": {
+        "key": "generic_equipment_test",
+        "name": "Generic Equipment Test",
+        "equipment_type": "Generic",
+        "description": "Generic test template for equipment testing",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "test_date", "label": "Test Date", "type": "date", "required": True},
+                    {"key": "test_type", "label": "Test Type", "type": "text", "required": True},
+                    {"key": "test_standard", "label": "Test Standard / Procedure", "type": "text"},
+                    {"key": "tested_by", "label": "Tested By", "type": "text", "required": True},
+                    {"key": "witnessed_by", "label": "Witnessed By", "type": "text"},
+                ],
+            },
+            {
+                "title": "Test Parameters",
+                "fields": [
+                    {"key": "ambient_temp", "label": "Ambient Temperature", "type": "number", "unit": "°C"},
+                    {"key": "humidity", "label": "Relative Humidity", "type": "number", "unit": "%"},
+                    {"key": "test_equipment", "label": "Test Equipment Used", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Test Results",
+                "fields": [
+                    {"key": "parameter_1", "label": "Parameter 1", "type": "text"},
+                    {"key": "value_1", "label": "Value 1", "type": "text"},
+                    {"key": "parameter_2", "label": "Parameter 2", "type": "text"},
+                    {"key": "value_2", "label": "Value 2", "type": "text"},
+                    {"key": "parameter_3", "label": "Parameter 3", "type": "text"},
+                    {"key": "value_3", "label": "Value 3", "type": "text"},
+                    {"key": "additional_results", "label": "Additional Results / Measurements", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Assessment",
+                "fields": [
+                    {"key": "observations", "label": "Observations", "type": "textarea"},
+                    {"key": "defects_found", "label": "Defects / Issues Found", "type": "textarea"},
+                    {"key": "recommendations", "label": "Recommendations", "type": "textarea"},
+                    {"key": "test_result", "label": "Overall Test Result", "type": "dropdown", "required": True,
+                     "options": ["Pass", "Fail", "Conditional", "Retest Required"]},
+                ],
+            },
+        ],
+    },
+
+    "generic_equipment_maintenance": {
+        "key": "generic_equipment_maintenance",
+        "name": "Generic Equipment Maintenance",
+        "equipment_type": "Generic",
+        "description": "Generic maintenance template for equipment maintenance activities",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Maintenance Information",
+                "fields": [
+                    {"key": "maintenance_date", "label": "Maintenance Date", "type": "date", "required": True},
+                    {"key": "maintenance_type", "label": "Maintenance Type", "type": "dropdown", "required": True,
+                     "options": ["Preventive", "Corrective", "Predictive", "Emergency"]},
+                    {"key": "work_order_no", "label": "Work Order Number", "type": "text"},
+                    {"key": "performed_by", "label": "Performed By", "type": "text", "required": True},
+                    {"key": "supervised_by", "label": "Supervised By", "type": "text"},
+                ],
+            },
+            {
+                "title": "Work Performed",
+                "fields": [
+                    {"key": "cleaning_done", "label": "Cleaning performed", "type": "checkbox"},
+                    {"key": "lubrication_done", "label": "Lubrication performed", "type": "checkbox"},
+                    {"key": "adjustment_done", "label": "Adjustments / calibration performed", "type": "checkbox"},
+                    {"key": "parts_replaced", "label": "Parts replaced / repaired", "type": "checkbox"},
+                    {"key": "work_description", "label": "Detailed Work Description", "type": "textarea", "required": True},
+                ],
+            },
+            {
+                "title": "Parts & Materials",
+                "fields": [
+                    {"key": "parts_used", "label": "Parts / Materials Used", "type": "textarea"},
+                    {"key": "part_numbers", "label": "Part Numbers", "type": "text"},
+                    {"key": "quantities", "label": "Quantities", "type": "text"},
+                ],
+            },
+            {
+                "title": "Post-Maintenance Status",
+                "fields": [
+                    {"key": "equipment_tested", "label": "Equipment tested after maintenance", "type": "checkbox"},
+                    {"key": "test_results", "label": "Test Results (if tested)", "type": "textarea"},
+                    {"key": "issues_found", "label": "Issues Found During Maintenance", "type": "textarea"},
+                    {"key": "follow_up_required", "label": "Follow-up Action Required", "type": "textarea"},
+                    {"key": "next_maintenance_due", "label": "Next Maintenance Due Date", "type": "date"},
+                    {"key": "equipment_status", "label": "Equipment Status", "type": "dropdown", "required": True,
+                     "options": ["Operational", "Non-Operational", "Requires Further Work", "Under Observation"]},
+                ],
+            },
+        ],
+    },
+
+    "generic_equipment_inspection": {
+        "key": "generic_equipment_inspection",
+        "name": "Generic Equipment Inspection",
+        "equipment_type": "Generic",
+        "description": "Generic inspection template for equipment inspection activities",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Inspection Information",
+                "fields": [
+                    {"key": "inspection_date", "label": "Inspection Date", "type": "date", "required": True},
+                    {"key": "inspection_category", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "General Maintenance", "Documentation", "Environmental"]},
+                    {"key": "inspector_name", "label": "Inspector Name", "type": "text", "required": True},
+                    {"key": "inspection_reference", "label": "Inspection Reference / Checklist No.", "type": "text"},
+                ],
+            },
+            {
+                "title": "Visual Inspection",
+                "fields": [
+                    {"key": "physical_condition", "label": "Physical condition satisfactory", "type": "checkbox"},
+                    {"key": "no_damage", "label": "No visible damage or corrosion", "type": "checkbox"},
+                    {"key": "nameplate_legible", "label": "Nameplate legible and intact", "type": "checkbox"},
+                    {"key": "mounting_secure", "label": "Mounting / foundation secure", "type": "checkbox"},
+                    {"key": "housekeeping_ok", "label": "Housekeeping / cleanliness acceptable", "type": "checkbox"},
+                    {"key": "visual_observations", "label": "Visual Observations / Issues", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Electrical Safety",
+                "fields": [
+                    {"key": "earthing_intact", "label": "Earthing connections intact", "type": "checkbox"},
+                    {"key": "insulation_ok", "label": "Insulation / covers in good condition", "type": "checkbox"},
+                    {"key": "clearances_ok", "label": "Electrical clearances maintained", "type": "checkbox"},
+                    {"key": "no_overheating", "label": "No signs of overheating", "type": "checkbox"},
+                    {"key": "safety_signage", "label": "Safety signage / labels present", "type": "checkbox"},
+                    {"key": "electrical_observations", "label": "Electrical Safety Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Documentation",
+                "fields": [
+                    {"key": "drawings_available", "label": "Equipment drawings available", "type": "checkbox"},
+                    {"key": "manuals_available", "label": "Maintenance manuals available", "type": "checkbox"},
+                    {"key": "records_updated", "label": "Maintenance records up to date", "type": "checkbox"},
+                    {"key": "certificates_valid", "label": "Test certificates valid", "type": "checkbox"},
+                    {"key": "doc_observations", "label": "Documentation Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "deficiencies", "label": "Deficiencies Identified", "type": "textarea"},
+                    {"key": "action_required", "label": "Corrective Action Required", "type": "textarea"},
+                    {"key": "priority", "label": "Action Priority", "type": "dropdown",
+                     "options": ["Low", "Medium", "High", "Critical"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True,
+                     "options": ["Compliant", "Non-Compliant", "Partial Compliance"]},
+                ],
+            },
+        ],
+    },
+
 }
 
 
