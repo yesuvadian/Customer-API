@@ -5218,27 +5218,7 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
             code = clean_name[:3].upper()
         return code
 
-    # Create root "Zone" parent department
-    print(f"\n{'='*60}")
-    print(f"Creating root Zone parent department...")
-    print(f"{'='*60}")
-
-    root_zone_id = str(uuid.uuid4())
-    root_zone = OrgDepartment(
-        id=uuid.UUID(root_zone_id),
-        organization_id=uuid.UUID(org_id),
-        name="Zone",
-        code="ZONE",
-        description="Root parent for all zones",
-        parent_department_id=None,
-        manager_id=None,
-        is_active=True,
-        cts=datetime.utcnow(),
-        mts=datetime.utcnow()
-    )
-    session.add(root_zone)
-    session.commit()
-    print(f"[OK] Created root Zone department")
+    # No synthetic root — zones from the Excel are the top-level nodes (parent=None)
 
     # Process each level
     for level_idx, level in enumerate(levels):
@@ -5276,9 +5256,9 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
                     skipped_count += 1
                     continue
             else:
-                # First level (Zone) - use root Zone as parent
+                # First level (Zone) — no parent, these are the tree roots
                 full_path = dept_name
-                parent_id = root_zone_id
+                parent_id = None
 
             # Check if department with this name already exists in this org
             existing = session.query(OrgDepartment).filter(
@@ -5323,7 +5303,7 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
         print(f"[OK] Created {created_count} {level} departments (skipped {skipped_count} duplicates)")
 
     print(f"\n{'='*60}")
-    print(f"[OK] COMPLETED: Created {len(department_map) + 1} total departments (including root Zone)")
+    print(f"[OK] COMPLETED: Created {len(department_map)} total departments")
     print(f"{'='*60}\n")
 
 
