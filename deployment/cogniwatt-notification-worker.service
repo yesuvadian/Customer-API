@@ -1,0 +1,52 @@
+[Unit]
+Description=CogniWatt Notification Engine Worker
+Documentation=https://github.com/your-org/cogniwatt
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=cogniwatt
+Group=cogniwatt
+WorkingDirectory=/opt/cogniwatt/Customer-API
+
+# Python virtual environment
+Environment="PATH=/opt/cogniwatt/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/opt/cogniwatt/Customer-API"
+
+# Load environment variables from .env file
+EnvironmentFile=/opt/cogniwatt/Customer-API/.env
+
+# Worker configuration (optional overrides)
+Environment="POLL_INTERVAL=5"
+Environment="BATCH_SIZE=10"
+Environment="LOG_LEVEL=INFO"
+
+# Start the worker
+ExecStart=/opt/cogniwatt/venv/bin/python /opt/cogniwatt/Customer-API/notification_worker.py
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Resource limits (adjust as needed)
+LimitNOFILE=4096
+MemoryLimit=512M
+CPUQuota=50%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cogniwatt-notification-worker
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/cogniwatt/Customer-API/logs
+
+[Install]
+WantedBy=multi-user.target

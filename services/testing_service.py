@@ -187,12 +187,23 @@ class TestingService:
             except Exception as _surv:
                 logger.warning("[TestingService] Surveillance tracking update failed: %s", _surv)
 
-        # ── Notification: test submitted → notify approvers ───────────────────
+        # ── Notification: test submitted → emit event for async processing ────
         try:
-            from services.notification_service import NotificationService
-            NotificationService(self.db).notify_test_submitted(request)
+            from services.notification_event_emitter import emit_test_submitted_event
+            emit_test_submitted_event(
+                db=self.db,
+                organization_id=request.organization_id,
+                request_id=request.id,
+                request_number=request.request_number,
+                tester_name=request.tester.full_name if request.tester else "Unknown",
+                equipment_name=request.equipment_name or "Unknown Equipment",
+                equipment_type=request.equipment_type or "",
+                substation_name=request.substation.name if request.substation else "Unknown",
+                test_category=request.request_category or "test",
+                scheduled_date=request.scheduled_start_date.strftime("%Y-%m-%d") if request.scheduled_start_date else "",
+            )
         except Exception as _n:
-            print(f"[WARN] test_submitted notification failed: {_n}")
+            logger.warning(f"test_submitted event emission failed: {_n}")
 
         return request
 
@@ -462,14 +473,24 @@ class TestingService:
 
             # ── Notification hooks (fire-and-forget; never block save) ────────
             try:
-                from services.notification_service import NotificationService
-                _nsvc = NotificationService(self.db)
-                if ev["overall"] == "CRITICAL":
-                    _nsvc.notify_eval_critical(request, result, ev)
-                elif ev["overall"] == "ALERT":
-                    _nsvc.notify_eval_alert(request, result, ev)
+                from services.notification_event_emitter import emit_test_result_event
+                overall_threshold = ev.get("overall", "NORMAL")
+                if overall_threshold in ("ALERT", "CRITICAL"):
+                    emit_test_result_event(
+                        db=self.db,
+                        organization_id=request.organization_id,
+                        request_id=request.id,
+                        request_number=request.request_number,
+                        equipment_name=request.equipment_name or "Unknown Equipment",
+                        equipment_type=request.equipment_type or "",
+                        test_category=request.request_category or "test",
+                        test_type_name=template_key or "Unknown Test",
+                        result_threshold=overall_threshold,
+                        tester_name=request.tester.full_name if request.tester else "Unknown",
+                        additional_payload={"evaluation": ev},
+                    )
             except Exception as _notif_err:
-                print(f"[WARN] Notification hook failed: {_notif_err}")
+                logger.warning(f"Notification event emission failed: {_notif_err}")
 
         except Exception as _eval_err:  # evaluation must never block save
             import traceback

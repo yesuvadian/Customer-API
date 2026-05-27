@@ -246,6 +246,10 @@ def get_workflow_dashboard(
     )
 
     for wf_id, wf_code, ueic, stage_name, started_at, duration_days in overdue_workflows:
+        # Ensure started_at is timezone-aware (assume UTC if naive)
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+
         deadline = started_at + timedelta(days=duration_days)
         days_overdue = (now - deadline).days
 
