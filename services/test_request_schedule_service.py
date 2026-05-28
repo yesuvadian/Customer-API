@@ -870,7 +870,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     case((TestRequestSchedule.is_active == True, 1), else_=0)
                 ).label('active_count'),
                 func.sum(
-                    case((TestRequestSchedule.is_paused == True, 1), else_=0)
+                    case((TestRequestSchedule.paused_at.isnot(None), 1), else_=0)
                 ).label('paused_count'),
             )
             .join(
