@@ -1095,12 +1095,13 @@ def get_test_coordinator_dashboard(
         ueic = req.equipment.ueic if req.equipment else ''
         equipment_name = req.equipment.manufacturer or ueic if req.equipment else ''
         dept_name = req.department.name if req.department else ''
-        
+
         # Get last alert sent date
+        # Note: last_alert_date field not implemented yet in TestingRequest model
         last_alert = None
-        if req.last_alert_date:
-            last_alert = req.last_alert_date.strftime('%d-%b-%Y')
-        
+        # if hasattr(req, 'last_alert_date') and req.last_alert_date:
+        #     last_alert = req.last_alert_date.strftime('%d-%b-%Y')
+
         overdue_breakdown.append({
             'id': str(req.id),
             'ueic': ueic,
