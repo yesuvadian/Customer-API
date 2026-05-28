@@ -167,22 +167,27 @@ class OrgTestTemplateService:
         tmpl.modified_by = modified_by
 
         # When a global (system) template is updated, cascade the new
-        # template_data to every org-specific clone so the tester form
-        # always renders the latest field definitions regardless of which
-        # row get_for_test_type resolves to.
+        # template_data to ALL other rows with the same template_key so
+        # that the tester always sees the latest definition regardless of
+        # which test_type_id or org_id it resolves to.
+        # This covers two cases:
+        #   1. Org-specific clones (same key, non-null org_id)
+        #   2. Other global rows with the same key but a different test_type_id
+        #      (e.g. "Capacitance & Tan Delta Test (Transformer)" exists under
+        #      both Power Transformer and Feeder Protection Relays masters)
         if tmpl.org_id is None:
-            clones = (
+            siblings = (
                 self.db.query(OrgTestTemplate)
                 .filter(
                     OrgTestTemplate.template_key == tmpl.template_key,
-                    OrgTestTemplate.org_id.isnot(None),
+                    OrgTestTemplate.id != tmpl.id,
                 )
                 .all()
             )
-            for clone in clones:
-                clone.template_data = template_data
-                flag_modified(clone, "template_data")
-                clone.version = tmpl.version
+            for sibling in siblings:
+                sibling.template_data = template_data
+                flag_modified(sibling, "template_data")
+                sibling.version = tmpl.version
 
         self.db.commit()
         self.db.refresh(tmpl)
@@ -395,17 +400,14 @@ class OrgTestTemplateService:
                     .first()
                 )
                 if existing:
-                    # Lifecycle-flagged templates must always be kept in sync —
-                    # the enable_cumulative / enable_calibration flags may have
-                    # been added to test_templates.py after the initial seed, so
-                    # a plain "skip if exists" would leave stale records forever.
-                    is_lifecycle = (
-                        template_data.get("enable_cumulative")
-                        or template_data.get("enable_calibration")
-                    )
-                    if is_lifecycle:
-                        existing.template_data = template_data
-                        existing.template_key = template_key
+                    # Always sync the DB row from test_templates.py so that
+                    # adding new sections/fields/formulas to the static dict
+                    # is immediately reflected without a manual DB edit.
+                    from sqlalchemy.orm.attributes import flag_modified
+                    existing.template_data = template_data
+                    existing.template_key  = template_key
+                    existing.version       = (existing.version or 1) + 1
+                    flag_modified(existing, "template_data")
                     continue
 
                 self.db.add(OrgTestTemplate(

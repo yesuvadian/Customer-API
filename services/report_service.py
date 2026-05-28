@@ -12,7 +12,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-
+from xml.sax.saxutils import escape
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm, cm
@@ -616,6 +616,7 @@ class ReportService:
     # ───────────────────────────────────────────────────
     # Helper: Detail Table (label-value pairs, 4 columns)
     # ───────────────────────────────────────────────────
+
     def _detail_table(self, data, styles):
         """Build a 4-column label-value table."""
         return self._detail_table_raw(data)
@@ -623,32 +624,58 @@ class ReportService:
     @staticmethod
     def _detail_table_raw(data):
         """Build a styled 4-column table from raw data."""
-        page_width = A4[0] - 30 * mm  # minus margins
+        page_width = A4[0] - 30 * mm
         col1 = 35 * mm
         col2 = (page_width - 2 * col1) / 2
         col3 = col1
         col4 = col2
 
         wrapped_data = []
+
         for row in data:
             wrapped_row = []
+
             for i, cell in enumerate(row):
                 val = str(cell) if cell else ""
+
                 if i % 2 == 0:
                     # Label column
-                    wrapped_row.append(Paragraph(
-                        f"<b>{val}</b>",
-                        ParagraphStyle("lbl", fontSize=8, textColor=colors.HexColor("#555555")),
-                    ))
+                    safe_label = escape(ReportService._pdf_safe(val))
+
+                    wrapped_row.append(
+                        Paragraph(
+                            f"<b>{safe_label}</b>",
+                            ParagraphStyle(
+                                "lbl",
+                                fontSize=8,
+                                textColor=colors.HexColor("#555555"),
+                                wordWrap="CJK",
+                            ),
+                        )
+                    )
                 else:
                     # Value column
-                    wrapped_row.append(Paragraph(
-                        val,
-                        ParagraphStyle("val", fontSize=9, textColor=colors.black),
-                    ))
+                    safe_val = escape(ReportService._pdf_safe(val))
+
+                    wrapped_row.append(
+                        Paragraph(
+                            safe_val,
+                            ParagraphStyle(
+                                "val",
+                                fontSize=9,
+                                textColor=colors.black,
+                                wordWrap="CJK",
+                            ),
+                        )
+                    )
+
             wrapped_data.append(wrapped_row)
 
-        table = Table(wrapped_data, colWidths=[col1, col2, col3, col4])
+        table = Table(
+            wrapped_data,
+            colWidths=[col1, col2, col3, col4]
+        )
+
         table.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
@@ -659,6 +686,7 @@ class ReportService:
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ]))
+
         return table
 
     @staticmethod

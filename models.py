@@ -4,8 +4,22 @@ from sqlalchemy import Enum
 
 import uuid
 from sqlalchemy import (
-    Column, Float, LargeBinary, Numeric, String, Boolean, Date, DateTime, Integer, ForeignKey, UniqueConstraint, func,Text
+    Column,
+    Float,
+    LargeBinary,
+    Numeric,
+    String,
+    Boolean,
+    Date,
+    DateTime,
+    Integer,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
+    func,
+    Text,
 )
+ 
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB, ARRAY
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import relationship
@@ -274,6 +288,14 @@ class RepairWorkflow(Base):
         nullable=True,
     )
 
+    parent_workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Links surveillance workflows back to their parent repair workflow"
+    )
+
     organization_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.organizations.id", ondelete="SET NULL"),
@@ -281,7 +303,7 @@ class RepairWorkflow(Base):
         index=True,
     )
 
-    workflow_type = Column(String(50), default="BREAKDOWN", nullable=True)  # BREAKDOWN / OVERHAUL
+    workflow_type = Column(String(50), default="BREAKDOWN", nullable=True)  # BREAKDOWN / OVERHAUL / SURVEILLANCE
     source = Column(String(50), nullable=True)  # manual / cumulative / scheduled
 
     status = Column(String(20), default="active")
@@ -2012,7 +2034,10 @@ class CategoryMaster(Base):
 
 class CategoryDetails(Base):
     __tablename__ = "CategoryDetails"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        UniqueConstraint("name", "category_master_id", name="uq_category_details_name_master"),
+        {"schema": "public"}
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     category_master_id = Column(

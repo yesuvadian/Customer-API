@@ -1776,7 +1776,7 @@ class RepairWorkflowService:
                         deadline = stage_instance.started_at + timedelta(days=stage.default_duration_days)
                         current_stage_deadline = deadline.isoformat()
 
-                        now = datetime.now(timezone.utc)
+                        now = datetime.utcnow()
                         days_remaining = (deadline - now).days
                         is_overdue = days_remaining < 0
 

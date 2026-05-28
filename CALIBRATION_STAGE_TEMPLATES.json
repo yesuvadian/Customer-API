@@ -6,15 +6,37 @@
       {
         "title": "Calibration Due Summary",
         "fields": [
-          {"key": "last_calibration_date", "label": "Last Calibration Date",  "type": "date",     "required": false, "readonly": true},
-          {"key": "next_due_date",          "label": "Next Due Date",           "type": "date",     "required": false, "readonly": true},
-          {"key": "days_overdue",           "label": "Days Overdue / Until Due","type": "number",   "required": false, "readonly": true},
-          {"key": "review_remarks",         "label": "Remarks",                 "type": "textarea", "required": false}
+          {
+            "key": "last_calibration_date",
+            "label": "Last Calibration Date",
+            "type": "date",
+            "required": false,
+            "readonly": true
+          },
+          {
+            "key": "next_due_date",
+            "label": "Next Due Date",
+            "type": "date",
+            "required": false,
+            "readonly": true
+          },
+          {
+            "key": "days_overdue",
+            "label": "Days Overdue / Until Due",
+            "type": "number",
+            "required": false,
+            "readonly": true
+          },
+          {
+            "key": "review_remarks",
+            "label": "Remarks",
+            "type": "textarea",
+            "required": false
+          }
         ]
       }
     ]
   },
-
   "cal_stage_execution": {
     "name": "Send to Lab",
     "template_type": "calibration_stage",
@@ -22,16 +44,40 @@
       {
         "title": "Lab Submission Details",
         "fields": [
-          {"key": "lab_name",          "label": "Laboratory / Agency Name",    "type": "text",     "required": true},
-          {"key": "submission_date",   "label": "Date Sent to Lab",            "type": "date",     "required": true},
-          {"key": "expected_return",   "label": "Expected Return Date",         "type": "date",     "required": false},
-          {"key": "scope_of_work",     "label": "Calibration Scope",           "type": "textarea", "required": true},
-          {"key": "dispatch_photo",    "label": "Dispatch / Handover Photo",   "type": "file",     "required": false}
+          {
+            "key": "lab_name",
+            "label": "Laboratory / Agency Name",
+            "type": "text",
+            "required": true
+          },
+          {
+            "key": "submission_date",
+            "label": "Date Sent to Lab",
+            "type": "date",
+            "required": true
+          },
+          {
+            "key": "expected_return",
+            "label": "Expected Return Date",
+            "type": "date",
+            "required": false
+          },
+          {
+            "key": "scope_of_work",
+            "label": "Calibration Scope",
+            "type": "textarea",
+            "required": true
+          },
+          {
+            "key": "dispatch_photo",
+            "label": "Dispatch / Handover Photo",
+            "type": "file",
+            "required": false
+          }
         ]
       }
     ]
   },
-
   "cal_stage_certificate": {
     "name": "Certificate Upload",
     "template_type": "calibration_stage",
@@ -39,30 +85,85 @@
       {
         "title": "Calibration Certificate",
         "fields": [
-          {"key": "calibration_date",     "label": "Calibration Date",              "type": "date",     "required": true},
-          {"key": "validity_months",      "label": "Validity (Months)",              "type": "number",   "required": true},
-          {"key": "overall_result",       "label": "Result",                         "type": "dropdown", "required": true,
-           "options": ["Pass", "Fail"]},
-          {"key": "certificate_number",   "label": "Certificate Number",             "type": "text",     "required": true},
-          {"key": "calibrated_by",        "label": "Calibrated By (Agency / Lab)",   "type": "text",     "required": true},
-          {"key": "certificate_document", "label": "Calibration Certificate (PDF)",  "type": "file",     "required": true},
-          {"key": "notes",                "label": "Notes",                          "type": "textarea", "required": false}
+          {
+            "key": "calibration_date",
+            "label": "Calibration Date",
+            "type": "date",
+            "required": true
+          },
+          {
+            "key": "validity_months",
+            "label": "Validity (Months)",
+            "type": "number",
+            "required": true
+          },
+          {
+            "key": "overall_result",
+            "label": "Result",
+            "type": "dropdown",
+            "required": true,
+            "options": [
+              "Pass",
+              "Fail"
+            ]
+          },
+          {
+            "key": "certificate_number",
+            "label": "Certificate Number",
+            "type": "text",
+            "required": true
+          },
+          {
+            "key": "calibrated_by",
+            "label": "Calibrated By (Agency / Lab)",
+            "type": "text",
+            "required": true
+          },
+          {
+            "key": "certificate_document",
+            "label": "Calibration Certificate (PDF)",
+            "type": "file",
+            "required": true
+          },
+          {
+            "key": "notes",
+            "label": "Notes",
+            "type": "textarea",
+            "required": false
+          }
         ]
       }
     ]
   },
-
   "cal_stage_officer_verification": {
-    "name": "Officer Verification",
+    "name": "Officer Verification — Calibration",
     "template_type": "calibration_stage",
     "sections": [
       {
         "title": "Verification by Designated Officer",
         "fields": [
-          {"key": "verification_outcome", "label": "Verification Outcome", "type": "dropdown", "required": true,
-           "options": ["Verified — Calibration Complete", "Rejected — Resubmit Certificate"]},
-          {"key": "verification_notes",   "label": "Verification Notes",   "type": "textarea", "required": true},
-          {"key": "verified_date",        "label": "Date of Verification", "type": "date",     "required": true}
+          {
+            "key": "verification_outcome",
+            "label": "Verification Outcome",
+            "type": "dropdown",
+            "required": true,
+            "options": [
+              "Verified — Calibration Complete",
+              "Rejected — Resubmit Certificate"
+            ]
+          },
+          {
+            "key": "verification_notes",
+            "label": "Verification Notes",
+            "type": "textarea",
+            "required": true
+          },
+          {
+            "key": "verified_date",
+            "label": "Date of Verification",
+            "type": "date",
+            "required": true
+          }
         ]
       }
     ]

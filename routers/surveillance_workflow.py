@@ -12,6 +12,7 @@ Handles post-commissioning surveillance workflow operations including:
 Uses repair_stage_roles for permission control (same as repair workflows).
 """
 
+import logging
 from typing import List, Optional
 from uuid import UUID
 
@@ -37,6 +38,8 @@ router = APIRouter(
     tags=["surveillance-workflows"],
     dependencies=[Depends(get_current_user)],
 )
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -71,7 +74,8 @@ def _check_workflow_access(db: Session, workflow_id: UUID, user: User) -> Repair
     is_org_admin, user_dept_id = get_user_dept_scope(db, user.id, None)
 
     if not is_org_admin and user_dept_id:
-        if workflow.department_id != user_dept_id:
+        workflow_dept_id = workflow.equipment.department_id if workflow.equipment else None
+        if workflow_dept_id and workflow_dept_id != user_dept_id:
             raise HTTPException(403, "Access denied: Different department")
 
     return workflow
@@ -92,7 +96,7 @@ def _serialize_workflow(wf: RepairWorkflow, current_stage: Optional[RepairStageI
         'start_date': wf.started_at.isoformat() if wf.started_at else None,  # started_at, not start_date
         'end_date': wf.completed_at.isoformat() if wf.completed_at else None,  # completed_at, not end_date
         'current_stage': {
-            'stage_number': current_stage.stage.stage_number if current_stage and current_stage.stage else None,
+            'stage_number': current_stage.stage.sequence if current_stage and current_stage.stage else None,
             'stage_name': current_stage.stage.name if current_stage and current_stage.stage else None,
             'quarter_number': current_stage.quarter_number if current_stage else None,
             'status': current_stage.status if current_stage else None,
@@ -435,11 +439,24 @@ def get_surveillance_summary(
     # Check access
     workflow = _check_workflow_access(db, workflow_id, user)
 
-    # Get overall summary
+    # Get overall summary (return defaults if calculation fails - e.g., no tests yet)
     try:
         summary = SurveillanceTemplateService.get_overall_summary(db, workflow_id)
     except Exception as e:
-        raise HTTPException(500, f"Failed to get overall summary: {str(e)}")
+        logger.warning(
+            "[SurveillanceSummary] Failed to calculate summary for workflow %s: %s",
+            workflow_id, str(e)
+        )
+        # Return default summary for new workflows with no tests
+        summary = {
+            'workflow_id': str(workflow_id),
+            'total_tests': 0,
+            'completed_tests': 0,
+            'abnormal_tests': 0,
+            'abnormal_rate': 0.0,
+            'quality_rating': 'N/A',
+            'note': 'No tests scheduled yet'
+        }
 
     # Add quarterly summaries
     quarterly_summaries = []
@@ -455,7 +472,9 @@ def get_surveillance_summary(
             quarterly_summaries.append({
                 'quarter': quarter,
                 'total_tests': 0,
-                'error': 'Calculation failed'
+                'completed_tests': 0,
+                'abnormal_tests': 0,
+                'note': 'No tests scheduled'
             })
 
     summary['quarters'] = quarterly_summaries
