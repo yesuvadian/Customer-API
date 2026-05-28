@@ -337,6 +337,8 @@ class SurveillanceTemplateService:
         )
         ticket_count = len(tickets)
         completed = [t for t in tickets if t.status in _DONE_STATUSES]
+        # Tickets created but tester hasn't submitted results yet
+        pending_tickets = [t for t in tickets if t.status not in _DONE_STATUSES]
         abnormal = [t for t in tickets if t.form_data and t.form_data.get('result_status') == 'abnormal']
 
         # total = whichever is larger:
@@ -344,10 +346,15 @@ class SurveillanceTemplateService:
         # - ticket_count: after tickets created (next_run_date advanced to next quarter)
         total_tests = max(ticket_count, schedule_count)
 
+        # schedule_count > 0 means no tickets yet — truly "scheduled" (future)
+        # pending_tickets > 0 means tickets exist but tester hasn't submitted results
+        # These are mutually exclusive: when tickets are created, next_run_date advances
+        # so schedule_count drops to 0 for this quarter.
         return {
             'total_tests': total_tests,
             'completed_tests': len(completed),
-            'scheduled_tests': total_tests - len(completed),
+            'scheduled_tests': schedule_count,        # no ticket yet (amber badge)
+            'pending_tickets': len(pending_tickets),  # ticket open, awaiting tester (blue badge)
             'abnormal_tests': len(abnormal),
             'abnormal_rate': (len(abnormal) / len(completed) * 100) if completed else 0,
             'pending_tests': total_tests - len(completed),
