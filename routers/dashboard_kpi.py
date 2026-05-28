@@ -862,7 +862,7 @@ def get_test_coordinator_dashboard(
     
     Visible to: EE TLSS, Test Coordinator, Reviewing Officer roles
     """
-    from models import TestingRequest, Equipment, TestSession, TestResult, TestType, Recommendation
+    from models import TestingRequest, Equipment, TestSession, TestResult, CategoryDetails, Recommendation
     from sqlalchemy import func, and_, extract
     from datetime import datetime, timedelta
     
@@ -971,7 +971,7 @@ def get_test_coordinator_dashboard(
     # =========================================================================
     
     test_compliance_by_type = []
-    test_types = db.query(TestType).filter(TestType.is_active.is_(True)).all()
+    test_types = db.query(CategoryDetails).filter(CategoryDetails.is_active.is_(True)).all()
     
     for tt in test_types:
         # Total equipment that should have this test
@@ -1154,13 +1154,13 @@ def get_test_coordinator_dashboard(
     # =========================================================================
     
     recent_results = db.query(
-        TestSession, TestingRequest, Equipment, TestType, TestResult
+        TestSession, TestingRequest, Equipment, CategoryDetails, TestResult
     ).join(
         TestingRequest, TestSession.testing_request_id == TestingRequest.id
     ).join(
         Equipment, TestingRequest.equipment_id == Equipment.id
     ).join(
-        TestType, TestingRequest.test_type_id == TestType.id
+        CategoryDetails, TestingRequest.test_type_id == CategoryDetails.id
     ).outerjoin(
         TestResult, TestResult.test_session_id == TestSession.id
     ).filter(
@@ -1320,7 +1320,7 @@ def get_test_coordinator_dashboard(
             TestingRequest.organization_id == svc.org_id,
             dept_cond,
             TestingRequest.due_date.between(week_start, week_end),
-            TestingRequest.test_type.has(TestType.name.notin_(['DGA', 'BDV', 'Insulation Resistance', 'SF6 Purity']))
+            TestingRequest.test_type.has(CategoryDetails.name.notin_(['DGA', 'BDV', 'Insulation Resistance', 'SF6 Purity']))
         ).scalar() or 0
         
         weekly_schedule.append({
