@@ -309,12 +309,16 @@ class SurveillanceTemplateService:
             .all()
         )
 
-        completed = [t for t in tests if t.status in ('completed', 'submitted')]
+        # "done" = tester has submitted results or beyond
+        _DONE_STATUSES = ('test_submitted', 'under_approval', 'approved', 'completed')
+        completed = [t for t in tests if t.status in _DONE_STATUSES]
+        scheduled = [t for t in tests if t.status not in _DONE_STATUSES]
         abnormal = [t for t in tests if t.form_data and t.form_data.get('result_status') == 'abnormal']
 
         return {
             'total_tests': len(tests),
             'completed_tests': len(completed),
+            'scheduled_tests': len(scheduled),
             'abnormal_tests': len(abnormal),
             'abnormal_rate': (len(abnormal) / len(completed) * 100) if completed else 0,
             'pending_tests': len(tests) - len(completed),
@@ -348,7 +352,10 @@ class SurveillanceTemplateService:
             .all()
         )
 
-        completed = [t for t in all_tests if t.status in ('completed', 'submitted')]
+        # "done" = tester has submitted results or beyond
+        _DONE_STATUSES = ('test_submitted', 'under_approval', 'approved', 'completed')
+        completed = [t for t in all_tests if t.status in _DONE_STATUSES]
+        scheduled = [t for t in all_tests if t.status not in _DONE_STATUSES]
         abnormal = [t for t in all_tests if t.form_data and t.form_data.get('result_status') == 'abnormal']
 
         dept_id = (
@@ -356,18 +363,20 @@ class SurveillanceTemplateService:
             if workflow.equipment
             else None
         )
+        # Only calculate quality rating when tests have been completed
         quality_rating = SurveillanceConfigService.calculate_quality_rating(
             db,
             total_tests=len(completed),
             abnormal_tests=len(abnormal),
             organization_id=workflow.organization_id,
             department_id=dept_id,
-        )
+        ) if completed else 'N/A'
 
         return {
             'workflow_id': str(workflow_id),
             'status': workflow.status,
             'total_tests': len(all_tests),
+            'scheduled_tests': len(scheduled),
             'completed_tests': len(completed),
             'abnormal_tests': len(abnormal),
             'abnormal_rate': (len(abnormal) / len(completed) * 100) if completed else 0,
