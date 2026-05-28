@@ -16,7 +16,7 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy import and_
 from sqlalchemy.orm import Session, joinedload
 
@@ -29,6 +29,8 @@ from models import (
     TestingRequest,
     User,
 )
+from fastapi.responses import FileResponse
+from schemas import RepairSaveDataRequest, RepairAdvanceRequest, RepairSubmitRequest
 from services.repair_workflow_service import RepairWorkflowService
 from services.surveillance_template_service import SurveillanceTemplateService
 from utils.common_service import get_user_dept_scope
@@ -554,3 +556,162 @@ def get_progress(
         return RepairWorkflowService(db).get_progress(workflow_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@router.get("/{workflow_id}/available-transitions")
+def available_transitions(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Returns the set of actions the calling user can take on this workflow right now.
+    Response: {can_assign, can_submit, can_approve, can_reject, can_cancel}
+
+    Surveillance override: can_submit is blocked until ALL test tickets for
+    the current quarter are in a done status (test_submitted / under_approval /
+    approved / completed). Officers cannot submit the quarterly review form
+    while testers still have open tickets.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        result = RepairWorkflowService(db).get_available_transitions(workflow_id, user.id)
+
+        # Surveillance-specific gate: block submit until all quarter tickets done
+        if result.get('can_submit'):
+            workflow = db.query(RepairWorkflow).filter(
+                RepairWorkflow.id == workflow_id
+            ).first()
+            current_instance = (
+                db.query(RepairStageInstance)
+                .filter(RepairStageInstance.id == workflow.current_stage_instance_id)
+                .first()
+            ) if workflow and workflow.current_stage_instance_id else None
+
+            quarter_number = current_instance.quarter_number if current_instance else None
+
+            if quarter_number:
+                _DONE_STATUSES = (
+                    'test_submitted', 'under_approval', 'approved', 'completed'
+                )
+                tickets = (
+                    db.query(TestingRequest)
+                    .filter(
+                        TestingRequest.surveillance_workflow_id == workflow_id,
+                        TestingRequest.surveillance_quarter == quarter_number,
+                    )
+                    .all()
+                )
+                total = len(tickets)
+                done = sum(1 for t in tickets if t.status in _DONE_STATUSES)
+                pending = total - done
+
+                if total == 0 or pending > 0:
+                    result['can_submit'] = False
+                    result['submit_blocked_reason'] = (
+                        f'{pending} of {total} Q{quarter_number} test(s) still pending '
+                        f'— complete all tests before submitting'
+                        if total > 0
+                        else f'No Q{quarter_number} test tickets created yet'
+                    )
+
+        return result
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/save")
+def save_stage(
+    workflow_id: UUID,
+    stage_id: UUID,
+    payload: RepairSaveDataRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Save (draft) form data for the current surveillance stage.
+    Reviewing Officer fills quarterly review or final evaluation form.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).save_stage_data(
+            workflow_id, stage_id, payload.form_data, user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/submit")
+def submit_stage(
+    workflow_id: UUID,
+    stage_id: UUID,
+    payload: RepairSubmitRequest = RepairSubmitRequest(),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Submit the completed stage form. Transitions stage: assigned → submitted.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).submit_stage(
+            workflow_id, stage_id, payload.remarks, user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{workflow_id}/advance")
+def advance_stage(
+    workflow_id: UUID,
+    payload: RepairAdvanceRequest = RepairAdvanceRequest(),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Approve current stage and advance to next quarter (Q1→Q2→Q3→Q4→Final Evaluation).
+    Stage must be submitted. Requires can_approve on this stage.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).advance_stage(workflow_id, payload.remarks, user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/{workflow_id}/stages/{stage_id}/eligible-users")
+def get_eligible_users(
+    workflow_id: UUID,
+    stage_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Returns users whose org role is authorised (can_edit) for this stage.
+    Used to populate the assign dialog.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).get_eligible_users(workflow_id, stage_id, user)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/assign")
+def assign_stage(
+    workflow_id: UUID,
+    stage_id: UUID,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Assign a user to the current surveillance stage.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).assign_stage(
+            workflow_id, stage_id, payload.get("user_id"), user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
