@@ -152,6 +152,27 @@ def delete_master_schedule(
 
 
 # ============================================================
+# LIST EQUIPMENT WITH SCHEDULES
+# ============================================================
+
+@router.get("/equipment-with-schedules")
+def list_equipment_with_schedules(
+    request_category: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns list of equipment that have operational schedules,
+    with schedule counts.
+    """
+    svc = TestRequestScheduleService(db)
+    return svc.list_equipment_with_schedules(
+        organization_id=current_user.organization_id,
+        request_category=request_category,
+    )
+
+
+# ============================================================
 # LIST OPERATIONAL SCHEDULES
 # ============================================================
 
