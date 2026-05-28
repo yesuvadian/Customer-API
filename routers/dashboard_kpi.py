@@ -1193,8 +1193,6 @@ def get_test_coordinator_dashboard(
         result_value = None
         if result and result.result_value:
             result_value = result.result_value
-        elif session.result_summary:
-            result_value = session.result_summary.get('key_value')
         
         recent_results_list.append({
             'id': str(session.id),
@@ -1206,7 +1204,7 @@ def get_test_coordinator_dashboard(
             'result_color': result_color,
             'result_bg': result_bg,
             'tested_on': session.session_date.strftime('%d-%b-%Y') if session.session_date else None,
-            'tested_by': session.tested_by,
+            'tested_by': session.conductor.name if session.conductor else None,
             'next_due_date': req.due_date.strftime('%d-%b-%Y') if req.due_date else None
         })
     
@@ -1230,11 +1228,10 @@ def get_test_coordinator_dashboard(
         remedial_actions_list.append({
             'id': str(rec.id),
             'ueic': ueic,
-            'description': rec.summary or rec.recommendation_text or '',
-            'assigned_to': rec.assigned_to_name or 'Unassigned',
-            'due_date': (req.due_date.strftime('%Y-%m-%d') if req and req.due_date else 
-                        (rec.target_date.strftime('%Y-%m-%d') if rec.target_date else None)),
-            'is_critical': rec.priority == 'critical' if hasattr(rec, 'priority') else False,
+            'description': rec.summary or rec.detailed_notes or '',
+            'assigned_to': 'Unassigned',
+            'due_date': req.due_date.strftime('%Y-%m-%d') if req and req.due_date else None,
+            'is_critical': False,
             'is_overdue': is_overdue,
             'days_open': days_open,
             'status': 'overdue' if is_overdue else 'pending'
@@ -1666,9 +1663,9 @@ def get_asset_dashboard(
         remediation_list.append({
             'id': str(rec.id),
             'ueic': ueic,
-            'description': rec.summary or rec.recommendation_text or '',
-            'assigned_to': rec.assigned_to_name or 'Unassigned',
-            'due_date': rec.target_date.strftime('%d-%b-%Y') if rec.target_date else None,
+            'description': rec.summary or rec.detailed_notes or '',
+            'assigned_to': 'Unassigned',
+            'due_date': None,
             'days_open': days_open,
             'is_overdue': days_open > 14,
             'recommendation_type': rec.recommendation_type.value if hasattr(rec.recommendation_type, 'value') else 'General'
