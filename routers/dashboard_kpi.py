@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User
+from models import User, RequestCategory
 from services.dashboard_service import DashboardService, invalidate_dashboard_cache
 
 router = APIRouter(
