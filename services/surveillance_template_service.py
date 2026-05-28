@@ -325,6 +325,20 @@ class SurveillanceTemplateService:
 
         # TestingRequest tickets already created for this quarter
         _DONE_STATUSES = ('test_submitted', 'under_approval', 'approved', 'completed')
+
+        # Surveillance tickets start at 'submitted' (no draft stage).
+        # 10 statuses, steps 0-9, each step = 100/9 ≈ 11%.
+        _STATUS_STEP = {
+            'submitted': 0, 'pending_approval': 1, 'assigned': 2,
+            'accepted': 3, 'scheduled': 4, 'in_progress': 5,
+            'test_submitted': 6, 'under_approval': 7,
+            'approved': 8, 'completed': 9,
+            # non-forward states
+            'rejected': 0, 'closed': 9, 'under_review': 6,
+            'finance_pending': 2, 'outcome_active': 9, 'commissioned': 9,
+        }
+        _STATUS_MAX_STEP = 9  # completed = step 9 = 100%
+
         tickets = (
             db.query(TestingRequest)
             .filter(
@@ -346,6 +360,20 @@ class SurveillanceTemplateService:
         # - ticket_count: after tickets created (next_run_date advanced to next quarter)
         total_tests = max(ticket_count, schedule_count)
 
+        # Quarter progress = average of each ticket's individual status progress.
+        # e.g. [assigned=22%, in_progress=56%, submitted=0%] → avg 26%
+        if tickets:
+            def _ticket_progress(t) -> float:
+                raw = t.status.value if hasattr(t.status, 'value') else (t.status or 'submitted')
+                step = _STATUS_STEP.get(raw, 0)
+                return round(step / _STATUS_MAX_STEP * 100, 1)
+
+            progress_percent = round(
+                sum(_ticket_progress(t) for t in tickets) / len(tickets), 1
+            )
+        else:
+            progress_percent = 0.0
+
         # schedule_count > 0 means no tickets yet — truly "scheduled" (future)
         # pending_tickets > 0 means tickets exist but tester hasn't submitted results
         # These are mutually exclusive: when tickets are created, next_run_date advances
@@ -358,6 +386,7 @@ class SurveillanceTemplateService:
             'abnormal_tests': len(abnormal),
             'abnormal_rate': (len(abnormal) / len(completed) * 100) if completed else 0,
             'pending_tests': total_tests - len(completed),
+            'progress_percent': progress_percent,     # weighted avg progress across all tickets
         }
 
     @staticmethod
