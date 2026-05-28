@@ -376,6 +376,21 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             )
 
             if existing_generated:
+                # Patch missing surveillance linkage on existing ticket
+                if (
+                    schedule.surveillance_workflow_id
+                    and not existing_generated.surveillance_workflow_id
+                ):
+                    from utils.surveillance_utils import calculate_surveillance_quarter
+                    existing_generated.surveillance_workflow_id = schedule.surveillance_workflow_id
+                    existing_generated.surveillance_quarter = calculate_surveillance_quarter(
+                        db, schedule.surveillance_workflow_id, now
+                    )
+                    db.commit()
+                    logger.info(
+                        "[ScheduleService] Patched surveillance linkage on existing ticket %s",
+                        existing_generated.id,
+                    )
                 return True
 
             # Check if schedule has ended (for surveillance workflows with end_date)
