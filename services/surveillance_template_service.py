@@ -86,7 +86,7 @@ class SurveillanceTemplateService:
             is_abnormal = SurveillanceConfigService.is_result_abnormal(
                 db, tr.form_data.get('result_status') if tr.form_data else None,
                 organization_id=workflow.organization_id,
-                department_id=workflow.department_id
+                department_id=workflow.equipment.department_id if workflow.equipment else None,
             ) if tr.form_data else False
 
             if tr.status == 'completed':
@@ -159,7 +159,7 @@ class SurveillanceTemplateService:
             total_tests=len(completed_tests),
             abnormal_tests=len(abnormal_tests),
             organization_id=workflow.organization_id,
-            department_id=workflow.department_id
+            department_id=workflow.equipment.department_id if workflow.equipment else None,
         )
 
         # Calculate surveillance duration
@@ -351,12 +351,17 @@ class SurveillanceTemplateService:
         completed = [t for t in all_tests if t.test_status == 'completed']
         abnormal = [t for t in all_tests if t.is_abnormal]
 
+        dept_id = (
+            workflow.equipment.department_id
+            if workflow.equipment
+            else None
+        )
         quality_rating = SurveillanceConfigService.calculate_quality_rating(
             db,
             total_tests=len(completed),
             abnormal_tests=len(abnormal),
             organization_id=workflow.organization_id,
-            department_id=workflow.department_id
+            department_id=dept_id,
         )
 
         return {
