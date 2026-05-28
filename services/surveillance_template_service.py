@@ -109,7 +109,7 @@ class SurveillanceTemplateService:
         # Pre-populated form data
         return {
             'quarter_number': quarter_number,
-            'date_range': f'Q{quarter_number} ({workflow.start_date.strftime("%b %Y") if workflow.start_date else "N/A"})',
+            'date_range': f'Q{quarter_number} ({workflow.started_at.strftime("%b %Y") if workflow.started_at else "N/A"})',
             'parent_repair_workflow': str(workflow.parent_workflow_id) if workflow.parent_workflow_id else 'N/A',
             'equipment_name': workflow.equipment.name if workflow.equipment else 'N/A',
             'test_summary_table': test_summary_rows,
@@ -162,11 +162,11 @@ class SurveillanceTemplateService:
             department_id=workflow.equipment.department_id if workflow.equipment else None,
         )
 
-        # Calculate surveillance duration
+        # Calculate surveillance duration from started_at / completed_at
         surveillance_duration = '24 months'
-        if workflow.start_date and workflow.end_date:
-            months = (workflow.end_date.year - workflow.start_date.year) * 12 + \
-                     (workflow.end_date.month - workflow.start_date.month)
+        if workflow.started_at and workflow.completed_at:
+            months = (workflow.completed_at.year - workflow.started_at.year) * 12 + \
+                     (workflow.completed_at.month - workflow.started_at.month)
             surveillance_duration = f'{months} months'
 
         # Build quarterly breakdown
@@ -191,8 +191,8 @@ class SurveillanceTemplateService:
         # Pre-populated form data
         return {
             'surveillance_duration': surveillance_duration,
-            'start_date': workflow.start_date.isoformat() if workflow.start_date else None,
-            'end_date': workflow.end_date.isoformat() if workflow.end_date else None,
+            'start_date': workflow.started_at.isoformat() if workflow.started_at else None,
+            'end_date': workflow.completed_at.isoformat() if workflow.completed_at else None,
             'parent_repair_workflow': str(workflow.parent_workflow_id) if workflow.parent_workflow_id else 'N/A',
             'equipment_name': workflow.equipment.name if workflow.equipment else 'N/A',
             'vendor_name': workflow.vendor_name if hasattr(workflow, 'vendor_name') else 'N/A',
@@ -372,6 +372,6 @@ class SurveillanceTemplateService:
             'abnormal_tests': len(abnormal),
             'abnormal_rate': (len(abnormal) / len(completed) * 100) if completed else 0,
             'quality_rating': quality_rating,
-            'start_date': workflow.start_date.isoformat() if workflow.start_date else None,
-            'end_date': workflow.end_date.isoformat() if workflow.end_date else None,
+            'start_date': workflow.started_at.isoformat() if workflow.started_at else None,
+            'end_date': workflow.completed_at.isoformat() if workflow.completed_at else None,
         }
