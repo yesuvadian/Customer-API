@@ -299,18 +299,18 @@ class SurveillanceTemplateService:
             dict with summary stats
         """
         tests = (
-            db.query(RepairSurveillanceTest)
+            db.query(TestingRequest)
             .filter(
                 and_(
-                    RepairSurveillanceTest.surveillance_workflow_id == workflow_id,
-                    RepairSurveillanceTest.quarter_number == quarter_number
+                    TestingRequest.surveillance_workflow_id == workflow_id,
+                    TestingRequest.surveillance_quarter == quarter_number,
                 )
             )
             .all()
         )
 
-        completed = [t for t in tests if t.test_status == 'completed']
-        abnormal = [t for t in tests if t.is_abnormal]
+        completed = [t for t in tests if t.status in ('completed', 'submitted')]
+        abnormal = [t for t in tests if t.form_data and t.form_data.get('result_status') == 'abnormal']
 
         return {
             'total_tests': len(tests),
@@ -343,13 +343,13 @@ class SurveillanceTemplateService:
             return {}
 
         all_tests = (
-            db.query(RepairSurveillanceTest)
-            .filter(RepairSurveillanceTest.surveillance_workflow_id == workflow_id)
+            db.query(TestingRequest)
+            .filter(TestingRequest.surveillance_workflow_id == workflow_id)
             .all()
         )
 
-        completed = [t for t in all_tests if t.test_status == 'completed']
-        abnormal = [t for t in all_tests if t.is_abnormal]
+        completed = [t for t in all_tests if t.status in ('completed', 'submitted')]
+        abnormal = [t for t in all_tests if t.form_data and t.form_data.get('result_status') == 'abnormal']
 
         dept_id = (
             workflow.equipment.department_id
