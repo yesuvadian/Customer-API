@@ -843,6 +843,92 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         return query.all()
 
     # ============================================================
+    # LIST EQUIPMENT WITH SCHEDULES
+    # ============================================================
+
+    def list_equipment_with_schedules(
+        self,
+        organization_id: Optional[UUID] = None,
+        request_category: Optional[str] = None,
+    ):
+        """
+        Returns list of equipment that have operational schedules.
+        Includes schedule counts per equipment.
+        """
+        from models import Equipment, CategoryMaster
+        from sqlalchemy import func, case
+
+        # Build query to group schedules by equipment
+        query = (
+            self.db.query(
+                Equipment.id.label('equipment_id'),
+                Equipment.ueic,
+                CategoryMaster.name.label('equipment_type_name'),
+                Equipment.nameplate_data['substation_name'].astext.label('location'),
+                func.count(TestRequestSchedule.id).label('schedule_count'),
+                func.sum(
+                    case((TestRequestSchedule.is_active == True, 1), else_=0)
+                ).label('active_count'),
+                func.sum(
+                    case((TestRequestSchedule.paused_at.isnot(None), 1), else_=0)
+                ).label('paused_count'),
+            )
+            .join(
+                TestRequestSchedule,
+                TestRequestSchedule.equipment_id == Equipment.id
+            )
+            .outerjoin(
+                CategoryMaster,
+                CategoryMaster.id == Equipment.equipment_type_id
+            )
+            .filter(
+                TestRequestSchedule.is_deleted == False,
+            )
+            .group_by(
+                Equipment.id,
+                Equipment.ueic,
+                CategoryMaster.name,
+                Equipment.nameplate_data['substation_name'].astext,
+            )
+        )
+
+        if organization_id:
+            query = query.filter(Equipment.organization_id == organization_id)
+
+        if request_category:
+            try:
+                cat_enum = RequestCategory(request_category)
+            except ValueError:
+                cat_enum = None
+            if cat_enum == RequestCategory.test:
+                query = query.filter(
+                    or_(
+                        TestRequestSchedule.request_category == RequestCategory.test,
+                        TestRequestSchedule.request_category.is_(None),
+                    )
+                )
+            elif cat_enum is not None:
+                query = query.filter(
+                    TestRequestSchedule.request_category == cat_enum
+                )
+
+        results = query.all()
+
+        # Convert to dict
+        return [
+            {
+                'equipment_id': str(row.equipment_id),
+                'ueic': row.ueic or '',
+                'equipment_type_name': row.equipment_type_name or '',
+                'location': row.location or '',
+                'schedule_count': row.schedule_count or 0,
+                'active_count': row.active_count or 0,
+                'paused_count': row.paused_count or 0,
+            }
+            for row in results
+        ]
+
+    # ============================================================
     # GET MASTER SCHEDULE
     # ============================================================
 

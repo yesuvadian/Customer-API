@@ -2588,6 +2588,181 @@ def seed_test_type_categories(session, master_ids):
                 "CVT Test Report",
             ],
         },
+        # ── Potential Transformer ────────────────────────────────────────────
+        "Potential Transformer": {
+            "test": [
+                "Insulation Resistance Test",
+                "Ratio Test",
+                "Polarity Test",
+                "Tan Delta Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+        },
+        # ── Station Auxiliary Transformer ────────────────────────────────────
+        "Station Auxiliary Transformer": {
+            "test": [
+                "Insulation Resistance Test",
+                "Ratio Test",
+                "Winding Resistance Test",
+                "Tan Delta Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+        },
+        # ── Diesel Generator Set ─────────────────────────────────────────────
+        "Diesel Generator Set": {
+            "test": [
+                "Load Test",
+                "Fuel System Test",
+                "Battery and Starting System Test",
+                "Voltage and Frequency Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+                "Engine Oil Change",
+                "Fuel Filter Replacement",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+                "Environmental",
+            ],
+        },
+        # ── Digital Communication Panel ──────────────────────────────────────
+        "Digital Communication Panel": {
+            "test": [
+                "Communication Link Test",
+                "Signal Quality Test",
+                "Network Connectivity Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+        },
+        # ── LTAC Panel ───────────────────────────────────────────────────────
+        "LTAC Panel": {
+            "test": [
+                "Control Circuit Test",
+                "Indication Test",
+                "Metering Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+        },
+        # ── PLCC Panel ───────────────────────────────────────────────────────
+        "PLCC Panel": {
+            "test": [
+                "Communication Test",
+                "Logic Test",
+                "Interface Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+        },
+        # ── Wave Trap ────────────────────────────────────────────────────────
+        "Wave Trap": {
+            "test": [
+                "Insulation Resistance Test",
+                "Capacitance Test",
+                "Inductance Test",
+                "Resonance Frequency Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+        },
+        # ── Control & Relay Panel ────────────────────────────────────────────
+        "Control & Relay Panel": {
+            "test": [
+                "Control Circuit Test",
+                "Relay Functional Test",
+                "Interlocking Test",
+                "Indication Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+                "Contact Cleaning",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+        },
+        # ── Fire Fighting System ─────────────────────────────────────────────
+        "Fire Fighting System": {
+            "test": [
+                "Pressure Test",
+                "Flow Test",
+                "Alarm System Test",
+                "Sprinkler System Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+                "Pump Maintenance",
+                "Valve Maintenance",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+                "Environmental",
+            ],
+        },
+        # ── Battery Charger ──────────────────────────────────────────────────
+        "Battery Charger": {
+            "test": [
+                "Output Voltage Test",
+                "Output Current Test",
+                "Ripple Voltage Test",
+                "Float Charge Test",
+            ],
+            "maintenance": [
+                "Routine Preventive Maintenance",
+                "Contact Cleaning",
+            ],
+            "inspection": [
+                "Electrical Safety",
+                "General Maintenance",
+                "Documentation",
+            ],
+        },
     }
 
     # ── Dedicated lifecycle masters (NOT under "Testing Equipment") ──────────
@@ -7101,6 +7276,104 @@ def seed_inspection_templates(session) -> int:
     return updated + inserted
 
 
+def seed_generic_equipment_templates(session) -> int:
+    """
+    Map generic templates to new equipment types (PT, Station Aux Transformer,
+    DG Set, Digital Comm Panel, LTAC Panel, PLCC Panel, Wave Trap, Control & Relay Panel,
+    Fire Fighting System, Battery Charger).
+
+    Creates OrgTestTemplate records linking CategoryDetails to generic templates:
+    - test types → generic_equipment_test
+    - maintenance types → generic_equipment_maintenance
+    - inspection types → generic_equipment_inspection
+
+    Idempotent — safe to run multiple times.
+    """
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    # Equipment types to map (the 10 new equipment types)
+    equipment_types = [
+        "Potential Transformer",
+        "Station Auxiliary Transformer",
+        "Diesel Generator Set",
+        "Digital Communication Panel",
+        "LTAC Panel",
+        "PLCC Panel",
+        "Wave Trap",
+        "Control & Relay Panel",
+        "Fire Fighting System",
+        "Battery Charger",
+    ]
+
+    # Category type → template key mapping
+    template_mapping = {
+        "test": "generic_equipment_test",
+        "maintenance": "generic_equipment_maintenance",
+        "inspection": "generic_equipment_inspection",
+    }
+
+    inserted = 0
+    updated = 0
+
+    for equip_name in equipment_types:
+        master = session.query(CategoryMaster).filter_by(name=equip_name).first()
+        if not master:
+            print(f"  [SKIP] CategoryMaster '{equip_name}' not found — skipping.")
+            continue
+
+        # Get all test/maintenance/inspection CategoryDetails for this equipment
+        details = session.query(CategoryDetails).filter_by(
+            category_master_id=master.id
+        ).filter(
+            CategoryDetails.category_type.in_(["test", "maintenance", "inspection"])
+        ).all()
+
+        if not details:
+            print(f"  [SKIP] No test/maintenance/inspection types for '{equip_name}' — skipping.")
+            continue
+
+        for detail in details:
+            # Get the appropriate generic template for this category type
+            template_key = template_mapping.get(detail.category_type)
+            if not template_key:
+                continue
+
+            template_data = TEST_TEMPLATES.get(template_key)
+            if not template_data:
+                print(f"  [WARN] Template '{template_key}' not found in TEST_TEMPLATES — skipping.")
+                continue
+
+            # Check if template already exists
+            existing = session.query(OrgTestTemplate).filter_by(
+                test_type_id=detail.id,
+                org_id=None,
+            ).first()
+
+            if existing:
+                # Update if template key or data changed
+                if existing.template_key != template_key or existing.template_data != template_data:
+                    existing.template_key = template_key
+                    existing.template_data = template_data
+                    existing.is_system = True
+                    updated += 1
+            else:
+                # Create new template mapping
+                session.add(OrgTestTemplate(
+                    template_key=template_key,
+                    org_id=None,
+                    test_type_id=detail.id,
+                    template_data=template_data,
+                    is_system=True,
+                    version=1,
+                ))
+                inserted += 1
+
+    session.commit()
+    print(f"[OK] Generic equipment templates: {updated} updated, {inserted} inserted.")
+    return updated + inserted
+
+
 def seed_tr_workflows(session):
     """
     Seed the IntegratedWorkflowEngine with three workflows:
@@ -8112,6 +8385,8 @@ def run_seed():
         print(f"[OK] Capacitance & Tan Delta template: {n7} seeded.")
         n8 = seed_inspection_templates(session)
         print(f"[OK] Equipment-specific inspection templates: {n8} migrated.")
+        n9 = seed_generic_equipment_templates(session)
+        print(f"[OK] Generic equipment templates: {n9} seeded.")
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")
