@@ -103,7 +103,10 @@ def _serialize_workflow(wf: RepairWorkflow, current_stage: Optional[RepairStageI
             'quarter_number': current_stage.quarter_number if current_stage else None,
             'status': current_stage.status if current_stage else None,
         } if current_stage else None,
-        'progress': wf.progress or 0,
+        # Progress based on current stage sequence (Q1=20%, Q2=40%, Q3=60%, Q4=80%, Final=100%)
+        'progress': int(current_stage.stage.sequence / 5 * 100)
+        if current_stage and current_stage.stage
+        else (wf.progress or 0),
         'created_at': wf.created_at.isoformat() if wf.created_at else None,
     }
 
