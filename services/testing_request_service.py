@@ -118,6 +118,8 @@ class TestingRequestService:
             is_calibration=is_calibration,
             is_schedule_template=data.get("is_schedule_template", False),
             source_schedule_id=data.get("source_schedule_id"),
+            surveillance_workflow_id=data.get("surveillance_workflow_id"),
+            surveillance_quarter=data.get("surveillance_quarter"),
         )
         self.db.add(request)
         self.db.commit()
