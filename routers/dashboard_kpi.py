@@ -19,6 +19,7 @@ GET /dashboard/full               → all widgets in one call (Flutter convenien
 POST /dashboard/invalidate-cache  → flush cache for org
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -870,7 +871,7 @@ def get_test_coordinator_dashboard(
     svc = _svc(db, current_user, org_id, dept_id)
     
     # Date boundaries
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     ninety_days_ago = now - timedelta(days=90)
     thirty_days_ago = now - timedelta(days=30)
     
