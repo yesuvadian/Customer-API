@@ -241,12 +241,16 @@ def _check_schedule_notifications():
     try:
         from models import (
             NotificationScheduleRule,
+            ScheduleFrequency,
             TestingRequest,
             TestingRequestStatus,
         )
         from services.notification_service import NotificationService
         nsvc = NotificationService(db)
         today = date.today()
+
+        # Cooldown days are now part of ScheduleFrequency.days — no separate dict needed.
+        # Use ScheduleFrequency.cooldown(freq_str, default=N) for safe lookup.
 
         # Load all active rules
         all_rules = (
@@ -331,6 +335,11 @@ def _check_schedule_notifications():
                 status_ok = bool(on_status and req_status_str == on_status)
                 return time_ok and status_ok
 
+            elif tt == "recurring":
+                # Pure frequency-based trigger — no date condition.
+                # The cadence is enforced entirely by the cooldown dedup check below.
+                return True
+
             return False
 
         def _evaluate_advanced(cond: dict, due, req_status_str: str) -> bool:
@@ -369,6 +378,7 @@ def _check_schedule_notifications():
                 return req_status_str == cond.get("on_status", "")
             return False
 
+        # ── Pass 1: per-request notifications (non-recurring trigger types) ─────
         for req in requests:
             req_org = req.organization_id
             req_status_str = (
@@ -391,10 +401,11 @@ def _check_schedule_notifications():
             # Workflow type — derive the same way notification_service does
             req_wf = nsvc._workflow_type(req) or ""
 
-            # Merge global + org rules
-            effective: dict = dict(global_rules)
-            if req_org and req_org in org_rules:
-                effective.update(org_rules[req_org])
+            # Merge global + org rules (skip recurring — handled in pass 2)
+            effective: dict = {
+                k: v for k, v in {**global_rules, **(org_rules.get(req_org, {}))}.items()
+                if v.trigger_type != "recurring"
+            }
 
             for key, rule in effective.items():
                 event_type = key[0]
@@ -404,28 +415,63 @@ def _check_schedule_notifications():
                         if req_cat not in rule.applicable_categories:
                             continue
 
+                    # ── Equipment type filter ──────────────────────────────
+                    eq_types = list(getattr(rule, "applicable_equipment_types", None) or [])
+                    if eq_types:
+                        _eq_obj = getattr(req, "equipment_type", None)
+                        req_eq_type = (_eq_obj.name if _eq_obj else "") or ""
+                        if req_eq_type not in eq_types:
+                            continue
+
+                    # ── Specific activity type filter (advanced_conditions) ─
+                    adv_pre = getattr(rule, "advanced_conditions", None)
+                    if adv_pre and isinstance(adv_pre, dict):
+                        act_types = adv_pre.get("activity_types") or []
+                        if act_types:
+                            _tt_obj = getattr(req, "test_type", None)
+                            req_activity = (_tt_obj.name if _tt_obj else "") or ""
+                            if req_activity not in act_types:
+                                continue
+
                     # ── Workflow type filter ───────────────────────────────
                     wf_types = list(getattr(rule, "applicable_workflow_types", None) or [])
                     if wf_types and req_wf and req_wf not in wf_types:
                         continue
 
                     # ── Evaluate trigger ───────────────────────────────────
+                    # Note: advanced_conditions["activity_types"] was already
+                    # checked above for pre-filtering.  Here we only evaluate
+                    # time/status conditions (and/or logic) that remain.
                     adv = getattr(rule, "advanced_conditions", None)
-                    if adv:
+                    if adv and set(adv.keys()) - {"activity_types"}:
+                        # Has real trigger conditions beyond activity filter
                         matches = _evaluate_advanced(adv, due, req_status_str)
                     else:
                         matches = _evaluate_simple(rule, due, req_status_str)
 
                     if matches:
-                        # Dedup: skip if already fired for this TR+event today
+                        # ── Frequency-aware dedup ──────────────────────────
                         from models import NotificationLog
                         from datetime import datetime as _dt
+
+                        rule_freq = getattr(rule, "frequency", None)
+                        freq_str  = (
+                            rule_freq.value
+                            if rule_freq and hasattr(rule_freq, "value")
+                            else (rule_freq or None)
+                        )
+                        cooldown_days = ScheduleFrequency.cooldown(freq_str, default=1)
+                        cutoff_dt = _dt.combine(
+                            today - timedelta(days=cooldown_days - 1),
+                            _dt.min.time()
+                        )
+
                         already = (
                             db.query(NotificationLog.id)
                             .filter(
                                 NotificationLog.source_id == req.id,
                                 NotificationLog.event_type == event_type,
-                                NotificationLog.cts >= _dt.combine(today, _dt.min.time()),
+                                NotificationLog.cts >= cutoff_dt,
                             )
                             .first()
                         )
@@ -443,6 +489,92 @@ def _check_schedule_notifications():
                         f"[Notif] Rule {event_type} failed for req {req.id}: {_e}"
                     )
 
+        # ── Pass 2: aggregate notifications (recurring trigger type) ──────────
+        #
+        # Each recurring rule fires ONE notification per org covering ALL matching
+        # open requests — instead of one notification per request.  This is the
+        # correct model for digest-style rules ("Weekly Open Tests Summary", etc.).
+        #
+        recurring_rules = [r for r in all_rules if r.trigger_type == "recurring"]
+
+        if recurring_rules:
+            from collections import defaultdict as _ddict
+            from models import NotificationLog
+            from datetime import datetime as _dt
+
+            # Group open requests by org_id for fast lookup
+            by_org: dict = _ddict(list)
+            for req in requests:
+                by_org[req.organization_id].append(req)
+
+            for rule in recurring_rules:
+                event_type = rule.event_type
+                rule_freq  = getattr(rule, "frequency", None)
+                freq_str   = (
+                    rule_freq.value
+                    if rule_freq and hasattr(rule_freq, "value")
+                    else (rule_freq or None)
+                )
+                # Recurring rules default to weekly if no frequency set
+                cooldown_days = ScheduleFrequency.cooldown(freq_str, default=7)
+                cutoff_dt = _dt.combine(
+                    today - timedelta(days=cooldown_days - 1),
+                    _dt.min.time()
+                )
+
+                # Determine which orgs this rule applies to
+                if rule.organization_id:
+                    target_orgs = [rule.organization_id]
+                else:
+                    # Global rule: applies to every org that has open requests
+                    target_orgs = list(by_org.keys())
+
+                for org_id in target_orgs:
+                    org_reqs = by_org.get(org_id, [])
+                    if not org_reqs:
+                        continue
+
+                    # Apply category filter
+                    if rule.applicable_categories:
+                        filtered = [
+                            r for r in org_reqs
+                            if getattr(r.request_category, "value",
+                                       str(r.request_category or ""))
+                               in rule.applicable_categories
+                        ]
+                    else:
+                        filtered = org_reqs
+
+                    if not filtered:
+                        continue
+
+                    # Dedup at org level — source_id IS NULL for aggregate logs
+                    try:
+                        already = (
+                            db.query(NotificationLog.id)
+                            .filter(
+                                NotificationLog.organization_id == org_id,
+                                NotificationLog.event_type == event_type,
+                                NotificationLog.source_id.is_(None),
+                                NotificationLog.cts >= cutoff_dt,
+                            )
+                            .first()
+                        )
+                        if already:
+                            continue
+
+                        nsvc.notify_aggregate_summary(
+                            event_type=event_type,
+                            requests=filtered,
+                            organization_id=org_id,
+                            severity=rule.severity,
+                        )
+                        fired_total += 1
+                    except Exception as _e:
+                        logger.warning(
+                            f"[Notif] Recurring rule {event_type} failed for org {org_id}: {_e}"
+                        )
+
         if fired_total:
             logger.info(f"[Notif] Schedule job total fired={fired_total}")
 
@@ -458,6 +590,109 @@ scheduler.add_job(
     hour=7,
     minute=0,
     id="schedule_notification_job",
+)
+
+
+# Monthly MIS Report (runs on the 1st of each month at 06:00 UTC)
+# Collects per-org stats for the previous calendar month and fires
+# notify_monthly_mis_report() → sends to Senior Management / Supervisory roles.
+def _run_monthly_mis_report():
+    """
+    On the 1st of each month, count:
+      - tests completed in the previous month
+      - currently overdue open requests
+      - eval_critical events triggered in the previous month
+    Then fire notify_monthly_mis_report() per active organisation.
+    """
+    from datetime import date, datetime, timezone as _tz
+    db = SessionLocal()
+    try:
+        from models import (
+            TestingRequest,
+            TestingRequestStatus,
+            NotificationLog,
+            Organization,
+        )
+        from services.notification_service import NotificationService
+
+        today = date.today()
+        # Only fire on the 1st; guard against accidental double-runs
+        if today.day != 1:
+            logger.debug("[Notif] Monthly MIS job skipped — not the 1st of the month")
+            return
+
+        # Stats window = previous calendar month
+        this_month_start = datetime(today.year, today.month, 1, tzinfo=_tz.utc)
+        # Previous month end = this month start (exclusive upper bound)
+        prev_month_end   = this_month_start
+        # Previous month start = go back 28–31 days and land on the 1st
+        import calendar as _cal
+        prev_year  = today.year if today.month > 1 else today.year - 1
+        prev_month = today.month - 1 if today.month > 1 else 12
+        prev_month_start = datetime(prev_year, prev_month, 1, tzinfo=_tz.utc)
+        report_month = prev_month_start.strftime("%B %Y")
+
+        open_statuses = [
+            TestingRequestStatus.submitted,
+            TestingRequestStatus.assigned,
+            TestingRequestStatus.accepted,
+            TestingRequestStatus.in_progress,
+        ]
+
+        orgs = db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        fired = 0
+
+        for org in orgs:
+            try:
+                tests_completed = db.query(TestingRequest).filter(
+                    TestingRequest.organization_id == org.id,
+                    TestingRequest.status == TestingRequestStatus.completed,
+                    TestingRequest.completed_at >= prev_month_start,
+                    TestingRequest.completed_at <  prev_month_end,
+                ).count()
+
+                overdue_count = db.query(TestingRequest).filter(
+                    TestingRequest.organization_id == org.id,
+                    TestingRequest.status.in_(open_statuses),
+                    TestingRequest.due_date < datetime(today.year, today.month, today.day,
+                                                       tzinfo=_tz.utc),
+                ).count()
+
+                critical_count = db.query(NotificationLog).filter(
+                    NotificationLog.organization_id == org.id,
+                    NotificationLog.event_type == "eval_critical",
+                    NotificationLog.cts >= prev_month_start,
+                    NotificationLog.cts <  prev_month_end,
+                ).count()
+
+                nsvc = NotificationService(db)
+                nsvc.notify_monthly_mis_report(
+                    report_month=report_month,
+                    tests_completed=tests_completed,
+                    critical_count=critical_count,
+                    overdue_count=overdue_count,
+                    organization_id=org.id,
+                )
+                fired += 1
+            except Exception as _oe:
+                logger.warning(f"[Notif] MIS report failed for org {org.id}: {_oe}")
+
+        if fired:
+            logger.info(f"[Notif] Monthly MIS report fired for {fired} org(s) — {report_month}")
+
+    except Exception as e:
+        logger.error(f"[Notif] Monthly MIS report job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _run_monthly_mis_report,
+    trigger="cron",
+    day=1,
+    hour=6,
+    minute=0,
+    id="monthly_mis_report_job",
 )
 
 
@@ -758,19 +993,25 @@ async def startup_event():
     import surveillance_hooks  # noqa: F401
     logger.info("[Hooks] Workflow lifecycle hooks registered")
 
-    # Seed default notification templates + variables (idempotent)
+    # Seed all notification defaults (event catalogue, variables, templates,
+    # schedule rules, routing rules) — idempotent, safe to run on every restart
     try:
         _db = SessionLocal()
-        from services.notification_service import seed_default_templates, seed_default_variables
-        seeded_t = seed_default_templates(_db)
-        seeded_v = seed_default_variables(_db)
-        if seeded_t:
-            logger.info(f"[Notif] Seeded {seeded_t} default notification template(s) on startup")
-        if seeded_v:
-            logger.info(f"[Notif] Seeded {seeded_v} default notification variable(s) on startup")
+        from seed import seed_notification_defaults
+        _counts = seed_notification_defaults(_db)
         _db.close()
+        _total = sum(_counts.values())
+        if _total:
+            logger.info(
+                f"[Notif] Seeded notification defaults on startup: "
+                f"events={_counts['event_catalogue']}, "
+                f"vars={_counts['variables']}, "
+                f"templates={_counts['templates']}, "
+                f"schedule_rules={_counts['schedule_rules']}, "
+                f"routing_rules={_counts['routing_rules']}"
+            )
     except Exception as _e:
-        logger.warning(f"[Notif] Seed failed on startup (non-fatal): {_e}")
+        logger.warning(f"[Notif] Notification seed failed on startup (non-fatal): {_e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
