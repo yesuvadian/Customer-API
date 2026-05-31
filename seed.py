@@ -7643,6 +7643,244 @@ def seed_tr_workflows(session):
     print("[OK] TR / FR / TAQC workflow seeding complete.")
 
 
+def _seed_notification_variables(session) -> int:
+    """
+    Idempotent seed for NotificationVariable (global system variables).
+
+    Single source of truth — supersedes DEFAULT_VARIABLES in notification_service.py
+    and the thin SYSTEM_VARIABLES list that used to live in routers/notifications.py.
+
+    Each entry carries `role_template_names` — a list of RoleTemplate names whose
+    members find this variable contextually relevant in the template designer.
+    Empty list = universal (shown for all roles).
+    Admins can override these lists from the UI via PUT /notifications/variables/{id}.
+
+    Re-running the seed upserts every field so corrections land in the DB.
+    """
+    from models import NotificationVariable, RoleTemplate
+
+    # Build a name → UUID string lookup once for the whole run.
+    role_map: dict = {
+        r.name: str(r.id)
+        for r in session.query(RoleTemplate).all()
+    }
+
+    def _ids(names: list) -> list:
+        """Resolve a list of RoleTemplate names to UUID strings. Skips unknowns."""
+        return [role_map[n] for n in names if n in role_map]
+
+    # role_template_names:
+    #   []    → universal variable — shown in all template pickers
+    #   [...]  → scoped to those RoleTemplates; resolved to UUIDs at seed time
+    _VARIABLES = [
+        # ── Reports ──────────────────────────────────────────────────────────
+        dict(var_key="report.retriexls",   label="Report — Excel Download URL",
+             group_name="Reports",         resolver_key="report.retriexls",
+             description="Signed URL for the Excel report attachment (.xlsx).",
+             sample_value="https://app.seacms.in/reports/REQ-001.xlsx",
+             role_template_names=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]),
+        dict(var_key="report.retriepdf",   label="Report — PDF Download URL",
+             group_name="Reports",         resolver_key="report.retriepdf",
+             description="Signed URL for the PDF report attachment.",
+             sample_value="https://app.seacms.in/reports/REQ-001.pdf",
+             role_template_names=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]),
+        dict(var_key="report.ref",         label="Report Reference Number",
+             group_name="Reports",         resolver_key="report.ref",
+             description="Auto-generated report reference number.",
+             sample_value="RPT-2025-001",
+             role_template_names=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]),
+        dict(var_key="report.generated_on", label="Report Generated Date/Time",
+             group_name="Reports",          resolver_key="report.generated_on",
+             description="Timestamp when the report was generated.",
+             sample_value="2025-01-15 10:30 UTC",
+             role_template_names=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]),
+        # ── Equipment ─────────────────────────────────────────────────────────
+        # Universal — used by all roles in any equipment-related template.
+        dict(var_key="equipment.ueic",        label="Equipment UEIC",
+             group_name="Equipment",           resolver_key="equipment",
+             description="Unique Equipment Identity Code of the subject equipment.",
+             sample_value="TX-001-2025",
+             role_template_names=[]),
+        dict(var_key="equipment.type",        label="Equipment Type",
+             group_name="Equipment",           resolver_key="equipment_type",
+             description="Type/category of the equipment (e.g. Power Transformer).",
+             sample_value="Power Transformer",
+             role_template_names=[]),
+        dict(var_key="equipment.department",  label="Substation / Department",
+             group_name="Equipment",           resolver_key="department",
+             description="Substation, bay, or department where the equipment is installed.",
+             sample_value="Relay Panel — Substation A",
+             role_template_names=[]),
+        dict(var_key="equipment.status",      label="Equipment Status",
+             group_name="Equipment",           resolver_key="equipment_status",
+             description="Current operational status of the equipment.",
+             sample_value="active",
+             role_template_names=[]),
+        dict(var_key="equipment.manufacturer", label="Manufacturer",
+             group_name="Equipment",            resolver_key="manufacturer",
+             description="Manufacturer / OEM of the equipment.",
+             sample_value="ABB",
+             role_template_names=[]),
+        # ── Replacement event ─────────────────────────────────────────────────
+        dict(var_key="old_ueic",     label="Retired UEIC",
+             group_name="Replacement", resolver_key="old_ueic",
+             description="UEIC of the retired (replaced) equipment.",
+             sample_value="TX-OLD-001",
+             role_template_names=["Asset Data Officer", "Maintenance Officer"]),
+        dict(var_key="new_ueic",     label="New Replacement UEIC",
+             group_name="Replacement", resolver_key="new_ueic",
+             description="UEIC of the newly commissioned replacement equipment.",
+             sample_value="TX-NEW-002",
+             role_template_names=["Asset Data Officer", "Maintenance Officer"]),
+        dict(var_key="replaced_by",  label="Replaced By (User)",
+             group_name="Replacement", resolver_key="replaced_by",
+             description="Name / email of the officer who recorded the replacement.",
+             sample_value="EE John (john@utility.com)",
+             role_template_names=["Asset Data Officer", "Maintenance Officer"]),
+        dict(var_key="replaced_on",  label="Replacement Date",
+             group_name="Replacement", resolver_key="replaced_on",
+             description="Date on which the replacement event was recorded.",
+             sample_value="2025-01-15",
+             role_template_names=["Asset Data Officer", "Maintenance Officer"]),
+        dict(var_key="reason",       label="Replacement / Rejection Reason",
+             group_name="Replacement", resolver_key="reason",
+             description="Free-text reason for the replacement or rejection action.",
+             sample_value="End of service life — IR below threshold",
+             role_template_names=[]),
+        # ── Test Request workflow ──────────────────────────────────────────────
+        dict(var_key="request.number",       label="Test Request Number",
+             group_name="Test Request",       resolver_key="request_number",
+             description="Auto-generated test request reference number.",
+             sample_value="REQ-2025-001",
+             role_template_names=[]),
+        dict(var_key="request.title",        label="Test Request Title",
+             group_name="Test Request",       resolver_key="request_title",
+             description="Title/description of the test request.",
+             sample_value="IR Test — Power Transformer TX-001",
+             role_template_names=[]),
+        dict(var_key="request.status",       label="Request Status",
+             group_name="Test Request",       resolver_key="request_status",
+             description="Current workflow status of the test request.",
+             sample_value="submitted",
+             role_template_names=[]),
+        dict(var_key="request.priority",     label="Priority",
+             group_name="Test Request",       resolver_key="request_priority",
+             description="Priority level of the test request (high / medium / low).",
+             sample_value="high",
+             role_template_names=[]),
+        dict(var_key="request.due_date",     label="Due Date",
+             group_name="Test Request",       resolver_key="due_date",
+             description="Scheduled due date for the test to be completed.",
+             sample_value="2025-03-31",
+             role_template_names=[]),
+        dict(var_key="request.submitted_by", label="Submitted By",
+             group_name="Test Request",       resolver_key="originator",
+             description="Email / name of the user who submitted the test request.",
+             sample_value="originator@utility.com",
+             role_template_names=[]),
+        dict(var_key="request.assigned_to",  label="Assigned To (Tester)",
+             group_name="Test Request",       resolver_key="tester",
+             description="Email / name of the tester the request was assigned to.",
+             sample_value="tester@utility.com",
+             role_template_names=["Test & Work Coordinator", "Reviewing Officer"]),
+        # ── Evaluation / test result ───────────────────────────────────────────
+        dict(var_key="eval.overall",     label="Overall Result (NORMAL / ALERT / CRITICAL)",
+             group_name="Evaluation",    resolver_key="eval_overall",
+             description="Composite evaluation outcome from test template thresholds.",
+             sample_value="CRITICAL",
+             role_template_names=["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"]),
+        dict(var_key="eval.test_type",   label="Test Type",
+             group_name="Evaluation",    resolver_key="test_name",
+             description="Name of the test type (e.g. IR Test, PI Test).",
+             sample_value="IR Test",
+             role_template_names=[]),
+        dict(var_key="eval.evaluated_at", label="Evaluation Date/Time",
+             group_name="Evaluation",     resolver_key="tested_at",
+             description="Timestamp when the test evaluation was completed.",
+             sample_value="2025-01-15 09:00 UTC",
+             role_template_names=["Reviewing Officer", "Maintenance Officer"]),
+        # ── Organisation ──────────────────────────────────────────────────────
+        dict(var_key="org.name", label="Organisation Name",
+             group_name="Organisation", resolver_key="org_name",
+             description="Name of the organisation as registered in SEACMS.",
+             sample_value="KPTCL",
+             role_template_names=[]),
+        dict(var_key="org.id",   label="Organisation ID",
+             group_name="Organisation", resolver_key="org_id",
+             description="UUID of the organisation.",
+             sample_value="3fa85f64-5717-4562-b3fc-2c963f66afa6",
+             role_template_names=[]),
+        # ── Department / Context ──────────────────────────────────────────────
+        dict(var_key="dept.name", label="Department Name",
+             group_name="Context",  resolver_key="currentdeptname",
+             description="Name of the department associated with the event.",
+             sample_value="North Division",
+             role_template_names=[]),
+        dict(var_key="dept.code", label="Department Code",
+             group_name="Context",  resolver_key="dept_code",
+             description="Short code for the department.",
+             sample_value="NB-DIV",
+             role_template_names=[]),
+        dict(var_key="user.name",  label="Recipient Name",
+             group_name="Context", resolver_key="user_name",
+             description="Full name of the notification recipient (resolved at dispatch time).",
+             sample_value="Jane Smith",
+             role_template_names=[]),
+        dict(var_key="user.email", label="Recipient Email",
+             group_name="Context", resolver_key="recipient_email",
+             description="Email address of the notification recipient.",
+             sample_value="jane.smith@utility.com",
+             role_template_names=[]),
+        # ── System ────────────────────────────────────────────────────────────
+        dict(var_key="system.date",     label="Today's Date",
+             group_name="System",        resolver_key="system.date",
+             description="Current date at the time the notification is rendered (YYYY-MM-DD).",
+             sample_value="2025-01-15",
+             role_template_names=[]),
+        dict(var_key="system.time",     label="Current Time (UTC)",
+             group_name="System",        resolver_key="system.time",
+             description="Current time at the time the notification is rendered (HH:MM UTC).",
+             sample_value="10:30 UTC",
+             role_template_names=[]),
+        dict(var_key="system.app_name", label="Application Name (SEACMS)",
+             group_name="System",        resolver_key="system.app_name",
+             description="Name of the application — always resolves to 'SEACMS'.",
+             sample_value="SEACMS",
+             role_template_names=[]),
+    ]
+
+    inserted = 0
+    for entry in _VARIABLES:
+        # Resolve role names → UUID strings; pop the hint key (not a model field).
+        role_ids = _ids(entry.pop("role_template_names"))
+
+        existing = (
+            session.query(NotificationVariable)
+            .filter(
+                NotificationVariable.var_key == entry["var_key"],
+                NotificationVariable.organization_id.is_(None),
+            )
+            .first()
+        )
+        if existing:
+            # Upsert: refresh every mutable field so corrections land in the DB.
+            for field, val in entry.items():
+                setattr(existing, field, val)
+            existing.role_template_ids = role_ids
+        else:
+            session.add(NotificationVariable(
+                **entry,
+                role_template_ids=role_ids,
+                organization_id=None,
+                is_system=True,
+                is_active=True,
+            ))
+            inserted += 1
+
+    session.commit()
+    return inserted
+
+
 def _seed_notification_event_catalogue(session) -> int:
     """
     Idempotent seed for NotificationEventCatalogue.
@@ -7653,24 +7891,64 @@ def _seed_notification_event_catalogue(session) -> int:
       1. Add an entry to _CATALOGUE below (or INSERT directly into the DB).
       2. No code change to any router or service is needed.
     """
-    from models import NotificationEventCatalogue
+    from models import NotificationEventCatalogue, RoleTemplate
 
+    # Build a name → UUID string map from the live RoleTemplate table.
+    # default_roles are stored as RoleTemplate.id UUID strings so the Flutter
+    # template editor gets a proper FK reference it can cross-check against
+    # GET /notifications/org-roles (which returns role_template_id per OrgRole).
+    _rt_map: dict = {
+        rt.name: str(rt.id)
+        for rt in session.query(RoleTemplate).all()
+    }
+
+    # Human-readable guard: catch stale/typo role names before the UUID
+    # resolution silently drops them.  Every name in default_roles MUST match
+    # a live RoleTemplate row.
+    _VALID_ROLES = set(_rt_map.keys())  # dynamic — always in sync with RoleTemplate table
+
+    # group_name values below MUST match the Flutter _groupIcons keys in
+    # notification_center_page.dart so every group renders with an icon.
     _CATALOGUE = [
-        # ── Equipment ─────────────────────────────────────────────────────────
+        # ── Equipment Lifecycle ───────────────────────────────────────────────
         dict(
             event_type="equipment_replacement",
             label="Equipment Replacement",
-            group_name="Equipment",
+            group_name="Equipment Lifecycle",
             description="Fired when equipment is retired and a replacement unit is commissioned.",
             context_vars=["old_ueic", "new_ueic", "equipment_type", "department",
                           "reason_type", "reason", "replaced_by", "replaced_on"],
             default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
         ),
-        # ── Evaluation ────────────────────────────────────────────────────────
+        dict(
+            event_type="equipment_registered",
+            label="Equipment Registered",
+            group_name="Equipment Lifecycle",
+            description="Fired when a new equipment unit is commissioned into the register.",
+            context_vars=["equipment", "equipment_type", "department", "manufacturer", "commissioned_by"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
+        ),
+        dict(
+            event_type="equipment_retired",
+            label="Equipment Retired",
+            group_name="Equipment Lifecycle",
+            description="Fired when an equipment unit is decommissioned / retired.",
+            context_vars=["equipment", "equipment_type", "department", "reason", "retired_by"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
+        ),
+        dict(
+            event_type="design_problem_alert",
+            label="Design Problem Alert",
+            group_name="Equipment Lifecycle",
+            description="Fired when a systemic design problem is identified for a make/model.",
+            context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
+            default_roles=["Senior Management Approver", "Reviewing Officer"],
+        ),
+        # ── Threshold Alerts ──────────────────────────────────────────────────
         dict(
             event_type="eval_critical",
-            label="Critical Test Result",
-            group_name="Evaluation",
+            label="Threshold Critical",
+            group_name="Threshold Alerts",
             description="Fired when a test evaluation result is CRITICAL (per test template thresholds).",
             context_vars=["equipment", "ueic", "test_type", "result", "dept",
                           "eval.overall", "eval.evaluated_at", "report.retriepdf"],
@@ -7678,55 +7956,27 @@ def _seed_notification_event_catalogue(session) -> int:
         ),
         dict(
             event_type="eval_alert",
-            label="Alert Test Result",
-            group_name="Evaluation",
+            label="Threshold Alert",
+            group_name="Threshold Alerts",
             description="Fired when a test evaluation result is ALERT (per test template thresholds).",
             context_vars=["equipment", "ueic", "test_type", "result", "dept",
                           "eval.overall", "eval.evaluated_at", "report.retriepdf"],
             default_roles=["Reviewing Officer", "Maintenance Officer"],
         ),
-        # ── Test Result Thresholds (New System) ───────────────────────────────
-        dict(
-            event_type="test_result_normal",
-            label="Test Result - Normal",
-            group_name="Testing",
-            description="Test completed successfully with all values in normal range",
-            context_vars=["equipment_name", "equipment_type", "test_type_name", "request_number",
-                          "tester_name", "substation_name", "overall_result"],
-            default_roles=[],
-        ),
-        dict(
-            event_type="test_result_alert",
-            label="Test Result - Alert",
-            group_name="Testing",
-            description="Test completed with one or more values in alert/warning range",
-            context_vars=["equipment_name", "equipment_type", "test_type_name", "request_number",
-                          "tester_name", "substation_name", "overall_result"],
-            default_roles=["EE TLSS"],
-        ),
-        dict(
-            event_type="test_result_critical",
-            label="Test Result - Critical",
-            group_name="Testing",
-            description="Test completed with one or more values in critical/failure range",
-            context_vars=["equipment_name", "equipment_type", "test_type_name", "request_number",
-                          "tester_name", "substation_name", "overall_result"],
-            default_roles=["EE TLSS", "Department Head"],
-        ),
-        # ── Test Workflow ─────────────────────────────────────────────────────
+        # ── Testing Requests ──────────────────────────────────────────────────
         dict(
             event_type="request_submitted",
-            label="Test Request Submitted",
-            group_name="Test Workflow",
+            label="Request Submitted",
+            group_name="Testing Requests",
             description="Fired when an originator submits a new test request.",
             context_vars=["request.number", "request.title", "request.priority",
                           "request.submitted_by", "equipment.ueic", "equipment.department"],
-            default_roles=["Reviewing Officer", "Reviewing Officer"],
+            default_roles=["Reviewing Officer"],
         ),
         dict(
             event_type="tester_assigned",
-            label="Tester Assigned to Request",
-            group_name="Test Workflow",
+            label="Tester Assigned",
+            group_name="Testing Requests",
             description="Fired when a test request is assigned to a field/lab tester.",
             context_vars=["request.number", "request.title", "request.assigned_to",
                           "request.due_date", "equipment.ueic"],
@@ -7735,24 +7985,32 @@ def _seed_notification_event_catalogue(session) -> int:
         dict(
             event_type="tester_declined",
             label="Tester Declined Assignment",
-            group_name="Test Workflow",
-            description="Fired when a tester declines an assignment — notifies the Test Assigner.",
+            group_name="Testing Requests",
+            description="Fired when a tester declines an assignment — notifies the Test & Work Coordinator.",
             context_vars=["request.number", "tester_name", "reason"],
-            default_roles=["TestAssigner", "Reviewing Officer"],
+            default_roles=["Test & Work Coordinator", "Reviewing Officer"],
         ),
         dict(
             event_type="test_submitted",
-            label="Test Results Submitted",
-            group_name="Test Workflow",
+            label="Test Submitted",
+            group_name="Testing Requests",
             description="Fired when a tester submits test results for review.",
             context_vars=["request.number", "request.title", "request.submitted_by",
                           "equipment.ueic", "eval.overall", "report.retriepdf"],
-            default_roles=["Reviewing Officer", "Reviewing Officer"],
+            default_roles=["Reviewing Officer"],
+        ),
+        dict(
+            event_type="status_changed",
+            label="Status Changed",
+            group_name="Testing Requests",
+            description="Fired when a normal workflow status changes.",
+            context_vars=["request.number", "request.status", "request.title", "equipment.ueic"],
+            default_roles=["Reviewing Officer", "Asset Data Officer"],
         ),
         dict(
             event_type="recommendation_approved",
             label="Recommendation Approved",
-            group_name="Test Workflow",
+            group_name="Testing Requests",
             description="Fired when a technical approver approves a recommendation.",
             context_vars=["request.number", "recommendation_type", "product_count"],
             default_roles=["Asset Data Officer", "Maintenance Officer"],
@@ -7760,16 +8018,32 @@ def _seed_notification_event_catalogue(session) -> int:
         dict(
             event_type="recommendation_rejected",
             label="Recommendation Rejected",
-            group_name="Test Workflow",
+            group_name="Testing Requests",
             description="Fired when a technical approver rejects a recommendation.",
             context_vars=["request.number", "reason"],
             default_roles=["Test Engineer", "Asset Data Officer"],
         ),
-        # ── Scheduling ────────────────────────────────────────────────────────
+        dict(
+            event_type="procurement_pending",
+            label="Procurement Request Raised",
+            group_name="Testing Requests",
+            description="Fired when a procurement request is created — notifies Procurement Approvers.",
+            context_vars=["request.number", "pr_number", "title"],
+            default_roles=["Procurement Approver", "Reviewing Officer"],
+        ),
+        dict(
+            event_type="procurement_decision",
+            label="Procurement Decision (Approved / Rejected)",
+            group_name="Testing Requests",
+            description="Fired when Procurement approves or rejects a procurement request.",
+            context_vars=["request.number", "pr_number", "decision", "notes"],
+            default_roles=["Asset Data Officer", "Reviewing Officer"],
+        ),
+        # ── Schedule Reminders ────────────────────────────────────────────────
         dict(
             event_type="due_reminder",
-            label="Test Due Soon Reminder (15 days)",
-            group_name="Scheduling",
+            label="Due Reminder (15 days)",
+            group_name="Schedule Reminders",
             description="Fired 15 days before a scheduled test is due (SRS §8.2 #1).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
@@ -7777,17 +8051,17 @@ def _seed_notification_event_catalogue(session) -> int:
         ),
         dict(
             event_type="due_reminder_final",
-            label="Test Due Final Reminder (7 days)",
-            group_name="Scheduling",
+            label="Due Reminder (Final — 7 days)",
+            group_name="Schedule Reminders",
             description="Final reminder fired 7 days before a scheduled test is due (SRS §8.2 #2).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
-            default_roles=["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="overdue_alert",
             label="Test Overdue",
-            group_name="Scheduling",
+            group_name="Schedule Reminders",
             description="Fired when a scheduled test passes its due date without completion (SRS §8.2 #3).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_overdue"],
@@ -7796,67 +8070,26 @@ def _seed_notification_event_catalogue(session) -> int:
         dict(
             event_type="overdue_escalation",
             label="Test Overdue Escalation (>7 days)",
-            group_name="Scheduling",
+            group_name="Schedule Reminders",
             description="Escalation fired when a test is more than 7 days overdue (SRS §8.2 #4).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "days_overdue", "equipment.department"],
             default_roles=["Supervisory Officer", "Senior Management Approver"],
         ),
-        # ── Recommendations / Procurement ─────────────────────────────────────
-        dict(
-            event_type="procurement_pending",
-            label="Procurement Request Raised",
-            group_name="Recommendations",
-            description="Fired when a procurement request is created — notifies Finance Approvers.",
-            context_vars=["request.number", "pr_number", "title"],
-            default_roles=["FinanceApprover", "Reviewing Officer"],
-        ),
-        dict(
-            event_type="procurement_decision",
-            label="Procurement Decision (Approved / Rejected)",
-            group_name="Recommendations",
-            description="Fired when Finance approves or rejects a procurement request.",
-            context_vars=["request.number", "pr_number", "decision", "notes"],
-            default_roles=["Asset Data Officer", "TechApprover", "Reviewing Officer"],
-        ),
-        # ── Equipment ─────────────────────────────────────────────────────────
-        dict(
-            event_type="equipment_registered",
-            label="Equipment Registered",
-            group_name="Equipment",
-            description="Fired when a new equipment unit is commissioned into the register.",
-            context_vars=["equipment", "equipment_type", "department", "manufacturer", "commissioned_by"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
-        ),
-        dict(
-            event_type="equipment_retired",
-            label="Equipment Retired",
-            group_name="Equipment",
-            description="Fired when an equipment unit is decommissioned / retired.",
-            context_vars=["equipment", "equipment_type", "department", "reason", "retired_by"],
-            default_roles=["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
-        ),
-        dict(
-            event_type="design_problem_alert",
-            label="Design Problem Alert",
-            group_name="Equipment",
-            description="Fired when a systemic design problem is identified for a make/model.",
-            context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
-            default_roles=["Senior Management Approver", "Reviewing Officer", "Reviewing Officer"],
-        ),
-        # ── Repair Lifecycle ──────────────────────────────────────────────────
+        # ── Stage Workflows ───────────────────────────────────────────────────
+        # "Stage Workflows" covers repair / overhaul lifecycle stages
         dict(
             event_type="repair_stage_changed",
             label="Repair Stage Advanced",
-            group_name="Repair",
+            group_name="Stage Workflows",
             description="Fired each time the repair workflow advances to the next stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["Maintenance Officer", "TRC Member"],
+            default_roles=["Maintenance Officer", "Transformer Repair Coordinator"],
         ),
         dict(
             event_type="repair_delay",
             label="Repair Stage Delayed",
-            group_name="Repair",
+            group_name="Stage Workflows",
             description="Fired when a repair stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
             default_roles=["Maintenance Officer", "Senior Management Approver"],
@@ -7864,16 +8097,80 @@ def _seed_notification_event_catalogue(session) -> int:
         dict(
             event_type="overhaul_recommended",
             label="Overhaul Recommended",
-            group_name="Repair",
+            group_name="Stage Workflows",
             description="Fired when the repair workflow reaches completion — overhaul is done.",
             context_vars=["equipment", "equipment_type", "department", "operation_count", "operation_threshold"],
             default_roles=["Maintenance Officer", "Senior Management Approver", "Reviewing Officer"],
         ),
-        # ── Failure Registry ──────────────────────────────────────────────────
+        dict(
+            event_type="overhaul_stage_changed",
+            label="Overhaul Stage Advanced",
+            group_name="Stage Workflows",
+            description="Fired each time the overhaul workflow advances to the next stage.",
+            context_vars=["equipment", "equipment_type", "stage", "progress"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
+        ),
+        dict(
+            event_type="overhaul_stage_delay",
+            label="Overhaul Stage Delayed",
+            group_name="Stage Workflows",
+            description="Fired when an overhaul stage is rejected / sent back — indicating a delay.",
+            context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
+            default_roles=["Maintenance Officer", "Senior Management Approver"],
+        ),
+        dict(
+            event_type="calibration_stage_changed",
+            label="Calibration Stage Advanced",
+            group_name="Stage Workflows",
+            description="Fired each time the calibration workflow advances to the next stage.",
+            context_vars=["equipment", "equipment_type", "stage", "progress"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
+        ),
+        dict(
+            event_type="calibration_stage_delay",
+            label="Calibration Stage Delayed",
+            group_name="Stage Workflows",
+            description="Fired when a calibration stage is rejected / sent back — indicating a delay.",
+            context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
+            default_roles=["Maintenance Officer", "Senior Management Approver"],
+        ),
+        dict(
+            event_type="surveillance_stage_changed",
+            label="Surveillance Stage Advanced",
+            group_name="Stage Workflows",
+            description="Fired each time the surveillance workflow advances to the next quarter stage.",
+            context_vars=["equipment", "equipment_type", "stage", "progress"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
+        ),
+        dict(
+            event_type="surveillance_stage_delay",
+            label="Surveillance Stage Delayed",
+            group_name="Stage Workflows",
+            description="Fired when a surveillance stage is rejected / sent back — indicating a delay.",
+            context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
+            default_roles=["Maintenance Officer", "Senior Management Approver"],
+        ),
+        # ── Failure Register ──────────────────────────────────────────────────
+        dict(
+            event_type="fr_submitted",
+            label="Failure Registry Submitted",
+            group_name="Failure Register",
+            description="Fired when a new Failure Registry entry is submitted and is awaiting review.",
+            context_vars=["fr_number", "equipment", "originator", "category"],
+            default_roles=["Test & Work Coordinator", "Reviewing Officer"],
+        ),
+        dict(
+            event_type="fr_approved",
+            label="Failure Registry Approved",
+            group_name="Failure Register",
+            description="Fired when a Failure Registry submission is approved.",
+            context_vars=["fr_number", "equipment", "approved_by", "next_action"],
+            default_roles=["Asset Data Officer", "Maintenance Officer"],
+        ),
         dict(
             event_type="fr_rejected",
             label="Failure Registry Rejected",
-            group_name="Failure Registry",
+            group_name="Failure Register",
             description="Fired when a Failure Registry submission is rejected by an approver.",
             context_vars=["fr_number", "reason"],
             default_roles=["Asset Data Officer"],
@@ -7890,8 +8187,32 @@ def _seed_notification_event_catalogue(session) -> int:
         ),
     ]
 
+    # Guard: surface any default_roles value that isn't a known RoleTemplate name
+    # so bad entries are caught at seed time rather than silently at runtime.
+    _invalid = [
+        (e["event_type"], r)
+        for e in _CATALOGUE
+        for r in e.get("default_roles", [])
+        if r not in _VALID_ROLES
+    ]
+    if _invalid:
+        import warnings
+        for _evt, _role in _invalid:
+            warnings.warn(
+                f"[seed] default_roles: '{_role}' in event '{_evt}' is not a known "
+                "RoleTemplate name — it will NOT resolve to any OrgRole.",
+                stacklevel=2,
+            )
+
+    def _resolve_role_ids(names: list) -> list:
+        """Convert a list of RoleTemplate names to UUID strings. Skips unknowns."""
+        return [_rt_map[n] for n in names if n in _rt_map]
+
     inserted = 0
     for entry in _CATALOGUE:
+        # Resolve role names → RoleTemplate UUIDs before persisting.
+        role_ids = _resolve_role_ids(entry.get("default_roles", []))
+
         existing = (
             session.query(NotificationEventCatalogue)
             .filter(NotificationEventCatalogue.event_type == entry["event_type"])
@@ -7903,18 +8224,993 @@ def _seed_notification_event_catalogue(session) -> int:
             existing.group_name    = entry["group_name"]
             existing.description   = entry.get("description", "")
             existing.context_vars  = entry.get("context_vars", [])
-            existing.default_roles = entry.get("default_roles", [])
+            existing.default_roles = role_ids   # UUIDs, not names
         else:
-            session.add(NotificationEventCatalogue(**entry))
+            session.add(NotificationEventCatalogue(
+                event_type   = entry["event_type"],
+                label        = entry["label"],
+                group_name   = entry["group_name"],
+                description  = entry.get("description", ""),
+                context_vars = entry.get("context_vars", []),
+                default_roles= role_ids,         # UUIDs, not names
+            ))
             inserted += 1
     session.commit()
+    return inserted
+
+
+def _seed_notification_templates(session) -> int:
+    """
+    Idempotent upsert of global default notification templates
+    (organization_id = NULL).
+
+    Single source of truth for all system notification templates —
+    supersedes DEFAULT_TEMPLATES + seed_default_templates() in
+    notification_service.py.
+
+    On first run  → inserts all rows.
+    On re-run     → updates subject_template / body_template /
+                    recipient_roles / attachment_vars from this list,
+                    leaving org-specific overrides untouched.
+
+    To add or edit a template:
+      1. Edit the matching _tmpl() call below (or add a new one).
+      2. Re-run seed.py  — or call PUT /admin/notifications/seed-defaults
+         from the Flutter UI.
+      Zero code changes elsewhere are needed.
+    """
+    from models import NotificationTemplate
+    import logging as _log
+    _logger = _log.getLogger(__name__)
+
+    # ── Inline builder helpers ───────────────────────────────────────────────
+    def _e(subject, body_html, roles):
+        """Email channel entry."""
+        return {"channel": "email", "subject_template": subject,
+                "body_template": body_html, "recipient_roles": roles,
+                "attachment_vars": []}
+
+    def _ea(subject, body_html, roles, attachment_vars):
+        """Email channel entry with attachment variables."""
+        return {"channel": "email", "subject_template": subject,
+                "body_template": body_html, "recipient_roles": roles,
+                "attachment_vars": attachment_vars}
+
+    def _s(body, roles):
+        """SMS channel entry (160-char guideline)."""
+        return {"channel": "sms", "subject_template": "",
+                "body_template": body, "recipient_roles": roles}
+
+    def _i(title, body, roles):
+        """In-app channel entry."""
+        return {"channel": "inapp", "subject_template": title,
+                "body_template": body, "recipient_roles": roles}
+
+    def _html(rows):
+        """Build a compact HTML table from [(label, var_key), ...] pairs."""
+        trs = "".join(
+            "<tr>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'><b>" + str(k) + "</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{" + str(v) + "}}</td>"
+            "</tr>"
+            for k, v in rows
+        )
+        return (
+            "<table cellspacing='0' style='border-collapse:collapse;"
+            "font-size:13px;width:100%'>"
+            + trs + "</table>"
+        )
+
+    _TEMPLATES = []
+
+    def _tmpl(event_type, *channel_dicts):
+        for d in channel_dicts:
+            _TEMPLATES.append({"event_type": event_type, **d})
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TEMPLATE DEFINITIONS
+    # Each event type gets up to three channels: email (_e/_ea), SMS (_s),
+    # in-app (_i).  subject_template / body_template use {{var_key}} syntax.
+    # Org admins can override any of these from the Flutter Template Config UI.
+    # ══════════════════════════════════════════════════════════════════════════
+
+    # ── Equipment ─────────────────────────────────────────────────────────────
+    _tmpl("equipment_replacement",
+        _e(
+            "[REPLACEMENT] {{equipment.type}} — {{old_ueic}} → {{new_ueic}}",
+            "<h3 style='color:#1E3C72'>Equipment Replacement Notification</h3>"
+            "<p>A replacement event has been recorded in SEACMS on {{system.date}}.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Retired UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{old_ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>New UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{new_ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Substation / Bay</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{reason_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{reason}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Replaced By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{replaced_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{replaced_on}}</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS Equipment Register to download the Replacement Report PDF.</p>",
+            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] {{equipment.type}} at {{equipment.department}} replaced."
+            " Old:{{old_ueic}} New:{{new_ueic}}. By {{replaced_by}} on {{replaced_on}}.",
+            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Equipment replaced — {{old_ueic}} → {{new_ueic}}",
+            "{{equipment.type}} at {{equipment.department}} replaced by {{replaced_by}} on {{replaced_on}}."
+            " Reason: {{reason_type}}.",
+            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+        ),
+    )
+
+    # ── Evaluation ────────────────────────────────────────────────────────────
+    _tmpl("eval_critical",
+        _ea(
+            "[CRITICAL] {{equipment.ueic}} — {{eval.test_type}} Threshold Exceeded",
+            "<h3 style='color:red'>Critical Test Result — Immediate Action Required</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.test_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Evaluated At</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.evaluated_at}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Finding</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{result_summary}}</td></tr>"
+            "</table>"
+            "<p>The evaluation report is attached to this email.</p>",
+            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
+            [{"var_key": "report.retriepdf", "type": "pdf"}],
+        ),
+        _s(
+            "[KPTCL-SEACMS] CRITICAL: {{equipment.ueic}} — {{eval.test_type}}."
+            " Req:{{request.number}}. Login SEACMS for details.",
+            ["Reviewing Officer", "Maintenance Officer"],
+        ),
+        _i(
+            "CRITICAL — {{equipment.ueic}}",
+            "{{eval.test_type}} result CRITICAL for {{equipment.ueic}} ({{request.number}})."
+            " Evaluated: {{eval.evaluated_at}}.",
+            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
+        ),
+    )
+
+    _tmpl("eval_alert",
+        _e(
+            "[ALERT] {{equipment.ueic}} — {{eval.test_type}} Warning",
+            "<h3 style='color:orange'>Alert: Test Result Warning</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.test_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Revised Interval</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{revised_interval}}</td></tr>"
+            "</table>"
+            "<p><a href='{{report.retriepdf}}'>Download PDF Report</a></p>",
+            ["Reviewing Officer", "Maintenance Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] ALERT: {{equipment.ueic}} — {{eval.test_type}}."
+            " Revised interval: {{revised_interval}}. Req:{{request.number}}.",
+            ["Reviewing Officer", "Maintenance Officer"],
+        ),
+        _i(
+            "Alert — {{equipment.ueic}}",
+            "{{eval.test_type}} threshold warning for {{equipment.ueic}}."
+            " Revised interval: {{revised_interval}}.",
+            ["Reviewing Officer", "Maintenance Officer"],
+        ),
+    )
+
+    # ── Test Workflow ──────────────────────────────────────────────────────────
+    _tmpl("request_submitted",
+        _e(
+            "New Test Request Submitted — {{request.number}}",
+            "<h3>New Test Request Awaiting Approval</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Category</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{category}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Priority</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.priority}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Submitted By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.submitted_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS to review and approve this request.</p>",
+            ["Reviewing Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] New {{category}} request {{request.number}} submitted"
+            " by {{request.submitted_by}} for {{equipment.ueic}}. Login to approve.",
+            ["Reviewing Officer"],
+        ),
+        _i(
+            "New submission — {{request.number}}",
+            "{{equipment.ueic}} submitted for {{category}} by {{request.submitted_by}}. Priority: {{request.priority}}.",
+            ["Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("tester_assigned",
+        _e(
+            "Test Request Assigned to You — {{request.number}}",
+            "<h3>You Have Been Assigned a Test Request</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Assigned To</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.assigned_to}}</td></tr>"
+            "</table>"
+            "<p>Please log in to SEACMS to accept or decline this assignment.</p>",
+            ["Test Engineer", "Maintenance Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] You are assigned test req {{request.number}}"
+            " for {{equipment.ueic}}. Due: {{request.due_date}}. Login SEACMS.",
+            ["Test Engineer"],
+        ),
+        _i(
+            "Assigned — {{request.number}}",
+            "You have been assigned {{request.number}} for {{equipment.ueic}}. Due: {{request.due_date}}.",
+            ["Test Engineer", "Maintenance Officer"],
+        ),
+    )
+
+    _tmpl("tester_declined",
+        _e(
+            "Tester Declined Assignment — {{request.number}}",
+            "<h3>Tester Declined — Reassignment Required</h3>"
+            "<p><b>Request:</b> {{request.number}}</p>"
+            "<p><b>Declined by:</b> {{tester_name}}</p>"
+            "<p><b>Reason:</b> {{reason}}</p>"
+            "<p>Please reassign this request in SEACMS.</p>",
+            ["Test & Work Coordinator", "Reviewing Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] {{tester_name}} declined req {{request.number}}."
+            " Reason: {{reason}}. Please reassign.",
+            ["Test & Work Coordinator"],
+        ),
+        _i(
+            "Tester declined — {{request.number}}",
+            "{{tester_name}} declined {{request.number}}. Reason: {{reason}}.",
+            ["Test & Work Coordinator", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("test_submitted",
+        _ea(
+            "Test Results Ready for Review — {{request.number}}",
+            "<h3>Test Results Submitted — Awaiting Your Review</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Submitted By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.submitted_by}}</td></tr>"
+            "</table>"
+            "<p>The test report is attached to this email.</p>"
+            "<p>Log in to SEACMS to approve or reject these results.</p>",
+            ["Reviewing Officer"],
+            [{"var_key": "report.retriepdf", "type": "pdf"}],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Results submitted for {{request.number}} ({{equipment.ueic}})."
+            " Result: {{eval.overall}}. Login SEACMS to review.",
+            ["Reviewing Officer"],
+        ),
+        _i(
+            "Results submitted — {{request.number}}",
+            "Test results for {{equipment.ueic}} ({{request.number}}) await review. Result: {{eval.overall}}.",
+            ["Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("recommendation_approved",
+        _e(
+            "Recommendation Approved — {{request.number}}",
+            "<h3>Equipment Recommendation Approved</h3>"
+            "<p><b>Request:</b> {{request.number}}</p>"
+            "<p><b>Recommendation Type:</b> {{recommendation_type}}</p>"
+            "<p><b>Replacement Products:</b> {{product_count}}</p>"
+            "<p>Log in to SEACMS to proceed with procurement.</p>",
+            ["Asset Data Officer", "Maintenance Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Recommendation approved for {{request.number}}."
+            " Type: {{recommendation_type}}. Login SEACMS.",
+            ["Asset Data Officer"],
+        ),
+        _i(
+            "Recommendation approved — {{request.number}}",
+            "{{recommendation_type}} recommendation approved. {{product_count}} product(s) for procurement.",
+            ["Asset Data Officer", "Maintenance Officer"],
+        ),
+    )
+
+    _tmpl("recommendation_rejected",
+        _e(
+            "Recommendation Rejected — {{request.number}}",
+            "<h3>Recommendation Rejected — Action Required</h3>"
+            "<p><b>Request:</b> {{request.number}}</p>"
+            "<p><b>Reason:</b> {{reason}}</p>"
+            "<p>Please revise and resubmit your recommendation in SEACMS.</p>",
+            ["Test Engineer", "Asset Data Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Recommendation for {{request.number}} rejected."
+            " Reason: {{reason}}. Please revise.",
+            ["Test Engineer"],
+        ),
+        _i(
+            "Recommendation rejected — {{request.number}}",
+            "Recommendation rejected. Reason: {{reason}}.",
+            ["Test Engineer", "Asset Data Officer"],
+        ),
+    )
+
+    # ── Scheduling ────────────────────────────────────────────────────────────
+    _tmpl("due_reminder",
+        _e(
+            "Test Due in {{days_remaining}} Days — {{equipment.ueic}}",
+            "<h3>Upcoming Test Due — 15-Day Reminder</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Remaining</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_remaining}}</td></tr>"
+            "</table>"
+            "<p>Please ensure the test is scheduled and resources are allocated.</p>",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Test due in {{days_remaining}} days for {{equipment.ueic}}"
+            " ({{equipment.department}}). Due: {{request.due_date}}.",
+            ["Maintenance Officer"],
+        ),
+        _i(
+            "Test due in {{days_remaining}} days — {{equipment.ueic}}",
+            "Request {{request.number}} for {{equipment.ueic}} is due on {{request.due_date}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("due_reminder_final",
+        _e(
+            "FINAL REMINDER: Test Due in {{days_remaining}} Days — {{equipment.ueic}}",
+            "<h3 style='color:orange'>Final Reminder — Test Due in {{days_remaining}} Days</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+            "</table>"
+            "<p><b>Action required:</b> Test must be completed by {{request.due_date}}.</p>",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] FINAL REMINDER: Test for {{equipment.ueic}} due {{request.due_date}}"
+            " ({{days_remaining}} days). Dept: {{equipment.department}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Final reminder — {{equipment.ueic}} due {{request.due_date}}",
+            "Only {{days_remaining}} days left. Request {{request.number}} must be completed by {{request.due_date}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("overdue_alert",
+        _e(
+            "[OVERDUE] Test Not Completed — {{equipment.ueic}} ({{days_overdue}} days)",
+            "<h3 style='color:red'>Test Overdue — Immediate Action Required</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Was Due</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
+            "</table>"
+            "<p>Please take immediate action to complete or reschedule this test.</p>",
+            ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] OVERDUE: Test for {{equipment.ueic}} ({{equipment.department}})"
+            " is {{days_overdue}} days overdue. Req: {{request.number}}.",
+            ["Reviewing Officer", "Maintenance Officer"],
+        ),
+        _i(
+            "Overdue {{days_overdue}} days — {{equipment.ueic}}",
+            "Test {{request.number}} for {{equipment.ueic}} is overdue by {{days_overdue}} days (was due {{request.due_date}}).",
+            ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
+        ),
+    )
+
+    _tmpl("overdue_escalation",
+        _e(
+            "[ESCALATION] Test {{days_overdue}} Days Overdue — {{equipment.ueic}}",
+            "<h3 style='color:darkred'>Escalation: Test Critically Overdue</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "</table>"
+            "<p>This has been escalated to zone/circle management.</p>",
+            ["Supervisory Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] ESCALATION: {{equipment.ueic}} test {{days_overdue}}d overdue."
+            " Dept: {{equipment.department}}. Req: {{request.number}}.",
+            ["Supervisory Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Escalation — {{equipment.ueic}} {{days_overdue}}d overdue",
+            "Critical: {{request.number}} for {{equipment.ueic}} is {{days_overdue}} days overdue.",
+            ["Supervisory Officer", "Senior Management Approver"],
+        ),
+    )
+
+    # ── Procurement ───────────────────────────────────────────────────────────
+    _tmpl("procurement_pending",
+        _e(
+            "Procurement Request Raised — {{pr_number}}",
+            "<h3>New Procurement Request Awaiting Finance Approval</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>PR Number</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{pr_number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Title</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{title}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS to approve or reject this procurement request.</p>",
+            ["Procurement Approver", "Reviewing Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Procurement {{pr_number}} raised for {{request.number}}."
+            " Awaiting your finance approval. Login SEACMS.",
+            ["Procurement Approver"],
+        ),
+        _i(
+            "Procurement raised — {{pr_number}}",
+            "PR {{pr_number}} for test request {{request.number}} is awaiting finance approval.",
+            ["Procurement Approver", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("procurement_decision",
+        _e(
+            "Procurement {{decision|upper}} — {{pr_number}}",
+            "<h3>Procurement Decision: {{decision|upper}}</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>PR Number</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{pr_number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Decision</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{decision}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Notes</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{notes}}</td></tr>"
+            "</table>",
+            ["Asset Data Officer", "Reviewing Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Procurement {{pr_number}} {{decision}}."
+            " Req: {{request.number}}. Notes: {{notes}}.",
+            ["Asset Data Officer"],
+        ),
+        _i(
+            "Procurement {{decision}} — {{pr_number}}",
+            "PR {{pr_number}} ({{request.number}}) has been {{decision}} by Finance. Notes: {{notes}}.",
+            ["Asset Data Officer", "Reviewing Officer"],
+        ),
+    )
+
+    # ── Equipment Lifecycle ───────────────────────────────────────────────────
+    _tmpl("equipment_registered",
+        _e(
+            "[NEW EQUIPMENT] {{equipment.ueic}} Commissioned — {{equipment.type}}",
+            "<h3 style='color:#1E3C72'>New Equipment Registered in SEACMS</h3>"
+            "<p>A new equipment record has been created on {{system.date}}.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Manufacturer</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.manufacturer}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Substation / Bay</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Commissioned By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{commissioned_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS to review the equipment details and configure test schedules.</p>",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] New equipment registered: {{equipment.ueic}} ({{equipment.type}})"
+            " at {{equipment.department}} on {{system.date}} by {{commissioned_by}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "New equipment — {{equipment.ueic}}",
+            "{{equipment.type}} ({{equipment.ueic}}) commissioned at {{equipment.department}} by {{commissioned_by}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("equipment_retired",
+        _e(
+            "[RETIRED] {{equipment.ueic}} — {{equipment.type}} Decommissioned",
+            "<h3 style='color:#555'>Equipment Retired from Service</h3>"
+            "<p>The following equipment has been decommissioned on {{system.date}}.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Substation / Bay</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{reason}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Retired By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{retired_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+            "</table>"
+            "<p>All pending test schedules for this equipment have been cancelled. Log in to SEACMS to confirm.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Equipment {{equipment.ueic}} ({{equipment.type}}) at"
+            " {{equipment.department}} RETIRED on {{system.date}}. Reason: {{reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Equipment retired — {{equipment.ueic}}",
+            "{{equipment.type}} ({{equipment.ueic}}) at {{equipment.department}} has been decommissioned. Reason: {{reason}}.",
+            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+    )
+
+    # ── Remedial / Compliance ─────────────────────────────────────────────────
+    _tmpl("remedial_action_due",
+        _e(
+            "[ACTION REQUIRED] Remedial Compliance Not Uploaded — {{request.number}}",
+            "<h3 style='color:red'>Remedial Action Compliance Overdue</h3>"
+            "<p>The remedial action compliance document has not been uploaded by the due date.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Compliance Due</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{compliance_due_date}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
+            "</table>"
+            "<p>Please upload the compliance proof immediately in SEACMS.</p>",
+            ["Field Officer", "Reviewing Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Remedial compliance NOT uploaded for {{request.number}}"
+            " ({{equipment.ueic}}). Due: {{compliance_due_date}}. Upload in SEACMS.",
+            ["Field Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Remedial compliance overdue — {{request.number}}",
+            "Compliance for {{request.number}} ({{equipment.ueic}}) was due {{compliance_due_date}}"
+            " and is now {{days_overdue}} day(s) overdue.",
+            ["Field Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("taqc_observation_overdue",
+        _e(
+            "[TAQC] Observation Compliance Not Uploaded — {{request.number}}",
+            "<h3 style='color:orange'>TA&amp;QC Observation Compliance Overdue</h3>"
+            "<p>The compliance document for a TA&amp;QC observation has not been uploaded by the target date.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Target Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{compliance_due_date}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
+            "</table>"
+            "<p>Please upload the compliance document in SEACMS immediately.</p>",
+            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] TA&QC compliance NOT uploaded. Req:{{request.number}}"
+            " ({{equipment.ueic}}). Target: {{compliance_due_date}}. Upload in SEACMS.",
+            ["Reviewing Officer", "Supervisory Officer"],
+        ),
+        _i(
+            "TA&QC compliance overdue — {{request.number}}",
+            "Observation compliance for {{request.number}} ({{equipment.ueic}})"
+            " is {{days_overdue}} day(s) past target {{compliance_due_date}}.",
+            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+        ),
+    )
+
+    # ── Maintenance ───────────────────────────────────────────────────────────
+    _tmpl("maintenance_due",
+        _e(
+            "Maintenance Due in {{days_remaining}} Days — {{equipment.ueic}}",
+            "<h3 style='color:#1E3C72'>Upcoming Maintenance Due — 15-Day Reminder</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Remaining</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_remaining}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "</table>"
+            "<p>Please ensure maintenance resources and outage window are scheduled.</p>",
+            ["Maintenance Officer", "Nodal Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Maintenance due in {{days_remaining}} days for {{equipment.ueic}}"
+            " at {{equipment.department}}. Due: {{request.due_date}}.",
+            ["Maintenance Officer", "Nodal Officer"],
+        ),
+        _i(
+            "Maintenance due in {{days_remaining}} days — {{equipment.ueic}}",
+            "Request {{request.number}} for {{equipment.ueic}} maintenance is due on {{request.due_date}}.",
+            ["Maintenance Officer", "Nodal Officer"],
+        ),
+    )
+
+    _tmpl("overhaul_recommended",
+        _e(
+            "[OVERHAUL] Operation Count Threshold Reached — {{equipment.ueic}}",
+            "<h3 style='color:darkorange'>Overhaul Recommendation — Operation Threshold Exceeded</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Operations Count</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{operation_count}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Threshold</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{operation_threshold}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Recommendation Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+            "</table>"
+            "<p>An overhaul is recommended. Please raise a maintenance request in SEACMS.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Overhaul needed: {{equipment.ueic}} ({{equipment.type}}) at"
+            " {{equipment.department}}. Operations: {{operation_count}}/{{operation_threshold}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Overhaul recommended — {{equipment.ueic}}",
+            "{{equipment.type}} ({{equipment.ueic}}) has reached {{operation_count}} operations"
+            " (threshold: {{operation_threshold}}). Overhaul recommended.",
+            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+    )
+
+    # ── Design / Systemic Issues ──────────────────────────────────────────────
+    _tmpl("design_problem_alert",
+        _e(
+            "[DESIGN ALERT] Problem Detected on {{equipment.manufacturer}} {{equipment.type}}",
+            "<h3 style='color:darkred'>Design Problem Alert — All Affected Equipment</h3>"
+            "<p>A systemic design problem has been identified linked to a specific make/model.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Manufacturer</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.manufacturer}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Problem Description</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{problem_description}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Affected Count</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{affected_count}} units</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Identified On</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+            "</table>"
+            "<p>Inspect all {{equipment.type}} units of this make immediately. Log in to SEACMS for the affected equipment list.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] DESIGN ALERT: {{equipment.manufacturer}} {{equipment.type}}."
+            " {{affected_count}} units affected. Problem: {{problem_description}}. Login SEACMS.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Design problem — {{equipment.manufacturer}} {{equipment.type}}",
+            "Systemic problem detected on {{equipment.manufacturer}} {{equipment.type}}:"
+            " {{problem_description}}. {{affected_count}} unit(s) affected.",
+            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+    )
+
+    # ── Repair Cycle ──────────────────────────────────────────────────────────
+    _tmpl("repair_delay",
+        _e(
+            "[REPAIR DELAY] Stage Timeline Exceeded — {{equipment.ueic}}",
+            "<h3 style='color:darkorange'>Transformer Repair Delay Alert</h3>"
+            "<p>A repair stage has exceeded its scheduled timeline.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Repair Stage</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Stage Deadline</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{stage_deadline}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
+            "</table>"
+            "<p>Please review and update the repair timeline in SEACMS.</p>",
+            ["Reviewing Officer", "Senior Management Approver", "CEE RT&R&D"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] REPAIR DELAY: {{equipment.ueic}} stage '{{repair_stage}}'"
+            " is {{days_delayed}} days overdue (deadline: {{stage_deadline}}).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Repair delay — {{equipment.ueic}} ({{repair_stage}})",
+            "Repair stage '{{repair_stage}}' for {{equipment.ueic}} is {{days_delayed}}"
+            " day(s) past deadline {{stage_deadline}}.",
+            ["Reviewing Officer", "Senior Management Approver", "CEE RT&R&D"],
+        ),
+    )
+
+    # ── Reports ───────────────────────────────────────────────────────────────
+    _tmpl("monthly_mis_report",
+        _ea(
+            "[MONTHLY MIS] SEACMS Monthly Report — {{report_month}}",
+            "<h3 style='color:#1E3C72'>Monthly MIS Report — {{report_month}}</h3>"
+            "<p>Your monthly equipment management report is ready for {{report_month}}.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Report Period</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report_month}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Generated On</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report.generated_on}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Tests Completed</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{tests_completed}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Critical Findings</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{critical_count}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overdue Tests</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{overdue_count}}</td></tr>"
+            "</table>"
+            "<p>The PDF and Excel reports are attached to this email.</p>",
+            ["Supervisory Officer", "Senior Management Approver"],
+            [
+                {"var_key": "report.retriepdf",  "type": "pdf"},
+                {"var_key": "report.retriexls", "type": "excel"},
+            ],
+        ),
+        _i(
+            "Monthly MIS Report — {{report_month}} ready",
+            "The SEACMS MIS report for {{report_month}} is available."
+            " Tests: {{tests_completed}}, Critical: {{critical_count}}, Overdue: {{overdue_count}}.",
+            ["Supervisory Officer", "Senior Management Approver"],
+        ),
+    )
+
+    # ── Failure Registry ──────────────────────────────────────────────────────
+    _tmpl("fr_submitted",
+        _e(
+            "[FAILURE REGISTER] New Entry Submitted — {{fr_number}}",
+            "<h3 style='color:#1a73e8'>Failure Register Entry Submitted</h3>"
+            "<p>A new failure register entry has been submitted and is awaiting your review.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Entry Reference</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{fr_number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Submitted By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{originator}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+            "</table>"
+            "<p>Please log in to SEACMS to review and take action on this entry.</p>",
+            ["Test & Work Coordinator", "Reviewing Officer"],
+        ),
+        _i(
+            "New failure register entry — {{fr_number}}",
+            "A new failure register entry {{fr_number}} for {{equipment}} has been submitted by {{originator}}.",
+            ["Test & Work Coordinator", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("fr_approved",
+        _e(
+            "[FAILURE REGISTER] Entry Approved — {{fr_number}}",
+            "<h3 style='color:#27ae60'>Failure Register Entry Approved</h3>"
+            "<p>Your failure register entry has been reviewed and approved.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Entry Reference</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{fr_number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Approved By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{approved_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Next Action</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{next_action}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+            "</table>",
+            ["Asset Data Officer", "Maintenance Officer"],
+        ),
+        _i(
+            "Failure register approved — {{fr_number}}",
+            "Failure register entry {{fr_number}} for {{equipment}} has been approved by {{approved_by}}."
+            " Next action: {{next_action}}.",
+            ["Asset Data Officer", "Maintenance Officer"],
+        ),
+    )
+
+    _tmpl("fr_rejected",
+        _e(
+            "[FAILURE REGISTER] Entry Rejected — {{request.number}}",
+            "<h3 style='color:#c0392b'>Failure Register Entry Rejected</h3>"
+            "<p>A failure register entry you submitted has been rejected and requires revision.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Entry Reference</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Rejected By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{rejected_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{rejection_reason}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
+            "</table>"
+            "<p>Please log in to SEACMS, review the rejection reason, and resubmit a corrected entry.</p>",
+            ["Reviewing Officer", "Test & Work Coordinator"],
+        ),
+        _i(
+            "Failure register rejected — {{request.number}}",
+            "Failure register entry {{request.number}} for {{equipment.ueic}} was rejected by {{rejected_by}}."
+            " Reason: {{rejection_reason}}.",
+            ["Reviewing Officer", "Test & Work Coordinator"],
+        ),
+    )
+
+    # ── Repair Lifecycle ──────────────────────────────────────────────────────
+    _tmpl("repair_stage_changed",
+        _i(
+            "Repair stage advanced — {{equipment.ueic}}",
+            "Repair stage for {{equipment.ueic}} ({{equipment.type}}) has advanced"
+            " from '{{previous_stage}}' to '{{repair_stage}}'."
+            " Assigned to: {{assigned_to}}.",
+            ["Test Engineer", "Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    # ── Overhaul Lifecycle ────────────────────────────────────────────────────
+    _tmpl("overhaul_stage_changed",
+        _i(
+            "Overhaul stage advanced — {{equipment.ueic}}",
+            "Overhaul stage for {{equipment.ueic}} ({{equipment_type}}) has advanced"
+            " to '{{stage}}'.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("overhaul_stage_delay",
+        _e(
+            "[OVERHAUL DELAY] Stage Rejected — {{equipment.ueic}}",
+            "<h3 style='color:darkorange'>Overhaul Delay Alert</h3>"
+            "<p>An overhaul stage has been rejected and sent back, indicating a delay.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overhaul Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Stage Deadline</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{stage_deadline}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
+            "</table>"
+            "<p>Please review and update the overhaul timeline in SEACMS.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] OVERHAUL DELAY: {{equipment.ueic}} stage '{{repair_stage}}'"
+            " is {{days_delayed}} days overdue (deadline: {{stage_deadline}}).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Overhaul delay — {{equipment.ueic}} ({{repair_stage}})",
+            "Overhaul stage '{{repair_stage}}' for {{equipment.ueic}} was rejected,"
+            " causing a delay of {{days_delayed}} day(s). Deadline: {{stage_deadline}}.",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    # ── Calibration Lifecycle ──────────────────────────────────────────────────
+    _tmpl("calibration_stage_changed",
+        _i(
+            "Calibration stage advanced — {{equipment.ueic}}",
+            "Calibration stage for {{equipment.ueic}} ({{equipment_type}}) has advanced"
+            " to '{{stage}}'.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("calibration_stage_delay",
+        _e(
+            "[CALIBRATION DELAY] Stage Rejected — {{equipment.ueic}}",
+            "<h3 style='color:darkorange'>Calibration Delay Alert</h3>"
+            "<p>A calibration stage has been rejected and sent back, indicating a delay.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Calibration Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
+            "</table>"
+            "<p>Please review and update the calibration timeline in SEACMS.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] CALIBRATION DELAY: {{equipment.ueic}} stage '{{repair_stage}}'"
+            " is {{days_delayed}} days overdue.",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Calibration delay — {{equipment.ueic}} ({{repair_stage}})",
+            "Calibration stage '{{repair_stage}}' for {{equipment.ueic}} was rejected,"
+            " causing a delay of {{days_delayed}} day(s).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    # ── Surveillance Lifecycle ─────────────────────────────────────────────────
+    _tmpl("surveillance_stage_changed",
+        _i(
+            "Surveillance stage advanced — {{equipment.ueic}}",
+            "Surveillance stage for {{equipment.ueic}} ({{equipment_type}}) has advanced"
+            " to '{{stage}}'.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("surveillance_stage_delay",
+        _e(
+            "[SURVEILLANCE DELAY] Stage Rejected — {{equipment.ueic}}",
+            "<h3 style='color:darkorange'>Surveillance Delay Alert</h3>"
+            "<p>A surveillance stage has been rejected and sent back, indicating a delay.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Surveillance Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
+            "</table>"
+            "<p>Please review and update the surveillance timeline in SEACMS.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] SURVEILLANCE DELAY: {{equipment.ueic}} stage '{{repair_stage}}'"
+            " is {{days_delayed}} days overdue.",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Surveillance delay — {{equipment.ueic}} ({{repair_stage}})",
+            "Surveillance stage '{{repair_stage}}' for {{equipment.ueic}} was rejected,"
+            " causing a delay of {{days_delayed}} day(s).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    # ── Upsert into DB ────────────────────────────────────────────────────────
+    inserted = 0
+    for tpl in _TEMPLATES:
+        existing = (
+            session.query(NotificationTemplate)
+            .filter(
+                NotificationTemplate.event_type == tpl["event_type"],
+                NotificationTemplate.channel    == tpl["channel"],
+                NotificationTemplate.organization_id.is_(None),
+            )
+            .first()
+        )
+        if existing:
+            existing.subject_template = tpl.get("subject_template", existing.subject_template)
+            existing.body_template    = tpl["body_template"]
+            existing.recipient_roles  = tpl.get("recipient_roles", existing.recipient_roles)
+            existing.attachment_vars  = tpl.get("attachment_vars", existing.attachment_vars or [])
+        else:
+            session.add(NotificationTemplate(**tpl))
+            inserted += 1
+
+    session.commit()
+    _logger.info(
+        f"[Seed] Notification templates: {inserted} new inserted"
+        f" ({len(_TEMPLATES) - inserted} refreshed)."
+    )
     return inserted
 
 
 def _seed_notification_schedule_rules(session) -> int:
     """
     Idempotent seed for NotificationScheduleRule rows.
-    Matches on event_type + trigger_type + offset_days — won't duplicate on re-run.
+    Matches on event_type + trigger_type + offset_days + trigger_on_status + frequency
+    (the full natural key from uq_notif_schedule_rule_v3) — won't duplicate on re-run.
+
+    frequency semantics:
+      None         — fires once per day while the trigger condition is true (default).
+      "weekly"     — re-fires every 7 days; good for ongoing overdue reminders.
+      "biweekly"   — every 14 days.
+      "monthly"    — every 30 days; good for inspection/maintenance cadence summaries.
+      "semi_annual"— every 6 months; compliance health-check intervals.
+      "yearly"     — annual audit / calibration reminders.
+      "recurring"  — trigger_type="recurring" fires purely on the frequency with no
+                     date condition (used for periodic status digests, MIS reports, etc.)
 
     To add a new scheduler-based notification:
       1. Insert a row here (or directly in the DB).
@@ -7924,6 +9220,8 @@ def _seed_notification_schedule_rules(session) -> int:
     from models import NotificationScheduleRule
 
     _DEFAULT_RULES = [
+        # ── Due-date reminders (one-shot — no frequency; fires once when window opens) ──
+
         # SRS §8.2 #1 — 15-day early reminder
         dict(
             event_type="due_reminder",
@@ -7931,6 +9229,7 @@ def _seed_notification_schedule_rules(session) -> int:
             trigger_type="due_soon",
             offset_days=15,
             severity="info",
+            frequency=None,          # one-shot: fires once when due_date is 15 days away
             applicable_categories=[],
         ),
         # SRS §8.2 #2 — 7-day final reminder
@@ -7940,33 +9239,43 @@ def _seed_notification_schedule_rules(session) -> int:
             trigger_type="due_soon",
             offset_days=7,
             severity="alert",
+            frequency=None,          # one-shot: fires once when due_date is 7 days away
             applicable_categories=[],
         ),
-        # SRS §8.2 #3 — overdue alert (any day past due)
+
+        # ── Overdue alerts (weekly repeat — keep notifying while still overdue) ──────
+
+        # SRS §8.2 #3 — overdue alert, repeats weekly until resolved
         dict(
             event_type="overdue_alert",
-            label="Test Overdue",
+            label="Test Overdue — weekly repeat",
             trigger_type="overdue",
             offset_days=0,
             severity="alert",
+            frequency="weekly",      # re-fires every 7 days while test remains overdue
             applicable_categories=[],
         ),
-        # SRS §8.2 #4 — escalation after 7 days overdue
+        # SRS §8.2 #4 — escalation after 7 days overdue, repeats weekly
         dict(
             event_type="overdue_escalation",
-            label="Test Overdue Escalation (>7 days)",
+            label="Test Overdue Escalation (>7 days) — weekly repeat",
             trigger_type="escalation",
             offset_days=7,
             severity="critical",
+            frequency="weekly",      # re-fires every 7 days while escalation condition holds
             applicable_categories=[],
         ),
-        # Maintenance-specific 15-day due reminder (separate from test due_reminder)
+
+        # ── Maintenance ──────────────────────────────────────────────────────────────
+
+        # Maintenance-specific 15-day due reminder
         dict(
             event_type="due_reminder",
             label="Maintenance Due Reminder — 15 days before",
             trigger_type="due_soon",
             offset_days=15,
             severity="info",
+            frequency=None,          # one-shot
             applicable_categories=["maintenance"],
         ),
         # Maintenance due event (separate event type for routing rule separation)
@@ -7976,8 +9285,12 @@ def _seed_notification_schedule_rules(session) -> int:
             trigger_type="due_soon",
             offset_days=15,
             severity="info",
+            frequency=None,          # one-shot
             applicable_categories=["maintenance"],
         ),
+
+        # ── Status-transition triggers (one-shot — fire once on status change) ───────
+
         # Status-based: fire when request reaches "compliance_pending" status
         dict(
             event_type="remedial_action_due",
@@ -7986,6 +9299,7 @@ def _seed_notification_schedule_rules(session) -> int:
             offset_days=0,
             trigger_on_status="compliance_pending",
             severity="alert",
+            frequency=None,          # one-shot on status change
             applicable_categories=[],
         ),
         # TAQC observation overdue — status_transition trigger
@@ -7996,17 +9310,21 @@ def _seed_notification_schedule_rules(session) -> int:
             offset_days=0,
             trigger_on_status="compliance_pending",
             severity="alert",
+            frequency=None,          # one-shot on status change
             applicable_categories=[],
         ),
-        # "Both" example: tester still in_progress but due date passed 5 days ago
-        # → catches testers who started but never uploaded results
+
+        # ── Combined time + status (weekly repeat) ───────────────────────────────────
+
+        # Tester still in_progress but 5 days overdue → weekly reminder until resolved
         dict(
             event_type="overdue_alert",
-            label="Overdue — in_progress 5 days after due date",
+            label="Overdue — in_progress 5 days after due date (weekly)",
             trigger_type="both",
             offset_days=5,
             trigger_on_status="in_progress",
             severity="alert",
+            frequency="weekly",      # keep reminding every week while condition holds
             applicable_categories=[],
             advanced_conditions={
                 "and": [
@@ -8015,22 +9333,72 @@ def _seed_notification_schedule_rules(session) -> int:
                 ]
             },
         ),
+
+        # ── Recurring — periodic digests / summaries (no date condition) ─────────────
+
+        # Weekly open-test digest for test coordinators
+        dict(
+            event_type="due_reminder",
+            label="Weekly Open Tests Summary",
+            trigger_type="recurring",
+            offset_days=0,
+            severity="info",
+            frequency="weekly",      # fires every Monday (or whichever day scheduler runs)
+            applicable_categories=[],
+        ),
+        # Monthly overdue summary (management visibility)
+        dict(
+            event_type="overdue_alert",
+            label="Monthly Overdue Tests Summary",
+            trigger_type="recurring",
+            offset_days=0,
+            severity="alert",
+            frequency="monthly",     # fires once a month for any still-open overdue TRs
+            applicable_categories=[],
+        ),
+        # Bi-annual inspection compliance reminder
+        dict(
+            event_type="due_reminder",
+            label="Six-Month Inspection Compliance Reminder",
+            trigger_type="recurring",
+            offset_days=0,
+            severity="info",
+            frequency="semi_annual", # fires every 6 months for inspection-type TRs
+            applicable_categories=["inspection"],
+        ),
+        # Yearly calibration reminder
+        dict(
+            event_type="due_reminder",
+            label="Annual Calibration Reminder",
+            trigger_type="recurring",
+            offset_days=0,
+            severity="info",
+            frequency="yearly",      # fires once a year for calibration-type TRs
+            applicable_categories=["calibration"],
+        ),
     ]
 
     inserted = 0
     for rule_def in _DEFAULT_RULES:
-        # Match on the new natural key: event_type + trigger_type + offset_days + trigger_on_status
+        # Match on the full natural key (v3): includes frequency so weekly and monthly
+        # variants of the same event_type + trigger_type can coexist.
+        freq_val = rule_def.get("frequency")
         existing = (
             session.query(NotificationScheduleRule)
             .filter(
                 NotificationScheduleRule.organization_id.is_(None),
-                NotificationScheduleRule.event_type    == rule_def["event_type"],
-                NotificationScheduleRule.trigger_type  == rule_def["trigger_type"],
-                NotificationScheduleRule.offset_days   == rule_def.get("offset_days", 0),
+                NotificationScheduleRule.event_type   == rule_def["event_type"],
+                NotificationScheduleRule.trigger_type == rule_def["trigger_type"],
+                NotificationScheduleRule.offset_days  == rule_def.get("offset_days", 0),
                 (
                     NotificationScheduleRule.trigger_on_status == rule_def["trigger_on_status"]
                     if "trigger_on_status" in rule_def
                     else NotificationScheduleRule.trigger_on_status.is_(None)
+                ),
+                (
+                    NotificationScheduleRule.frequency == freq_val
+                    if freq_val is not None
+                    else NotificationScheduleRule.frequency.is_(None)
                 ),
             )
             .first()
@@ -8038,16 +9406,17 @@ def _seed_notification_schedule_rules(session) -> int:
         if not existing:
             # Build kwargs — only pass fields that exist on the model
             kwargs = {
-                "event_type":               rule_def["event_type"],
-                "label":                    rule_def["label"],
-                "trigger_type":             rule_def["trigger_type"],
-                "offset_days":              rule_def.get("offset_days", 0),
-                "trigger_on_status":        rule_def.get("trigger_on_status"),
-                "applicable_categories":    rule_def.get("applicable_categories", []),
+                "event_type":                rule_def["event_type"],
+                "label":                     rule_def["label"],
+                "trigger_type":              rule_def["trigger_type"],
+                "offset_days":               rule_def.get("offset_days", 0),
+                "trigger_on_status":         rule_def.get("trigger_on_status"),
+                "frequency":                 freq_val,
+                "applicable_categories":     rule_def.get("applicable_categories", []),
                 "applicable_workflow_types": rule_def.get("applicable_workflow_types", []),
-                "advanced_conditions":      rule_def.get("advanced_conditions"),
-                "severity":                 rule_def.get("severity", "info"),
-                "is_active":                rule_def.get("is_active", True),
+                "advanced_conditions":       rule_def.get("advanced_conditions"),
+                "severity":                  rule_def.get("severity", "info"),
+                "is_active":                 rule_def.get("is_active", True),
             }
             session.add(NotificationScheduleRule(**kwargs))
             inserted += 1
@@ -8171,6 +9540,16 @@ def _seed_notification_routing_rules(session) -> int:
          "Recommendation Rejected — all workflows"),
 
         # ── Failure Registry ──────────────────────────────────────────────────
+        ("fr_submitted",
+         ["failure_registry"], [],
+         ["email", "inapp"],
+         "Failure Registry Submitted"),
+
+        ("fr_approved",
+         ["failure_registry"], [],
+         ["email", "inapp"],
+         "Failure Registry Approved"),
+
         ("fr_rejected",
          ["failure_registry"], [],
          ["email", "inapp"],
@@ -8236,6 +9615,39 @@ def _seed_notification_routing_rules(session) -> int:
          ["email", "sms"],
          "Repair Stage Delay — Email + SMS"),
 
+        # ── Overhaul Lifecycle ────────────────────────────────────────────────
+        ("overhaul_stage_changed",
+         [], [],
+         ["inapp"],
+         "Overhaul Stage Advanced — in-app only"),
+
+        ("overhaul_stage_delay",
+         [], [],
+         ["email", "sms"],
+         "Overhaul Stage Delay — Email + SMS"),
+
+        # ── Calibration Lifecycle ─────────────────────────────────────────────
+        ("calibration_stage_changed",
+         [], [],
+         ["inapp"],
+         "Calibration Stage Advanced — in-app only"),
+
+        ("calibration_stage_delay",
+         [], [],
+         ["email", "sms"],
+         "Calibration Stage Delay — Email + SMS"),
+
+        # ── Surveillance Lifecycle ────────────────────────────────────────────
+        ("surveillance_stage_changed",
+         [], [],
+         ["inapp"],
+         "Surveillance Stage Advanced — in-app only"),
+
+        ("surveillance_stage_delay",
+         [], [],
+         ["email", "sms"],
+         "Surveillance Stage Delay — Email + SMS"),
+
         # ── Design / Systemic ─────────────────────────────────────────────────
         ("design_problem_alert",
          [], [],
@@ -8295,6 +9707,32 @@ def _seed_notification_routing_rules(session) -> int:
             inserted += 1
     session.commit()
     return inserted
+
+
+# ── Public convenience wrapper ────────────────────────────────────────────────
+
+def seed_notification_defaults(session) -> dict:
+    """
+    Idempotent seed for ALL notification defaults in dependency order:
+      1. event_catalogue  — the 24 canonical event types
+      2. variables        — template-variable registry
+      3. templates        — default email/sms/inapp templates per event
+      4. schedule_rules   — time-based trigger rules (reminders, overdue)
+      5. routing_rules    — channel-routing rules per workflow / test type
+
+    Call this from create_tables.py, main.py startup, and the admin
+    /seed-defaults endpoint.  There is no need to import any individual
+    private seeder outside this file.
+
+    Returns a dict with per-seeder insert counts.
+    """
+    return {
+        "event_catalogue":  _seed_notification_event_catalogue(session),
+        "variables":        _seed_notification_variables(session),
+        "templates":        _seed_notification_templates(session),
+        "schedule_rules":   _seed_notification_schedule_rules(session),
+        "routing_rules":    _seed_notification_routing_rules(session),
+    }
 
 
 def run_seed():
@@ -8479,40 +9917,20 @@ def run_seed():
         # Proper permissions are already set via role templates during org role provisioning
         # seed_org_role_permissions_for_modules(session, module_ids)
 
-        # Notification defaults — templates + variable registry (idempotent)
+        # All notification defaults — event catalogue, variables, templates,
+        # schedule rules, routing rules (idempotent, single call)
         print("\n--- Notification Defaults Seeding ---")
         try:
-            from services.notification_service import seed_default_templates, seed_default_variables
-            seeded_t = seed_default_templates(session)
-            seeded_v = seed_default_variables(session)
-            print(f"[OK] Notification templates : {seeded_t} inserted (0 = already seeded)")
-            print(f"[OK] Notification variables : {seeded_v} inserted (0 = already seeded)")
+            _nc = seed_notification_defaults(session)
+            print(f"[OK] Event catalogue  : {_nc['event_catalogue']} inserted (0 = already seeded)")
+            print(f"[OK] Variables        : {_nc['variables']} inserted (0 = already seeded)")
+            print(f"[OK] Templates        : {_nc['templates']} inserted (0 = already seeded)")
+            print(f"[OK] Schedule rules   : {_nc['schedule_rules']} inserted (0 = already seeded)")
+            print(f"[OK] Routing rules    : {_nc['routing_rules']} inserted (0 = already seeded)")
         except Exception as _e:
-            print(f"[WARN] Notification seed failed (non-fatal): {_e}")
-
-        # Notification event catalogue (config-driven event types — idempotent)
-        print("\n--- Notification Event Catalogue Seeding ---")
-        try:
-            seeded_c = _seed_notification_event_catalogue(session)
-            print(f"[OK] Notification event catalogue : {seeded_c} inserted (0 = already seeded)")
-        except Exception as _e:
-            print(f"[WARN] Notification event catalogue seed failed (non-fatal): {_e}")
-
-        # Notification schedule rules (config-driven scheduler — idempotent)
-        print("\n--- Notification Schedule Rules Seeding ---")
-        try:
-            seeded_r = _seed_notification_schedule_rules(session)
-            print(f"[OK] Notification schedule rules : {seeded_r} inserted (0 = already seeded)")
-        except Exception as _e:
-            print(f"[WARN] Notification schedule rules seed failed (non-fatal): {_e}")
-
-        # Notification routing rules (workflow/equipment/test-type channel scoping — idempotent)
-        print("\n--- Notification Routing Rules Seeding ---")
-        try:
-            seeded_rr = _seed_notification_routing_rules(session)
-            print(f"[OK] Notification routing rules : {seeded_rr} inserted (0 = already seeded)")
-        except Exception as _e:
-            print(f"[WARN] Notification routing rules seed failed (non-fatal): {_e}")
+            import traceback
+            print(f"[WARN] Notification defaults seed failed (non-fatal): {_e}")
+            traceback.print_exc()
 
         # Repair Workflow — stages, templates, roles, transitions
         print("\n--- Repair Workflow Seeding ---")
