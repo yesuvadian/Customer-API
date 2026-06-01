@@ -9290,6 +9290,38 @@ def _seed_notification_event_catalogue(session) -> int:
             default_roles=["Test Engineer", "Asset Data Officer"],
         ),
         dict(
+            event_type="repair_cancelled",
+            label="Repair Workflow Cancelled",
+            group_name="Repair Lifecycle",
+            description="Fired when an active repair workflow is cancelled.",
+            context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
+            default_roles=["Reviewing Officer", "Maintenance Officer"],
+        ),
+        dict(
+            event_type="overhaul_cancelled",
+            label="Overhaul Workflow Cancelled",
+            group_name="Repair Lifecycle",
+            description="Fired when an active overhaul workflow is cancelled.",
+            context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
+            default_roles=["Reviewing Officer", "Maintenance Officer"],
+        ),
+        dict(
+            event_type="calibration_cancelled",
+            label="Calibration Workflow Cancelled",
+            group_name="Repair Lifecycle",
+            description="Fired when an active calibration workflow is cancelled.",
+            context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
+            default_roles=["Reviewing Officer", "Maintenance Officer"],
+        ),
+        dict(
+            event_type="surveillance_cancelled",
+            label="Surveillance Workflow Cancelled",
+            group_name="Repair Lifecycle",
+            description="Fired when an active surveillance workflow is cancelled.",
+            context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
+            default_roles=["Reviewing Officer", "Maintenance Officer"],
+        ),
+        dict(
             event_type="procurement_pending",
             label="Procurement Request Raised",
             group_name="Testing Requests",
@@ -11035,6 +11067,26 @@ def _seed_notification_routing_rules(session) -> int:
          ["repair_lifecycle"], [],
          ["email", "sms"],
          "Repair Stage Delay — Email + SMS"),
+
+        ("repair_cancelled",
+         [], [],
+         ["email", "inapp"],
+         "Repair Workflow Cancelled — Email + in-app"),
+
+        ("overhaul_cancelled",
+         [], [],
+         ["email", "inapp"],
+         "Overhaul Workflow Cancelled — Email + in-app"),
+
+        ("calibration_cancelled",
+         [], [],
+         ["email", "inapp"],
+         "Calibration Workflow Cancelled — Email + in-app"),
+
+        ("surveillance_cancelled",
+         [], [],
+         ["email", "inapp"],
+         "Surveillance Workflow Cancelled — Email + in-app"),
 
         # ── Overhaul Lifecycle ────────────────────────────────────────────────
         ("overhaul_stage_changed",

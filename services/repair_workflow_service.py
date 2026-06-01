@@ -943,6 +943,16 @@ class RepairWorkflowService:
         self.db.commit()
         self._log_audit(workflow_id, workflow.current_stage_id, "cancel", user_id, reason or "Workflow cancelled")
 
+        self._fire_notification_safe(
+            "repair_cancelled",
+            workflow,
+            None,
+            user_id,
+            status_from="active",
+            status_to="cancelled",
+            reason=reason,
+        )
+
         return {"message": "Workflow cancelled", "workflow_id": str(workflow_id)}
 
     def list_pending_assignments(self) -> list:
@@ -1911,6 +1921,7 @@ class RepairWorkflowService:
         stage_instance=None,
         status_from: Optional[str] = None,
         status_to: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> None:
         """
         Fire a notification for a workflow stage event, routing to the correct
@@ -2021,5 +2032,35 @@ class RepairWorkflowService:
                         workflow_type="repair_lifecycle",
                     )
 
-        except Exception as _n:
-            print(f"[WARN] notification failed ({event_type}): {_n}")
+            elif event_type == "repair_cancelled":
+                if wf_code == "OVERHAUL":
+                    actual_event = "overhaul_cancelled"
+                elif wf_code == "CALIBRATION":
+                    actual_event = "calibration_cancelled"
+                elif wf_code == "SURVEILLANCE":
+                    actual_event = "surveillance_cancelled"
+                else:
+                    actual_event = "repair_cancelled"
+
+                dept = getattr(equipment, "department_name", "") or ""
+                svc.fire(
+                    event_type=actual_event,
+                    context={
+                        "equipment":      eq_ueic,
+                        "equipment_type": eq_type,
+                        "department":     dept,
+                        "cancelled_by":   str(user_id),
+                        "cancel_reason":  reason or "",
+                    },
+                    organization_id=equipment.organization_id,
+                    department_id=equipment.department_id,
+                    source_id=workflow.id,
+                    source_type="repair_workflow",
+                    severity="alert",
+                    workflow_type="repair_lifecycle",
+                    status_from=status_from,
+                    status_to=status_to,
+                )
+        except Exception:
+            return
+
