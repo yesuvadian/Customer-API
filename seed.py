@@ -5702,29 +5702,74 @@ def migrate_report_tables(session):
             cts             TIMESTAMPTZ DEFAULT NOW()
         )
     """))
+    # ── Reporting Center columns (idempotent) ───────────────────────────────
+    session.execute(text("""
+        ALTER TABLE public.report_definitions
+            ADD COLUMN IF NOT EXISTS group_name         VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS notification_event VARCHAR(80)
+    """))
+    # ── extra_data on user notifications (for download URL etc.) ────────────
+    session.execute(text("""
+        ALTER TABLE public.user_notifications
+            ADD COLUMN IF NOT EXISTS extra_data JSONB
+    """))
+    # ── report_query_keys table ───────────────────────────────────────────
+    session.execute(text("""
+        CREATE TABLE IF NOT EXISTS public.report_query_keys (
+            key               VARCHAR(100) PRIMARY KEY,
+            label             VARCHAR(255) NOT NULL,
+            description       TEXT,
+            group_name        VARCHAR(100),
+            parameters_schema JSONB NOT NULL DEFAULT '{}',
+            is_active         BOOLEAN DEFAULT TRUE,
+            is_system         BOOLEAN DEFAULT TRUE,
+            sort_order        INTEGER DEFAULT 0,
+            cts               TIMESTAMPTZ DEFAULT NOW(),
+            mts               TIMESTAMPTZ DEFAULT NOW()
+        )
+    """))
+    # ── fallback_keys on notification_variables (replaces hardcoded _ALIASES) ─
+    session.execute(text("""
+        ALTER TABLE public.notification_variables
+            ADD COLUMN IF NOT EXISTS fallback_keys JSONB NOT NULL DEFAULT '[]'
+    """))
+    # ── sql_template + org_alias on report_query_keys (replaces _q_* methods) ─
+    session.execute(text("""
+        ALTER TABLE public.report_query_keys
+            ADD COLUMN IF NOT EXISTS sql_template TEXT,
+            ADD COLUMN IF NOT EXISTS org_alias    VARCHAR(10)
+    """))
     session.commit()
     print("[OK] report_definitions and report_logs tables ready.")
 
 
 def seed_report_definitions(session):
     """
-    Insert the 14 SRS report definitions as system rows.
-    Idempotent — skips rows that already exist (matched by query_key).
+    Insert/upsert system report definitions.
+    Idempotent — updates group_name/notification_event on existing rows,
+    inserts new rows if they don't exist yet.
     """
+    # fmt: (name, query_key, group_name, frequency, notification_event, output_format, description)
     DEFINITIONS = [
+        # ── Existing definitions — now enriched with group_name + notification_event ──────
         {
             "name": "Equipment Condition Summary",
             "description": "All active equipment with latest test condition (CRITICAL/ALERT/NORMAL/NOT_TESTED)",
             "query_key": "equipment_condition_summary",
             "output_format": "excel",
             "frequency": "on_demand",
+            "group_name": "Equipment Lifecycle",
+            "notification_event": None,
         },
+        # ── Testing Requests group ────────────────────────────────────────────────
         {
-            "name": "Overdue Tests",
-            "description": "Testing requests past their due date",
+            "name": "Overdue Test Report",
+            "description": "Tests past their due date with days-overdue count.",
             "query_key": "overdue_tests_report",
             "output_format": "excel",
-            "frequency": "daily",
+            "frequency": "monthly",
+            "group_name": "Testing Requests",
+            "notification_event": "overdue_report_ready",
         },
         {
             "name": "Active Alerts",
@@ -5732,41 +5777,26 @@ def seed_report_definitions(session):
             "query_key": "active_alerts_report",
             "output_format": "excel",
             "frequency": "daily",
+            "group_name": "Testing Requests",
+            "notification_event": None,
         },
         {
-            "name": "Flagged Equipment",
-            "description": "Equipment with CRITICAL or ALERT status (deduplicated)",
+            "name": "ALERT / CRITICAL Equipment Report",
+            "description": "All ALERT and CRITICAL equipment (deduplicated by UEIC).",
             "query_key": "flagged_equipment_report",
             "output_format": "excel",
             "frequency": "weekly",
+            "group_name": "Testing Requests",
+            "notification_event": "alert_report_ready",
         },
         {
-            "name": "Repair Lifecycle Progress",
-            "description": "Repair lifecycle requests with session progress",
-            "query_key": "repair_progress_report",
+            "name": "Test Compliance Status Report",
+            "description": "Test compliance % by zone / circle / substation.",
+            "query_key": "compliance_status_report",
             "output_format": "excel",
-            "frequency": "on_demand",
-        },
-        {
-            "name": "Maintenance Overdue",
-            "description": "Preventive maintenance requests past due date",
-            "query_key": "maintenance_overdue_report",
-            "output_format": "excel",
-            "frequency": "daily",
-        },
-        {
-            "name": "Procurement Pipeline",
-            "description": "All procurement requests with status",
-            "query_key": "procurement_pipeline_report",
-            "output_format": "excel",
-            "frequency": "weekly",
-        },
-        {
-            "name": "Open Remediation Records",
-            "description": "Pending recommendations awaiting approval",
-            "query_key": "open_remediation_report",
-            "output_format": "excel",
-            "frequency": "on_demand",
+            "frequency": "monthly",
+            "group_name": "Testing Requests",
+            "notification_event": "compliance_report_ready",
         },
         {
             "name": "Testing Request Status",
@@ -5774,6 +5804,8 @@ def seed_report_definitions(session):
             "query_key": "testing_request_status_report",
             "output_format": "excel",
             "frequency": "on_demand",
+            "group_name": "Testing Requests",
+            "notification_event": None,
         },
         {
             "name": "Test Results Summary",
@@ -5781,6 +5813,8 @@ def seed_report_definitions(session):
             "query_key": "test_results_summary_report",
             "output_format": "excel",
             "frequency": "weekly",
+            "group_name": "Testing Requests",
+            "notification_event": None,
         },
         {
             "name": "Recommendation Approvals",
@@ -5788,20 +5822,181 @@ def seed_report_definitions(session):
             "query_key": "recommendation_approval_report",
             "output_format": "excel",
             "frequency": "on_demand",
+            "group_name": "Testing Requests",
+            "notification_event": None,
+        },
+        # ── Equipment Lifecycle group ─────────────────────────────────────────────
+        {
+            "name": "Equipment Inventory Report",
+            "description": "Full equipment inventory with zone hierarchy, condition, age, and manufacturer.",
+            "query_key": "equipment_inventory_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Equipment Lifecycle",
+            "notification_event": None,
         },
         {
-            "name": "Compliance Status by Substation",
-            "description": "Equipment testing compliance rates grouped by substation",
-            "query_key": "compliance_status_report",
+            "name": "Equipment Lifecycle Summary",
+            "description": (
+                "One row per equipment unit showing commissioned date, total test count, "
+                "total failure count, last test date and result, and current status."
+            ),
+            "query_key": "equipment_lifecycle_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Equipment Lifecycle",
+            "notification_event": None,
+        },
+        {
+            "name": "Equipment Condition Summary",
+            "description": "All active equipment with latest test condition (CRITICAL/ALERT/NORMAL/NOT_TESTED)",
+            "query_key": "equipment_condition_summary",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Equipment Lifecycle",
+            "notification_event": None,
+        },
+        # ── Failure Register group ────────────────────────────────────────────────
+        {
+            "name": "Equipment Failure Annual Report",
+            "description": "Yearly failure summary grouped by equipment type, make, and model.",
+            "query_key": "equipment_failure_annual_report",
+            "output_format": "excel",
+            "frequency": "annual",
+            "group_name": "Failure Register",
+            "notification_event": "annual_failure_report_ready",
+        },
+        {
+            "name": "Equipment Failure Performance Analysis",
+            "description": "On-demand comparative failure-rate analysis across makes, types, voltage classes, and age bands.",
+            "query_key": "equipment_failure_performance_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Failure Register",
+            "notification_event": None,
+        },
+        {
+            "name": "Failure Resolution Report",
+            "description": "End-to-end traceability: each Failure Registry record with outcome and linked work-order status.",
+            "query_key": "failure_resolution_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Failure Register",
+            "notification_event": None,
+        },
+        # ── Stage Workflows group ─────────────────────────────────────────────────
+        {
+            "name": "Transformer Repair Status Report",
+            "description": "Repair lifecycle stage progress for Power Transformers with % completion and stage breakdown.",
+            "query_key": "transformer_repair_status_report",
             "output_format": "excel",
             "frequency": "monthly",
+            "group_name": "Stage Workflows",
+            "notification_event": "repair_report_ready",
         },
+        {
+            "name": "Repair Lifecycle Progress",
+            "description": "Repair lifecycle requests with session progress",
+            "query_key": "repair_progress_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Stage Workflows",
+            "notification_event": None,
+        },
+        {
+            "name": "Post-Repair Transformer Evaluation",
+            "description": "Pre vs post-repair test comparison. Auto-triggered on surveillance completion.",
+            "query_key": "post_repair_evaluation_report",
+            "output_format": "pdf",
+            "frequency": "on_demand",
+            "group_name": "Stage Workflows",
+            "notification_event": "post_repair_report_ready",
+        },
+        # ── Preventive Maintenance group ──────────────────────────────────────────
+        {
+            "name": "PM Compliance Report",
+            "description": "Preventive maintenance compliance % vs schedule, grouped by zone and circle.",
+            "query_key": "pm_compliance_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Preventive Maintenance",
+            "notification_event": "pm_report_ready",
+        },
+        {
+            "name": "Maintenance Overdue",
+            "description": "Preventive maintenance requests past due date",
+            "query_key": "maintenance_overdue_report",
+            "output_format": "excel",
+            "frequency": "daily",
+            "group_name": "Preventive Maintenance",
+            "notification_event": None,
+        },
+        {
+            "name": "Remedial Action Pending Report",
+            "description": "Pending remedial actions with ageing and action type.",
+            "query_key": "open_remediation_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Preventive Maintenance",
+            "notification_event": "remedial_report_ready",
+        },
+        {
+            "name": "Procurement Pipeline",
+            "description": "All procurement requests with status",
+            "query_key": "procurement_pipeline_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Preventive Maintenance",
+            "notification_event": None,
+        },
+        # ── TA&QC group ──────────────────────────────────────────────────────────
+        {
+            "name": "TA&QC Observation Compliance Report",
+            "description": "TA&QC observation compliance status with ageing.",
+            "query_key": "taqc_compliance_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "TA&QC",
+            "notification_event": "taqc_report_ready",
+        },
+        # ── Vendor & Repairer group ───────────────────────────────────────────────
+        {
+            "name": "Vendor Performance Ranking Report",
+            "description": "Vendor delivery timeliness and quality ranking.",
+            "query_key": "vendor_performance_report",
+            "output_format": "excel",
+            "frequency": "quarterly",
+            "group_name": "Vendor & Repairer",
+            "notification_event": "vendor_report_ready",
+        },
+        {
+            "name": "Repairer Performance Ranking Report",
+            "description": "Workshop / repairer turnaround time and post-repair quality ranking.",
+            "query_key": "repairer_performance_report",
+            "output_format": "excel",
+            "frequency": "annual",
+            "group_name": "Vendor & Repairer",
+            "notification_event": "repairer_report_ready",
+        },
+        # ── Equipment Operations group ────────────────────────────────────────────
+        {
+            "name": "OLTC / CB Operations Count Report",
+            "description": "OLTC tap change and CB operation counts vs thresholds.",
+            "query_key": "oltc_cb_operations_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Equipment Operations",
+            "notification_event": "oltc_report_ready",
+        },
+        # ── KPI / Performance group ───────────────────────────────────────────────
         {
             "name": "Tester Performance",
             "description": "Tester completion rates and average turnaround times",
             "query_key": "tester_performance_report",
             "output_format": "excel",
             "frequency": "monthly",
+            "group_name": "KPI & Performance",
+            "notification_event": None,
         },
         {
             "name": "Monthly KPI Summary",
@@ -5809,78 +6004,1103 @@ def seed_report_definitions(session):
             "query_key": "monthly_kpi_report",
             "output_format": "excel",
             "frequency": "monthly",
-        },
-        # §3.3.3 Equipment Failure Registry
-        {
-            "name": "Equipment Failure Annual Report",
-            "description": (
-                "Yearly failure summary grouped by equipment type, make, and model. "
-                "Available as PDF or Excel. Auto-generated each calendar year."
-            ),
-            "query_key": "equipment_failure_annual_report",
-            "output_format": "excel",
-            "frequency": "annual",
-        },
-        {
-            "name": "Equipment Failure Performance Analysis",
-            "description": (
-                "On-demand report comparing failure rates across makes, equipment types, "
-                "voltage classes, and age bands."
-            ),
-            "query_key": "equipment_failure_performance_report",
-            "output_format": "excel",
-            "frequency": "on_demand",
-        },
-        # §3.3.4 Failure Resolution
-        {
-            "name": "Failure Resolution Report",
-            "description": (
-                "End-to-end traceability: each Failure Registry record with its outcome "
-                "(Repair / Replacement / Under Investigation) and the linked Repair Lifecycle "
-                "work-order status. Supports date range and outcome filters."
-            ),
-            "query_key": "failure_resolution_report",
-            "output_format": "excel",
-            "frequency": "on_demand",
-        },
-        # §3.5 Equipment Lifecycle
-        {
-            "name": "Equipment Lifecycle Summary",
-            "description": (
-                "One row per equipment unit showing commissioned date, total test count, "
-                "total failure count, last test date and result, and current status. "
-                "Supports filters: status, voltage_class, department_id, date_from, date_to "
-                "(commissioned date range)."
-            ),
-            "query_key": "equipment_lifecycle_report",
-            "output_format": "excel",
-            "frequency": "on_demand",
+            "group_name": "KPI & Performance",
+            "notification_event": None,
         },
     ]
 
-    created = 0
+    created = updated = 0
     for d in DEFINITIONS:
         existing = session.query(ReportDefinition).filter_by(
             query_key=d["query_key"]
         ).first()
         if existing:
-            continue
-        session.add(ReportDefinition(
-            name=d["name"],
-            description=d["description"],
-            query_key=d["query_key"],
-            parameters={},
-            output_format=d["output_format"],
-            frequency=d["frequency"],
-            recipient_roles=[],
-            is_active=True,
-            is_system=True,
-        ))
-        created += 1
+            # Upsert: refresh group_name + notification_event on existing rows
+            existing.group_name         = d.get("group_name")
+            existing.notification_event = d.get("notification_event")
+            existing.name               = d["name"]          # keep name current
+            updated += 1
+        else:
+            session.add(ReportDefinition(
+                name=d["name"],
+                description=d["description"],
+                query_key=d["query_key"],
+                parameters={},
+                output_format=d["output_format"],
+                frequency=d["frequency"],
+                group_name=d.get("group_name"),
+                notification_event=d.get("notification_event"),
+                recipient_roles=[],
+                is_active=True,
+                is_system=True,
+            ))
+            created += 1
 
     session.commit()
-    print(f"[OK] Report definitions seeded: {created} created, "
-          f"{len(DEFINITIONS) - created} already existed.")
+    print(f"[OK] Report definitions seeded: {created} created, {updated} updated.")
+
+
+def seed_report_query_keys(session):
+    """
+    Idempotent upsert of all report query keys.
+
+    Each entry carries:
+      sql_template  — full parameterised SQL (no Python string formatting).
+                      Use {org_clause} where org scoping goes; use :name bind
+                      params for every filter.  NULL-safe guards make every
+                      filter optional.
+      org_alias     — table alias for org scoping, e.g. "tr", "e", "res".
+    """
+    from models import ReportQueryKey
+
+    # ── SQL helpers reused across queries ─────────────────────────────────────
+    # All queries use {org_clause} which the engine replaces at runtime with
+    # "AND <alias>.organization_id = :org_id"  (or "" when no org is set).
+    # ─────────────────────────────────────────────────────────────────────────
+
+    KEYS = [
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Testing Requests
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="overdue_tests_report",
+            label="Overdue Test Report",
+            group_name="Testing Requests",
+            description="Tests past their due date with days-overdue count.",
+            parameters_schema={"date_from": "date", "date_to": "date"},
+            sort_order=10,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    tr.request_number,
+    tr.title,
+    tr.zone,
+    tr.ce_circle,
+    tr.ee_subdivision,
+    tr.status,
+    tr.priority,
+    tr.due_date::date                         AS due_date,
+    (NOW()::date - tr.due_date::date)         AS days_overdue,
+    e.ueic,
+    cm.name                                   AS equipment_type,
+    cd.name                                   AS test_type
+FROM   public.testing_requests tr
+LEFT JOIN public.equipment         e  ON e.id  = tr.equipment_id
+LEFT JOIN public."CategoryMaster"  cm ON cm.id = tr.equipment_type_id
+LEFT JOIN public."CategoryDetails" cd ON cd.id = tr.test_type_id
+WHERE  tr.request_category = 'test'
+  AND  tr.due_date IS NOT NULL
+  AND  tr.due_date < NOW()
+  AND  tr.status IN ('submitted','assigned','accepted','in_progress',
+                     'test_submitted','under_approval')
+  {org_clause}
+  AND  (:date_from::date IS NULL OR tr.due_date >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR tr.due_date <= :date_to::date)
+ORDER  BY tr.due_date ASC
+"""),
+
+        dict(
+            key="active_alerts_report",
+            label="Active Alerts",
+            group_name="Testing Requests",
+            description="Test results with CRITICAL or ALERT evaluation.",
+            parameters_schema={"severity": "string", "date_from": "date", "date_to": "date"},
+            sort_order=20,
+            org_alias="res",
+            sql_template="""
+SELECT
+    tr.request_number,
+    e.ueic,
+    cm.name                                 AS equipment_type,
+    tr.zone,
+    tr.ee_subdivision,
+    res.test_name,
+    res.evaluation_result->>'overall'       AS severity,
+    res.tested_at,
+    u.email                                 AS tested_by
+FROM   public.test_results res
+JOIN   public.testing_requests   tr ON tr.id  = res.testing_request_id
+LEFT JOIN public.equipment        e  ON e.id  = tr.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+LEFT JOIN public.users            u  ON u.id  = res.tested_by
+WHERE  res.evaluation_result IS NOT NULL
+  AND  res.evaluation_result->>'overall' IN ('CRITICAL','ALERT')
+  AND  (:severity IS NULL OR :severity = 'all'
+        OR res.evaluation_result->>'overall' = :severity)
+  {org_clause}
+  AND  (:date_from::date IS NULL OR res.tested_at >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR res.tested_at <= :date_to::date)
+ORDER  BY res.tested_at DESC
+LIMIT  500
+"""),
+
+        dict(
+            key="flagged_equipment_report",
+            label="ALERT / CRITICAL Equipment Report",
+            group_name="Testing Requests",
+            description="All ALERT and CRITICAL equipment (deduplicated by UEIC).",
+            parameters_schema={},
+            sort_order=30,
+            org_alias="res",
+            sql_template="""
+SELECT DISTINCT ON (e.id)
+    e.ueic,
+    d.name                              AS substation,
+    cm.name                             AS equipment_type,
+    e.voltage_class,
+    res.evaluation_result->>'overall'   AS condition,
+    res.tested_at                       AS last_tested_at,
+    tr.zone,
+    tr.ee_subdivision
+FROM   public.test_results res
+JOIN   public.testing_requests   tr ON tr.id = res.testing_request_id
+JOIN   public.equipment          e  ON e.id  = tr.equipment_id
+LEFT JOIN public.org_departments d  ON d.id  = e.department_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+WHERE  res.evaluation_result IS NOT NULL
+  AND  res.evaluation_result->>'overall' IN ('CRITICAL','ALERT')
+  {org_clause}
+ORDER  BY e.id, res.tested_at DESC
+"""),
+
+        dict(
+            key="compliance_status_report",
+            label="Test Compliance Status Report",
+            group_name="Testing Requests",
+            description="Test compliance % by zone / circle / substation.",
+            parameters_schema={"period_days": "int"},
+            sort_order=40,
+            org_alias="e",
+            sql_template="""
+SELECT
+    d.name                              AS substation,
+    tr_agg.zone,
+    COUNT(DISTINCT e.id)                AS total_equipment,
+    COUNT(DISTINCT CASE
+        WHEN latest_tr.completed_at >=
+             NOW() - (INTERVAL '1 day' * COALESCE(:period_days, 365))
+        THEN e.id END)                  AS tested_in_period,
+    ROUND(
+        100.0
+        * COUNT(DISTINCT CASE
+            WHEN latest_tr.completed_at >=
+                 NOW() - (INTERVAL '1 day' * COALESCE(:period_days, 365))
+            THEN e.id END)
+        / NULLIF(COUNT(DISTINCT e.id), 0), 1
+    )                                   AS compliance_pct,
+    COUNT(DISTINCT CASE
+        WHEN latest_res.condition = 'CRITICAL' THEN e.id END) AS critical_count,
+    COUNT(DISTINCT CASE
+        WHEN latest_res.condition = 'ALERT'    THEN e.id END) AS alert_count
+FROM   public.equipment e
+LEFT JOIN public.org_departments  d      ON d.id = e.department_id
+LEFT JOIN public.testing_requests tr_agg ON tr_agg.equipment_id = e.id
+LEFT JOIN LATERAL (
+    SELECT completed_at FROM public.testing_requests
+    WHERE  equipment_id = e.id AND status = 'completed'
+    ORDER  BY completed_at DESC LIMIT 1
+) latest_tr ON true
+LEFT JOIN LATERAL (
+    SELECT res.evaluation_result->>'overall' AS condition
+    FROM   public.test_results res
+    JOIN   public.testing_requests req ON req.id = res.testing_request_id
+    WHERE  req.equipment_id = e.id AND res.evaluation_result IS NOT NULL
+    ORDER  BY res.tested_at DESC LIMIT 1
+) latest_res ON true
+WHERE  e.status = 'active'
+{org_clause}
+GROUP  BY d.name, tr_agg.zone
+ORDER  BY compliance_pct ASC NULLS FIRST
+"""),
+
+        dict(
+            key="testing_request_status_report",
+            label="Testing Request Status",
+            group_name="Testing Requests",
+            description="All testing requests with current status and assignment.",
+            parameters_schema={"date_from": "date", "date_to": "date",
+                               "status": "string", "category": "string"},
+            sort_order=50,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    tr.request_number,
+    tr.title,
+    tr.request_category,
+    tr.status,
+    tr.priority,
+    tr.zone,
+    tr.ce_circle,
+    tr.ee_subdivision,
+    tr.cts::date          AS created_date,
+    tr.due_date::date     AS due_date,
+    tr.completed_at::date AS completed_date,
+    e.ueic,
+    cm.name               AS equipment_type,
+    cd.name               AS test_type,
+    u_o.email             AS originator,
+    u_t.email             AS assigned_tester
+FROM   public.testing_requests tr
+LEFT JOIN public.equipment         e   ON e.id   = tr.equipment_id
+LEFT JOIN public."CategoryMaster"  cm  ON cm.id  = tr.equipment_type_id
+LEFT JOIN public."CategoryDetails" cd  ON cd.id  = tr.test_type_id
+LEFT JOIN public.users             u_o ON u_o.id = tr.originator_id
+LEFT JOIN public.users             u_t ON u_t.id = tr.assigned_tester_id
+WHERE  1=1
+  {org_clause}
+  AND  (:status   IS NULL OR :status   = 'all' OR tr.status            = :status)
+  AND  (:category IS NULL OR :category = 'all' OR tr.request_category  = :category)
+  AND  (:date_from::date IS NULL OR tr.cts >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR tr.cts <= :date_to::date)
+ORDER  BY tr.cts DESC
+"""),
+
+        dict(
+            key="test_results_summary_report",
+            label="Test Results Summary",
+            group_name="Testing Requests",
+            description="Test results with evaluation outcomes.",
+            parameters_schema={"date_from": "date", "date_to": "date", "severity": "string"},
+            sort_order=60,
+            org_alias="res",
+            sql_template="""
+SELECT
+    tr.request_number,
+    e.ueic,
+    cm.name                                 AS equipment_type,
+    res.test_name,
+    res.template_key,
+    res.overall_result,
+    res.evaluation_result->>'overall'       AS evaluation_overall,
+    res.pass_fail,
+    res.tested_at,
+    u.email                                 AS tested_by,
+    tr.zone,
+    tr.ee_subdivision
+FROM   public.test_results res
+JOIN   public.testing_requests   tr ON tr.id  = res.testing_request_id
+LEFT JOIN public.equipment        e  ON e.id  = tr.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+LEFT JOIN public.users            u  ON u.id  = res.tested_by
+WHERE  1=1
+  {org_clause}
+  AND  (:severity IS NULL OR :severity = 'all'
+        OR res.evaluation_result->>'overall' = :severity)
+  AND  (:date_from::date IS NULL OR res.tested_at >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR res.tested_at <= :date_to::date)
+ORDER  BY res.tested_at DESC
+LIMIT  1000
+"""),
+
+        dict(
+            key="recommendation_approval_report",
+            label="Recommendation Approvals",
+            group_name="Testing Requests",
+            description="Recommendations with approval status and notes.",
+            parameters_schema={"status": "string"},
+            sort_order=70,
+            org_alias="rec",
+            sql_template="""
+SELECT
+    tr.request_number,
+    e.ueic,
+    cm.name               AS equipment_type,
+    rec.recommendation_type,
+    rec.approval_status,
+    rec.summary,
+    rec.cts::date         AS submitted_date,
+    rec.approved_at::date AS approved_date,
+    rec.approval_notes,
+    u_s.email             AS submitted_by,
+    u_a.email             AS approved_by
+FROM   public.recommendations rec
+JOIN   public.testing_requests   tr  ON tr.id   = rec.testing_request_id
+LEFT JOIN public.equipment        e   ON e.id   = tr.equipment_id
+LEFT JOIN public."CategoryMaster" cm  ON cm.id  = tr.equipment_type_id
+LEFT JOIN public.users            u_s ON u_s.id = rec.submitted_by
+LEFT JOIN public.users            u_a ON u_a.id = rec.approved_by
+WHERE  1=1
+  {org_clause}
+  AND  (:status IS NULL OR :status = 'all' OR rec.approval_status = :status)
+ORDER  BY rec.cts DESC
+"""),
+
+        dict(
+            key="tester_performance_report",
+            label="Tester Performance",
+            group_name="Testing Requests",
+            description="Tester completion rates and average turnaround times.",
+            parameters_schema={"date_from": "date", "date_to": "date"},
+            sort_order=80,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    u.email                                 AS tester_email,
+    TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')) AS tester_name,
+    COUNT(tr.id)                            AS total_assigned,
+    COUNT(CASE WHEN tr.status='completed'   THEN 1 END) AS completed,
+    COUNT(CASE WHEN tr.status='in_progress' THEN 1 END) AS in_progress,
+    COUNT(CASE WHEN tr.status='rejected'    THEN 1 END) AS rejected,
+    ROUND(AVG(CASE
+        WHEN tr.status='completed'
+         AND tr.completed_at IS NOT NULL
+         AND tr.assigned_at  IS NOT NULL
+        THEN EXTRACT(EPOCH FROM (tr.completed_at - tr.assigned_at)) / 86400.0
+    END), 1)                                AS avg_days_to_complete
+FROM   public.testing_requests tr
+JOIN   public.users u ON u.id = tr.assigned_tester_id
+WHERE  tr.assigned_tester_id IS NOT NULL
+  {org_clause}
+  AND  (:date_from::date IS NULL OR tr.cts >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR tr.cts <= :date_to::date)
+GROUP  BY u.id, u.email, u.firstname, u.lastname
+ORDER  BY completed DESC
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Equipment Lifecycle
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="equipment_condition_summary",
+            label="Equipment Condition Summary",
+            group_name="Equipment Lifecycle",
+            description="All active equipment with latest test condition "
+                        "(CRITICAL/ALERT/NORMAL/NOT_TESTED).",
+            parameters_schema={},
+            sort_order=10,
+            org_alias="e",
+            sql_template="""
+SELECT
+    e.ueic,
+    d.name                              AS department,
+    cm.name                             AS equipment_type,
+    e.voltage_class,
+    e.status                            AS equipment_status,
+    e.manufacturer,
+    e.year_of_manufacture,
+    COALESCE(lat.evaluation_result->>'overall', 'NOT_TESTED') AS condition,
+    lat.tested_at                       AS last_tested_at,
+    lat.test_name                       AS last_test_name
+FROM   public.equipment e
+LEFT JOIN public.org_departments  d  ON d.id  = e.department_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+LEFT JOIN LATERAL (
+    SELECT res.evaluation_result, res.tested_at, res.test_name
+    FROM   public.test_results res
+    JOIN   public.testing_requests req ON req.id = res.testing_request_id
+    WHERE  req.equipment_id = e.id AND res.evaluation_result IS NOT NULL
+    ORDER  BY res.tested_at DESC NULLS LAST
+    LIMIT  1
+) lat ON true
+WHERE  e.status != 'retired'
+{org_clause}
+ORDER  BY e.ueic
+"""),
+
+        dict(
+            key="equipment_inventory_report",
+            label="Equipment Inventory Report",
+            group_name="Equipment Lifecycle",
+            description="Full equipment inventory with zone hierarchy, condition, age, "
+                        "and manufacturer.",
+            parameters_schema={"equipment_type": "string", "voltage_class": "string",
+                               "department_id": "uuid"},
+            sort_order=20,
+            org_alias="e",
+            sql_template="""
+SELECT
+    e.ueic,
+    cm.name                             AS equipment_type,
+    e.voltage_class,
+    e.manufacturer,
+    e.model_number,
+    e.factory_serial_number,
+    e.year_of_manufacture,
+    e.commissioned_date,
+    e.status,
+    d.name                              AS substation,
+    d2.name                             AS ee_subdivision,
+    d3.name                             AS ce_circle,
+    d4.name                             AS zone,
+    COALESCE(lat.evaluation_result->>'overall', 'NOT_TESTED') AS condition
+FROM   public.equipment e
+LEFT JOIN public.org_departments  d   ON d.id   = e.department_id
+LEFT JOIN public.org_departments  d2  ON d2.id  = d.parent_department_id
+LEFT JOIN public.org_departments  d3  ON d3.id  = d2.parent_department_id
+LEFT JOIN public.org_departments  d4  ON d4.id  = d3.parent_department_id
+LEFT JOIN public."CategoryMaster" cm  ON cm.id  = e.equipment_type_id
+LEFT JOIN LATERAL (
+    SELECT res.evaluation_result
+    FROM   public.test_results res
+    JOIN   public.testing_requests req ON req.id = res.testing_request_id
+    WHERE  req.equipment_id = e.id AND res.evaluation_result IS NOT NULL
+    ORDER  BY res.tested_at DESC NULLS LAST LIMIT 1
+) lat ON true
+WHERE  e.status != 'retired'
+  {org_clause}
+  AND  (:equipment_type IS NULL
+        OR cm.name ILIKE '%' || :equipment_type || '%')
+  AND  (:voltage_class  IS NULL OR e.voltage_class  = :voltage_class)
+  AND  (:department_id  IS NULL OR e.department_id  = :department_id::uuid)
+ORDER  BY d4.name NULLS LAST, d3.name NULLS LAST, d.name, e.ueic
+"""),
+
+        dict(
+            key="equipment_lifecycle_report",
+            label="Equipment Lifecycle Summary",
+            group_name="Equipment Lifecycle",
+            description="One row per equipment unit: commissioned date, test count, "
+                        "failure count, last result.",
+            parameters_schema={"status": "string", "voltage_class": "string",
+                               "department_id": "uuid",
+                               "date_from": "date", "date_to": "date"},
+            sort_order=30,
+            org_alias="e",
+            sql_template="""
+SELECT
+    e.ueic,
+    cm.name                             AS equipment_type,
+    e.voltage_class,
+    e.manufacturer,
+    e.status,
+    d.name                              AS department,
+    e.commissioned_date,
+    COUNT(DISTINCT tr.id)               AS total_tests,
+    COUNT(DISTINCT fr.id)               AS total_failures,
+    MAX(res.tested_at)                  AS last_tested_at,
+    (SELECT res2.evaluation_result->>'overall'
+     FROM   public.test_results res2
+     JOIN   public.testing_requests req2 ON req2.id = res2.testing_request_id
+     WHERE  req2.equipment_id = e.id
+     ORDER  BY res2.tested_at DESC LIMIT 1) AS last_result
+FROM   public.equipment e
+LEFT JOIN public.org_departments  d   ON d.id  = e.department_id
+LEFT JOIN public."CategoryMaster" cm  ON cm.id = e.equipment_type_id
+LEFT JOIN public.testing_requests tr  ON tr.equipment_id = e.id
+LEFT JOIN public.failure_registry fr  ON fr.equipment_id = e.id
+LEFT JOIN public.test_results     res ON res.testing_request_id = tr.id
+WHERE  1=1
+  {org_clause}
+  AND  (:status        IS NULL OR e.status        = :status)
+  AND  (:voltage_class IS NULL OR e.voltage_class = :voltage_class)
+  AND  (:department_id IS NULL OR e.department_id = :department_id::uuid)
+  AND  (:date_from::date IS NULL OR e.commissioned_date >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR e.commissioned_date <= :date_to::date)
+GROUP  BY e.id, e.ueic, cm.name, e.voltage_class, e.manufacturer,
+          e.status, d.name, e.commissioned_date
+ORDER  BY e.ueic
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Failure Register
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="equipment_failure_annual_report",
+            label="Equipment Failure Annual Report",
+            group_name="Failure Register",
+            description="Yearly failure summary grouped by equipment type, make, "
+                        "and voltage class.",
+            parameters_schema={"year": "int"},
+            sort_order=10,
+            org_alias="fr",
+            sql_template="""
+SELECT
+    cm.name                                        AS equipment_type,
+    e.manufacturer                                 AS make,
+    e.voltage_class,
+    COUNT(fr.id)                                   AS failure_count,
+    COUNT(DISTINCT e.id)                           AS units_affected,
+    STRING_AGG(DISTINCT fr.failure_category, ', ') AS failure_categories
+FROM   public.failure_registry fr
+JOIN   public.equipment        e   ON e.id   = fr.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+WHERE  EXTRACT(YEAR FROM fr.cts)
+         = COALESCE(:year, EXTRACT(YEAR FROM NOW())::int - 1)
+  {org_clause}
+GROUP  BY cm.name, e.manufacturer, e.voltage_class
+ORDER  BY failure_count DESC
+"""),
+
+        dict(
+            key="equipment_failure_performance_report",
+            label="Equipment Failure Performance Analysis",
+            group_name="Failure Register",
+            description="Comparative failure-rate analysis across makes, types, "
+                        "voltage classes, and age bands.",
+            parameters_schema={"equipment_type": "string", "make": "string",
+                               "voltage_class": "string",
+                               "date_from": "date", "date_to": "date"},
+            sort_order=20,
+            org_alias="fr",
+            sql_template="""
+SELECT
+    cm.name                     AS equipment_type,
+    e.manufacturer              AS make,
+    e.voltage_class,
+    CASE
+        WHEN (DATE_PART('year', NOW()) - e.year_of_manufacture::int)
+             BETWEEN 0  AND 10 THEN '0-10 years'
+        WHEN (DATE_PART('year', NOW()) - e.year_of_manufacture::int)
+             BETWEEN 11 AND 20 THEN '11-20 years'
+        ELSE '>20 years'
+    END                         AS age_band,
+    COUNT(fr.id)                AS failure_count,
+    COUNT(DISTINCT e.id)        AS unit_count,
+    ROUND(COUNT(fr.id)::numeric / NULLIF(COUNT(DISTINCT e.id), 0), 2)
+                                AS failure_rate_per_unit
+FROM   public.failure_registry fr
+JOIN   public.equipment        e   ON e.id   = fr.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+WHERE  1=1
+  {org_clause}
+  AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
+  AND  (:equipment_type  IS NULL
+        OR cm.name ILIKE '%' || :equipment_type || '%')
+  AND  (:make            IS NULL
+        OR e.manufacturer ILIKE '%' || :make || '%')
+  AND  (:voltage_class   IS NULL OR e.voltage_class = :voltage_class)
+GROUP  BY cm.name, e.manufacturer, e.voltage_class, age_band
+ORDER  BY failure_rate_per_unit DESC NULLS LAST
+"""),
+
+        dict(
+            key="failure_resolution_report",
+            label="Failure Resolution Report",
+            group_name="Failure Register",
+            description="Each Failure Registry record with outcome and linked "
+                        "work-order status.",
+            parameters_schema={"date_from": "date", "date_to": "date",
+                               "outcome": "string"},
+            sort_order=30,
+            org_alias="fr",
+            sql_template="""
+SELECT
+    fr.fr_number,
+    e.ueic                      AS equipment_ueic,
+    cm.name                     AS equipment_type,
+    fr.failure_category,
+    fr.next_action              AS resolution_outcome,
+    fr.approval_status,
+    fr.cts::date                AS failure_date,
+    wf.status                   AS linked_workflow_status,
+    wf.id                       AS linked_workflow_id
+FROM   public.failure_registry fr
+JOIN   public.equipment        e   ON e.id   = fr.equipment_id
+LEFT JOIN public."CategoryMaster"   cm ON cm.id = e.equipment_type_id
+LEFT JOIN public.workflow_sessions  wf ON wf.source_fr_id = fr.id
+WHERE  1=1
+  {org_clause}
+  AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
+  AND  (:outcome IS NULL OR :outcome = 'all' OR fr.next_action = :outcome)
+ORDER  BY fr.cts DESC
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Stage Workflows
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="transformer_repair_status_report",
+            label="Transformer Repair Status Report",
+            group_name="Stage Workflows",
+            description="Repair lifecycle stage progress for Power Transformers "
+                        "with % completion.",
+            parameters_schema={"date_from": "date", "date_to": "date",
+                               "department_id": "uuid"},
+            sort_order=10,
+            org_alias="wf",
+            sql_template="""
+SELECT
+    e.ueic,
+    e.manufacturer,
+    e.voltage_class,
+    d.name                          AS department,
+    wf.id                           AS workflow_id,
+    wf.status                       AS workflow_status,
+    wf.cts::date                    AS started_date,
+    wf.last_stage_name              AS current_stage,
+    wf.completed_stages             AS stages_done,
+    wf.total_stages                 AS stages_total,
+    ROUND(
+        COALESCE(wf.completed_stages, 0)::numeric
+        / NULLIF(wf.total_stages, 0) * 100, 1
+    )                               AS pct_complete,
+    EXTRACT(DAY FROM NOW() - wf.cts)::int AS days_elapsed
+FROM   public.workflow_sessions wf
+JOIN   public.equipment          e ON e.id  = wf.equipment_id
+LEFT JOIN public.org_departments d ON d.id  = wf.department_id
+WHERE  wf.workflow_type = 'repair_lifecycle'
+  AND  e.equipment_type_id IN (
+           SELECT id FROM public."CategoryMaster"
+           WHERE  name ILIKE '%transformer%')
+  {org_clause}
+  AND  (:date_from::date IS NULL OR wf.cts >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR wf.cts <= :date_to::date)
+  AND  (:department_id   IS NULL OR wf.department_id = :department_id::uuid)
+ORDER  BY wf.cts DESC
+"""),
+
+        dict(
+            key="repair_progress_report",
+            label="Repair Lifecycle Progress",
+            group_name="Stage Workflows",
+            description="Repair lifecycle requests with session progress.",
+            parameters_schema={},
+            sort_order=20,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    tr.request_number,
+    e.ueic,
+    cm.name                             AS equipment_type,
+    tr.title,
+    tr.status,
+    tr.total_sessions_planned,
+    tr.requested_date::date             AS requested_date,
+    tr.due_date::date                   AS due_date,
+    tr.zone,
+    tr.ee_subdivision,
+    COUNT(ts.id)                        AS sessions_completed
+FROM   public.testing_requests tr
+LEFT JOIN public.equipment        e  ON e.id  = tr.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+LEFT JOIN public.test_sessions    ts
+       ON ts.testing_request_id = tr.id AND ts.status = 'completed'
+WHERE  tr.request_category = 'repair_lifecycle'
+  AND  tr.status IN ('submitted','assigned','accepted','in_progress',
+                     'test_submitted','under_approval')
+  {org_clause}
+GROUP  BY tr.id, e.ueic, cm.name
+ORDER  BY tr.cts DESC
+"""),
+
+        dict(
+            key="post_repair_evaluation_report",
+            label="Post-Repair Transformer Evaluation",
+            group_name="Stage Workflows",
+            description="Pre vs post-repair test comparison for surveillance-completed "
+                        "workflows.",
+            parameters_schema={"workflow_id": "uuid",
+                               "date_from": "date", "date_to": "date"},
+            sort_order=30,
+            org_alias="wf",
+            sql_template="""
+SELECT
+    e.ueic,
+    e.manufacturer,
+    e.voltage_class,
+    d.name                              AS department,
+    wf.id                               AS workflow_id,
+    wf.completed_at::date               AS completion_date,
+    pre.evaluation_result ->>'overall'  AS pre_repair_result,
+    post.evaluation_result->>'overall'  AS post_repair_result,
+    pre.tested_at                       AS pre_repair_tested_at,
+    post.tested_at                      AS post_repair_tested_at
+FROM   public.workflow_sessions wf
+JOIN   public.equipment          e  ON e.id  = wf.equipment_id
+LEFT JOIN public.org_departments d  ON d.id  = wf.department_id
+LEFT JOIN LATERAL (
+    SELECT res.evaluation_result, res.tested_at
+    FROM   public.test_results res
+    JOIN   public.testing_requests req ON req.id = res.testing_request_id
+    WHERE  req.equipment_id = e.id AND res.tested_at < wf.cts
+    ORDER  BY res.tested_at DESC LIMIT 1
+) pre  ON true
+LEFT JOIN LATERAL (
+    SELECT res.evaluation_result, res.tested_at
+    FROM   public.test_results res
+    JOIN   public.testing_requests req ON req.id = res.testing_request_id
+    WHERE  req.equipment_id = e.id
+      AND  req.category     = 'surveillance'
+      AND  res.tested_at    > wf.completed_at
+    ORDER  BY res.tested_at ASC LIMIT 1
+) post ON true
+WHERE  wf.workflow_type  = 'repair_lifecycle'
+  AND  wf.completed_at IS NOT NULL
+  {org_clause}
+  AND  (:workflow_id IS NULL OR wf.id = :workflow_id::uuid)
+  AND  (:date_from::date IS NULL OR wf.completed_at >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR wf.completed_at <= :date_to::date)
+ORDER  BY wf.completed_at DESC
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Preventive Maintenance
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="pm_compliance_report",
+            label="PM Compliance Report",
+            group_name="Preventive Maintenance",
+            description="Preventive maintenance compliance % vs schedule, "
+                        "grouped by zone and circle.",
+            parameters_schema={"month": "int", "year": "int", "department_id": "uuid"},
+            sort_order=10,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    d4.name                         AS zone,
+    d3.name                         AS ce_circle,
+    d2.name                         AS ee_subdivision,
+    d.name                          AS substation,
+    COUNT(tr.id)                    AS scheduled,
+    COUNT(CASE WHEN tr.status = 'completed' THEN 1 END) AS completed,
+    ROUND(
+        COUNT(CASE WHEN tr.status = 'completed' THEN 1 END)::numeric
+        / NULLIF(COUNT(tr.id), 0) * 100, 1
+    )                               AS compliance_pct
+FROM   public.testing_requests tr
+JOIN   public.equipment          e  ON e.id   = tr.equipment_id
+LEFT JOIN public.org_departments d  ON d.id   = e.department_id
+LEFT JOIN public.org_departments d2 ON d2.id  = d.parent_department_id
+LEFT JOIN public.org_departments d3 ON d3.id  = d2.parent_department_id
+LEFT JOIN public.org_departments d4 ON d4.id  = d3.parent_department_id
+WHERE  tr.category = 'maintenance'
+  AND  EXTRACT(MONTH FROM tr.due_date)
+         = COALESCE(:month, EXTRACT(MONTH FROM NOW()))
+  AND  EXTRACT(YEAR  FROM tr.due_date)
+         = COALESCE(:year,  EXTRACT(YEAR  FROM NOW()))
+  {org_clause}
+  AND  (:department_id IS NULL OR d.id = :department_id::uuid)
+GROUP  BY d4.name, d3.name, d2.name, d.name
+ORDER  BY zone NULLS LAST, ce_circle NULLS LAST,
+          ee_subdivision NULLS LAST, d.name
+"""),
+
+        dict(
+            key="maintenance_overdue_report",
+            label="Maintenance Overdue",
+            group_name="Preventive Maintenance",
+            description="Preventive maintenance requests past due date.",
+            parameters_schema={},
+            sort_order=20,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    tr.request_number,
+    tr.title,
+    tr.zone,
+    tr.ee_subdivision,
+    tr.status,
+    tr.due_date::date                         AS due_date,
+    (NOW()::date - tr.due_date::date)         AS days_overdue,
+    e.ueic,
+    cm.name                                   AS equipment_type
+FROM   public.testing_requests tr
+LEFT JOIN public.equipment        e  ON e.id  = tr.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+WHERE  tr.request_category = 'maintenance'
+  AND  tr.due_date IS NOT NULL
+  AND  tr.due_date < NOW()
+  AND  tr.status IN ('submitted','assigned','accepted','in_progress',
+                     'test_submitted','under_approval')
+  {org_clause}
+ORDER  BY tr.due_date ASC
+"""),
+
+        dict(
+            key="open_remediation_report",
+            label="Remedial Action Pending Report",
+            group_name="Preventive Maintenance",
+            description="Pending remedial actions with ageing and action type.",
+            parameters_schema={},
+            sort_order=30,
+            org_alias="rec",
+            sql_template="""
+SELECT
+    tr.request_number,
+    e.ueic,
+    cm.name                                 AS equipment_type,
+    rec.recommendation_type,
+    rec.approval_status,
+    rec.summary,
+    rec.cts::date                           AS raised_date,
+    (NOW()::date - rec.cts::date)           AS days_open,
+    u.email                                 AS submitted_by,
+    tr.due_date::date                       AS due_date
+FROM   public.recommendations rec
+JOIN   public.testing_requests   tr ON tr.id  = rec.testing_request_id
+LEFT JOIN public.equipment        e  ON e.id  = tr.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+LEFT JOIN public.users            u  ON u.id  = rec.submitted_by
+WHERE  rec.approval_status = 'pending'
+  {org_clause}
+ORDER  BY rec.cts ASC
+"""),
+
+        dict(
+            key="procurement_pipeline_report",
+            label="Procurement Pipeline",
+            group_name="Preventive Maintenance",
+            description="All procurement requests with status.",
+            parameters_schema={"status": "string"},
+            sort_order=40,
+            org_alias="pr",
+            sql_template="""
+SELECT
+    pr.procurement_number,
+    pr.title,
+    pr.status,
+    pr.estimated_cost,
+    pr.quantity,
+    pr.raised_at::date  AS raised_date,
+    tr.request_number   AS linked_request,
+    u.email             AS raised_by
+FROM   public.procurement_requests pr
+LEFT JOIN public.testing_requests tr ON tr.id = pr.testing_request_id
+LEFT JOIN public.users            u  ON u.id  = pr.raised_by
+WHERE  1=1
+  {org_clause}
+  AND  (:status IS NULL OR :status = 'all' OR pr.status = :status)
+ORDER  BY pr.raised_at DESC
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # TA&QC
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="taqc_compliance_report",
+            label="TA&QC Observation Compliance Report",
+            group_name="TA&QC",
+            description="TA&QC observation compliance status with ageing.",
+            parameters_schema={"month": "int", "year": "int", "department_id": "uuid"},
+            sort_order=10,
+            org_alias="ti",
+            sql_template="""
+SELECT
+    d.name                          AS department,
+    ti.observation_category,
+    COUNT(ti.id)                    AS total_observations,
+    COUNT(CASE WHEN ti.status = 'closed' THEN 1 END)  AS closed,
+    COUNT(CASE WHEN ti.status != 'closed' THEN 1 END) AS open,
+    ROUND(
+        COUNT(CASE WHEN ti.status = 'closed' THEN 1 END)::numeric
+        / NULLIF(COUNT(ti.id), 0) * 100, 1
+    )                               AS compliance_pct,
+    MAX(EXTRACT(DAY FROM NOW() - ti.cts))::int AS max_age_days
+FROM   public.taqc_inspections ti
+LEFT JOIN public.org_departments d ON d.id = ti.department_id
+WHERE  EXTRACT(MONTH FROM ti.cts)
+         = COALESCE(:month, EXTRACT(MONTH FROM NOW()))
+  AND  EXTRACT(YEAR  FROM ti.cts)
+         = COALESCE(:year,  EXTRACT(YEAR  FROM NOW()))
+  {org_clause}
+  AND  (:department_id IS NULL OR ti.department_id = :department_id::uuid)
+GROUP  BY d.name, ti.observation_category
+ORDER  BY compliance_pct ASC NULLS LAST
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Vendor & Repairer
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="vendor_performance_report",
+            label="Vendor Performance Ranking Report",
+            group_name="Vendor & Repairer",
+            description="Vendor delivery timeliness and quality ranking.",
+            parameters_schema={"quarter": "int", "year": "int"},
+            sort_order=10,
+            org_alias="pr",
+            sql_template="""
+SELECT
+    pr.vendor_name,
+    COUNT(pr.id)                        AS total_orders,
+    COUNT(CASE WHEN pr.decision = 'approved' THEN 1 END) AS approved,
+    COUNT(CASE WHEN pr.decision = 'rejected' THEN 1 END) AS rejected,
+    ROUND(
+        AVG(EXTRACT(DAY FROM pr.decision_date - pr.cts)), 1
+    )                                   AS avg_days_to_decision,
+    COUNT(CASE
+        WHEN pr.decision = 'approved'
+         AND pr.delivery_date <= pr.expected_delivery_date
+        THEN 1 END)                     AS on_time_deliveries,
+    ROUND(
+        COUNT(CASE
+            WHEN pr.decision = 'approved'
+             AND pr.delivery_date <= pr.expected_delivery_date
+            THEN 1 END)::numeric
+        / NULLIF(COUNT(CASE WHEN pr.decision = 'approved' THEN 1 END), 0)
+        * 100, 1
+    )                                   AS on_time_pct
+FROM   public.procurement_requests pr
+WHERE  EXTRACT(QUARTER FROM pr.cts)
+         = COALESCE(:quarter, EXTRACT(QUARTER FROM NOW()))
+  AND  EXTRACT(YEAR FROM pr.cts)
+         = COALESCE(:year, EXTRACT(YEAR FROM NOW()))
+  AND  pr.vendor_name IS NOT NULL
+  {org_clause}
+GROUP  BY pr.vendor_name
+ORDER  BY on_time_pct DESC NULLS LAST
+"""),
+
+        dict(
+            key="repairer_performance_report",
+            label="Repairer Performance Ranking Report",
+            group_name="Vendor & Repairer",
+            description="Workshop / repairer turnaround time and post-repair quality "
+                        "ranking.",
+            parameters_schema={"year": "int"},
+            sort_order=20,
+            org_alias="wf",
+            sql_template="""
+SELECT
+    wf.repairer_name,
+    COUNT(wf.id)                        AS total_workflows,
+    COUNT(CASE WHEN wf.status = 'completed' THEN 1 END) AS completed,
+    ROUND(
+        AVG(EXTRACT(DAY FROM wf.completed_at - wf.cts))
+        FILTER (WHERE wf.completed_at IS NOT NULL), 1
+    )                                   AS avg_turnaround_days,
+    COUNT(DISTINCT CASE
+        WHEN srv.id IS NOT NULL THEN wf.id END) AS post_repair_surveillances,
+    COUNT(DISTINCT CASE
+        WHEN srv.id IS NOT NULL
+         AND res.evaluation_result->>'overall' = 'NORMAL'
+        THEN wf.id END)                 AS surveillance_pass_count
+FROM   public.workflow_sessions wf
+LEFT JOIN public.workflow_sessions srv
+       ON srv.equipment_id = wf.equipment_id
+      AND srv.workflow_type = 'surveillance'
+      AND srv.cts > wf.completed_at
+LEFT JOIN public.test_results res
+       ON res.testing_request_id IN (
+              SELECT id FROM public.testing_requests
+              WHERE  equipment_id = wf.equipment_id
+                AND  category     = 'surveillance')
+WHERE  wf.workflow_type  = 'repair_lifecycle'
+  AND  EXTRACT(YEAR FROM wf.cts)
+         = COALESCE(:year, EXTRACT(YEAR FROM NOW())::int - 1)
+  AND  wf.repairer_name IS NOT NULL
+  {org_clause}
+GROUP  BY wf.repairer_name
+ORDER  BY avg_turnaround_days ASC NULLS LAST
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Equipment Operations
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="oltc_cb_operations_report",
+            label="OLTC / CB Operations Count Report",
+            group_name="Equipment Operations",
+            description="OLTC tap change and CB operation counts vs thresholds.",
+            parameters_schema={"department_id": "uuid"},
+            sort_order=10,
+            org_alias="e",
+            sql_template="""
+SELECT
+    e.ueic,
+    cm.name                         AS equipment_type,
+    d.name                          AS department,
+    e.manufacturer,
+    e.voltage_class,
+    COALESCE((e.nameplate_data->>'oltc_tap_count')::int,     0)     AS oltc_tap_count,
+    COALESCE((e.nameplate_data->>'cb_operation_count')::int, 0)     AS cb_operation_count,
+    COALESCE((e.nameplate_data->>'oltc_threshold')::int,     50000) AS oltc_threshold,
+    COALESCE((e.nameplate_data->>'cb_threshold')::int,       2000)  AS cb_threshold,
+    CASE
+        WHEN COALESCE((e.nameplate_data->>'oltc_tap_count')::int, 0)
+             >= COALESCE((e.nameplate_data->>'oltc_threshold')::int, 50000)
+        THEN 'EXCEEDED' ELSE 'OK'
+    END                             AS oltc_status,
+    CASE
+        WHEN COALESCE((e.nameplate_data->>'cb_operation_count')::int, 0)
+             >= COALESCE((e.nameplate_data->>'cb_threshold')::int, 2000)
+        THEN 'EXCEEDED' ELSE 'OK'
+    END                             AS cb_status
+FROM   public.equipment e
+LEFT JOIN public.org_departments  d  ON d.id  = e.department_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+WHERE  e.status != 'retired'
+  AND  cm.name ILIKE ANY(ARRAY['%transformer%','%circuit breaker%','%oltc%'])
+  {org_clause}
+  AND  (:department_id IS NULL OR e.department_id = :department_id::uuid)
+ORDER  BY e.ueic
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # KPI & Performance
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="monthly_kpi_report",
+            label="Monthly KPI Summary",
+            group_name="KPI & Performance",
+            description="Monthly aggregated KPIs: requests, completions, alerts, "
+                        "findings.",
+            parameters_schema={"months": "int"},
+            sort_order=10,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    TO_CHAR(DATE_TRUNC('month', tr.cts), 'YYYY-MM') AS month,
+    COUNT(tr.id)                                      AS requests_raised,
+    COUNT(CASE WHEN tr.status='completed' THEN 1 END) AS completed,
+    COUNT(CASE
+        WHEN tr.status IN ('submitted','assigned','accepted','in_progress',
+                           'test_submitted','under_approval')
+         AND tr.due_date IS NOT NULL
+         AND tr.due_date < NOW() THEN 1 END)          AS overdue,
+    COUNT(DISTINCT CASE
+        WHEN res.evaluation_result->>'overall' = 'CRITICAL'
+        THEN res.id END)                              AS critical_findings,
+    COUNT(DISTINCT CASE
+        WHEN res.evaluation_result->>'overall' = 'ALERT'
+        THEN res.id END)                              AS alert_findings,
+    COUNT(DISTINCT rec.id)                            AS recommendations_raised,
+    COUNT(DISTINCT CASE
+        WHEN rec.approval_status = 'approved'
+        THEN rec.id END)                              AS recommendations_approved
+FROM   public.testing_requests tr
+LEFT JOIN public.test_results    res ON res.testing_request_id = tr.id
+LEFT JOIN public.recommendations rec ON rec.testing_request_id = tr.id
+WHERE  tr.cts >= NOW() - (INTERVAL '1 month' * COALESCE(:months, 12))
+  {org_clause}
+GROUP  BY DATE_TRUNC('month', tr.cts)
+ORDER  BY month DESC
+"""),
+
+    ]  # end KEYS
+
+    inserted = updated = 0
+    for entry in KEYS:
+        key = entry["key"]
+        existing = session.query(ReportQueryKey).filter_by(key=key).first()
+        if existing:
+            existing.label             = entry["label"]
+            existing.group_name        = entry["group_name"]
+            existing.description       = entry["description"]
+            existing.parameters_schema = entry["parameters_schema"]
+            existing.sort_order        = entry["sort_order"]
+            existing.sql_template      = entry["sql_template"].strip()
+            existing.org_alias         = entry["org_alias"]
+            updated += 1
+        else:
+            session.add(ReportQueryKey(
+                key              = key,
+                label            = entry["label"],
+                group_name       = entry["group_name"],
+                description      = entry["description"],
+                parameters_schema= entry["parameters_schema"],
+                sort_order       = entry["sort_order"],
+                sql_template     = entry["sql_template"].strip(),
+                org_alias        = entry["org_alias"],
+                is_active        = True,
+                is_system        = True,
+            ))
+            inserted += 1
+
+    session.commit()
+    print(f"[OK] Report query keys: {inserted} inserted, {updated} updated.")
 
 
 # ----------------- Run Seed -----------------
@@ -7672,25 +8892,32 @@ def _seed_notification_variables(session) -> int:
     # role_template_names:
     #   []    → universal variable — shown in all template pickers
     #   [...]  → scoped to those RoleTemplates; resolved to UUIDs at seed time
+    # fallback_keys: ordered list of raw fire()-context keys to try when the
+    # dot-notation var_key itself isn't present.  First match wins.
+    # Replaces the hardcoded VariableResolver._ALIASES dict.
     _VARIABLES = [
         # ── Reports ──────────────────────────────────────────────────────────
         dict(var_key="report.retriexls",   label="Report — Excel Download URL",
              group_name="Reports",         resolver_key="report.retriexls",
+             fallback_keys=["report_xls_url", "xls_url"],
              description="Signed URL for the Excel report attachment (.xlsx).",
              sample_value="https://app.seacms.in/reports/REQ-001.xlsx",
              role_template_names=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]),
         dict(var_key="report.retriepdf",   label="Report — PDF Download URL",
              group_name="Reports",         resolver_key="report.retriepdf",
+             fallback_keys=["report_pdf_url", "pdf_url"],
              description="Signed URL for the PDF report attachment.",
              sample_value="https://app.seacms.in/reports/REQ-001.pdf",
              role_template_names=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]),
         dict(var_key="report.ref",         label="Report Reference Number",
              group_name="Reports",         resolver_key="report.ref",
+             fallback_keys=["report_ref", "request_number"],
              description="Auto-generated report reference number.",
              sample_value="RPT-2025-001",
              role_template_names=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]),
         dict(var_key="report.generated_on", label="Report Generated Date/Time",
-             group_name="Reports",          resolver_key="report.generated_on",
+             group_name="Reports",           resolver_key="report.generated_on",
+             fallback_keys=["report_generated_on"],
              description="Timestamp when the report was generated.",
              sample_value="2025-01-15 10:30 UTC",
              role_template_names=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]),
@@ -7698,152 +8925,188 @@ def _seed_notification_variables(session) -> int:
         # Universal — used by all roles in any equipment-related template.
         dict(var_key="equipment.ueic",        label="Equipment UEIC",
              group_name="Equipment",           resolver_key="equipment",
+             fallback_keys=["equipment", "ueic", "old_ueic"],
              description="Unique Equipment Identity Code of the subject equipment.",
              sample_value="TX-001-2025",
              role_template_names=[]),
         dict(var_key="equipment.type",        label="Equipment Type",
              group_name="Equipment",           resolver_key="equipment_type",
+             fallback_keys=["equipment_type"],
              description="Type/category of the equipment (e.g. Power Transformer).",
              sample_value="Power Transformer",
              role_template_names=[]),
         dict(var_key="equipment.department",  label="Substation / Department",
              group_name="Equipment",           resolver_key="department",
+             fallback_keys=["department"],
              description="Substation, bay, or department where the equipment is installed.",
              sample_value="Relay Panel — Substation A",
              role_template_names=[]),
         dict(var_key="equipment.status",      label="Equipment Status",
              group_name="Equipment",           resolver_key="equipment_status",
+             fallback_keys=["equipment_status"],
              description="Current operational status of the equipment.",
              sample_value="active",
              role_template_names=[]),
         dict(var_key="equipment.manufacturer", label="Manufacturer",
              group_name="Equipment",            resolver_key="manufacturer",
+             fallback_keys=["manufacturer"],
              description="Manufacturer / OEM of the equipment.",
              sample_value="ABB",
              role_template_names=[]),
         # ── Replacement event ─────────────────────────────────────────────────
-        dict(var_key="old_ueic",     label="Retired UEIC",
+        dict(var_key="old_ueic",    label="Retired UEIC",
              group_name="Replacement", resolver_key="old_ueic",
+             fallback_keys=["old_ueic"],
              description="UEIC of the retired (replaced) equipment.",
              sample_value="TX-OLD-001",
              role_template_names=["Asset Data Officer", "Maintenance Officer"]),
-        dict(var_key="new_ueic",     label="New Replacement UEIC",
+        dict(var_key="new_ueic",    label="New Replacement UEIC",
              group_name="Replacement", resolver_key="new_ueic",
+             fallback_keys=["new_ueic"],
              description="UEIC of the newly commissioned replacement equipment.",
              sample_value="TX-NEW-002",
              role_template_names=["Asset Data Officer", "Maintenance Officer"]),
-        dict(var_key="replaced_by",  label="Replaced By (User)",
+        dict(var_key="replaced_by", label="Replaced By (User)",
              group_name="Replacement", resolver_key="replaced_by",
+             fallback_keys=["replaced_by"],
              description="Name / email of the officer who recorded the replacement.",
              sample_value="EE John (john@utility.com)",
              role_template_names=["Asset Data Officer", "Maintenance Officer"]),
-        dict(var_key="replaced_on",  label="Replacement Date",
+        dict(var_key="replaced_on", label="Replacement Date",
              group_name="Replacement", resolver_key="replaced_on",
+             fallback_keys=["replaced_on"],
              description="Date on which the replacement event was recorded.",
              sample_value="2025-01-15",
              role_template_names=["Asset Data Officer", "Maintenance Officer"]),
-        dict(var_key="reason",       label="Replacement / Rejection Reason",
+        dict(var_key="reason",      label="Replacement / Rejection Reason",
              group_name="Replacement", resolver_key="reason",
+             fallback_keys=["reason"],
              description="Free-text reason for the replacement or rejection action.",
              sample_value="End of service life — IR below threshold",
              role_template_names=[]),
         # ── Test Request workflow ──────────────────────────────────────────────
         dict(var_key="request.number",       label="Test Request Number",
              group_name="Test Request",       resolver_key="request_number",
+             fallback_keys=["request_number"],
              description="Auto-generated test request reference number.",
              sample_value="REQ-2025-001",
              role_template_names=[]),
         dict(var_key="request.title",        label="Test Request Title",
              group_name="Test Request",       resolver_key="request_title",
+             fallback_keys=["request_title", "title"],
              description="Title/description of the test request.",
              sample_value="IR Test — Power Transformer TX-001",
              role_template_names=[]),
         dict(var_key="request.status",       label="Request Status",
              group_name="Test Request",       resolver_key="request_status",
+             fallback_keys=["request_status"],
              description="Current workflow status of the test request.",
              sample_value="submitted",
              role_template_names=[]),
         dict(var_key="request.priority",     label="Priority",
              group_name="Test Request",       resolver_key="request_priority",
+             fallback_keys=["request_priority", "priority"],
              description="Priority level of the test request (high / medium / low).",
              sample_value="high",
              role_template_names=[]),
         dict(var_key="request.due_date",     label="Due Date",
              group_name="Test Request",       resolver_key="due_date",
+             fallback_keys=["due_date"],
              description="Scheduled due date for the test to be completed.",
              sample_value="2025-03-31",
              role_template_names=[]),
         dict(var_key="request.submitted_by", label="Submitted By",
              group_name="Test Request",       resolver_key="originator",
+             fallback_keys=["originator"],
              description="Email / name of the user who submitted the test request.",
              sample_value="originator@utility.com",
              role_template_names=[]),
         dict(var_key="request.assigned_to",  label="Assigned To (Tester)",
              group_name="Test Request",       resolver_key="tester",
+             fallback_keys=["tester", "assigned_tester"],
              description="Email / name of the tester the request was assigned to.",
              sample_value="tester@utility.com",
              role_template_names=["Test & Work Coordinator", "Reviewing Officer"]),
         # ── Evaluation / test result ───────────────────────────────────────────
         dict(var_key="eval.overall",     label="Overall Result (NORMAL / ALERT / CRITICAL)",
              group_name="Evaluation",    resolver_key="eval_overall",
+             fallback_keys=["eval_overall", "overall"],
              description="Composite evaluation outcome from test template thresholds.",
              sample_value="CRITICAL",
              role_template_names=["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"]),
         dict(var_key="eval.test_type",   label="Test Type",
              group_name="Evaluation",    resolver_key="test_name",
+             fallback_keys=["test_name"],
              description="Name of the test type (e.g. IR Test, PI Test).",
              sample_value="IR Test",
              role_template_names=[]),
         dict(var_key="eval.evaluated_at", label="Evaluation Date/Time",
              group_name="Evaluation",     resolver_key="tested_at",
+             fallback_keys=["tested_at", "evaluated_at"],
              description="Timestamp when the test evaluation was completed.",
              sample_value="2025-01-15 09:00 UTC",
              role_template_names=["Reviewing Officer", "Maintenance Officer"]),
         # ── Organisation ──────────────────────────────────────────────────────
         dict(var_key="org.name", label="Organisation Name",
              group_name="Organisation", resolver_key="org_name",
+             fallback_keys=["org_name"],
              description="Name of the organisation as registered in SEACMS.",
              sample_value="KPTCL",
              role_template_names=[]),
         dict(var_key="org.id",   label="Organisation ID",
              group_name="Organisation", resolver_key="org_id",
+             fallback_keys=["org_id"],
              description="UUID of the organisation.",
              sample_value="3fa85f64-5717-4562-b3fc-2c963f66afa6",
              role_template_names=[]),
         # ── Department / Context ──────────────────────────────────────────────
-        dict(var_key="dept.name", label="Department Name",
-             group_name="Context",  resolver_key="currentdeptname",
+        dict(var_key="dept.name",  label="Department Name",
+             group_name="Context", resolver_key="currentdeptname",
+             fallback_keys=["currentdeptname", "department_name", "dept_name", "department"],
              description="Name of the department associated with the event.",
              sample_value="North Division",
              role_template_names=[]),
-        dict(var_key="dept.code", label="Department Code",
-             group_name="Context",  resolver_key="dept_code",
+        dict(var_key="dept.code",  label="Department Code",
+             group_name="Context", resolver_key="dept_code",
+             fallback_keys=["dept_code", "department_code"],
              description="Short code for the department.",
              sample_value="NB-DIV",
              role_template_names=[]),
+        dict(var_key="dept.level", label="Department Level",
+             group_name="Context", resolver_key="dept_level",
+             fallback_keys=["dept_level"],
+             description="Hierarchy level of the department (e.g. Zone, Circle, Division).",
+             sample_value="Division",
+             role_template_names=[]),
         dict(var_key="user.name",  label="Recipient Name",
              group_name="Context", resolver_key="user_name",
+             fallback_keys=["user_name", "recipient_name"],
              description="Full name of the notification recipient (resolved at dispatch time).",
              sample_value="Jane Smith",
              role_template_names=[]),
         dict(var_key="user.email", label="Recipient Email",
              group_name="Context", resolver_key="recipient_email",
+             fallback_keys=["recipient_email", "user_email"],
              description="Email address of the notification recipient.",
              sample_value="jane.smith@utility.com",
              role_template_names=[]),
         # ── System ────────────────────────────────────────────────────────────
+        # System vars are injected directly in build_context — no fallback lookup needed.
         dict(var_key="system.date",     label="Today's Date",
              group_name="System",        resolver_key="system.date",
+             fallback_keys=[],
              description="Current date at the time the notification is rendered (YYYY-MM-DD).",
              sample_value="2025-01-15",
              role_template_names=[]),
         dict(var_key="system.time",     label="Current Time (UTC)",
              group_name="System",        resolver_key="system.time",
+             fallback_keys=[],
              description="Current time at the time the notification is rendered (HH:MM UTC).",
              sample_value="10:30 UTC",
              role_template_names=[]),
         dict(var_key="system.app_name", label="Application Name (SEACMS)",
              group_name="System",        resolver_key="system.app_name",
+             fallback_keys=[],
              description="Name of the application — always resolves to 'SEACMS'.",
              sample_value="SEACMS",
              role_template_names=[]),
@@ -7852,7 +9115,8 @@ def _seed_notification_variables(session) -> int:
     inserted = 0
     for entry in _VARIABLES:
         # Resolve role names → UUID strings; pop the hint key (not a model field).
-        role_ids = _ids(entry.pop("role_template_names"))
+        role_ids    = _ids(entry.pop("role_template_names"))
+        fb_keys     = entry.pop("fallback_keys", [])
 
         existing = (
             session.query(NotificationVariable)
@@ -7867,10 +9131,12 @@ def _seed_notification_variables(session) -> int:
             for field, val in entry.items():
                 setattr(existing, field, val)
             existing.role_template_ids = role_ids
+            existing.fallback_keys     = fb_keys
         else:
             session.add(NotificationVariable(
                 **entry,
                 role_template_ids=role_ids,
+                fallback_keys=fb_keys,
                 organization_id=None,
                 is_system=True,
                 is_active=True,
@@ -8184,6 +9450,103 @@ def _seed_notification_event_catalogue(session) -> int:
             context_vars=["report_month", "tests_completed", "critical_count", "overdue_count",
                           "report_pdf_url", "report_xls_url"],
             default_roles=["Supervisory Officer", "Senior Management Approver", "Reviewing Officer"],
+        ),
+        # ── Report-Ready events (fired by run_scheduled_reports) ──────────────────
+        dict(
+            event_type="overdue_report_ready",
+            label="Overdue Test Report Ready",
+            group_name="Reports",
+            description="Fired when the scheduled Overdue Test Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+        dict(
+            event_type="alert_report_ready",
+            label="ALERT/CRITICAL Report Ready",
+            group_name="Reports",
+            description="Fired when the weekly ALERT/CRITICAL Equipment Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+        dict(
+            event_type="compliance_report_ready",
+            label="Test Compliance Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly Test Compliance Status Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Reviewing Officer", "Supervisory Officer"],
+        ),
+        dict(
+            event_type="repair_report_ready",
+            label="Transformer Repair Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly Transformer Repair Status Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+        ),
+        dict(
+            event_type="annual_failure_report_ready",
+            label="Annual Failure Report Ready",
+            group_name="Reports",
+            description="Fired when the annual Equipment Failure Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Supervisory Officer", "Senior Management Approver"],
+        ),
+        dict(
+            event_type="pm_report_ready",
+            label="PM Compliance Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly PM Compliance Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
+        ),
+        dict(
+            event_type="remedial_report_ready",
+            label="Remedial Action Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly Remedial Action Pending Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Maintenance Officer", "Reviewing Officer"],
+        ),
+        dict(
+            event_type="taqc_report_ready",
+            label="TA&QC Compliance Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly TA&QC Observation Compliance Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Reviewing Officer", "Supervisory Officer"],
+        ),
+        dict(
+            event_type="vendor_report_ready",
+            label="Vendor Performance Report Ready",
+            group_name="Reports",
+            description="Fired when the quarterly Vendor Performance Ranking Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Supervisory Officer", "Senior Management Approver"],
+        ),
+        dict(
+            event_type="repairer_report_ready",
+            label="Repairer Performance Report Ready",
+            group_name="Reports",
+            description="Fired when the annual Repairer Performance Ranking Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Supervisory Officer", "Senior Management Approver"],
+        ),
+        dict(
+            event_type="oltc_report_ready",
+            label="OLTC/CB Operations Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly OLTC/CB Operations Count Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Maintenance Officer"],
+        ),
+        dict(
+            event_type="post_repair_report_ready",
+            label="Post-Repair Evaluation Report Ready",
+            group_name="Reports",
+            description="Fired when a Post-Repair Transformer Evaluation report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["Supervisory Officer", "Senior Management Approver"],
         ),
     ]
 
@@ -9027,20 +10390,50 @@ def _seed_notification_templates(session) -> int:
 
     # ── Repair Lifecycle ──────────────────────────────────────────────────────
     _tmpl("repair_stage_changed",
+        _e(
+            "[REPAIR] Stage Advanced — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#1E3C72'>Repair Workflow Stage Advanced</h3>"
+            "<p>The repair workflow for the following equipment has advanced to the next stage.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Current Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Progress</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{progress}}%</td></tr>"
+            "</table>"
+            "<p>Please log in to SEACMS to view the current stage and take any required action.</p>",
+            ["Test Engineer", "Maintenance Officer", "Reviewing Officer"],
+        ),
         _i(
-            "Repair stage advanced — {{equipment.ueic}}",
-            "Repair stage for {{equipment.ueic}} ({{equipment.type}}) has advanced"
-            " from '{{previous_stage}}' to '{{repair_stage}}'."
-            " Assigned to: {{assigned_to}}.",
+            "Repair stage advanced — {{equipment}}",
+            "Repair stage for {{equipment}} ({{equipment_type}}) has advanced"
+            " to '{{stage}}'. Progress: {{progress}}%.",
             ["Test Engineer", "Maintenance Officer", "Reviewing Officer"],
         ),
     )
 
     # ── Overhaul Lifecycle ────────────────────────────────────────────────────
     _tmpl("overhaul_stage_changed",
+        _e(
+            "[OVERHAUL] Stage Advanced — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#1E3C72'>Overhaul Workflow Stage Advanced</h3>"
+            "<p>The overhaul workflow has advanced to the next stage.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Current Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{stage}}</td></tr>"
+            "</table>",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
         _i(
-            "Overhaul stage advanced — {{equipment.ueic}}",
-            "Overhaul stage for {{equipment.ueic}} ({{equipment_type}}) has advanced"
+            "Overhaul stage advanced — {{equipment}}",
+            "Overhaul stage for {{equipment}} ({{equipment_type}}) has advanced"
             " to '{{stage}}'.",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
@@ -9083,9 +10476,23 @@ def _seed_notification_templates(session) -> int:
 
     # ── Calibration Lifecycle ──────────────────────────────────────────────────
     _tmpl("calibration_stage_changed",
+        _e(
+            "[CALIBRATION] Stage Advanced — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#1E3C72'>Calibration Workflow Stage Advanced</h3>"
+            "<p>The calibration workflow has advanced to the next stage.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Current Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{stage}}</td></tr>"
+            "</table>",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
         _i(
-            "Calibration stage advanced — {{equipment.ueic}}",
-            "Calibration stage for {{equipment.ueic}} ({{equipment_type}}) has advanced"
+            "Calibration stage advanced — {{equipment}}",
+            "Calibration stage for {{equipment}} ({{equipment_type}}) has advanced"
             " to '{{stage}}'.",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
@@ -9126,9 +10533,23 @@ def _seed_notification_templates(session) -> int:
 
     # ── Surveillance Lifecycle ─────────────────────────────────────────────────
     _tmpl("surveillance_stage_changed",
+        _e(
+            "[SURVEILLANCE] Stage Advanced — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#1E3C72'>Surveillance Workflow Stage Advanced</h3>"
+            "<p>The surveillance workflow has advanced to the next stage.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Current Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{stage}}</td></tr>"
+            "</table>",
+            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
         _i(
-            "Surveillance stage advanced — {{equipment.ueic}}",
-            "Surveillance stage for {{equipment.ueic}} ({{equipment_type}}) has advanced"
+            "Surveillance stage advanced — {{equipment}}",
+            "Surveillance stage for {{equipment}} ({{equipment_type}}) has advanced"
             " to '{{stage}}'.",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
@@ -9602,8 +11023,8 @@ def _seed_notification_routing_rules(session) -> int:
         # ── Repair Lifecycle ──────────────────────────────────────────────────
         ("repair_stage_changed",
          ["repair_lifecycle"], [],
-         ["inapp"],
-         "Repair Stage Advanced — in-app only"),
+         ["email", "inapp"],
+         "Repair Stage Advanced — Email + in-app"),
 
         ("overhaul_recommended",
          ["repair_lifecycle"], [],
@@ -9618,8 +11039,8 @@ def _seed_notification_routing_rules(session) -> int:
         # ── Overhaul Lifecycle ────────────────────────────────────────────────
         ("overhaul_stage_changed",
          [], [],
-         ["inapp"],
-         "Overhaul Stage Advanced — in-app only"),
+         ["email", "inapp"],
+         "Overhaul Stage Advanced — Email + in-app"),
 
         ("overhaul_stage_delay",
          [], [],
@@ -9629,8 +11050,8 @@ def _seed_notification_routing_rules(session) -> int:
         # ── Calibration Lifecycle ─────────────────────────────────────────────
         ("calibration_stage_changed",
          [], [],
-         ["inapp"],
-         "Calibration Stage Advanced — in-app only"),
+         ["email", "inapp"],
+         "Calibration Stage Advanced — Email + in-app"),
 
         ("calibration_stage_delay",
          [], [],
@@ -9640,8 +11061,8 @@ def _seed_notification_routing_rules(session) -> int:
         # ── Surveillance Lifecycle ────────────────────────────────────────────
         ("surveillance_stage_changed",
          [], [],
-         ["inapp"],
-         "Surveillance Stage Advanced — in-app only"),
+         ["email", "inapp"],
+         "Surveillance Stage Advanced — Email + in-app"),
 
         ("surveillance_stage_delay",
          [], [],
@@ -9690,7 +11111,11 @@ def _seed_notification_routing_rules(session) -> int:
             )
             .first()
         )
-        if not existing:
+        if existing:
+            # Update channels + label so re-seeding corrects stale rows
+            existing.channels_enabled = channels
+            existing.label = label
+        else:
             session.add(NotificationRoutingRule(
                 event_type=event_type,
                 label=label,

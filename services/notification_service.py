@@ -19,6 +19,7 @@ Key design points
 from __future__ import annotations
 
 import logging
+import time
 import traceback
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
@@ -287,55 +288,68 @@ def _generate_attachment_bytes(
     return None
 
 
+# ── Variable alias cache (loaded from notification_variables.fallback_keys) ───
+
+_alias_cache:    Optional[Dict[str, List[str]]] = None
+_alias_cache_ts: float = 0.0
+_ALIAS_CACHE_TTL = 300  # seconds — refresh every 5 minutes
+
+
+def _load_alias_cache(db: Session) -> Dict[str, List[str]]:
+    """
+    Return var_key → [fallback_keys] mapping from DB, refreshed every 5 min.
+    System variables (is_system=True, org=NULL) only — org-custom vars resolve
+    directly from the fire() context by their var_key, no alias needed.
+    """
+    global _alias_cache, _alias_cache_ts
+    now_ts = time.monotonic()
+    if _alias_cache is not None and (now_ts - _alias_cache_ts) < _ALIAS_CACHE_TTL:
+        return _alias_cache
+
+    try:
+        rows = (
+            db.query(NotificationVariable)
+            .filter(
+                NotificationVariable.is_system.is_(True),
+                NotificationVariable.is_active.is_(True),
+                NotificationVariable.organization_id.is_(None),
+                NotificationVariable.fallback_keys.isnot(None),
+            )
+            .all()
+        )
+        cache: Dict[str, List[str]] = {}
+        for row in rows:
+            fb = list(row.fallback_keys or [])
+            if fb:                          # skip vars with no fallback (system.*)
+                cache[row.var_key] = fb
+        _alias_cache    = cache
+        _alias_cache_ts = now_ts
+        return cache
+    except Exception as exc:
+        logger.warning(f"[VariableResolver] alias cache load failed: {exc}")
+        return _alias_cache or {}   # serve stale cache on DB error
+
+
 # ── Variable context resolver ─────────────────────────────────────────────────
 
 class VariableResolver:
     """
     Augments the raw context dict passed to fire() with:
       • Dot-notation aliases  ({{equipment.ueic}} from legacy "equipment" key)
+        — fallback lists are stored in notification_variables.fallback_keys
+          and loaded via _load_alias_cache(); no hardcoded mapping in code.
       • System-injected vars  ({{system.date}}, {{system.time}}, {{system.app_name}})
-
-    The DB table `notification_variables` acts as the **registry** for the UI
-    variable-picker only — resolution always uses this class + the fire() context.
     """
 
-    # Maps dot-notation var_key → list of fallback raw-context keys (first match wins)
-    _ALIASES: Dict[str, List[str]] = {
-        "equipment.ueic":        ["equipment", "ueic", "old_ueic"],
-        "equipment.type":        ["equipment_type"],
-        "equipment.department":  ["department"],
-        "equipment.manufacturer":["manufacturer"],
-        "equipment.status":      ["equipment_status"],
-        "request.number":        ["request_number"],
-        "request.title":         ["request_title", "title"],
-        "request.status":        ["request_status"],
-        "request.priority":      ["request_priority", "priority"],
-        "request.due_date":      ["due_date"],
-        "request.submitted_by":  ["originator"],
-        "request.assigned_to":   ["tester", "assigned_tester"],
-        "eval.overall":          ["eval_overall", "overall"],
-        "eval.test_type":        ["test_name"],
-        "eval.evaluated_at":     ["tested_at", "evaluated_at"],
-        "report.ref":            ["report_ref", "request_number"],
-        "report.generated_on":   ["report_generated_on"],
-        "report.retriepdf":      ["report_pdf_url", "pdf_url"],
-        "report.retriexls":      ["report_xls_url", "xls_url"],
-        "org.name":              ["org_name"],
-        "org.id":                ["org_id"],
-        # Department / context variables — useful in subject line
-        # e.g. "Subject: [{{dept.name}}] Equipment replaced"
-        "dept.name":             ["currentdeptname", "department_name", "dept_name", "department"],
-        "dept.code":             ["dept_code", "department_code"],
-        "dept.level":            ["dept_level"],
-        "user.name":             ["user_name", "recipient_name"],
-        "user.email":            ["recipient_email", "user_email"],
-    }
-
     @staticmethod
-    def build_context(raw: Dict[str, Any]) -> Dict[str, Any]:
+    def build_context(raw: Dict[str, Any],
+                      db: Optional[Session] = None) -> Dict[str, Any]:
         """
         Return a flat dict that maps every supported var_key to its resolved value.
         Safe to call with any partial context — missing keys simply won't be resolved.
+
+        db: pass the active Session so fallback aliases are loaded from DB.
+            If None (e.g. unit tests), alias resolution is skipped gracefully.
         """
         now = datetime.now(timezone.utc)
         ctx: Dict[str, Any] = {k: (str(v) if v is not None else "") for k, v in raw.items()}
@@ -345,13 +359,15 @@ class VariableResolver:
         ctx.setdefault("system.time",     now.strftime("%H:%M UTC"))
         ctx.setdefault("system.app_name", "SEACMS")
 
-        # Resolve dot-notation aliases from legacy flat keys
-        for dot_key, sources in VariableResolver._ALIASES.items():
-            if dot_key not in ctx or not ctx[dot_key]:
-                for src in sources:
-                    if ctx.get(src):
-                        ctx[dot_key] = ctx[src]
-                        break
+        # Resolve dot-notation aliases from DB-backed fallback lists
+        if db is not None:
+            aliases = _load_alias_cache(db)
+            for dot_key, sources in aliases.items():
+                if not ctx.get(dot_key):
+                    for src in sources:
+                        if ctx.get(src):
+                            ctx[dot_key] = ctx[src]
+                            break
 
         return ctx
 
@@ -1140,6 +1156,7 @@ def _create_inapp(
     source_id: Optional[UUID],
     source_type: Optional[str],
     ueic: Optional[str] = None,
+    extra_data: Optional[dict] = None,
 ) -> UserNotification:
     notif = UserNotification(
         user_id=user_id,
@@ -1151,6 +1168,7 @@ def _create_inapp(
         source_id=source_id,
         source_type=source_type,
         ueic=ueic or None,
+        extra_data=extra_data or None,
     )
     db.add(notif)
     return notif
@@ -1373,7 +1391,7 @@ class NotificationService:
                 logger.debug(f"[Notif] No active templates for event_type={event_type!r}")
                 return
 
-            resolved_ctx = VariableResolver.build_context(context)
+            resolved_ctx = VariableResolver.build_context(context, db=self.db)
 
             # ── Auto-inject org context from DB ──────────────────────────────
             _org_name = "SEACMS"
@@ -2515,6 +2533,11 @@ class NotificationService:
             # Inapp: create UserNotification immediately (no network needed)
             _ctx  = resolved_ctx or {}
             _ueic = _ctx.get("equipment.ueic") or _ctx.get("equipment") or None
+            # For report-ready events pass structured data so Flutter can show a download button
+            _extra = None
+            if source_type == "report_definition":
+                _extra = {k: v for k, v in _ctx.items()
+                          if k in ("download_url", "format", "report_name", "report_period")}
             _create_inapp(
                 db=self.db,
                 user_id=user.id,
@@ -2526,6 +2549,7 @@ class NotificationService:
                 source_id=source_id,
                 source_type=source_type,
                 ueic=_ueic,
+                extra_data=_extra,
             )
 
     # ── Background job: process pending email/sms logs ────────────────────────

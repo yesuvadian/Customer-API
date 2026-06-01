@@ -558,6 +558,16 @@ class RepairWorkflowService:
         )
 
         stage = self.db.query(RepairStageDefinition).filter(RepairStageDefinition.id == stage_id).first()
+
+        self._fire_notification_safe(
+            "repair_stage_changed",
+            workflow,
+            stage,
+            coordinator_id,
+            status_from="pending",
+            status_to="assigned",
+        )
+
         return {
             "message": "User assigned successfully",
             "stage": stage.name if stage else str(stage_id),
@@ -1911,8 +1921,9 @@ class RepairWorkflowService:
 
         status_from / status_to are passed through to the notification engine
         so that routing rules with applicable_status_from/to filters match correctly:
-          submit_stage:  status_from="assigned",  status_to="submitted"
-          advance_stage: status_from="submitted", status_to="approved"
+          assign_stage_user: status_from="pending",  status_to="assigned"
+          submit_stage:      status_from="assigned", status_to="submitted"
+          advance_stage:     status_from="submitted", status_to="approved"
 
         For delay events, stage should be the REJECTED stage definition and
         stage_instance should be its RepairStageInstance so that

@@ -62,6 +62,7 @@ class UserNotificationOut(BaseModel):
     is_read: bool
     read_at: Optional[object] = None
     cts: object
+    extra_data: Optional[dict] = None    # Structured payload (e.g. download_url for reports)
 
     class Config:
         from_attributes = True

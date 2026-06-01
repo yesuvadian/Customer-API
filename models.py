@@ -3823,6 +3823,9 @@ class UserNotification(Base):
     is_read = Column(Boolean, default=False, index=True)
     read_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Structured payload for Flutter deep-links / action buttons (e.g. download_url for reports)
+    extra_data = Column(JSONB, nullable=True)
+
     cts = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", foreign_keys=[user_id])
@@ -3876,6 +3879,11 @@ class NotificationVariable(Base):
     #     ADD COLUMN role_template_ids JSONB NOT NULL DEFAULT '[]';
     role_template_ids = Column(JSONB, nullable=False, server_default="[]")
 
+    # Ordered list of raw-context keys to try when the var_key itself is absent.
+    # E.g. equipment.ueic → ["equipment", "ueic", "old_ueic"]
+    # Replaces the hardcoded VariableResolver._ALIASES dict.
+    fallback_keys = Column(JSONB, nullable=False, server_default="[]")
+
     is_system = Column(Boolean, default=False, nullable=False)  # system vars: no delete
     is_active = Column(Boolean, default=True,  nullable=False)
 
@@ -3886,6 +3894,48 @@ class NotificationVariable(Base):
 
 
 # ── Reporting Suite ────────────────────────────────────────────────────────
+
+class ReportQueryKey(Base):
+    """
+    Registry of available report query keys.
+    Each row is a self-contained report data source: metadata for the UI
+    AND the SQL that the engine executes.
+
+    sql_template  — parameterised SQL with two conventions:
+                    • {org_clause}  placeholder replaced at runtime with
+                      "AND <org_alias>.organization_id = :org_id" (or "" when
+                      no org filter applies).
+                    • :named_params  SQLAlchemy bound parameters for every
+                      user-supplied filter (date_from, year, status, …).
+                      NULL-safe guards (`(:p IS NULL OR col = :p)`) make every
+                      parameter optional — callers only set what they need.
+    org_alias     — table alias used for org scoping, e.g. "tr", "e", "res".
+                    Empty / NULL means the query is not org-scoped.
+
+    System rows (is_system=True) are seeded on startup and should not be
+    deleted via UI.  Adding a new report type = one new row here, zero
+    Python code change.
+    """
+    __tablename__ = "report_query_keys"
+    __table_args__ = {"schema": "public"}
+
+    key          = Column(String(100), primary_key=True)    # e.g. "overdue_tests_report"
+    label        = Column(String(255), nullable=False)       # "Overdue Tests"
+    description  = Column(Text, nullable=True)
+    group_name   = Column(String(100), nullable=True)        # UI grouping in the editor picker
+    # JSON schema of parameters this query accepts, e.g.:
+    # {"date_from": "date", "date_to": "date", "department_id": "uuid", "year": "int"}
+    parameters_schema = Column(JSONB, nullable=False, server_default="{}")
+    # SQL template executed by the reporting engine (replaces hardcoded _q_* methods)
+    sql_template = Column(Text, nullable=True)
+    # Table alias for org-scoping injection, e.g. "tr", "e", "res"
+    org_alias    = Column(String(10), nullable=True)
+    is_active    = Column(Boolean, default=True)
+    is_system    = Column(Boolean, default=True)   # system keys: no delete via UI
+    sort_order   = Column(Integer, default=0)
+    cts          = Column(DateTime(timezone=True), server_default=func.now())
+    mts          = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 
 class ReportDefinition(Base):
     """
@@ -3910,6 +3960,9 @@ class ReportDefinition(Base):
     is_active       = Column(Boolean, default=True)
     is_system       = Column(Boolean, default=False)   # True for the 14 built-in SRS reports
     last_generated_at = Column(DateTime(timezone=True), nullable=True)
+    # Reporting Center: grouping label + notification event fired after auto-generation
+    group_name        = Column(String(100), nullable=True)   # "Testing Requests", "Stage Workflows", etc.
+    notification_event= Column(String(80),  nullable=True)   # e.g. "overdue_report_ready"
     created_by      = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by     = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts             = Column(DateTime(timezone=True), server_default=func.now())

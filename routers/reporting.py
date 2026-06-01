@@ -15,14 +15,16 @@ GET  /reports/logs/{id}                Get one log entry
 from typing import Optional
 from uuid import UUID
 
+import os
+
 from fastapi import APIRouter, Depends, Query, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User
+from models import User, ReportQueryKey
 from services.reporting_service import ReportingService
 
 router = APIRouter(
@@ -30,63 +32,6 @@ router = APIRouter(
     tags=["reports"],
     dependencies=[Depends(get_current_user)],
 )
-
-# ── Available query keys (ad-hoc builder uses this) ────────────────────────
-
-QUERY_KEYS = [
-    {"key": "equipment_condition_summary",    "label": "Equipment Condition Summary",
-     "description": "All active equipment with latest test condition (CRITICAL/ALERT/NORMAL/NOT_TESTED)"},
-    {"key": "overdue_tests_report",           "label": "Overdue Tests",
-     "description": "Testing requests past their due date"},
-    {"key": "active_alerts_report",           "label": "Active Alerts",
-     "description": "Test results with CRITICAL or ALERT evaluation"},
-    {"key": "flagged_equipment_report",       "label": "Flagged Equipment",
-     "description": "Equipment with CRITICAL or ALERT status (deduplicated)"},
-    {"key": "repair_progress_report",         "label": "Repair Lifecycle Progress",
-     "description": "Repair lifecycle requests with session progress"},
-    {"key": "maintenance_overdue_report",     "label": "Maintenance Overdue",
-     "description": "Preventive maintenance requests past due date"},
-    {"key": "procurement_pipeline_report",    "label": "Procurement Pipeline",
-     "description": "All procurement requests with status"},
-    {"key": "open_remediation_report",        "label": "Open Remediation Records",
-     "description": "Pending recommendations awaiting approval"},
-    {"key": "testing_request_status_report",  "label": "Testing Request Status",
-     "description": "All testing requests with current status and assignment"},
-    {"key": "test_results_summary_report",    "label": "Test Results Summary",
-     "description": "Test results with evaluation outcomes"},
-    {"key": "recommendation_approval_report", "label": "Recommendation Approvals",
-     "description": "Recommendations with approval status and notes"},
-    {"key": "compliance_status_report",       "label": "Compliance Status by Substation",
-     "description": "Equipment testing compliance rates grouped by substation"},
-    {"key": "tester_performance_report",      "label": "Tester Performance",
-     "description": "Tester completion rates and average turnaround times"},
-    {"key": "monthly_kpi_report",             "label": "Monthly KPI Summary",
-     "description": "Monthly aggregated KPIs: requests, completions, alerts, findings"},
-    # §3.3.3 Equipment Failure Registry
-    {"key": "equipment_failure_annual_report",
-     "label": "Equipment Failure Annual Report",
-     "description": "Yearly failure summary grouped by equipment type, make, and model. "
-                    "Parameter: year (default = previous calendar year)."},
-    {"key": "equipment_failure_performance_report",
-     "label": "Equipment Failure Performance Analysis",
-     "description": "On-demand comparative failure-rate analysis across makes, types, "
-                    "voltage classes, and age bands. Supports date range and dimension filters."},
-    # §3.3.4 Failure Resolution
-    {"key": "failure_resolution_report",
-     "label": "Failure Resolution Report",
-     "description": "End-to-end traceability report: each Failure Registry (FR-) record "
-                    "with its outcome (Repair / Replacement / Under Investigation) and the "
-                    "linked Repair Lifecycle work order status. "
-                    "Parameters: date_from, date_to (failure_date), outcome (all | Repair | "
-                    "Replacement | Under Investigation)."},
-    # §3.5 Equipment Lifecycle
-    {"key": "equipment_lifecycle_report",
-     "label": "Equipment Lifecycle Summary",
-     "description": "One row per equipment unit: commissioned date, test count, failure count, "
-                    "last test result, and current status. "
-                    "Parameters: status, voltage_class, department_id, date_from, date_to "
-                    "(commissioned date range)."},
-]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -174,9 +119,27 @@ class RunRequest(BaseModel):
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 @router.get("/definitions/query-keys")
-def get_query_keys():
-    """Return the list of built-in query keys for the ad-hoc builder."""
-    return QUERY_KEYS
+def get_query_keys(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return available report query keys from the database."""
+    keys = (
+        db.query(ReportQueryKey)
+        .filter(ReportQueryKey.is_active.is_(True))
+        .order_by(ReportQueryKey.group_name, ReportQueryKey.sort_order)
+        .all()
+    )
+    return [
+        {
+            "key":               k.key,
+            "label":             k.label,
+            "description":       k.description,
+            "group_name":        k.group_name,
+            "parameters_schema": k.parameters_schema,
+        }
+        for k in keys
+    ]
 
 
 @router.get("/definitions")
@@ -282,3 +245,41 @@ def list_logs(
     svc  = _svc(db, current_user, org_id)
     logs = svc.list_logs(definition_id=definition_id, limit=limit)
     return [_log_to_dict(lg) for lg in logs]
+
+
+# ── Reporting Center endpoints ─────────────────────────────────────────────────
+
+@router.get("/groups")
+def get_report_groups(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return distinct group_name values for Reporting Center filter chips."""
+    from sqlalchemy import distinct
+    from models import ReportDefinition
+    rows = db.query(distinct(ReportDefinition.group_name)).filter(
+        ReportDefinition.group_name.isnot(None)
+    ).all()
+    return sorted([r[0] for r in rows if r[0]])
+
+
+@router.get("/download/{filename:path}")
+def download_report_file(
+    filename: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Serve a previously generated scheduled report file."""
+    # Sanitise: strip any path traversal
+    safe_name = os.path.basename(filename)
+    path = os.path.join("uploads", "reports", safe_name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Report file not found or expired")
+    if filename.endswith(".xlsx"):
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        media = "application/pdf"
+    return FileResponse(
+        path,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
