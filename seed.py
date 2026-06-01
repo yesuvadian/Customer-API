@@ -9245,7 +9245,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a testing request is rejected by an approver.",
             context_vars=["request.number", "request.title", "equipment.ueic", "rejected_by", "reason"],
-            default_roles=["Originator", "Reviewing Officer"],
+            default_roles=["Asset Data Officer", "Reviewing Officer"],
         ),
         dict(
             event_type="tester_assigned",
@@ -9820,17 +9820,17 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
             "</table>"
             "<p>Log in to SEACMS to review and approve this request.</p>",
-            ["Reviewing Officer"],
+            ["Reviewing Officer", "@owner", "@requester"],
         ),
         _s(
             "[KPTCL-SEACMS] New {{category}} request {{request.number}} submitted"
             " by {{request.submitted_by}} for {{equipment.ueic}}. Login to approve.",
-            ["Reviewing Officer"],
+            ["Reviewing Officer", "@owner", "@requester"],
         ),
         _i(
             "New submission — {{request.number}}",
             "{{equipment.ueic}} submitted for {{category}} by {{request.submitted_by}}. Priority: {{request.priority}}.",
-            ["Reviewing Officer"],
+            ["Reviewing Officer", "@owner", "@requester"],
         ),
     )
 
@@ -9960,16 +9960,16 @@ def _seed_notification_templates(session) -> int:
             "<p><b>Rejected by:</b> {{rejected_by}}</p>"
             "<p><b>Reason:</b> {{reason}}</p>"
             "<p>Please review the request and resubmit it in SEACMS.</p>",
-            ["Originator", "Reviewing Officer"],
+            ["Asset Data Officer", "Reviewing Officer"],
         ),
         _s(
             "[KPTCL-SEACMS] Request {{request.number}} rejected by {{rejected_by}}. Reason: {{reason}}.",
-            ["Originator"],
+            ["Asset Data Officer"],
         ),
         _i(
             "Request rejected — {{request.number}}",
             "Testing request {{request.number}} was rejected. Reason: {{reason}}.",
-            ["Originator", "Reviewing Officer"],
+            ["Asset Data Officer", "Reviewing Officer"],
         ),
     )
 

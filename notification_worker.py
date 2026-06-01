@@ -36,6 +36,7 @@ import signal
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -219,15 +220,44 @@ class NotificationWorker:
             # Process the notification using NotificationService
             notification_service = NotificationService(db)
 
+            # Derive source_id / source_type from payload so @token recipients resolve.
+            # Convention: payload["request_id"] or payload["record_id"] holds the UUID
+            # of the primary source record; workflow_type maps to source_type.
+            _WORKFLOW_TO_SOURCE_TYPE = {
+                "testing_request":   "testing_request",
+                "taqc_inspection":   "testing_request",
+                "multisession":      "testing_request",
+                "direct_test":       "testing_request",
+                "schedule":          "testing_request",
+                "failure_register":  "testing_request",
+                "equipment":         "equipment",
+                "recommendation":    "recommendation",
+            }
+            _payload      = event.payload or {}
+            _src_id_str   = (
+                _payload.get("request_id") or
+                _payload.get("record_id")  or
+                _payload.get("source_id")
+            )
+            _src_type     = _WORKFLOW_TO_SOURCE_TYPE.get(event.workflow_type or "")
+            _src_id: Optional[UUID] = None
+            if _src_id_str:
+                try:
+                    _src_id = UUID(str(_src_id_str))
+                except (ValueError, AttributeError):
+                    pass
+
             notification_service.fire(
                 event_type=event.event_type,
                 workflow_type=event.workflow_type,
                 equipment_type=event.equipment_type,
-                test_category=event.test_category,
+                test_type=event.test_category,   # NotificationEvent uses test_category; fire() expects test_type
                 status_from=event.status_from,
                 status_to=event.status_to,
-                context=event.payload,
+                context=_payload,
                 organization_id=event.organization_id,
+                source_id=_src_id,
+                source_type=_src_type,
             )
 
             # Mark as sent

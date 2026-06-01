@@ -187,6 +187,8 @@ scheduler.add_job(
     trigger="interval",
     minutes=1,
     id="notification_pending_job",
+    max_instances=1,    # never run concurrently — prevents duplicate sends
+    coalesce=True,      # if missed fires pile up, run once not multiple times
 )
 
 
@@ -209,6 +211,8 @@ scheduler.add_job(
     trigger="interval",
     minutes=5,
     id="notification_retry_job",
+    max_instances=1,
+    coalesce=True,
 )
 
 

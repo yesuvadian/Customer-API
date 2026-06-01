@@ -187,23 +187,12 @@ class TestingService:
             except Exception as _surv:
                 logger.warning("[TestingService] Surveillance tracking update failed: %s", _surv)
 
-        # ── Notification: test submitted → emit event for async processing ────
+        # ── Notification: test submitted (direct — worker process not guaranteed) ─
         try:
-            from services.notification_event_emitter import emit_test_submitted_event
-            emit_test_submitted_event(
-                db=self.db,
-                organization_id=request.organization_id,
-                request_id=request.id,
-                request_number=request.request_number,
-                tester_name=request.tester.full_name if request.tester else "Unknown",
-                equipment_name=request.equipment_name or "Unknown Equipment",
-                equipment_type=request.equipment_type or "",
-                substation_name=request.substation.name if request.substation else "Unknown",
-                test_category=request.request_category or "test",
-                scheduled_date=request.scheduled_start_date.strftime("%Y-%m-%d") if request.scheduled_start_date else "",
-            )
+            from services.notification_service import NotificationService
+            NotificationService(self.db).notify_test_submitted(request)
         except Exception as _n:
-            logger.warning(f"test_submitted event emission failed: {_n}")
+            logger.warning(f"notify_test_submitted failed: {_n}")
 
         return request
 

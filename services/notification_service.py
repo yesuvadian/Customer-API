@@ -136,13 +136,35 @@ def _enrich_context_from_source(
                 if dept:
                     ctx.setdefault("dept.name", dept.name or "")
                     ctx.setdefault("dept.code", dept.code or "")
+            # Originator (submitted_by) context
+            if tr.originator_id:
+                from models import User as _User
+                orig = db.query(_User).filter(_User.id == tr.originator_id).first()
+                if orig:
+                    _orig_name = (
+                        f"{orig.firstname or ''} {orig.lastname or ''}".strip()
+                        or orig.email or str(orig.id)
+                    )
+                    ctx.setdefault("request.submitted_by", _orig_name)
+                    ctx.setdefault("originator",           _orig_name)
+                    ctx.setdefault("originator.email",     orig.email or "")
             # Equipment (asset register) context
             if tr.equipment_id:
-                from models import Equipment
-                eq = db.query(Equipment).filter(Equipment.id == tr.equipment_id).first()
+                from models import Equipment as _EqModel
+                from sqlalchemy.orm import joinedload as _jl
+                eq = (
+                    db.query(_EqModel)
+                    .options(_jl(_EqModel.department))
+                    .filter(_EqModel.id == tr.equipment_id)
+                    .first()
+                )
                 if eq:
                     ctx.setdefault("equipment.ueic", getattr(eq, "ueic", "") or "")
                     ctx.setdefault("equipment.name", getattr(eq, "name", "") or "")
+                    # Use the already-loaded relationship — avoids a second query
+                    _eq_dept = getattr(eq, "department", None)
+                    if _eq_dept:
+                        ctx.setdefault("equipment.department", _eq_dept.name or "")
 
         elif source_type == "test_result":
             from models import TestResult, TestingRequest, OrgDepartment
@@ -198,7 +220,13 @@ def _enrich_context_from_source(
                 ctx.setdefault("recommendation.status", rec.status or "")
 
     except Exception as _exc:
-        logger.debug(f"[Notif] _enrich_context_from_source({source_type}): {_exc}")
+        logger.warning(f"[Notif] _enrich_context_from_source({source_type}): {_exc}")
+
+    # ── Fallback: always ensure equipment.department has a value ─────────────
+    # Must be outside the try/except so it runs even when an earlier step threw.
+    # Uses the TR's own department if the equipment's department wasn't resolved.
+    if source_type == "testing_request":
+        ctx.setdefault("equipment.department", ctx.get("dept.name", "") or "")
 
 
 def _load_org_variables(db: Session, organization_id: Optional[UUID]) -> Dict[str, str]:
@@ -372,6 +400,132 @@ class VariableResolver:
         return ctx
 
 
+# ── System-token recipient resolver ──────────────────────────────────────────
+
+def _resolve_token_user(
+    db: Session,
+    source_type: str,
+    source_id: UUID,
+    field_name: str,
+) -> "Optional[User]":
+    """
+    Load the User whose UUID is stored in ``field_name`` on the source record.
+
+    source_type → model mapping
+    ───────────────────────────
+    testing_request  → TestingRequest
+    equipment        → Equipment
+    recommendation   → Recommendation
+    (others)         → skipped — extend here as needed
+
+    Field-name overrides
+    ────────────────────
+    Different models use different field names for conceptually the same
+    "owner / creator" relationship.  ``_FIELD_OVERRIDES`` maps
+    (source_type, generic_field) → model_specific_field so callers can use
+    the generic token names (@owner → "created_by") while still resolving
+    correctly against models that use a different column name.
+
+    Returns None on any error so a missing token never blocks delivery.
+    """
+    # ── Per-(source_type, generic_token_field) → model_specific_field ────────────
+    #
+    # Different models store the same conceptual "person" under different column
+    # names.  Map the generic token field (from SYSTEM_RECIPIENT_TOKENS) to the
+    # actual column on each model so @tokens work correctly across all source types.
+    #
+    #  Model                  @assignee                @owner          @requester
+    #  ──────────────────     ──────────────────────   ─────────────   ──────────────────────
+    #  TestingRequest          assigned_tester_id*      originator_id†  originator_id†
+    #  Equipment               assigned_tester_id (n/a) created_by*     requested_by (n/a)
+    #  TestResult              tested_by†               created_by*     → parent TR originator†
+    #  Recommendation          assigned_tester_id (n/a) created_by*     submitted_by†
+    #  RepairWorkflow          work_award_by†           created_by*     created_by†
+    #  (surveillance_workflow) ─ same model as above ─
+    #
+    #  *  direct column exists on that model
+    #  †  override applied here or via special navigation logic below
+    #  n/a → getattr returns None → user skipped (no error)
+    #
+    _FIELD_OVERRIDES: dict = {
+        # TestingRequest uses originator_id for both owner and requester
+        ("testing_request",       "created_by"):         "originator_id",
+        ("testing_request",       "requested_by"):       "originator_id",
+        # TestResult: @assignee is the tester who submitted the result
+        ("test_result",           "assigned_tester_id"): "tested_by",
+        # Recommendation: @requester is the submitter
+        ("recommendation",        "requested_by"):       "submitted_by",
+        # RepairWorkflow: @assignee is the Work Award Officer; @requester same as creator
+        ("repair_workflow",       "assigned_tester_id"): "work_award_by",
+        ("repair_workflow",       "requested_by"):       "created_by",
+        # surveillance_workflow IDs point to RepairWorkflow rows — same overrides
+        ("surveillance_workflow", "assigned_tester_id"): "work_award_by",
+        ("surveillance_workflow", "requested_by"):       "created_by",
+    }
+    actual_field = _FIELD_OVERRIDES.get((source_type, field_name), field_name)
+
+    try:
+        if source_type == "testing_request":
+            from models import TestingRequest as _TR
+            record = db.query(_TR).filter(_TR.id == source_id).first()
+
+        elif source_type == "equipment":
+            from models import Equipment as _EQ
+            record = db.query(_EQ).filter(_EQ.id == source_id).first()
+
+        elif source_type == "recommendation":
+            from models import Recommendation as _REC
+            record = db.query(_REC).filter(_REC.id == source_id).first()
+
+        elif source_type == "test_result":
+            from models import TestResult as _TR2
+            record = db.query(_TR2).filter(_TR2.id == source_id).first()
+
+            # @requester on test_result → navigate to parent testing_request's originator
+            # (TestResult has no "requester" column of its own).
+            if record and field_name == "requested_by":
+                from models import TestingRequest as _TR_p
+                parent = (
+                    db.query(_TR_p)
+                    .filter(_TR_p.id == record.testing_request_id)
+                    .first()
+                )
+                user_id = getattr(parent, "originator_id", None) if parent else None
+                if not user_id:
+                    return None
+                return db.query(User).filter(User.id == user_id).first()
+
+        elif source_type in ("repair_workflow", "surveillance_workflow"):
+            # surveillance_workflow IDs are FKs into repair_workflows (same table).
+            from models import RepairWorkflow as _RW
+            record = db.query(_RW).filter(_RW.id == source_id).first()
+
+        else:
+            logger.debug(
+                f"[Notif] _resolve_token_user: unsupported source_type={source_type!r}"
+            )
+            return None
+
+        if not record:
+            return None
+
+        user_id = getattr(record, actual_field, None)
+        if not user_id:
+            logger.debug(
+                f"[Notif] _resolve_token_user: field {actual_field!r} is empty "
+                f"on {source_type}/{source_id}"
+            )
+            return None
+
+        return db.query(User).filter(User.id == user_id).first()
+
+    except Exception as exc:
+        logger.warning(
+            f"[Notif] _resolve_token_user({source_type!r}, {actual_field!r}): {exc}"
+        )
+        return None
+
+
 # ── Department ancestry helper ────────────────────────────────────────────────
 
 def _ancestor_dept_ids(db: Session, department_id: UUID) -> set:
@@ -408,32 +562,63 @@ def _resolve_recipients_by_roles(
     role_names: List[str],
     organization_id: Optional[UUID],
     department_id: Optional[UUID] = None,
+    source_type: Optional[str] = None,
+    source_id: Optional[UUID] = None,
 ) -> List[User]:
     """
-    Return unique active User objects that hold any of the given OrgRole identifiers
-    within the given organisation, scoped by department when provided.
+    Return unique active User objects for the given recipient identifiers.
 
-    role_names accepts two formats (auto-detected):
-      • UUID strings  — matched against OrgRole.id  (new format, preferred)
-      • Name strings  — matched against OrgRole.name (legacy format, backward compat)
+    Accepts three identifier formats in the same list (auto-detected):
+      • ``@token`` strings — system recipient tokens (e.g. ``"@assignee"``)
+                             resolved from the source record at fire()-time.
+                             Defined in ``services/notification_tokens.py``.
+      • UUID strings       — matched against OrgRole.id  (preferred)
+      • Name strings       — matched against OrgRole.name (legacy / backward compat)
 
-    Department scoping rules (mirrors testing_request_service.get_user_scope):
+    System tokens are always resolved first and deduplicated against
+    the role-based results so a user is never notified twice.
+
+    Department scoping rules (applies to role-based recipients only):
       • OrgUserRole.department_id IS NULL  → org-wide user  → always included
       • OrgUserRole.department_id == source_dept    → same leaf dept → included
-      • OrgUserRole.department_id is an ANCESTOR of source_dept
-        (circle/zone level above the TR's division)           → included
+      • OrgUserRole.department_id is an ANCESTOR of source_dept → included
       • OrgUserRole.department_id is a sibling / different branch → excluded
-
-    This ensures North-division events don't spam South/Mysuru personnel,
-    but Circle EE and Zone SEE (who sit above the division) still receive them.
     """
-    if not role_names or not organization_id:
-        return []
+    from services.notification_tokens import SYSTEM_RECIPIENT_TOKENS
+
+    seen: set     = set()
+    users: List[User] = []
+
+    # ── 1. Resolve system tokens (@assignee, @owner, …) ──────────────────────
+    sys_tokens = [r for r in (role_names or []) if isinstance(r, str) and r.startswith("@")]
+    org_refs   = [r for r in (role_names or []) if not (isinstance(r, str) and r.startswith("@"))]
+
+    if sys_tokens and source_type and source_id:
+        for token in sys_tokens:
+            field_name = SYSTEM_RECIPIENT_TOKENS.get(token)
+            if not field_name:
+                logger.debug(f"[Notif] Unknown system recipient token: {token!r}")
+                continue
+            user = _resolve_token_user(db, source_type, source_id, field_name)
+            if user and user.id not in seen:
+                seen.add(user.id)
+                users.append(user)
+                logger.debug(
+                    f"[Notif] Token {token!r} → user={user.id} ({user.email})"
+                )
+    elif sys_tokens:
+        logger.debug(
+            f"[Notif] System tokens {sys_tokens} present but source_type/source_id "
+            f"not provided — tokens skipped"
+        )
+
+    # ── 2. Resolve org roles (existing logic) ─────────────────────────────────
+    if not org_refs or not organization_id:
+        return users   # may already contain system-token users
 
     # Auto-detect whether the caller passed UUIDs or name strings.
-    # Mixed lists are unusual but we handle them: split into two groups and union.
-    uuid_ids  = [UUID(r) for r in role_names if _is_uuid_str(r)]
-    name_strs = [r for r in role_names if not _is_uuid_str(r)]
+    uuid_ids  = [UUID(r) for r in org_refs if _is_uuid_str(r)]
+    name_strs = [r for r in org_refs if not _is_uuid_str(r)]
 
     from sqlalchemy import or_ as _or_
     role_filter = []
@@ -442,7 +627,7 @@ def _resolve_recipients_by_roles(
     if name_strs:
         role_filter.append(OrgRole.name.in_(name_strs))
     if not role_filter:
-        return []
+        return users   # return any system-token users already collected
 
     # Build the full ancestor set once (includes source dept itself)
     ancestor_ids: set = set()
@@ -463,32 +648,21 @@ def _resolve_recipients_by_roles(
         .all()
     )
 
-    print(
-        f"[DEBUG resolve_recipients] role_names={role_names} org={organization_id} "
+    logger.debug(
+        f"[Notif resolve_recipients] org_refs={org_refs} org={organization_id} "
         f"dept={department_id} ancestor_ids={ancestor_ids} rows_count={len(rows)}"
     )
 
-    seen: set = set()
-    users: List[User] = []
     for row in rows:
         if department_id:
             row_dept = row.department_id
-            # Exclude users assigned to a dept that is NOT in the ancestor chain
-            # (i.e. a sibling division or unrelated branch).
+            # Exclude users assigned to a dept outside the ancestor chain.
             # Org-wide users (dept_id IS NULL) are always included.
             if row_dept is not None and row_dept not in ancestor_ids:
-                print(
-                    f"[DEBUG resolve_recipients] EXCLUDED user={row.user_id} "
-                    f"row_dept={row_dept} not in ancestor_ids"
-                )
                 continue
         if row.user_id not in seen:
             seen.add(row.user_id)
             users.append(row.user)
-            print(
-                f"[DEBUG resolve_recipients] INCLUDED user={row.user_id} "
-                f"email={getattr(row.user, 'email', '?')} row_dept={row.department_id}"
-            )
     return users
 
 
@@ -1458,17 +1632,21 @@ class NotificationService:
                 # ── Recipient roles: routing override wins if set ─────────────
                 effective_roles = roles_override or list(tmpl.recipient_roles or [])
 
-                # ── Role-based recipients (dept-scoped) ──────────────────────
+                # ── Recipient resolution ─────────────────────────────────────
+                # Handles both @system-tokens (resolved from source record)
+                # and regular OrgRole UUIDs / name strings.
                 recipients = _resolve_recipients_by_roles(
                     self.db,
                     effective_roles,
                     organization_id,
                     department_id=department_id,
+                    source_type=source_type,
+                    source_id=source_id,
                 )
-                print(
-                    f"[DEBUG fire] event={event_type!r} "
-                    f"roles={effective_roles} roles_override={roles_override} dept={department_id} "
-                    f"→ recipients={[u.email for u in recipients]}"
+                logger.debug(
+                    f"[Notif] fire event={event_type!r} "
+                    f"roles={effective_roles} override={roles_override} dept={department_id} "
+                    f"→ {len(recipients)} recipient(s)"
                 )
 
                 # ── Caller-supplied extra User objects (e.g. test-fire) ──────
@@ -1764,13 +1942,29 @@ class NotificationService:
             request.equipment.ueic if request.equipment else
             (request.equipment_type.name if request.equipment_type else "Equipment")
         )
+        # Resolve originator display name
+        _orig = getattr(request, "originator", None)
+        if _orig:
+            _orig_name = (
+                f"{_orig.firstname or ''} {_orig.lastname or ''}".strip()
+                or _orig.email or ""
+            )
+        else:
+            _orig_name = ""
+        # Resolve category as plain string (request_category is an Enum)
+        _cat_raw = getattr(request, "request_category", "test")
+        _category = _cat_raw.value if hasattr(_cat_raw, "value") else str(_cat_raw)
         self.fire(
             event_type="request_submitted",
             context={
-                "equipment": equipment_label,
-                "request_number": getattr(request, "request_number", ""),
-                "originator": request.originator.email if request.originator else "",
-                "category": getattr(request, "request_category", "test"),
+                "equipment":           equipment_label,
+                "request_number":      getattr(request, "request_number", ""),
+                # dot-notation keys match template variables directly
+                "request.number":      getattr(request, "request_number", ""),
+                "request.priority":    getattr(request, "priority", "normal") or "normal",
+                "request.submitted_by": _orig_name,
+                "originator":          _orig_name,
+                "category":            _category,
             },
             organization_id=getattr(request, "organization_id", None),
             department_id=self._dept(request),
@@ -2593,9 +2787,20 @@ class NotificationService:
                 NotificationLog.channel.in_(["email", "sms"]),
             )
             .order_by(NotificationLog.cts.asc())
-            .limit(50)   # process in batches of 50
+            .limit(50)
+            .with_for_update(skip_locked=True)   # prevent concurrent workers sending the same row
             .all()
         )
+
+        # Immediately mark claimed rows as "processing" and flush so other
+        # workers see them as non-pending before we start slow SMTP calls.
+        for _log in pending:
+            _log.status = "processing"
+        try:
+            self.db.flush()
+        except Exception:
+            self.db.rollback()
+            return {"sent": 0, "failed": 0, "skipped": 0, "total": 0}
 
         sent = failed = skipped = 0
 
@@ -2656,6 +2861,10 @@ class NotificationService:
                 sent += 1
             elif log.status in ("skipped",):
                 skipped += 1
+            elif log.status == "processing":
+                # dispatcher didn't update status — treat as failed so it retries
+                log.status = "failed"
+                failed += 1
             else:
                 failed += 1
 

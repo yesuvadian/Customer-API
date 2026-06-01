@@ -1328,6 +1328,7 @@ class RoutingRuleOut(BaseModel):
     applicable_status_to:   Optional[str] = None
     channels_enabled:           List[str] = []
     recipient_roles_override:   Optional[List[str]] = None
+    template_recipient_roles:   Optional[List[str]] = None  # template defaults (no override set)
     priority:  int = 0
     # Per-channel template overrides (NULL = use default template)
     email_template_id: Optional[UUID] = None
@@ -1335,6 +1336,7 @@ class RoutingRuleOut(BaseModel):
     inapp_template_id: Optional[UUID] = None
     is_active: bool
     is_global: bool = False   # True if organization_id is None
+    has_org_override: bool = False  # True if an org-specific rule covers the same event_type
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
 
@@ -1379,7 +1381,24 @@ class RoutingRuleUpdate(BaseModel):
 
 # ── Helper: serialise a rule row ──────────────────────────────────────────────
 
-def _rule_out(rule: NotificationRoutingRule) -> dict:
+def _rule_out(rule: NotificationRoutingRule, db: Optional[Session] = None) -> dict:
+    # When no override is set, look up the global template's default recipient_roles
+    # so the UI can show them as a read-only hint (e.g. on global-default cards).
+    template_recipient_roles: Optional[list] = None
+    if db is not None and not rule.recipient_roles_override:
+        from models import NotificationTemplate as _NTmpl
+        _tmpl = (
+            db.query(_NTmpl)
+            .filter(
+                _NTmpl.event_type == rule.event_type,
+                _NTmpl.organization_id.is_(None),
+                _NTmpl.channel == "email",
+            )
+            .first()
+        )
+        if _tmpl and _tmpl.recipient_roles:
+            template_recipient_roles = list(_tmpl.recipient_roles)
+
     return {
         "id":            rule.id,
         "organization_id": rule.organization_id,
@@ -1392,6 +1411,7 @@ def _rule_out(rule: NotificationRoutingRule) -> dict:
         "applicable_status_to":       rule.applicable_status_to,
         "channels_enabled":           rule.channels_enabled or [],
         "recipient_roles_override":   rule.recipient_roles_override,
+        "template_recipient_roles":   template_recipient_roles,
         "priority":  rule.priority,
         # Per-channel template overrides (None = use default)
         "email_template_id": getattr(rule, 'email_template_id', None),
@@ -1530,8 +1550,14 @@ def _get_org_roles(db: Session, organization_id=None) -> list:
                 # Lets Flutter map catalogue default_roles (RoleTemplate UUIDs)
                 # to OrgRole.id values when pre-filling the template editor.
                 "role_template_id": rt_map.get(r.name),
+                "is_system_token":  False,
             })
-    return result
+
+    # Prepend system recipient tokens at the top so they appear first in the
+    # Recipient Roles chip selector in the Flutter Notification Center UI.
+    # ``is_system_token: True`` lets the UI render them with distinct styling.
+    from services.notification_tokens import all_token_entries
+    return all_token_entries() + result
 
 
 def _get_equipment_types(db: Session) -> list:
@@ -1625,7 +1651,19 @@ def list_routing_rules(
         NotificationRoutingRule.event_type,
     ).all()
 
-    return [_rule_out(r) for r in rules]
+    # event_types that have at least one org-specific rule in this result set
+    org_overridden_event_types: set = {
+        r.event_type for r in rules if r.organization_id is not None
+    }
+
+    rule_dicts = [_rule_out(r, db) for r in rules]
+
+    # Mark global default rules that are (at least partially) superseded by an org rule
+    for rd in rule_dicts:
+        if rd.get("is_global") and rd["event_type"] in org_overridden_event_types:
+            rd["has_org_override"] = True
+
+    return rule_dicts
 
 
 @router.post("/routing-rules", status_code=status.HTTP_201_CREATED)
@@ -1662,7 +1700,7 @@ def create_routing_rule(
     db.add(rule)
     db.commit()
     db.refresh(rule)
-    return _rule_out(rule)
+    return _rule_out(rule, db)
 
 
 @router.put("/routing-rules/{rule_id}")
@@ -1756,7 +1794,7 @@ def update_routing_rule(
         db.add(override)
         db.commit()
         db.refresh(override)
-        return _rule_out(override)
+        return _rule_out(override, db)
 
     # ── Org-specific rule: verify ownership then update in-place ──────────────
     if rule.organization_id != org_id:
@@ -1792,7 +1830,7 @@ def update_routing_rule(
 
     db.commit()
     db.refresh(rule)
-    return _rule_out(rule)
+    return _rule_out(rule, db)
 
 
 @router.delete("/routing-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1872,7 +1910,7 @@ def clone_routing_rule_as_org_override(
     db.add(clone)
     db.commit()
     db.refresh(clone)
-    return _rule_out(clone)
+    return _rule_out(clone, db)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

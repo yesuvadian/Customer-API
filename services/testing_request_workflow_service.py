@@ -226,14 +226,43 @@ class TestingRequestWorkflowService:
         tester_id: UUID,
         comment: Optional[str] = None
     ) -> tuple[bool, str]:
-        """Assign a tester to the request."""
-        return self.perform_transition(
+        """Assign a tester to the request.
+
+        Sets assigned_tester_id on the request BEFORE the workflow transition
+        so that:
+          1. The DB record is updated to reflect the assignment.
+          2. notify_tester_assigned() can read request.assigned_tester for
+             the in-app / email notification sent to the specific tester.
+        """
+        # Set the tester before the transition so notify_tester_assigned()
+        # can safely access request.assigned_tester after the commit.
+        testing_request.assigned_tester_id = tester_id
+
+        success, message = self.perform_transition(
             testing_request=testing_request,
             action_code="assign_tester",
             user=user,
             comment=comment,
             metadata={"tester_id": str(tester_id)}
         )
+
+        if success:
+            # Refresh so ORM relationships (assigned_tester, equipment, …) are
+            # populated before the notification service reads them.
+            try:
+                self.db.refresh(testing_request)
+            except Exception:
+                pass
+            try:
+                from services.notification_service import NotificationService
+                NotificationService(self.db).notify_tester_assigned(testing_request)
+            except Exception as notif_exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"[TestingRequest] notify_tester_assigned failed: {notif_exc}"
+                )
+
+        return success, message
 
     def accept_assignment(
         self,
