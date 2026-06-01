@@ -48,19 +48,23 @@ logger = logging.getLogger(__name__)
 # Helper Functions
 # =============================================================================
 
-def _check_workflow_access(db: Session, workflow_id: UUID, user: User) -> RepairWorkflow:
+def _check_workflow_access(
+    db: Session,
+    workflow_id: UUID,
+    user: User
+) -> RepairWorkflow:
     """
     Verify user has access to this surveillance workflow.
 
-    Enforces organization/department scoping based on user role.
+    Surveillance workflows follow the same visibility model as repair workflows:
+    organization-level access only.
     """
-    from utils.common_service import get_user_dept_scope
 
     workflow = (
         db.query(RepairWorkflow)
         .filter(
             RepairWorkflow.id == workflow_id,
-            RepairWorkflow.workflow_type == 'surveillance'
+            RepairWorkflow.workflow_type == "surveillance"
         )
         .first()
     )
@@ -68,17 +72,12 @@ def _check_workflow_access(db: Session, workflow_id: UUID, user: User) -> Repair
     if not workflow:
         raise HTTPException(404, "Surveillance workflow not found")
 
-    # Check organization match
+    # Organization scope only
     if workflow.organization_id != user.organization_id:
-        raise HTTPException(403, "Access denied: Different organization")
-
-    # Check department scope (if user is not org admin)
-    is_org_admin, user_dept_id = get_user_dept_scope(db, user.id, None)
-
-    if not is_org_admin and user_dept_id:
-        workflow_dept_id = workflow.equipment.department_id if workflow.equipment else None
-        if workflow_dept_id and workflow_dept_id != user_dept_id:
-            raise HTTPException(403, "Access denied: Different department")
+        raise HTTPException(
+            403,
+            "Access denied: Different organization"
+        )
 
     return workflow
 
@@ -142,63 +141,62 @@ def list_surveillance_workflows(
     user: User = Depends(get_current_user),
 ):
     """
-    List surveillance workflows for current user's organization/department.
+    List surveillance workflows.
 
-    Automatically scoped by:
-    - Organization (always filtered by user.organization_id)
-    - Department (filtered if user is not org admin)
+    Scoped by organization only (same behavior as repair workflows).
 
     Query params:
     - status: active, completed, on_hold, cancelled
     - quarter: 1-4 (filter by current quarter stage)
     - skip/limit: Pagination
     """
-    # Get user's department scope
-    is_org_admin, user_dept_id = get_user_dept_scope(db, user.id, None)
 
     # Base query with eager loading (avoid N+1)
     query = db.query(RepairWorkflow).options(
         joinedload(RepairWorkflow.equipment),
-        joinedload(RepairWorkflow.current_stage_instance).joinedload(RepairStageInstance.stage)
+        joinedload(
+            RepairWorkflow.current_stage_instance
+        ).joinedload(RepairStageInstance.stage)
     ).filter(
-        RepairWorkflow.workflow_type == 'surveillance',
-        RepairWorkflow.organization_id == user.organization_id,  # Org filter
+        RepairWorkflow.workflow_type == "surveillance",
+        RepairWorkflow.organization_id == user.organization_id,
     )
 
-    # Department filter (if not org admin)
-    # Note: RepairWorkflow doesn't have department_id, department info comes from Equipment
-    if not is_org_admin and user_dept_id:
-        query = query.join(Equipment, Equipment.id == RepairWorkflow.equipment_id).filter(
-            Equipment.department_id == user_dept_id
-        )
-
-    # Apply optional filters
+    # Optional status filter
     if status:
         query = query.filter(RepairWorkflow.status == status)
 
+    # Optional quarter filter
     if quarter:
         query = query.join(
             RepairStageInstance,
-            RepairStageInstance.id == RepairWorkflow.current_stage_instance_id
-        ).filter(RepairStageInstance.quarter_number == quarter)
+            RepairStageInstance.id == RepairWorkflow.current_stage_instance_id,
+        ).filter(
+            RepairStageInstance.quarter_number == quarter
+        )
 
-    # Get total count before pagination
+    # Total before pagination
     total = query.count()
 
-    # Apply pagination
-    workflows = query.order_by(RepairWorkflow.created_at.desc()).offset(skip).limit(limit).all()
+    # Pagination
+    workflows = (
+        query.order_by(RepairWorkflow.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
-    # Serialize results
+    # Serialize
     items = [
         _serialize_workflow(wf, wf.current_stage_instance)
         for wf in workflows
     ]
 
     return {
-        'total': total,
-        'skip': skip,
-        'limit': limit,
-        'items': items,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "items": items,
     }
 
 
