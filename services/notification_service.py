@@ -876,12 +876,25 @@ class EmailDispatcher(ChannelDispatcher):
         except Exception as _cc_exc:
             logger.debug(f"[Notif] CC/BCC lookup failed for log={log.id}: {_cc_exc}")
 
-        # ── No role-based recipients: fall back to CC/BCC as primary ─────────
-        # When the event has no routing rule and the template has no recipient_roles,
-        # pending will be empty. If the admin set CC/BCC email addresses on the
-        # template, treat them as the primary To recipients so the notification
-        # still fires (e.g. equipment_retired with only a CC email configured).
+        # ── No role-based recipients ──────────────────────────────────────────
         if not pending:
+            # If ALL recipients are already sent/skipped this is a re-pickup of a
+            # batch log whose status was never updated to 'sent' (scheduler bug).
+            # Mark it done and return — do NOT re-send to CC/BCC.
+            all_rcpt_statuses = {r.delivery_status for r in (log.recipients or [])}
+            if all_rcpt_statuses and all_rcpt_statuses <= {"sent", "skipped"}:
+                log.status  = "sent"
+                log.sent_at = now
+                logger.info(
+                    f"[Notif] Batch log {log.id} had all recipients already sent — "
+                    f"marking log as sent (was stuck at pending)"
+                )
+                return
+
+            # When the event has no routing rule and the template has no
+            # recipient_roles, pending will be empty.  If the admin set CC/BCC
+            # email addresses on the template, treat them as primary recipients
+            # so the notification still fires (e.g. equipment_retired).
             fallback = list(dict.fromkeys(cc_addrs + bcc_addrs))  # deduplicated, order preserved
             if fallback:
                 logger.info(
@@ -1613,12 +1626,13 @@ class NotificationService:
                 if routing and routing.recipient_roles_override
                 else None
             )
-            if routing:
-                logger.debug(
-                    f"[Notif] Routing rule {routing.id} matched for "
-                    f"event={event_type!r} workflow={workflow_type!r} "
-                    f"channels={allowed_channels}"
-                )
+            logger.info(
+                f"[Notif:fire] event={event_type!r} org={organization_id} "
+                f"workflow={workflow_type!r} source={source_type}/{source_id} "
+                f"→ rule={'NONE (permissive)' if not routing else routing.id} "
+                f"org_rule={routing.organization_id if routing else 'N/A'} "
+                f"channels={allowed_channels} override={roles_override}"
+            )
 
             for tmpl in templates:
                 # ── Channel filter from routing rule ─────────────────────────
@@ -2862,11 +2876,26 @@ class NotificationService:
             elif log.status in ("skipped",):
                 skipped += 1
             elif log.status == "processing":
-                # dispatcher didn't update status — treat as failed so it retries
-                log.status = "failed"
-                failed += 1
+                # Dispatcher didn't update status — check recipients and resolve.
+                # All recipients sent/skipped → mark sent; otherwise failed.
+                _rcpt_statuses = {r.delivery_status for r in (log.recipients or [])}
+                if _rcpt_statuses and _rcpt_statuses <= {"sent", "skipped"}:
+                    log.status  = "sent"
+                    log.sent_at = datetime.now(timezone.utc)
+                    sent += 1
+                else:
+                    log.status = "failed"
+                    failed += 1
             else:
-                failed += 1
+                # Catch-all: inspect recipients directly instead of trusting
+                # whatever status the dispatcher left (could be stale).
+                _rcpt_statuses = {r.delivery_status for r in (log.recipients or [])}
+                if _rcpt_statuses and _rcpt_statuses <= {"sent", "skipped"}:
+                    log.status  = "sent"
+                    log.sent_at = datetime.now(timezone.utc)
+                    sent += 1
+                else:
+                    failed += 1
 
         try:
             self.db.commit()

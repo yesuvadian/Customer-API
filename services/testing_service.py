@@ -187,13 +187,6 @@ class TestingService:
             except Exception as _surv:
                 logger.warning("[TestingService] Surveillance tracking update failed: %s", _surv)
 
-        # ── Notification: test submitted (direct — worker process not guaranteed) ─
-        try:
-            from services.notification_service import NotificationService
-            NotificationService(self.db).notify_test_submitted(request)
-        except Exception as _n:
-            logger.warning(f"notify_test_submitted failed: {_n}")
-
         return request
 
     @staticmethod

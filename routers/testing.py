@@ -428,6 +428,14 @@ def submit_test_results(
             replacement_products=repl_prods or None,
         )
 
+    # ── Fire test_submitted notification (both rec_type and non-rec_type paths) ─
+    try:
+        from services.notification_service import NotificationService
+        NotificationService(db).notify_test_submitted(req)
+    except Exception as _n:
+        import logging
+        logging.getLogger(__name__).warning(f"notify_test_submitted failed: {_n}")
+
     # ── Return request + stored recommendation data ───────────────────────────
     # _enrich() returns the ORM object — serialise to dict via Pydantic so we
     # can attach the extra "recommendation" key without hitting TypeError.
