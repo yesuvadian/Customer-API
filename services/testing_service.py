@@ -455,21 +455,28 @@ class TestingService:
 
             # ── Notification hooks (fire-and-forget; never block save) ────────
             try:
-                from services.notification_event_emitter import emit_test_result_event
+                from services.notification_service import NotificationService
                 overall_threshold = ev.get("overall", "NORMAL")
                 if overall_threshold in ("ALERT", "CRITICAL"):
-                    emit_test_result_event(
-                        db=self.db,
+                    _event_map = {"ALERT": "eval_alert", "CRITICAL": "eval_critical"}
+                    _tester_name = getattr(getattr(request, "tester", None), "full_name", None) or "Unknown"
+                    NotificationService(self.db).fire(
+                        event_type=_event_map[overall_threshold],
+                        context={
+                            "request.number":  request.request_number or "",
+                            "equipment.ueic":  getattr(request, "equipment_name", "") or "",
+                            "test_type_name":  template_key or "",
+                            "result_threshold": overall_threshold,
+                            "tester_name":     _tester_name,
+                        },
                         organization_id=request.organization_id,
-                        request_id=request.id,
-                        request_number=request.request_number,
-                        equipment_name=request.equipment_name or "Unknown Equipment",
-                        equipment_type=request.equipment_type or "",
-                        test_category=request.request_category or "test",
-                        test_type_name=template_key or "Unknown Test",
-                        result_threshold=overall_threshold,
-                        tester_name=request.tester.full_name if request.tester else "Unknown",
-                        additional_payload={"evaluation": ev},
+                        department_id=getattr(request, "department_id", None),
+                        source_id=result.id,
+                        source_type="test_result",
+                        severity="critical" if overall_threshold == "CRITICAL" else "alert",
+                        workflow_type="testing_request",
+                        equipment_type=getattr(request, "equipment_type", None) or None,
+                        test_type=(request.request_category.value if request.request_category else None),
                     )
             except Exception as _notif_err:
                 logger.warning(f"Notification event emission failed: {_notif_err}")
