@@ -413,6 +413,14 @@ class TestingRequestWorkflowService:
                 testing_request.assigned_tester_id = selected_tester.id
                 testing_request.status = TestingRequestStatus.assigned
                 self.db.commit()
+                self.db.refresh(testing_request)
+
+                try:
+                    from services.notification_service import NotificationService
+                    NotificationService(self.db).notify_tester_assigned(testing_request)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Notification failed: {e}")
 
                 return True, f"Request approved and assigned to {selected_tester.email} (testing mode)"
 
@@ -469,6 +477,14 @@ class TestingRequestWorkflowService:
             self.db.add(audit_log)
 
             self.db.commit()
+            self.db.refresh(testing_request)
+
+            try:
+                from services.notification_service import NotificationService
+                NotificationService(self.db).notify_tester_assigned(testing_request)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Notification failed: {e}")
 
             return True, f"Request approved and assigned to {selected_tester.email}"
 
