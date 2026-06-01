@@ -104,7 +104,7 @@ def _enrich_context_from_source(
                 return
             ctx.setdefault("tr.id",          str(tr.id))
             ctx.setdefault("tr.status",       str(tr.status.value) if tr.status else "")
-            ctx.setdefault("tr.submitted_at", str(tr.created_at)[:19] if tr.created_at else "")
+            ctx.setdefault("tr.submitted_at", str(tr.cts)[:19] if tr.cts else "")
             ctx.setdefault("tr.category",     str(tr.request_category.value) if tr.request_category else "")
             ctx.setdefault("request.number",  tr.request_number or str(tr.id)[:8])
             ctx.setdefault("request.status",  str(tr.status.value) if tr.status else "")
@@ -172,7 +172,7 @@ def _enrich_context_from_source(
             if not tr_res:
                 return
             ctx.setdefault("eval.overall",     tr_res.overall_result or "")
-            ctx.setdefault("eval.evaluated_at", str(tr_res.created_at)[:19] if tr_res.created_at else "")
+            ctx.setdefault("eval.evaluated_at", str(tr_res.tested_at or tr_res.cts)[:19] if (tr_res.tested_at or tr_res.cts) else "")
             if tr_res.testing_request_id:
                 tr = db.query(TestingRequest).filter(
                     TestingRequest.id == tr_res.testing_request_id
