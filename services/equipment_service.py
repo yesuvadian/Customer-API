@@ -412,7 +412,7 @@ class EquipmentService:
 
         return (
             query
-            .order_by(Equipment.ueic)
+            .order_by(desc(Equipment.cts))
             .offset(skip)
             .limit(limit)
             .all()
