@@ -13,7 +13,6 @@ from fastapi import HTTPException, status
 
 from models import TestingRequest, User, TestingRequestStatus
 from services.workflow_engine import IntegratedWorkflowEngine
-from services.notification_event_emitter import emit_status_changed_event
 from services.tester_auto_assignment_service import TesterAutoAssignmentService
 
 
@@ -131,17 +130,32 @@ class TestingRequestWorkflowService:
             self.db.commit()
 
             try:
-                emit_status_changed_event(
-                    db=self.db,
+                from services.notification_service import NotificationService
+                _changed_by = (
+                    getattr(user, "full_name", None)
+                    or getattr(user, "firstname", None)
+                    or str(user.id)
+                )
+                NotificationService(self.db).fire(
+                    event_type="status_changed",
+                    context={
+                        "request.number":  testing_request.request_number or str(testing_request.id),
+                        "request.status":  new_state_code,
+                        "request.title":   getattr(testing_request, "title", "") or "",
+                        "status_from":     from_state,
+                        "status_to":       new_state_code,
+                        "changed_by":      _changed_by,
+                    },
                     organization_id=testing_request.organization_id,
+                    department_id=getattr(testing_request, "department_id", None),
+                    source_id=testing_request.id,
+                    source_type="testing_request",
+                    severity="info",
                     workflow_type=self.WORKFLOW_TYPE,
-                    record_id=testing_request.id,
-                    record_number=testing_request.request_number or str(testing_request.id),
+                    equipment_type=(testing_request.equipment_type.name if testing_request.equipment_type else None),
+                    test_type=(testing_request.request_category.value if testing_request.request_category else None),
                     status_from=from_state,
                     status_to=new_state_code,
-                    changed_by=getattr(user, "full_name", None) or getattr(user, "firstname", None) or str(user.id),
-                    equipment_type=(testing_request.equipment_type.name if testing_request.equipment_type else ""),
-                    test_category=(testing_request.request_category.value if testing_request.request_category else ""),
                 )
             except Exception as _em:
                 import logging

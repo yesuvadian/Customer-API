@@ -9908,6 +9908,27 @@ def _seed_notification_templates(session) -> int:
         ),
     )
 
+    _tmpl("status_changed",
+        _e(
+            "Request Status Updated — {{request.number}}",
+            "<h3>Testing Request Status Changed</h3>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Previous Status</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{status_from}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>New Status</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{status_to}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Changed By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{changed_by}}</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS to view the request.</p>",
+            ["Reviewing Officer", "Asset Data Officer"],
+        ),
+        _i(
+            "Status updated — {{request.number}}",
+            "Request {{request.number}} moved from {{status_from}} to {{status_to}} by {{changed_by}}.",
+            ["Reviewing Officer", "Asset Data Officer"],
+        ),
+    )
+
     _tmpl("recommendation_approved",
         _e(
             "Recommendation Approved — {{request.number}}",
