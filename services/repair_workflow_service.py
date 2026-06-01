@@ -649,6 +649,13 @@ class RepairWorkflowService:
         self._log_audit(workflow_id, stage_id, "submit", user_id, remarks or "Stage submitted for approval")
 
         stage = self.db.query(RepairStageDefinition).filter(RepairStageDefinition.id == stage_id).first()
+
+        # Fire notification so routing rules with status_from=assigned/status_to=submitted match
+        self._fire_notification_safe(
+            "repair_stage_changed", workflow, stage, user_id,
+            status_from="assigned", status_to="submitted",
+        )
+
         return {
             "message": "Stage submitted — awaiting approval",
             "stage": stage.name if stage else str(stage_id),
@@ -747,6 +754,8 @@ class RepairWorkflowService:
             workflow,
             next_stage,
             user_id,
+            status_from="submitted",
+            status_to="approved",
         )
         # Fire stage_approved hook so listeners can react to specific stages
         # without touching this service (e.g. certificate upload processing).
@@ -1890,6 +1899,8 @@ class RepairWorkflowService:
         stage,
         user_id: UUID,
         stage_instance=None,
+        status_from: Optional[str] = None,
+        status_to: Optional[str] = None,
     ) -> None:
         """
         Fire a notification for a workflow stage event, routing to the correct
@@ -1897,6 +1908,11 @@ class RepairWorkflowService:
           CALIBRATION  → calibration_stage_changed / calibration_stage_delay
           SURVEILLANCE → surveillance_stage_changed / surveillance_stage_delay
           (else)       → repair_stage_changed       / repair_delay
+
+        status_from / status_to are passed through to the notification engine
+        so that routing rules with applicable_status_from/to filters match correctly:
+          submit_stage:  status_from="assigned",  status_to="submitted"
+          advance_stage: status_from="submitted", status_to="approved"
 
         For delay events, stage should be the REJECTED stage definition and
         stage_instance should be its RepairStageInstance so that
@@ -1941,6 +1957,8 @@ class RepairWorkflowService:
                     source_type="repair_workflow",
                     severity="info",
                     workflow_type="repair_lifecycle",
+                    status_from=status_from,
+                    status_to=status_to,
                 )
 
             elif event_type == "repair_delay":
