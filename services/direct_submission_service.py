@@ -262,7 +262,31 @@ class DirectSubmissionService:
 
         try:
             from services.notification_service import NotificationService
-            NotificationService(self.db).notify_request_submitted(req)
+            ns = NotificationService(self.db)
+            ns.notify_request_submitted(req)
+            # Fire specific fr_submitted event for failure registry entries
+            if req.request_category and req.request_category.value == "failure_registry":
+                equipment_label = (
+                    req.equipment.ueic if getattr(req, "equipment", None)
+                    else (req.equipment_type.name if getattr(req, "equipment_type", None) else "Equipment")
+                )
+                originator_label = req.originator.email if getattr(req, "originator", None) else ""
+                ns.fire(
+                    event_type="fr_submitted",
+                    context={
+                        "fr_number":  req.request_number,
+                        "equipment":  equipment_label,
+                        "originator": originator_label,
+                        "category":   "Failure Registry",
+                    },
+                    organization_id=req.organization_id,
+                    department_id=getattr(req, "department_id", None),
+                    source_id=req.id,
+                    source_type="testing_request",
+                    severity="info",
+                    workflow_type="failure_registry",
+                    test_type="failure_registry",
+                )
         except Exception as _n:
             print(f"[WARN] request_submitted notification failed: {_n}")
 

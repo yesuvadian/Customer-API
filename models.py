@@ -57,14 +57,54 @@ class BankStatusEnum(PyEnum):
     rejected = "rejected"
 
 class ScheduleFrequency(PyEnum):
-    daily = "daily"
-    weekly = "weekly"
-    biweekly = "biweekly"
-    monthly = "monthly"
-    quarterly = "quarterly"
-    semi_annual = "semi_annual"   # 180 days
-    yearly = "yearly"
-    triennial = "triennial"       # 3 years / 1095 days
+    """
+    Cooldown / recurrence frequency for notification schedule rules and test register.
+
+    Each member carries a ``.days`` attribute (integer) so callers never need a
+    parallel dict.  Use ``ScheduleFrequency.cooldown(value, default=N)`` for safe
+    lookup by string without raising ValueError on unknown values.
+
+    DB-stored value is the plain lowercase string (``"daily"``, ``"weekly"``, …) —
+    identical to the previous single-value definition, so NO migration is required.
+    """
+
+    # (value_string, cooldown_days)
+    daily       = ("daily",        1)
+    weekly      = ("weekly",       7)
+    biweekly    = ("biweekly",    14)
+    monthly     = ("monthly",     30)
+    quarterly   = ("quarterly",   90)
+    semi_annual = ("semi_annual", 180)
+    yearly      = ("yearly",      365)
+    triennial   = ("triennial",  1095)
+
+    def __new__(cls, value: str, days: int):
+        obj = object.__new__(cls)
+        obj._value_ = value   # SQLAlchemy / DB sees "daily", "weekly", etc. — unchanged
+        obj.days = days
+        return obj
+
+    @classmethod
+    def cooldown(cls, value: "str | None", default: int = 1) -> int:
+        """
+        Return the cooldown window in days for a frequency string.
+
+        Returns *default* when value is None, empty, or not a known frequency
+        (e.g. legacy "on_demand" strings) instead of raising ValueError.
+
+        Examples
+        --------
+        ScheduleFrequency.cooldown("weekly")           → 7
+        ScheduleFrequency.cooldown("monthly", default=30) → 30
+        ScheduleFrequency.cooldown(None, default=7)    → 7
+        ScheduleFrequency.cooldown("on_demand")        → 1 (unknown → default)
+        """
+        if not value:
+            return default
+        try:
+            return cls(value).days
+        except ValueError:
+            return default
 
 
 class ScheduleLogStatus(PyEnum):
@@ -3593,16 +3633,33 @@ class NotificationTemplate(Base):
     event_type = Column(String(100), nullable=False, index=True)
     channel = Column(String(20), nullable=False)  # "email" | "sms" | "inapp"
 
+    # NULL = the default template (one per org+event+channel).
+    # A non-null name creates a named variant; multiple variants per
+    # (org, event_type, channel) are allowed and distinguished by name.
+    name = Column(String(255), nullable=True)
+
     subject_template = Column(String(500), nullable=True)   # Jinja2 / str.format
     body_template = Column(Text, nullable=False)             # Jinja2 / str.format
 
-    # Role names whose members should receive this notification
-    # e.g. ["Originator", "Department Head", "EE TLSS"]
+    # OrgRole UUIDs whose members should receive this notification.
+    # Stored as JSON array of UUID strings, e.g. ["org-role-uuid-1", "org-role-uuid-2"].
+    # Legacy rows may still contain role name strings — _resolve_recipients_by_roles()
+    # handles both formats transparently.
     recipient_roles = Column(JSONB, nullable=False, server_default="[]")
 
     # Additional individual email addresses (outside role membership)
     # e.g. ["manager@utility.com", "external-auditor@gov.in"]
     extra_recipient_emails = Column(JSONB, nullable=False, server_default="[]")
+
+    # ── Email CC / BCC (email channel only; ignored for sms/inapp) ────────────
+    # CC roles — OrgRole UUIDs whose members receive a carbon copy.
+    cc_roles   = Column(JSONB, nullable=False, server_default="[]")
+    # CC individual email addresses (outside role membership).
+    cc_emails  = Column(JSONB, nullable=False, server_default="[]")
+    # BCC roles — OrgRole UUIDs whose members receive a blind carbon copy.
+    bcc_roles  = Column(JSONB, nullable=False, server_default="[]")
+    # BCC individual email addresses.
+    bcc_emails = Column(JSONB, nullable=False, server_default="[]")
 
     # ── Email attachments ─────────────────────────────────────────────────────
     # Context variable keys whose resolved values are file URLs to attach.
@@ -3615,6 +3672,11 @@ class NotificationTemplate(Base):
     #   ["report.retriepdf", "report.retriexls"]  → attach both PDF and Excel
     #
     attachment_vars = Column(JSONB, nullable=False, server_default="[]")
+
+    # True when an org explicitly disables this channel for this event/name slot.
+    # The row keeps is_active=True so it wins over the global default and prevents
+    # fallback — but the dispatcher and UI treat the channel as absent/off.
+    org_channel_disabled = Column(Boolean, nullable=False, server_default='false')
 
     is_active = Column(Boolean, default=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
@@ -3676,6 +3738,53 @@ class NotificationLog(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     recipient = relationship("User", foreign_keys=[recipient_id])
+
+    # One-to-many recipients (new fan-out design)
+    recipients = relationship(
+        "NotificationLogRecipient",
+        back_populates="log",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+
+
+class NotificationLogRecipient(Base):
+    """
+    Per-recipient row for a NotificationLog batch.
+    One parent NotificationLog fans out to N recipients — one row each.
+    Tracks the rendered content and per-address delivery status.
+    """
+    __tablename__ = "notification_log_recipient"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    log_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.notification_log.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Contact fields (at least one should be set, depending on channel)
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+
+    # Per-recipient rendered content (may differ per user due to {{user.*}} vars)
+    rendered_subject = Column(String(500), nullable=True)
+    rendered_body    = Column(Text, nullable=True)
+
+    # Delivery tracking
+    delivery_status = Column(String(20), default="pending", index=True)  # pending/sent/failed/skipped
+    error_message   = Column(Text, nullable=True)
+    sent_at         = Column(DateTime(timezone=True), nullable=True)
+    cts             = Column(DateTime(timezone=True), server_default=func.now())
+
+    log  = relationship("NotificationLog", back_populates="recipients")
+    user = relationship("User", foreign_keys=[user_id])
 
 
 class UserNotification(Base):
@@ -3754,6 +3863,18 @@ class NotificationVariable(Base):
     # Code-side key to look up the resolved value from fire() context dict.
     # Usually same as var_key; legacy flat keys (e.g. "equipment") differ.
     resolver_key = Column(String(200), nullable=True)
+
+    # Role scope — list of RoleTemplate UUIDs (as strings) this variable is
+    # contextually relevant to.  Empty list = universal (shown for all roles).
+    # Editable by org admins via PUT /notifications/variables/{id}.
+    # Integrity enforced at the application layer (seed-time guard + UI role picker).
+    #
+    # DDL for existing databases:
+    #   -- If you previously had the single-column version:
+    #   ALTER TABLE public.notification_variables DROP COLUMN IF EXISTS role_template_id;
+    #   ALTER TABLE public.notification_variables
+    #     ADD COLUMN role_template_ids JSONB NOT NULL DEFAULT '[]';
+    role_template_ids = Column(JSONB, nullable=False, server_default="[]")
 
     is_system = Column(Boolean, default=False, nullable=False)  # system vars: no delete
     is_active = Column(Boolean, default=True,  nullable=False)
@@ -3850,7 +3971,11 @@ class NotificationEventCatalogue(Base):
     group_name   : grouping header in the Flutter UI (e.g. "Scheduling", "Evaluation")
     description  : one-line explanation shown as subtitle
     context_vars : JSON array of variable names available in templates for this event
-    default_roles: JSON array of role names pre-selected in the template editor
+    default_roles: JSON array of RoleTemplate UUIDs (strings) — pre-selected in the
+                   template editor.  The Flutter cross-references these against the
+                   role_template_id field returned by GET /notifications/org-roles to
+                   resolve the matching OrgRole.id for the caller's organisation.
+                   Seeded by seed.py::_seed_notification_event_catalogue().
     is_active    : hide from UI without deleting
     """
     __tablename__ = "notification_event_catalogue"
@@ -3889,7 +4014,7 @@ class NotificationScheduleRule(Base):
     Resolution: the scheduler loads ALL active rules and evaluates TRs against them.
     Org-specific rules are matched to TRs by organization_id;
     global rules (NULL) apply to all orgs that don't have an org-specific rule
-    for the same event_type + trigger_type combination.
+    for the same event_type + trigger_type + frequency combination.
 
     trigger_type:
       "due_soon"   — fires when due_date is within +offset_days from today
@@ -3898,18 +4023,34 @@ class NotificationScheduleRule(Base):
                      offset_days=0 → fires on any overdue request
       "escalation" — fires when due_date < today - offset_days
                      e.g. offset_days=7 → fires when overdue > 7 days
+      "recurring"  — fires purely on frequency schedule, no date condition
+                     e.g. frequency="weekly" → send every 7 days while request is open
+
+    frequency (optional):
+      When set, controls the repeat cadence instead of the default "once per day":
+        "daily"       →  1 day  cooldown
+        "weekly"      →  7 days cooldown
+        "biweekly"    → 14 days cooldown
+        "monthly"     → 30 days cooldown
+        "quarterly"   → 90 days cooldown
+        "semi_annual" → 180 days cooldown
+        "yearly"      → 365 days cooldown
+        "triennial"   → 1095 days cooldown
+      The scheduler checks the last NotificationLog entry for that source_id +
+      event_type and skips firing if it was sent within the cooldown window.
+      Without a frequency, the default behaviour is once-per-day.
 
     applicable_categories: JSON array of RequestCategory values to restrict this
       rule e.g. ["maintenance", "inspection"]. Empty array [] = all categories.
     """
     __tablename__ = "notification_schedule_rules"
     __table_args__ = (
-        # Drop the old unique constraint name in a migration if the column list changed.
-        # The new natural key is: org + event_type + trigger_type + offset_days + trigger_on_status
+        # Natural key includes frequency so you can have both a weekly and monthly
+        # rule for the same event_type + trigger_type combination.
         UniqueConstraint(
             "organization_id", "event_type", "trigger_type", "offset_days",
-            "trigger_on_status",
-            name="uq_notif_schedule_rule_v2",
+            "trigger_on_status", "frequency",
+            name="uq_notif_schedule_rule_v3",
         ),
         {"schema": "public"},
     )
@@ -3953,6 +4094,21 @@ class NotificationScheduleRule(Base):
     # Restrict to specific request categories; empty = all categories
     applicable_categories = Column(JSONB, nullable=False, server_default="[]")
 
+    # Restrict to specific equipment types (CategoryMaster.name); empty = all
+    applicable_equipment_types = Column(JSONB, nullable=False, server_default="[]")
+
+    # ── Repeat frequency (optional) ──────────────────────────────────────────
+    #
+    # Controls how often this rule re-fires for the same TestingRequest.
+    # NULL means once-per-day (existing default behaviour is preserved).
+    # When set, the scheduler skips firing if the same event_type was already
+    # sent for this source within the frequency window.
+    #
+    frequency = Column(
+        Enum(ScheduleFrequency, name="schedulefrequency", create_type=False),
+        nullable=True,
+    )
+
     # ── Advanced / future conditions (optional JSON) ─────────────────────────
     #
     # Stores an optional structured rule for complex scenarios, e.g.:
@@ -3962,6 +4118,8 @@ class NotificationScheduleRule(Base):
     #       {"type": "status", "on_status": "pending_approval"}
     #     ]
     #   }
+    # Also used to store specific test-type names chosen in the UI:
+    #   {"activity_types": ["BDV Test", "Contact Resistance Test"]}
     # The scheduler evaluates this only when present (non-null).
     # Simple triggers use the columns above; this is for advanced OR/AND logic.
     #
@@ -4032,6 +4190,25 @@ class NotificationRoutingRule(Base):
     channels_enabled            = Column(JSONB, nullable=False, server_default='["email","sms","inapp"]')
     recipient_roles_override    = Column(JSONB, nullable=True)   # NULL = use template default
     priority                    = Column(Integer, nullable=False, default=0)
+
+    # Optional per-channel template overrides.
+    # NULL = use the default (name IS NULL) template for that channel.
+    # Set to a specific NotificationTemplate.id to use a named variant.
+    email_template_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.notification_templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    sms_template_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.notification_templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    inapp_template_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.notification_templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     is_active = Column(Boolean, default=True, nullable=False)
     cts       = Column(DateTime(timezone=True), server_default=func.now())

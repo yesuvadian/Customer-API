@@ -35,7 +35,7 @@ class EventCatalogueCreate(BaseModel):
     group_name: str
     description: Optional[str] = None
     context_vars: List[str] = []
-    default_roles: List[str] = []
+    default_roles: List[UUID] = []   # RoleTemplate UUIDs
     organization_id: Optional[UUID] = None
 
 
@@ -44,7 +44,7 @@ class EventCatalogueUpdate(BaseModel):
     group_name: Optional[str] = None
     description: Optional[str] = None
     context_vars: Optional[List[str]] = None
-    default_roles: Optional[List[str]] = None
+    default_roles: Optional[List[UUID]] = None   # RoleTemplate UUIDs
     is_active: Optional[bool] = None
 
 
