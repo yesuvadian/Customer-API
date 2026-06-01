@@ -524,6 +524,17 @@ class TestingRequestWorkflowService:
                 testing_request.status = TestingRequestStatus.rejected
                 self.db.commit()
 
+                try:
+                    from services.notification_service import NotificationService
+                    NotificationService(self.db).notify_request_rejected(
+                        testing_request,
+                        getattr(user, "full_name", None) or getattr(user, "email", ""),
+                        comment,
+                    )
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Notification failed: {e}")
+
                 return True, f"Request rejected (testing mode): {comment}"
 
             # 2. Get rejection transition
@@ -553,6 +564,17 @@ class TestingRequestWorkflowService:
             testing_request.status = 'rejected'
 
             self.db.commit()
+
+            try:
+                from services.notification_service import NotificationService
+                NotificationService(self.db).notify_request_rejected(
+                    testing_request,
+                    getattr(user, "full_name", None) or getattr(user, "email", ""),
+                    comment,
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Notification failed: {e}")
 
             return True, "Request rejected successfully"
 

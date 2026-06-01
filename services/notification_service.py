@@ -1783,6 +1783,31 @@ class NotificationService:
             status_to="submitted",
         )
 
+    def notify_request_rejected(self, request, rejected_by: str, reason: str) -> None:
+        """Triggered when a testing request is rejected by an approver."""
+        equipment_label = (
+            request.equipment.ueic if request.equipment else
+            (request.equipment_type.name if request.equipment_type else "Equipment")
+        )
+        self.fire(
+            event_type="request_rejected",
+            context={
+                "equipment": equipment_label,
+                "request_number": getattr(request, "request_number", ""),
+                "rejected_by": rejected_by,
+                "reason": reason,
+            },
+            organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="alert",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="rejected",
+        )
+
     def notify_tester_assigned(self, request) -> None:
         """Triggered when a tester is assigned to a testing request."""
         equipment_label = (

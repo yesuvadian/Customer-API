@@ -9240,6 +9240,14 @@ def _seed_notification_event_catalogue(session) -> int:
             default_roles=["Reviewing Officer"],
         ),
         dict(
+            event_type="request_rejected",
+            label="Request Rejected",
+            group_name="Testing Requests",
+            description="Fired when a testing request is rejected by an approver.",
+            context_vars=["request.number", "request.title", "equipment.ueic", "rejected_by", "reason"],
+            default_roles=["Originator", "Reviewing Officer"],
+        ),
+        dict(
             event_type="tester_assigned",
             label="Tester Assigned",
             group_name="Testing Requests",
@@ -9940,6 +9948,28 @@ def _seed_notification_templates(session) -> int:
             "Recommendation rejected — {{request.number}}",
             "Recommendation rejected. Reason: {{reason}}.",
             ["Test Engineer", "Asset Data Officer"],
+        ),
+    )
+
+    _tmpl("request_rejected",
+        _e(
+            "Test Request Rejected — {{request.number}}",
+            "<h3>Testing Request Rejected</h3>"
+            "<p><b>Request:</b> {{request.number}}</p>"
+            "<p><b>Equipment:</b> {{equipment.ueic}}</p>"
+            "<p><b>Rejected by:</b> {{rejected_by}}</p>"
+            "<p><b>Reason:</b> {{reason}}</p>"
+            "<p>Please review the request and resubmit it in SEACMS.</p>",
+            ["Originator", "Reviewing Officer"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Request {{request.number}} rejected by {{rejected_by}}. Reason: {{reason}}.",
+            ["Originator"],
+        ),
+        _i(
+            "Request rejected — {{request.number}}",
+            "Testing request {{request.number}} was rejected. Reason: {{reason}}.",
+            ["Originator", "Reviewing Officer"],
         ),
     )
 
@@ -11115,6 +11145,11 @@ def _seed_notification_routing_rules(session) -> int:
          [], [],
          ["email", "inapp"],
          "Recommendation Rejected — all workflows"),
+
+        ("request_rejected",
+         ["testing_request"], [],
+         ["email", "inapp"],
+         "Request Rejected — all workflows"),
 
         # ── Failure Registry ──────────────────────────────────────────────────
         ("fr_submitted",
