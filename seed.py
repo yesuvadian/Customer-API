@@ -10620,6 +10620,130 @@ def _seed_notification_templates(session) -> int:
         ),
     )
 
+    _tmpl("repair_cancelled",
+        _e(
+            "[REPAIR] Workflow Cancelled — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#B00020'>Repair Workflow Cancelled</h3>"
+            "<p>The repair workflow for {{equipment}} has been cancelled.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Cancelled By</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancelled_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancel_reason}}</td></tr>"
+            "</table>"
+            "<p>Review the cancelled workflow in SEACMS for next steps.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "Repair workflow for {{equipment}} was cancelled by {{cancelled_by}}. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Repair workflow cancelled — {{equipment}}",
+            "The repair workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("overhaul_cancelled",
+        _e(
+            "[OVERHAUL] Workflow Cancelled — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#B00020'>Overhaul Workflow Cancelled</h3>"
+            "<p>The overhaul workflow for {{equipment}} has been cancelled.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Cancelled By</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancelled_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancel_reason}}</td></tr>"
+            "</table>"
+            "<p>Review the cancelled workflow in SEACMS for next steps.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "Overhaul workflow for {{equipment}} was cancelled by {{cancelled_by}}. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Overhaul workflow cancelled — {{equipment}}",
+            "The overhaul workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("calibration_cancelled",
+        _e(
+            "[CALIBRATION] Workflow Cancelled — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#B00020'>Calibration Workflow Cancelled</h3>"
+            "<p>The calibration workflow for {{equipment}} has been cancelled.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Cancelled By</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancelled_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancel_reason}}</td></tr>"
+            "</table>"
+            "<p>Review the cancelled workflow in SEACMS for next steps.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "Calibration workflow for {{equipment}} was cancelled by {{cancelled_by}}. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Calibration workflow cancelled — {{equipment}}",
+            "The calibration workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("surveillance_cancelled",
+        _e(
+            "[SURVEILLANCE] Workflow Cancelled — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#B00020'>Surveillance Workflow Cancelled</h3>"
+            "<p>The surveillance workflow for {{equipment}} has been cancelled.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Cancelled By</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancelled_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancel_reason}}</td></tr>"
+            "</table>"
+            "<p>Review the cancelled workflow in SEACMS for next steps.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "Surveillance workflow for {{equipment}} was cancelled by {{cancelled_by}}. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Surveillance workflow cancelled — {{equipment}}",
+            "The surveillance workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
     # ── Upsert into DB ────────────────────────────────────────────────────────
     inserted = 0
     for tpl in _TEMPLATES:
