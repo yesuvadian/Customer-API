@@ -716,3 +716,32 @@ def assign_stage(
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/upload")
+async def upload_stage_file(
+    workflow_id: UUID,
+    stage_id: UUID,
+    field_key: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Upload a file for a specific field in a surveillance stage form.
+    Stores the file and patches form_data[field_key] with the document reference.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        file_bytes = await file.read()
+        return RepairWorkflowService(db).upload_stage_file(
+            workflow_id=workflow_id,
+            stage_id=stage_id,
+            field_key=field_key,
+            file_name=file.filename,
+            file_bytes=file_bytes,
+            mime_type=file.content_type,
+            user_id=user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
