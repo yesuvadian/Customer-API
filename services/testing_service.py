@@ -11,6 +11,74 @@ from utils.common_service import UTCDateTimeMixin
 logger = logging.getLogger(__name__)
 
 
+def _build_threshold_config_html(ev: dict) -> str:
+    """
+    Build an HTML table from evaluation result fields for use as
+    {{alert.thresholdconfig}} in eval_alert / eval_critical email templates.
+
+    Renders only fields that have ALERT or CRITICAL status, showing:
+      Field | Value | Unit | Status | Normal Range | Alert Range | Critical Range
+
+    Falls back to a plain text summary if no fields are present.
+    """
+    fields = [
+        f for f in (ev.get("fields") or [])
+        if f.get("status") in ("ALERT", "CRITICAL")
+    ]
+    if not fields:
+        # No per-field breakdown — show overall summary
+        return (
+            f"<p>Overall result: <strong>{ev.get('overall', '')}</strong>. "
+            f"{ev.get('summary', '')}</p>"
+        )
+
+    TD = "style='padding:5px 8px;border:1px solid #ddd;font-size:12px'"
+    TH = "style='padding:5px 8px;border:1px solid #ddd;background:#1E3C72;color:#fff;font-size:12px;text-align:left'"
+
+    def _fmt(val) -> str:
+        return str(val) if val is not None else "—"
+
+    def _range(lo, hi) -> str:
+        if lo is not None and hi is not None:
+            return f"{lo} – {hi}"
+        if lo is not None:
+            return f"≥ {lo}"
+        if hi is not None:
+            return f"≤ {hi}"
+        return "—"
+
+    rows = ""
+    for f in fields:
+        t = f.get("thresholds") or {}
+        status = f.get("status", "")
+        status_color = "#d32f2f" if status == "CRITICAL" else "#f57c00"
+        unit = f.get("unit") or ""
+        rows += (
+            f"<tr>"
+            f"<td {TD}>{f.get('label', f.get('key', ''))}</td>"
+            f"<td {TD}><strong>{_fmt(f.get('value'))} {unit}</strong></td>"
+            f"<td {TD} style='color:{status_color};font-weight:bold'>{status}</td>"
+            f"<td {TD}>{_range(t.get('normal_min'), t.get('normal_max'))}</td>"
+            f"<td {TD}>{_range(t.get('alert_min'), t.get('alert_max'))}</td>"
+            f"<td {TD}>{_range(t.get('critical_below'), t.get('critical_above'))}</td>"
+            f"</tr>"
+        )
+
+    return (
+        f"<table cellspacing='0' style='border-collapse:collapse;width:100%;margin-top:8px'>"
+        f"<tr>"
+        f"<th {TH}>Parameter</th>"
+        f"<th {TH}>Measured Value</th>"
+        f"<th {TH}>Status</th>"
+        f"<th {TH}>Normal Range</th>"
+        f"<th {TH}>Alert Range</th>"
+        f"<th {TH}>Critical Range</th>"
+        f"</tr>"
+        f"{rows}"
+        f"</table>"
+    )
+
+
 def _deduplicated_overall_sections(main_sections: list, overall_sections: list) -> list:
     """
     Return only those sections/fields from overall_sections that don't already
@@ -45,6 +113,44 @@ class TestingService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Testing request not found")
         return request
 
+    def _user_label(self, user_id) -> str:
+        """Resolve a user's friendly display name for notification context."""
+        from models import User
+        if not user_id:
+            return "System"
+        u = self.db.query(User).filter(User.id == user_id).first()
+        if not u:
+            return str(user_id)
+        name = " ".join(filter(None, [u.firstname, u.lastname])).strip()
+        return name or u.email or str(user_id)
+
+    def _fire_status_changed(self, request, status_from: str, status_to: str, user_id) -> None:
+        """Emit the status_changed notification event for a lifecycle transition.
+        Fire-and-forget — never blocks the transaction."""
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).fire(
+                event_type="status_changed",
+                context={
+                    "request.number": request.request_number or str(request.id),
+                    "request.status": status_to,
+                    "request.title":  getattr(request, "title", "") or "",
+                    "status_from":    status_from,
+                    "status_to":      status_to,
+                    "changed_by":     self._user_label(user_id),
+                },
+                organization_id=request.organization_id,
+                department_id=getattr(request, "department_id", None),
+                source_id=request.id,
+                source_type="testing_request",
+                severity="info",
+                workflow_type="testing_request",
+                status_from=status_from,
+                status_to=status_to,
+            )
+        except Exception as _e:
+            logger.warning(f"status_changed notification failed: {_e}")
+
     def accept_assignment(self, request_id: UUID, tester_id: UUID) -> TestingRequest:
         request = self._get_request(request_id)
         if request.status != TestingRequestStatus.assigned:
@@ -62,6 +168,7 @@ class TestingService:
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
+        self._fire_status_changed(request, "assigned", "accepted", tester_id)
         return request
 
     def start_testing(self, request_id: UUID, tester_id: UUID) -> TestingRequest:
@@ -80,6 +187,7 @@ class TestingService:
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
+        self._fire_status_changed(request, "accepted", "in_progress", tester_id)
         return request
 
     # NOTE: Old upload_test_result (multipart form) removed.
@@ -95,6 +203,7 @@ class TestingService:
 
     def submit_test_results(self, request_id: UUID, tester_id: UUID, replacement_products=None) -> TestingRequest:
         request = self._get_request(request_id)
+        _prev_status = request.status.value
         if request.status not in (TestingRequestStatus.in_progress, TestingRequestStatus.test_submitted):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -168,6 +277,10 @@ class TestingService:
         self.db.commit()
         self.db.refresh(request)
 
+        # Notify on the lifecycle status change (e.g. in_progress → under_approval)
+        if request.status.value != _prev_status:
+            self._fire_status_changed(request, _prev_status, request.status.value, tester_id)
+
         # ── Surveillance tracking: update if this is a surveillance test ──────
         if request.surveillance_workflow_id:
             try:
@@ -186,24 +299,6 @@ class TestingService:
                 )
             except Exception as _surv:
                 logger.warning("[TestingService] Surveillance tracking update failed: %s", _surv)
-
-        # ── Notification: test submitted → emit event for async processing ────
-        try:
-            from services.notification_event_emitter import emit_test_submitted_event
-            emit_test_submitted_event(
-                db=self.db,
-                organization_id=request.organization_id,
-                request_id=request.id,
-                request_number=request.request_number,
-                tester_name=request.tester.full_name if request.tester else "Unknown",
-                equipment_name=request.equipment_name or "Unknown Equipment",
-                equipment_type=request.equipment_type or "",
-                substation_name=request.substation.name if request.substation else "Unknown",
-                test_category=request.request_category or "test",
-                scheduled_date=request.scheduled_start_date.strftime("%Y-%m-%d") if request.scheduled_start_date else "",
-            )
-        except Exception as _n:
-            logger.warning(f"test_submitted event emission failed: {_n}")
 
         return request
 
@@ -445,7 +540,7 @@ class TestingService:
         # ── Auto-evaluation ──────────────────────────────────────────────────
         try:
             from services.evaluation_service import EvaluationService
-            ev = EvaluationService.run(template_key, test_data, self.db)
+            ev = EvaluationService.run(template_key, test_data, self.db, org_id=request.organization_id)
             result.evaluation_result = ev
 
             # CRITICAL → override overall_result + pre-fill remedial recommendation
@@ -473,21 +568,41 @@ class TestingService:
 
             # ── Notification hooks (fire-and-forget; never block save) ────────
             try:
-                from services.notification_event_emitter import emit_test_result_event
+                from services.notification_service import NotificationService
                 overall_threshold = ev.get("overall", "NORMAL")
                 if overall_threshold in ("ALERT", "CRITICAL"):
-                    emit_test_result_event(
-                        db=self.db,
+                    _event_map = {"ALERT": "eval_alert", "CRITICAL": "eval_critical"}
+                    _tester_name = getattr(getattr(request, "tester", None), "full_name", None) or "Unknown"
+                    _eq_ueic = (
+                        getattr(getattr(request, "equipment", None), "ueic", "") or
+                        getattr(request, "equipment_name", "") or ""
+                    )
+                    NotificationService(self.db).fire(
+                        event_type=_event_map[overall_threshold],
+                        context={
+                            "request.number":        request.request_number or "",
+                            "equipment.ueic":        _eq_ueic,
+                            "eval.test_type":        result.test_name or test_name or template_key or "",
+                            "eval.overall":          overall_threshold,
+                            "result_summary":        ev.get("summary") or ev.get("finding") or "",
+                            "result_threshold":      overall_threshold,
+                            "tester_name":           _tester_name,
+                            "eval.evaluated_at":     str(result.tested_at or result.cts or "")[:19],
+                            "alert.thresholdconfig": _build_threshold_config_html(ev),
+                            "revised_interval":      (
+                                f"{ev['revised_interval_days']} days"
+                                if ev.get("revised_interval_days") is not None else "—"
+                            ),
+                        },
                         organization_id=request.organization_id,
-                        request_id=request.id,
-                        request_number=request.request_number,
-                        equipment_name=request.equipment_name or "Unknown Equipment",
-                        equipment_type=request.equipment_type or "",
-                        test_category=request.request_category or "test",
-                        test_type_name=template_key or "Unknown Test",
-                        result_threshold=overall_threshold,
-                        tester_name=request.tester.full_name if request.tester else "Unknown",
-                        additional_payload={"evaluation": ev},
+                        department_id=getattr(request, "department_id", None),
+                        source_id=result.id,
+                        source_type="test_result",
+                        severity="critical" if overall_threshold == "CRITICAL" else "alert",
+                        workflow_type="testing_request",
+                        equipment_type=getattr(getattr(request, "equipment_type", None), "name", None),
+                        test_type=(request.request_category.value if request.request_category else None),
+                        activity_type=result.test_name,
                     )
             except Exception as _notif_err:
                 logger.warning(f"Notification event emission failed: {_notif_err}")

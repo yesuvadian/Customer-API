@@ -219,6 +219,16 @@ class TestingRequestService:
         self.db.commit()
         return {"message": "Testing request deleted successfully"}
 
+    def _user_label(self, user_id) -> str:
+        """Resolve a user's friendly display name for notification context."""
+        if not user_id:
+            return "System"
+        u = self.db.query(User).filter(User.id == user_id).first()
+        if not u:
+            return str(user_id)
+        name = " ".join(filter(None, [u.firstname, u.lastname])).strip()
+        return name or u.email or str(user_id)
+
     def submit_request(self, request_id: UUID, modified_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
         if request.is_schedule_template:
@@ -244,9 +254,28 @@ class TestingRequestService:
         # Trigger notification
         try:
             from services.notification_service import NotificationService
-            NotificationService(self.db).notify_request_submitted(request)
+            ns = NotificationService(self.db)
+            ns.notify_request_submitted(request)
+            ns.fire(
+                event_type="status_changed",
+                context={
+                    "request.number": request.request_number or str(request.id),
+                    "request.status": request.status.value,
+                    "request.title":  getattr(request, "title", "") or "",
+                    "status_from":    "draft",
+                    "status_to":      request.status.value,
+                    "changed_by":     self._user_label(modified_by),
+                },
+                organization_id=request.organization_id,
+                department_id=getattr(request, "department_id", None),
+                source_id=request.id,
+                source_type="testing_request",
+                severity="info",
+                workflow_type="testing_request",
+                status_from="draft",
+                status_to=request.status.value,
+            )
         except Exception as e:
-            # Log but don't fail the request
             import logging
             logging.getLogger(__name__).error(f"Notification failed: {e}")
 
@@ -278,9 +307,28 @@ class TestingRequestService:
         # Trigger notification
         try:
             from services.notification_service import NotificationService
-            NotificationService(self.db).notify_tester_assigned(request)
+            ns = NotificationService(self.db)
+            ns.notify_tester_assigned(request)
+            ns.fire(
+                event_type="status_changed",
+                context={
+                    "request.number": request.request_number or str(request.id),
+                    "request.status": request.status.value,
+                    "request.title":  getattr(request, "title", "") or "",
+                    "status_from":    "submitted",
+                    "status_to":      "assigned",
+                    "changed_by":     self._user_label(assigned_by),
+                },
+                organization_id=request.organization_id,
+                department_id=getattr(request, "department_id", None),
+                source_id=request.id,
+                source_type="testing_request",
+                severity="info",
+                workflow_type="testing_request",
+                status_from="submitted",
+                status_to="assigned",
+            )
         except Exception as e:
-            # Log but don't fail the assignment
             import logging
             logging.getLogger(__name__).error(f"Notification failed: {e}")
         return request

@@ -237,9 +237,14 @@ class AutoStatusTransitionService:
             return False
 
     def _notify_approvers(self, testing_request: TestingRequest):
-        """Notify approvers that all sessions are complete and test is ready for review."""
-        try:
-            from services.notification_service import NotificationService
-            NotificationService(self.db).notify_test_submitted(testing_request)
-        except Exception as _n:
-            logger.warning(f"[Notif] auto-transition notify_approvers failed: {_n}")
+        """
+        Notify approvers that all sessions are complete and test is ready for review.
+
+        NOTE: For multi-session requests the tester still submits results via the
+        testing.py endpoint which calls testing_service.submit_test_results() →
+        notify_test_submitted().  Firing here as well would produce duplicate
+        notifications, so this method is intentionally left as a no-op.
+        If a pure-auto-transition flow (no manual result submission) ever needs
+        its own notification, add it here with a duplicate-check guard first.
+        """
+        pass  # notification handled by testing_service.submit_test_results()

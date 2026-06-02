@@ -19,8 +19,8 @@ class EmailService:
         self.password = EMAIL_PASS
         self.from_email =FROM_EMAIL
         
-        # ✅ CC email (default to FROM_EMAIL)
-        self.cc_email = FROM_EMAIL
+        # No default system CC — per-template cc_emails are passed explicitly
+        self.cc_email = None
         # Use BASE_URL from .env with a fallback
         self.base_url = os.getenv("BASE_URL", "http://localhost:8000")
 
@@ -29,9 +29,15 @@ class EmailService:
 
         # Optional: Password reset expiry from .env
         self.reset_token_expiry = int(os.getenv("RESETPASSWORD_TOKEN_EXPIRE", 3600))  # default 1 hour
-    def _add_cc(self, msg: EmailMessage):
-            if self.cc_email:
-                msg["Cc"] = self.cc_email
+    def _add_cc(self, msg: EmailMessage, extra_cc: Optional[List[str]] = None):
+        """Build a single Cc: header from the default system CC and any extra addresses."""
+        parts: List[str] = []
+        if self.cc_email:
+            parts.append(self.cc_email)
+        if extra_cc:
+            parts.extend(addr for addr in extra_cc if addr)
+        if parts:
+            msg["Cc"] = ", ".join(parts)
     def send_attachment_email(
         self,
         to_email: str,
@@ -86,16 +92,64 @@ class EmailService:
         <p>If you did not request this, please ignore this message.</p>
         """
         self.send_email_starttls(to_email, "Congniwatt: Your OTP Code", body)
-    def send_email_starttls(self, to_email: str, subject: str, body_html: str):
+    def send_email_starttls(
+        self,
+        to_email: str,
+        subject: str,
+        body_html: str,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+    ):
         """
         Send email using STARTTLS (Office 365 compatible).
-        Use this when SMTP_SSL fails on port 587.
+        cc / bcc accept lists of individual email address strings.
         """
         msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = self.from_email
         msg["To"] = to_email
-        self._add_cc(msg)
+        self._add_cc(msg, cc)
+        if bcc:
+            msg["Bcc"] = ", ".join(bcc)
+        msg.set_content(body_html, subtype="html")
+
+        server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+        try:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(self.username, self.password)
+            server.send_message(msg)
+        finally:
+            server.quit()
+
+    def send_email_starttls_bcc(
+        self,
+        bcc_emails: List[str],
+        subject: str,
+        body_html: str,
+        cc: Optional[List[str]] = None,
+        extra_bcc: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Send one HTML email to multiple recipients via BCC (STARTTLS / Office 365).
+
+        The 'To' header is set to 'undisclosed-recipients:;' so no recipient
+        can see the other addresses.  All addresses are placed in the Bcc field.
+
+        bcc_emails  : primary recipient list (resolved from recipient roles)
+        cc          : per-template CC addresses
+        extra_bcc   : per-template BCC addresses (merged with bcc_emails)
+        """
+        all_bcc = list(bcc_emails or []) + list(extra_bcc or [])
+        if not all_bcc:
+            return
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"]    = self.from_email
+        msg["To"]      = "undisclosed-recipients:;"
+        msg["Bcc"]     = ", ".join(all_bcc)
+        self._add_cc(msg, cc)
         msg.set_content(body_html, subtype="html")
 
         server = smtplib.SMTP(self.smtp_server, self.smtp_port)
@@ -132,6 +186,8 @@ class EmailService:
         subject: str,
         body_html: str,
         attachments: Optional[List[Dict]] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
     ):
         """
         Send HTML email with zero or more file attachments via STARTTLS (Office 365).
@@ -142,23 +198,15 @@ class EmailService:
           - "mime_type" : str    — e.g. "application/pdf" or "application/vnd.ms-excel"
                                    defaults to "application/octet-stream"
 
-        Usage for report dispatch:
-          email_svc.send_multi_attachment_email_starttls(
-              to_email="officer@kptcl.com",
-              subject="Monthly MIS Report — May 2026",
-              body_html=rendered_html,
-              attachments=[
-                  {"content": pdf_bytes,  "filename": "MIS_May2026.pdf",  "mime_type": "application/pdf"},
-                  {"content": xlsx_bytes, "filename": "MIS_May2026.xlsx", "mime_type":
-                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
-              ],
-          )
+        cc / bcc accept lists of individual email address strings from the template.
         """
         msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"]    = self.from_email
         msg["To"]      = to_email
-        self._add_cc(msg)
+        self._add_cc(msg, cc)
+        if bcc:
+            msg["Bcc"] = ", ".join(bcc)
         msg.set_content(body_html, subtype="html")
 
         for att in (attachments or []):
@@ -176,6 +224,53 @@ class EmailService:
                 subtype=subtype,
                 filename=filename,
             )
+
+        server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+        try:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(self.username, self.password)
+            server.send_message(msg)
+        finally:
+            server.quit()
+
+    def send_multi_attachment_email_starttls_bcc(
+        self,
+        bcc_emails: List[str],
+        subject: str,
+        body_html: str,
+        attachments: Optional[List[Dict]] = None,
+        cc: Optional[List[str]] = None,
+        extra_bcc: Optional[List[str]] = None,
+    ) -> None:
+        """
+        BCC variant of send_multi_attachment_email_starttls.
+        Sends one email with optional attachments to all addresses in BCC.
+
+        bcc_emails  : primary recipient list (resolved from recipient roles)
+        cc          : per-template CC addresses
+        extra_bcc   : per-template BCC addresses (merged with bcc_emails)
+        """
+        all_bcc = list(bcc_emails or []) + list(extra_bcc or [])
+        if not all_bcc:
+            return
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"]    = self.from_email
+        msg["To"]      = "undisclosed-recipients:;"
+        msg["Bcc"]     = ", ".join(all_bcc)
+        self._add_cc(msg, cc)
+        msg.set_content(body_html, subtype="html")
+
+        for att in (attachments or []):
+            content   = att.get("content")
+            filename  = att.get("filename", "attachment")
+            mime_type = att.get("mime_type", "application/octet-stream")
+            if not content:
+                continue
+            maintype, subtype = mime_type.split("/", 1)
+            msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
 
         server = smtplib.SMTP(self.smtp_server, self.smtp_port)
         try:

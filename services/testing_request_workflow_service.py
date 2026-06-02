@@ -124,8 +124,42 @@ class TestingRequestWorkflowService:
 
         if success and new_state_code:
             # Update the testing request status
+            from_state = testing_request.status.value
             testing_request.status = TestingRequestStatus[new_state_code]
+            testing_request.modified_by = user.id
             self.db.commit()
+
+            try:
+                from services.notification_service import NotificationService
+                _changed_by = (
+                    getattr(user, "full_name", None)
+                    or getattr(user, "firstname", None)
+                    or str(user.id)
+                )
+                NotificationService(self.db).fire(
+                    event_type="status_changed",
+                    context={
+                        "request.number":  testing_request.request_number or str(testing_request.id),
+                        "request.status":  new_state_code,
+                        "request.title":   getattr(testing_request, "title", "") or "",
+                        "status_from":     from_state,
+                        "status_to":       new_state_code,
+                        "changed_by":      _changed_by,
+                    },
+                    organization_id=testing_request.organization_id,
+                    department_id=getattr(testing_request, "department_id", None),
+                    source_id=testing_request.id,
+                    source_type="testing_request",
+                    severity="info",
+                    workflow_type=self.WORKFLOW_TYPE,
+                    equipment_type=(testing_request.equipment_type.name if testing_request.equipment_type else None),
+                    test_type=(testing_request.request_category.value if testing_request.request_category else None),
+                    status_from=from_state,
+                    status_to=new_state_code,
+                )
+            except Exception as _em:
+                import logging
+                logging.getLogger(__name__).warning(f"Status change notification failed: {_em}")
 
         return success, message
 
@@ -206,14 +240,43 @@ class TestingRequestWorkflowService:
         tester_id: UUID,
         comment: Optional[str] = None
     ) -> tuple[bool, str]:
-        """Assign a tester to the request."""
-        return self.perform_transition(
+        """Assign a tester to the request.
+
+        Sets assigned_tester_id on the request BEFORE the workflow transition
+        so that:
+          1. The DB record is updated to reflect the assignment.
+          2. notify_tester_assigned() can read request.assigned_tester for
+             the in-app / email notification sent to the specific tester.
+        """
+        # Set the tester before the transition so notify_tester_assigned()
+        # can safely access request.assigned_tester after the commit.
+        testing_request.assigned_tester_id = tester_id
+
+        success, message = self.perform_transition(
             testing_request=testing_request,
             action_code="assign_tester",
             user=user,
             comment=comment,
             metadata={"tester_id": str(tester_id)}
         )
+
+        if success:
+            # Refresh so ORM relationships (assigned_tester, equipment, …) are
+            # populated before the notification service reads them.
+            try:
+                self.db.refresh(testing_request)
+            except Exception:
+                pass
+            try:
+                from services.notification_service import NotificationService
+                NotificationService(self.db).notify_tester_assigned(testing_request)
+            except Exception as notif_exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"[TestingRequest] notify_tester_assigned failed: {notif_exc}"
+                )
+
+        return success, message
 
     def accept_assignment(
         self,
@@ -393,6 +456,14 @@ class TestingRequestWorkflowService:
                 testing_request.assigned_tester_id = selected_tester.id
                 testing_request.status = TestingRequestStatus.assigned
                 self.db.commit()
+                self.db.refresh(testing_request)
+
+                try:
+                    from services.notification_service import NotificationService
+                    NotificationService(self.db).notify_tester_assigned(testing_request)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Notification failed: {e}")
 
                 return True, f"Request approved and assigned to {selected_tester.email} (testing mode)"
 
@@ -449,6 +520,14 @@ class TestingRequestWorkflowService:
             self.db.add(audit_log)
 
             self.db.commit()
+            self.db.refresh(testing_request)
+
+            try:
+                from services.notification_service import NotificationService
+                NotificationService(self.db).notify_tester_assigned(testing_request)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Notification failed: {e}")
 
             return True, f"Request approved and assigned to {selected_tester.email}"
 
@@ -488,6 +567,17 @@ class TestingRequestWorkflowService:
                 testing_request.status = TestingRequestStatus.rejected
                 self.db.commit()
 
+                try:
+                    from services.notification_service import NotificationService
+                    NotificationService(self.db).notify_request_rejected(
+                        testing_request,
+                        getattr(user, "full_name", None) or getattr(user, "email", ""),
+                        comment,
+                    )
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Notification failed: {e}")
+
                 return True, f"Request rejected (testing mode): {comment}"
 
             # 2. Get rejection transition
@@ -517,6 +607,17 @@ class TestingRequestWorkflowService:
             testing_request.status = 'rejected'
 
             self.db.commit()
+
+            try:
+                from services.notification_service import NotificationService
+                NotificationService(self.db).notify_request_rejected(
+                    testing_request,
+                    getattr(user, "full_name", None) or getattr(user, "email", ""),
+                    comment,
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Notification failed: {e}")
 
             return True, "Request rejected successfully"
 

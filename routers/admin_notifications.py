@@ -179,10 +179,19 @@ def seed_defaults(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Insert global default notification templates (idempotent)."""
-    from services.notification_service import seed_default_templates
-    inserted = seed_default_templates(db)
-    return {"inserted": inserted, "message": f"Seeded {inserted} new default templates."}
+    """
+    Idempotent seed for all notification defaults:
+    event catalogue, variables, templates, schedule rules, routing rules.
+    Safe to call repeatedly — only inserts rows that don't exist yet.
+    """
+    from seed import seed_notification_defaults
+    counts = seed_notification_defaults(db)
+    total  = sum(counts.values())
+    return {
+        **counts,
+        "total_inserted": total,
+        "message": f"Seeded {total} new notification record(s).",
+    }
 
 
 @router.post("/test-fire")

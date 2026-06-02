@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -558,6 +558,16 @@ class RepairWorkflowService:
         )
 
         stage = self.db.query(RepairStageDefinition).filter(RepairStageDefinition.id == stage_id).first()
+
+        self._fire_notification_safe(
+            "repair_stage_changed",
+            workflow,
+            stage,
+            coordinator_id,
+            status_from="pending",
+            status_to="assigned",
+        )
+
         return {
             "message": "User assigned successfully",
             "stage": stage.name if stage else str(stage_id),
@@ -649,6 +659,13 @@ class RepairWorkflowService:
         self._log_audit(workflow_id, stage_id, "submit", user_id, remarks or "Stage submitted for approval")
 
         stage = self.db.query(RepairStageDefinition).filter(RepairStageDefinition.id == stage_id).first()
+
+        # Fire notification so routing rules with status_from=assigned/status_to=submitted match
+        self._fire_notification_safe(
+            "repair_stage_changed", workflow, stage, user_id,
+            status_from="assigned", status_to="submitted",
+        )
+
         return {
             "message": "Stage submitted — awaiting approval",
             "stage": stage.name if stage else str(stage_id),
@@ -747,6 +764,8 @@ class RepairWorkflowService:
             workflow,
             next_stage,
             user_id,
+            status_from="submitted",
+            status_to="approved",
         )
         # Fire stage_approved hook so listeners can react to specific stages
         # without touching this service (e.g. certificate upload processing).
@@ -862,13 +881,21 @@ class RepairWorkflowService:
             status="pending",
         ))
 
-        self._recalculate_progress(workflow)
-        self.db.commit()
-
+        # Load rejected stage definition BEFORE commit (for overdue computation in notification)
+        rejected_stage_def = self.db.query(RepairStageDefinition).filter(
+            RepairStageDefinition.id == current_stage_id
+        ).first()
+        # Load previous (rollback target) stage name for the API response
         prev_stage = self.db.query(RepairStageDefinition).filter(
             RepairStageDefinition.id == prev_stage_id
         ).first()
-        self._fire_notification_safe("repair_delay", workflow, prev_stage, user_id)
+
+        self._recalculate_progress(workflow)
+        self.db.commit()
+
+        self._fire_notification_safe(
+            "repair_delay", workflow, rejected_stage_def, user_id, stage_instance=instance
+        )
 
         return {
             "message": "Stage rejected — returned stage pending coordinator assignment",
@@ -915,6 +942,16 @@ class RepairWorkflowService:
 
         self.db.commit()
         self._log_audit(workflow_id, workflow.current_stage_id, "cancel", user_id, reason or "Workflow cancelled")
+
+        self._fire_notification_safe(
+            "repair_cancelled",
+            workflow,
+            None,
+            user_id,
+            status_from="active",
+            status_to="cancelled",
+            reason=reason,
+        )
 
         return {"message": "Workflow cancelled", "workflow_id": str(workflow_id)}
 
@@ -1875,21 +1912,66 @@ class RepairWorkflowService:
                 msg += f" and {count - 3} more"
             raise ValueError(msg)
 
-    def _fire_notification_safe(self, event_type: str, workflow: RepairWorkflow, stage, user_id: UUID) -> None:
+    def _fire_notification_safe(
+        self,
+        event_type: str,
+        workflow: RepairWorkflow,
+        stage,
+        user_id: UUID,
+        stage_instance=None,
+        status_from: Optional[str] = None,
+        status_to: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> None:
+        """
+        Fire a notification for a workflow stage event, routing to the correct
+        event type based on workflow_code:
+          CALIBRATION  → calibration_stage_changed / calibration_stage_delay
+          SURVEILLANCE → surveillance_stage_changed / surveillance_stage_delay
+          (else)       → repair_stage_changed       / repair_delay
+
+        status_from / status_to are passed through to the notification engine
+        so that routing rules with applicable_status_from/to filters match correctly:
+          assign_stage_user: status_from="pending",  status_to="assigned"
+          submit_stage:      status_from="assigned", status_to="submitted"
+          advance_stage:     status_from="submitted", status_to="approved"
+
+        For delay events, stage should be the REJECTED stage definition and
+        stage_instance should be its RepairStageInstance so that
+        default_duration_days can be used to compute the real deadline and
+        days_delayed (instead of dummy zeros).
+        """
         try:
             from services.notification_service import NotificationService
             equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
             if not equipment:
                 return
             svc = NotificationService(self.db)
+            wf_code = (workflow.workflow_code or "").upper()
+            eq_ueic = equipment.ueic or str(equipment.id)
+            eq_type = (
+                equipment.equipment_type.name
+                if getattr(equipment, "equipment_type", None)
+                else "Equipment"
+            )
+            stage_name = stage.name if stage else "Unknown Stage"
+
             if event_type == "repair_stage_changed":
+                if wf_code == "OVERHAUL":
+                    actual_event = "overhaul_stage_changed"
+                elif wf_code == "CALIBRATION":
+                    actual_event = "calibration_stage_changed"
+                elif wf_code == "SURVEILLANCE":
+                    actual_event = "surveillance_stage_changed"
+                else:
+                    actual_event = "repair_stage_changed"
                 svc.fire(
-                    event_type="repair_stage_changed",
+                    event_type=actual_event,
                     context={
-                        "equipment": equipment.ueic or str(equipment.id),
-                        "equipment_type": equipment.equipment_type.name if equipment.equipment_type else "Equipment",
-                        "stage": stage.name if stage else "Completed",
-                        "progress": str(workflow.progress),
+                        "equipment":      eq_ueic,
+                        "equipment_type": eq_type,
+                        "stage":          stage_name,
+                        "progress":       str(workflow.progress),
                     },
                     organization_id=equipment.organization_id,
                     department_id=equipment.department_id,
@@ -1897,15 +1979,88 @@ class RepairWorkflowService:
                     source_type="repair_workflow",
                     severity="info",
                     workflow_type="repair_lifecycle",
+                    status_from=status_from,
+                    status_to=status_to,
                 )
+
             elif event_type == "repair_delay":
-                svc.notify_repair_delay(
-                    equipment,
-                    repair_stage=stage.name if stage else "Unknown Stage",
-                    stage_deadline="-",
-                    days_delayed=0,
+                if wf_code == "OVERHAUL":
+                    actual_event = "overhaul_stage_delay"
+                elif wf_code == "CALIBRATION":
+                    actual_event = "calibration_stage_delay"
+                elif wf_code == "SURVEILLANCE":
+                    actual_event = "surveillance_stage_delay"
+                else:
+                    actual_event = "repair_delay"
+
+                # ── Compute real deadline and overdue days from stage definition ──
+                deadline_str = "-"
+                days_overdue = 0
+                duration = getattr(stage, "default_duration_days", None)
+                started_at = getattr(stage_instance, "started_at", None) if stage_instance else None
+                if duration is not None and started_at is not None:
+                    deadline_dt = started_at + timedelta(days=duration)
+                    deadline_str = deadline_dt.strftime("%Y-%m-%d")
+                    days_overdue = max(0, (datetime.utcnow() - deadline_dt).days)
+
+                if actual_event == "repair_delay":
+                    svc.notify_repair_delay(
+                        equipment,
+                        repair_stage=stage_name,
+                        stage_deadline=deadline_str,
+                        days_delayed=days_overdue,
+                        organization_id=equipment.organization_id,
+                        department_id=equipment.department_id,
+                    )
+                else:
+                    dept = getattr(equipment, "department_name", "") or ""
+                    svc.fire(
+                        event_type=actual_event,
+                        context={
+                            "equipment":      eq_ueic,
+                            "equipment_type": eq_type,
+                            "department":     dept,
+                            "repair_stage":   stage_name,
+                            "stage_deadline": deadline_str,
+                            "days_delayed":   str(days_overdue),
+                        },
+                        organization_id=equipment.organization_id,
+                        department_id=equipment.department_id,
+                        source_id=workflow.id,
+                        source_type="repair_workflow",
+                        severity="alert",
+                        workflow_type="repair_lifecycle",
+                    )
+
+            elif event_type == "repair_cancelled":
+                if wf_code == "OVERHAUL":
+                    actual_event = "overhaul_cancelled"
+                elif wf_code == "CALIBRATION":
+                    actual_event = "calibration_cancelled"
+                elif wf_code == "SURVEILLANCE":
+                    actual_event = "surveillance_cancelled"
+                else:
+                    actual_event = "repair_cancelled"
+
+                dept = getattr(equipment, "department_name", "") or ""
+                svc.fire(
+                    event_type=actual_event,
+                    context={
+                        "equipment":      eq_ueic,
+                        "equipment_type": eq_type,
+                        "department":     dept,
+                        "cancelled_by":   str(user_id),
+                        "cancel_reason":  reason or "",
+                    },
                     organization_id=equipment.organization_id,
                     department_id=equipment.department_id,
+                    source_id=workflow.id,
+                    source_type="repair_workflow",
+                    severity="alert",
+                    workflow_type="repair_lifecycle",
+                    status_from=status_from,
+                    status_to=status_to,
                 )
-        except Exception as _n:
-            print(f"[WARN] notification failed ({event_type}): {_n}")
+        except Exception:
+            return
+
