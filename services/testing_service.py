@@ -544,6 +544,10 @@ class TestingService:
                             "tester_name":           _tester_name,
                             "eval.evaluated_at":     str(result.tested_at or result.cts or "")[:19],
                             "alert.thresholdconfig": _build_threshold_config_html(ev),
+                            "revised_interval":      (
+                                f"{ev['revised_interval_days']} days"
+                                if ev.get("revised_interval_days") is not None else "—"
+                            ),
                         },
                         organization_id=request.organization_id,
                         department_id=getattr(request, "department_id", None),

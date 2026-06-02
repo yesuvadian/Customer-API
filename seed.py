@@ -9800,7 +9800,7 @@ def _seed_notification_templates(session) -> int:
     )
 
     _tmpl("eval_alert",
-        _e(
+        _ea(
             "[ALERT] {{equipment.ueic}} — {{eval.testname}} Warning",
             "<h3 style='color:orange'>Alert: Test Result Warning</h3>"
             "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
@@ -9810,8 +9810,11 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Revised Interval</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{revised_interval}}</td></tr>"
             "</table>"
-            "<p><a href='{{report.retriepdf}}'>Download PDF Report</a></p>",
+            "<h4 style='margin-top:14px'>Threshold Configuration</h4>"
+            "{{alert.thresholdconfig}}"
+            "<p>The evaluation report is attached to this email.</p>",
             ["Reviewing Officer", "Maintenance Officer"],
+            [{"var_key": "report.retriepdf", "type": "pdf"}],
         ),
         _s(
             "[KPTCL-SEACMS] ALERT: {{equipment.ueic}} — {{eval.test_type}}."
