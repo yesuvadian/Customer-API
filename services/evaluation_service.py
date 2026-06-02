@@ -469,16 +469,38 @@ class EvaluationService:
     # ─── DB-aware helpers ─────────────────────────────────────────────────────
 
     @staticmethod
-    def get_template_data(template_key: str, db: Session) -> Optional[dict]:
+    def get_template_data(
+        template_key: str, db: Session, org_id=None
+    ) -> Optional[dict]:
         """
         Resolve template_data from OrgTestTemplate (DB-first) or
         static test_templates.py dict.
+
+        Resolution order:
+          1. Org-specific row matching org_id (when provided)
+          2. Global row (org_id IS NULL)
+          3. Static test_templates.py dict
         """
         from models import OrgTestTemplate
+        if org_id:
+            row = (
+                db.query(OrgTestTemplate)
+                .filter(
+                    OrgTestTemplate.template_key == template_key,
+                    OrgTestTemplate.org_id == org_id,
+                )
+                .first()
+            )
+            if row:
+                return row.template_data or {}
+
+        # Global fallback
         row = (
             db.query(OrgTestTemplate)
-            .filter(OrgTestTemplate.template_key == template_key)
-            .order_by(OrgTestTemplate.org_id.nullslast())   # org-specific before global
+            .filter(
+                OrgTestTemplate.template_key == template_key,
+                OrgTestTemplate.org_id.is_(None),
+            )
             .first()
         )
         if row:
@@ -492,9 +514,9 @@ class EvaluationService:
             return {}
 
     @staticmethod
-    def run(template_key: str, test_data: dict, db: Session) -> dict:
+    def run(template_key: str, test_data: dict, db: Session, org_id=None) -> dict:
         """Convenience: resolve template then evaluate."""
-        tpl = EvaluationService.get_template_data(template_key, db)
+        tpl = EvaluationService.get_template_data(template_key, db, org_id=org_id)
         if not tpl:
             return {"overall": NORMAL, "evaluated_at": datetime.now(timezone.utc).isoformat(), "fields": []}
         return EvaluationService.evaluate_test_data(tpl, test_data)

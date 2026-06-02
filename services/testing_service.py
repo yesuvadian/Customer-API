@@ -427,7 +427,7 @@ class TestingService:
         # ── Auto-evaluation ──────────────────────────────────────────────────
         try:
             from services.evaluation_service import EvaluationService
-            ev = EvaluationService.run(template_key, test_data, self.db)
+            ev = EvaluationService.run(template_key, test_data, self.db, org_id=request.organization_id)
             result.evaluation_result = ev
 
             # CRITICAL → override overall_result + pre-fill remedial recommendation
@@ -475,7 +475,7 @@ class TestingService:
                         source_type="test_result",
                         severity="critical" if overall_threshold == "CRITICAL" else "alert",
                         workflow_type="testing_request",
-                        equipment_type=getattr(request, "equipment_type", None) or None,
+                        equipment_type=getattr(getattr(request, "equipment_type", None), "name", None),
                         test_type=(request.request_category.value if request.request_category else None),
                     )
             except Exception as _notif_err:
