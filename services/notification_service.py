@@ -1578,6 +1578,164 @@ def _resolve_routing(
     return None   # no rule → permissive default (all channels fire)
 
 
+# ── Follow-up action executor ─────────────────────────────────────────────────
+
+def _execute_followup_action(
+    db: Session,
+    action: dict,
+    source_id: Optional[UUID],
+    source_type: Optional[str],
+    organization_id: Optional[UUID],
+    department_id: Optional[UUID],
+) -> None:
+    """
+    Auto-create a follow-up ticket when eval_alert / eval_critical fires
+    and the matched routing rule has a followup_action config.
+
+    Follows the exact same flow as the Recommendation Wizard → Approval →
+    WorkflowDispatchService path — reuses _create_schedules_for_action()
+    so schedule tickets land in the TR Approval Queue (submitted status).
+
+    action format (from NotificationRoutingRule.followup_action):
+    {
+        "create_request":    true,
+        "next_action":       "maintenance",   # test/maintenance/inspection/repair_cycle
+        "schedule_frequency":"yearly",
+        "schedule_start_date":"2026-01-01",
+        "schedule_end_date":  "2026-12-31",
+        "test_types":        [{"id": 5, "name": "BDV Test"}],
+        "summary":           "Follow-up after CRITICAL alert"
+    }
+    """
+    if not action.get("create_request"):
+        return
+
+    next_action_str = (action.get("next_action") or "").lower()
+    if not next_action_str:
+        return
+
+    # ── Resolve the TestingRequest from the source ────────────────────────────
+    # source_type is "test_result" when fired from testing_service
+    from models import (
+        TestingRequest, TestResult,
+        Recommendation, NextActionType, ScheduleFrequency, RequestCategory,
+    )
+    tr: Optional[TestingRequest] = None
+
+    if source_type == "test_result" and source_id:
+        result_row = db.query(TestResult).filter(TestResult.id == source_id).first()
+        if result_row and result_row.testing_request_id:
+            tr = db.query(TestingRequest).filter(
+                TestingRequest.id == result_row.testing_request_id
+            ).first()
+    elif source_type == "testing_request" and source_id:
+        tr = db.query(TestingRequest).filter(TestingRequest.id == source_id).first()
+
+    if not tr:
+        logger.warning(
+            f"[FollowupAction] Cannot resolve TestingRequest from "
+            f"source_type={source_type!r} source_id={source_id}"
+        )
+        return
+
+    # ── Guard: skip if open follow-up already exists for this equipment ───────
+    _OPEN = (
+        TestingRequest.status.in_([
+            "submitted", "assigned", "accepted", "in_progress",
+        ])
+    )
+    _cat_map = {
+        "test":         "test",
+        "maintenance":  "maintenance",
+        "inspection":   "inspection",
+        "repair_cycle": "repair_cycle",
+    }
+    followup_category = _cat_map.get(next_action_str, "test")
+
+    if tr.equipment_id:
+        existing = (
+            db.query(TestingRequest)
+            .filter(
+                TestingRequest.equipment_id     == tr.equipment_id,
+                TestingRequest.organization_id  == (organization_id or tr.organization_id),
+                TestingRequest.request_category == followup_category,
+                TestingRequest.status.in_(["submitted", "assigned", "accepted", "in_progress"]),
+                TestingRequest.is_schedule_template.is_(False),
+            )
+            .first()
+        )
+        if existing:
+            logger.info(
+                f"[FollowupAction] Skipping — open {followup_category} request "
+                f"{existing.request_number} already exists for equipment {tr.equipment_id}"
+            )
+            return
+
+    # ── Build mock Recommendation from followup_action config ─────────────────
+    try:
+        _next_action   = NextActionType(next_action_str)
+    except ValueError:
+        logger.warning(f"[FollowupAction] Invalid next_action={next_action_str!r}")
+        return
+
+    _freq_str = action.get("schedule_frequency") or "yearly"
+    try:
+        _freq = ScheduleFrequency(_freq_str)
+    except ValueError:
+        _freq = ScheduleFrequency.yearly
+
+    mock_rec = Recommendation(
+        testing_request_id = tr.id,
+        organization_id    = organization_id or tr.organization_id,
+        next_action        = _next_action,
+        schedule_frequency = _freq,
+        test_types         = action.get("test_types") or [],
+        summary            = action.get("summary") or f"Auto follow-up: {next_action_str}",
+        recommendation_type = "fail",
+        submitted_by       = tr.created_by,
+        created_by         = tr.created_by,
+        approval_status    = "approved",
+    )
+
+    # ── Dispatch via WorkflowDispatchService ──────────────────────────────────
+    from services.workflow_dispatch_service import WorkflowDispatchService
+    from models import RequestCategory as _RC
+
+    _rc_map = {
+        "test":        _RC.test,
+        "maintenance": _RC.maintenance,
+        "inspection":  _RC.inspection,
+    }
+    _category = _rc_map.get(next_action_str)
+
+    svc = WorkflowDispatchService(db)
+
+    try:
+        if _category:
+            # test / maintenance / inspection → TestRequestSchedule
+            numbers = svc._create_schedules_for_action(
+                tr, mock_rec,
+                approver_id=tr.created_by,
+                category=_category,
+            )
+            db.commit()
+            logger.info(
+                f"[FollowupAction] Created {len(numbers)} {next_action_str} "
+                f"schedule(s) for TR={tr.request_number}: {numbers}"
+            )
+        elif next_action_str == "repair_cycle":
+            # repair_cycle → RepairWorkflow
+            wf_id = svc._start_repair_workflow(tr, approver_id=tr.created_by)
+            db.commit()
+            logger.info(
+                f"[FollowupAction] Started repair workflow {wf_id} "
+                f"for TR={tr.request_number}"
+            )
+    except Exception as _exc:
+        db.rollback()
+        logger.warning(f"[FollowupAction] Dispatch failed: {_exc}")
+
+
 # ── Core dispatch ─────────────────────────────────────────────────────────────
 
 class NotificationService:
@@ -1867,6 +2025,25 @@ class NotificationService:
                 except Exception as exc:
                     logger.error(f"[Notif] DB commit failed after enqueue: {exc}")
                     self.db.rollback()
+
+            # ── Follow-up action (eval_alert / eval_critical only) ───────────
+            # If the matched routing rule has a followup_action config, create
+            # the downstream ticket using WorkflowDispatchService — same logic
+            # as the recommendation wizard approval flow.
+            if routing and getattr(routing, 'followup_action', None):
+                try:
+                    _execute_followup_action(
+                        db=self.db,
+                        action=routing.followup_action,
+                        source_id=source_id,
+                        source_type=source_type,
+                        organization_id=organization_id,
+                        department_id=department_id,
+                    )
+                except Exception as _fa_exc:
+                    logger.warning(
+                        f"[Notif] followup_action failed for event={event_type!r}: {_fa_exc}"
+                    )
 
         except Exception as exc:
             logger.error(f"[Notif] fire() failed for event_type={event_type!r}: {exc}")
