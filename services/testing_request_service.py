@@ -219,6 +219,16 @@ class TestingRequestService:
         self.db.commit()
         return {"message": "Testing request deleted successfully"}
 
+    def _user_label(self, user_id) -> str:
+        """Resolve a user's friendly display name for notification context."""
+        if not user_id:
+            return "System"
+        u = self.db.query(User).filter(User.id == user_id).first()
+        if not u:
+            return str(user_id)
+        name = " ".join(filter(None, [u.firstname, u.lastname])).strip()
+        return name or u.email or str(user_id)
+
     def submit_request(self, request_id: UUID, modified_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
         if request.is_schedule_template:
@@ -254,6 +264,7 @@ class TestingRequestService:
                     "request.title":  getattr(request, "title", "") or "",
                     "status_from":    "draft",
                     "status_to":      request.status.value,
+                    "changed_by":     self._user_label(modified_by),
                 },
                 organization_id=request.organization_id,
                 department_id=getattr(request, "department_id", None),
@@ -306,6 +317,7 @@ class TestingRequestService:
                     "request.title":  getattr(request, "title", "") or "",
                     "status_from":    "submitted",
                     "status_to":      "assigned",
+                    "changed_by":     self._user_label(assigned_by),
                 },
                 organization_id=request.organization_id,
                 department_id=getattr(request, "department_id", None),
