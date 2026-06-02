@@ -930,6 +930,12 @@ def bulk_upsert_templates(
         if not effective_attachment_vars and channel == "email" and global_tmpl:
             effective_attachment_vars = list(getattr(global_tmpl, 'attachment_vars', None) or [])
 
+        # Inherit recipient_roles from global when not explicitly provided.
+        # Prevents org override from silently clearing recipients → no notifications sent.
+        effective_recipient_roles = data.recipient_roles
+        if not effective_recipient_roles and global_tmpl:
+            effective_recipient_roles = list(global_tmpl.recipient_roles or [])
+
         new_tmpl = NotificationTemplate(
             id=uuid4(),
             organization_id=org_id,
@@ -938,7 +944,7 @@ def bulk_upsert_templates(
             name=data.name or None,
             subject_template=cfg.subject_template,
             body_template=cfg.body_template or "",
-            recipient_roles=data.recipient_roles,
+            recipient_roles=effective_recipient_roles,
             extra_recipient_emails=data.extra_recipient_emails,
             # CC / BCC are email-only; set to empty for sms/inapp
             cc_roles=cfg.cc_roles   if channel == "email" else [],
