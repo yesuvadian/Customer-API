@@ -1450,6 +1450,7 @@ def _resolve_routing(
     workflow_type: Optional[str] = None,
     equipment_type: Optional[str] = None,
     test_type: Optional[str] = None,
+    activity_type: Optional[str] = None,
     status_from: Optional[str] = None,
     status_to: Optional[str] = None,
 ) -> Optional["NotificationRoutingRule"]:
@@ -1506,6 +1507,10 @@ def _resolve_routing(
             continue
         if rule.applicable_status_to and rule.applicable_status_to != status_to:
             continue
+        # advanced_conditions.activity_types — empty/absent = all tests for this equipment
+        _adv_types = ((rule.advanced_conditions or {}).get("activity_types") or [])
+        if _adv_types and activity_type not in _adv_types:
+            continue
         return rule   # first match wins (already sorted: org > global, high priority first)
 
     return None   # no rule → permissive default (all channels fire)
@@ -1551,6 +1556,7 @@ class NotificationService:
         workflow_type: Optional[str] = None,    # "direct_test"|"failure_register"|"taqc"|"multisession"|"schedule"
         equipment_type: Optional[str] = None,   # e.g. "Power Transformer", "CT"
         test_type: Optional[str] = None,        # "test"|"inspection"|"maintenance"|"life_cycle"
+        activity_type: Optional[str] = None,    # specific test name, e.g. "Short Circuit Test HV-IV"
         status_from: Optional[str] = None,      # e.g. "submitted"
         status_to: Optional[str] = None,        # e.g. "under_review"
     ) -> None:
@@ -1614,6 +1620,7 @@ class NotificationService:
                 workflow_type=workflow_type,
                 equipment_type=equipment_type,
                 test_type=test_type,
+                activity_type=activity_type,
                 status_from=status_from,
                 status_to=status_to,
             )

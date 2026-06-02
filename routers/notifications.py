@@ -1329,6 +1329,7 @@ class RoutingRuleOut(BaseModel):
     channels_enabled:           List[str] = []
     recipient_roles_override:   Optional[List[str]] = None
     template_recipient_roles:   Optional[List[str]] = None  # template defaults (no override set)
+    advanced_conditions:        Optional[dict] = None
     priority:  int = 0
     # Per-channel template overrides (NULL = use default template)
     email_template_id: Optional[UUID] = None
@@ -1771,6 +1772,11 @@ def update_routing_rule(
                 if data.recipient_roles_override is not None
                 else rule.recipient_roles_override
             ),
+            advanced_conditions=(
+                data.advanced_conditions
+                if data.advanced_conditions is not None
+                else rule.advanced_conditions
+            ),
             priority=(
                 data.priority if data.priority is not None else rule.priority
             ),
@@ -1818,6 +1824,8 @@ def update_routing_rule(
         rule.channels_enabled = data.channels_enabled
     if data.recipient_roles_override is not None:
         rule.recipient_roles_override = data.recipient_roles_override
+    if data.advanced_conditions is not None:
+        rule.advanced_conditions = data.advanced_conditions
     if data.priority is not None:
         rule.priority = data.priority
     # Template overrides — explicitly passed null clears back to default

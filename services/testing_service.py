@@ -477,6 +477,7 @@ class TestingService:
                         workflow_type="testing_request",
                         equipment_type=getattr(getattr(request, "equipment_type", None), "name", None),
                         test_type=(request.request_category.value if request.request_category else None),
+                        activity_type=result.test_name,
                     )
             except Exception as _notif_err:
                 logger.warning(f"Notification event emission failed: {_notif_err}")
