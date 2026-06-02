@@ -2591,51 +2591,99 @@ class NotificationService:
             severity=severity,
         )
 
+    # Default columns used when digest_columns is NULL on the schedule rule.
+    # Admins can override per-rule via the Notification Center UI.
+    DEFAULT_DIGEST_COLUMNS: list = [
+        {"field": "equipment",  "header": "Equipment"},
+        {"field": "department", "header": "Department"},
+        {"field": "due_date",   "header": "Due Date"},
+        {"field": "days",       "header": "Days"},
+        {"field": "request",    "header": "Request No."},
+        {"field": "status",     "header": "Status"},
+    ]
+
     @staticmethod
-    def build_digest_table(group: list, today) -> str:
+    def _resolve_digest_cell(field: str, r, due, today) -> str:
+        """Resolve a single cell value from a field name."""
+        if field == "equipment":
+            return (
+                getattr(getattr(r, "equipment", None), "ueic", "")
+                or getattr(getattr(r, "equipment_type", None), "name", "")
+                or ""
+            )
+        if field == "department":
+            return getattr(getattr(r, "department", None), "name", "") or ""
+        if field == "due_date":
+            return str(due or "")
+        if field == "days":
+            if due is None:
+                return ""
+            return (
+                str(max((today - due).days, 0)) if due < today
+                else str(max((due - today).days, 0))
+            )
+        if field == "request":
+            return r.request_number or str(r.id)[:8]
+        if field == "status":
+            return r.status.value if hasattr(r.status, "value") else str(r.status)
+        if field == "priority":
+            return getattr(r, "priority", "") or ""
+        if field == "category":
+            cat = getattr(r, "request_category", None)
+            return cat.value if cat and hasattr(cat, "value") else str(cat or "")
+        if field == "assigned_to":
+            tester = getattr(r, "assigned_tester", None)
+            if tester:
+                return (
+                    f"{getattr(tester, 'firstname', '') or ''} "
+                    f"{getattr(tester, 'lastname', '') or ''}".strip()
+                    or getattr(tester, "email", "") or ""
+                )
+            return ""
+        return ""
+
+    @staticmethod
+    def build_digest_table(group: list, today, columns: list = None) -> str:
         """
         Build the HTML table injected as {{digest_table}} in scheduled digest emails.
 
-        ``group`` is a list of (TestingRequest, due_date, rule) tuples — all
-        requests that matched the same (org, department, event_type) bucket.
+        ``group``   — list of (TestingRequest, due_date, rule) tuples.
+        ``today``   — date.today() from the scheduler.
+        ``columns`` — list of {"field": ..., "header": ..., "style": ...} dicts.
+                      Pass rule.digest_columns to use per-rule config,
+                      or None to fall back to DEFAULT_DIGEST_COLUMNS.
 
-        Columns
-        -------
-        Equipment   — equipment.ueic or equipment_type.name
-        Department  — request.department.name
-        Due Date    — due_date (date object or None)
-        Days        — days overdue (positive) or days remaining (negative shown as positive)
-        Request     — request_number
-        Status      — request.status
-
-        To change the table structure (add/remove columns, change styles,
-        rename headers) edit this single method — all digest events share it.
+        Supported field values:
+            equipment, department, due_date, days, request,
+            status, priority, category, assigned_to
         """
-        TD = "style='padding:6px 10px;border:1px solid #ddd;font-size:13px'"
-        TH = "style='padding:6px 10px;border:1px solid #ddd;background:#1E3C72;color:#fff;font-size:13px;text-align:left'"
+        cols = columns or NotificationService.DEFAULT_DIGEST_COLUMNS
 
+        TD_base = "padding:6px 10px;border:1px solid #ddd;font-size:13px"
+        TH_base = "padding:6px 10px;border:1px solid #ddd;background:#1E3C72;color:#fff;font-size:13px;text-align:left"
+
+        # Header row
+        headers = "".join(
+            f"<th style='{TH_base};{col.get('style', '')}'>{col['header']}</th>"
+            for col in cols
+        )
+
+        # Data rows
         rows_html = "".join(
             "<tr>"
-            f"<td {TD}>{getattr(getattr(r, 'equipment', None), 'ueic', '') or getattr(getattr(r, 'equipment_type', None), 'name', '') or ''}</td>"
-            f"<td {TD}>{getattr(getattr(r, 'department', None), 'name', '') or ''}</td>"
-            f"<td {TD}>{str(due or '')}</td>"
-            f"<td {TD}>{str(max((today - due).days, 0)) if due and due < today else str(max((due - today).days, 0)) if due else ''}</td>"
-            f"<td {TD}>{r.request_number or str(r.id)[:8]}</td>"
-            f"<td {TD}>{r.status.value if hasattr(r.status, 'value') else str(r.status)}</td>"
-            "</tr>"
+            + "".join(
+                f"<td style='{TD_base};{col.get('style', '')}'>"
+                f"{NotificationService._resolve_digest_cell(col['field'], r, due, today)}"
+                f"</td>"
+                for col in cols
+            )
+            + "</tr>"
             for r, due, _ in group
         )
 
         return (
             f"<table cellspacing='0' style='border-collapse:collapse;width:100%'>"
-            f"<tr>"
-            f"<th {TH}>Equipment</th>"
-            f"<th {TH}>Department</th>"
-            f"<th {TH}>Due Date</th>"
-            f"<th {TH}>Days</th>"
-            f"<th {TH}>Request</th>"
-            f"<th {TH}>Status</th>"
-            f"</tr>"
+            f"<tr>{headers}</tr>"
             f"{rows_html}"
             f"</table>"
         )

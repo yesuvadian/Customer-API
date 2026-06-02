@@ -1977,6 +1977,7 @@ class ScheduleRuleOut(BaseModel):
     applicable_categories:        List[str]
     applicable_equipment_types:   List[str]   # new — equipment type names; empty = all
     advanced_conditions:          Optional[dict]  # {"activity_types": [...specific test names...]}
+    digest_columns:               Optional[List[dict]]  # [{"field":"equipment","header":"Equipment","style":""}]
     severity:                     str
     is_active:                    bool
     cts:                          Optional[str]
@@ -1992,11 +1993,12 @@ class ScheduleRuleCreate(BaseModel):
     trigger_type:                 str
     offset_days:                  int = 0
     trigger_on_status:            Optional[str] = None
-    frequency:                    Optional[str] = None   # repeat cadence; None = once-per-day default
+    frequency:                    Optional[str] = None
     applicable_workflow_types:    Optional[List[str]] = None
     applicable_categories:        Optional[List[str]] = None
-    applicable_equipment_types:   Optional[List[str]] = None   # new
-    advanced_conditions:          Optional[dict] = None        # {"activity_types": [...]}
+    applicable_equipment_types:   Optional[List[str]] = None
+    advanced_conditions:          Optional[dict] = None
+    digest_columns:               Optional[List[dict]] = None  # None = use system defaults
     severity:                     str = "info"
     is_active:                    bool = True
 
@@ -2006,11 +2008,12 @@ class ScheduleRuleUpdate(BaseModel):
     trigger_type:                 Optional[str] = None
     offset_days:                  Optional[int] = None
     trigger_on_status:            Optional[str] = None
-    frequency:                    Optional[str] = None   # pass "" or null to clear
+    frequency:                    Optional[str] = None
     applicable_workflow_types:    Optional[List[str]] = None
     applicable_categories:        Optional[List[str]] = None
-    applicable_equipment_types:   Optional[List[str]] = None   # new
+    applicable_equipment_types:   Optional[List[str]] = None
     advanced_conditions:          Optional[dict] = None
+    digest_columns:               Optional[List[dict]] = None  # None = keep existing; [] = reset to defaults
     severity:                     Optional[str] = None
     is_active:                    Optional[bool] = None
 
@@ -2031,10 +2034,36 @@ def _srule_out(r: _NSR) -> dict:
         "applicable_categories":        list(r.applicable_categories or []),
         "applicable_equipment_types":   list(getattr(r, "applicable_equipment_types", None) or []),
         "advanced_conditions":          r.advanced_conditions,
+        "digest_columns":               r.digest_columns,
         "severity":                     r.severity,
         "is_active":                    r.is_active,
         "cts":                          r.cts.isoformat() if r.cts else None,
         "mts":                          r.mts.isoformat() if r.mts else None,
+    }
+
+
+@router.get("/schedule-rules/digest-fields")
+def get_digest_fields(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the supported field names and default column config for the
+    digest table editor in the Notification Center UI.
+    """
+    from services.notification_service import NotificationService
+    return {
+        "default_columns": NotificationService.DEFAULT_DIGEST_COLUMNS,
+        "supported_fields": [
+            {"field": "equipment",  "label": "Equipment (UEIC)"},
+            {"field": "department", "label": "Department"},
+            {"field": "due_date",   "label": "Due Date"},
+            {"field": "days",       "label": "Days Overdue / Remaining"},
+            {"field": "request",    "label": "Request Number"},
+            {"field": "status",     "label": "Status"},
+            {"field": "priority",   "label": "Priority"},
+            {"field": "category",   "label": "Category"},
+            {"field": "assigned_to","label": "Assigned To"},
+        ],
     }
 
 
@@ -2111,6 +2140,7 @@ def create_schedule_rule(
         applicable_categories=data.applicable_categories or [],
         applicable_equipment_types=data.applicable_equipment_types or [],
         advanced_conditions=data.advanced_conditions,
+        digest_columns=data.digest_columns or None,
         severity=data.severity,
         is_active=data.is_active,
     )
@@ -2186,6 +2216,11 @@ def update_schedule_rule(
                 data.advanced_conditions
                 if data.advanced_conditions is not None
                 else rule.advanced_conditions
+            ),
+            digest_columns=(
+                data.digest_columns
+                if data.digest_columns is not None
+                else getattr(rule, "digest_columns", None)
             ),
             severity=(
                 data.severity if data.severity is not None else rule.severity

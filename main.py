@@ -506,10 +506,14 @@ def _check_schedule_notifications():
                 if already:
                     continue
 
-                # ── Build digest table via NotificationService.build_digest_table()
-                # To change columns/styles edit that single method in
-                # services/notification_service.py — all digest events share it.
-                table_html = NotificationService.build_digest_table(group, today)
+                # ── Build digest table ─────────────────────────────────────
+                # Columns driven by rule.digest_columns (configured in the
+                # Notification Center UI). Falls back to DEFAULT_DIGEST_COLUMNS
+                # when NULL.
+                table_html = NotificationService.build_digest_table(
+                    group, today,
+                    columns=getattr(rule, "digest_columns", None),
+                )
 
                 # ── Representative values for subject line ──────────────────
                 first_req, first_due, _ = group[0]

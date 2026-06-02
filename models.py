@@ -4178,6 +4178,26 @@ class NotificationScheduleRule(Base):
     #
     advanced_conditions = Column(JSONB, nullable=True)
 
+    # ── Digest table column config (optional JSON) ───────────────────────────
+    # Controls which columns appear in the {{digest_table}} HTML table.
+    # NULL = use system defaults defined in NotificationService.DEFAULT_DIGEST_COLUMNS.
+    #
+    # Format:
+    #   [
+    #     {"field": "equipment",  "header": "Equipment",  "style": "width:20%"},
+    #     {"field": "department", "header": "Department"},
+    #     {"field": "due_date",   "header": "Due Date"},
+    #     {"field": "days",       "header": "Days"},
+    #     {"field": "request",    "header": "Request No."},
+    #     {"field": "status",     "header": "Status"}
+    #   ]
+    #
+    # Supported field values:
+    #   equipment, department, due_date, days, request,
+    #   status, priority, category, assigned_to
+    #
+    digest_columns = Column(JSONB, nullable=True)
+
     is_active     = Column(Boolean, default=True, nullable=False)
     cts           = Column(DateTime(timezone=True), server_default=func.now())
     mts           = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
