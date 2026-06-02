@@ -460,14 +460,21 @@ class TestingService:
                 if overall_threshold in ("ALERT", "CRITICAL"):
                     _event_map = {"ALERT": "eval_alert", "CRITICAL": "eval_critical"}
                     _tester_name = getattr(getattr(request, "tester", None), "full_name", None) or "Unknown"
+                    _eq_ueic = (
+                        getattr(getattr(request, "equipment", None), "ueic", "") or
+                        getattr(request, "equipment_name", "") or ""
+                    )
                     NotificationService(self.db).fire(
                         event_type=_event_map[overall_threshold],
                         context={
-                            "request.number":  request.request_number or "",
-                            "equipment.ueic":  getattr(request, "equipment_name", "") or "",
-                            "test_type_name":  template_key or "",
+                            "request.number":   request.request_number or "",
+                            "equipment.ueic":   _eq_ueic,
+                            "eval.test_type":   template_key or "",
+                            "eval.overall":     overall_threshold,
+                            "result_summary":   ev.get("summary") or ev.get("finding") or "",
                             "result_threshold": overall_threshold,
-                            "tester_name":     _tester_name,
+                            "tester_name":      _tester_name,
+                            "eval.evaluated_at": str(result.tested_at or result.cts or "")[:19],
                         },
                         organization_id=request.organization_id,
                         department_id=getattr(request, "department_id", None),
