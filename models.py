@@ -4263,6 +4263,7 @@ class NotificationRoutingRule(Base):
     channels_enabled            = Column(JSONB, nullable=False, server_default='["email","sms","inapp"]')
     recipient_roles_override    = Column(JSONB, nullable=True)   # NULL = use template default
     advanced_conditions         = Column(JSONB, nullable=True)   # e.g. {"activity_types": ["Short Circuit Test HV-IV"]}
+    followup_action             = Column(JSONB, nullable=True)   # auto follow-up ticket on alert/critical
     priority                    = Column(Integer, nullable=False, default=0)
 
     # Optional per-channel template overrides.

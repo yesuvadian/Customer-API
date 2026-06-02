@@ -1336,6 +1336,7 @@ class RoutingRuleOut(BaseModel):
     recipient_roles_override:   Optional[List[str]] = None
     template_recipient_roles:   Optional[List[str]] = None  # template defaults (no override set)
     advanced_conditions:        Optional[dict] = None
+    followup_action:            Optional[dict] = None  # auto follow-up ticket config
     priority:  int = 0
     # Per-channel template overrides (NULL = use default template)
     email_template_id: Optional[UUID] = None
@@ -1362,6 +1363,7 @@ class RoutingRuleCreate(BaseModel):
     channels_enabled:    List[str] = Field(default=["email", "sms", "inapp"])
     recipient_roles_override: Optional[List[str]] = None
     priority: int = Field(default=10, description="Higher priority wins. Default 10 for org rules.")
+    followup_action: Optional[dict] = None  # auto follow-up ticket on alert/critical
     # Per-channel template overrides — NULL = use default template for that channel
     email_template_id: Optional[UUID] = None
     sms_template_id:   Optional[UUID] = None
@@ -1379,6 +1381,7 @@ class RoutingRuleUpdate(BaseModel):
     channels_enabled:    Optional[List[str]] = None
     recipient_roles_override: Optional[List[str]] = None
     advanced_conditions: Optional[dict] = None
+    followup_action: Optional[dict] = None  # auto follow-up ticket on alert/critical
     priority: Optional[int] = None
     # Per-channel template overrides — pass null to clear back to default
     email_template_id: Optional[UUID] = None
@@ -1426,6 +1429,7 @@ def _rule_out(rule: NotificationRoutingRule, db: Optional[Session] = None) -> di
         "sms_template_id":   getattr(rule, 'sms_template_id', None),
         "inapp_template_id": getattr(rule, 'inapp_template_id', None),
         "advanced_conditions": getattr(rule, 'advanced_conditions', None),
+        "followup_action":     getattr(rule, 'followup_action', None),
         "is_active": rule.is_active,
         "is_global": rule.organization_id is None,
         "cts": rule.cts,
@@ -1783,6 +1787,11 @@ def update_routing_rule(
                 if data.advanced_conditions is not None
                 else rule.advanced_conditions
             ),
+            followup_action=(
+                data.followup_action
+                if data.followup_action is not None
+                else getattr(rule, 'followup_action', None)
+            ),
             priority=(
                 data.priority if data.priority is not None else rule.priority
             ),
@@ -1832,6 +1841,8 @@ def update_routing_rule(
         rule.recipient_roles_override = data.recipient_roles_override
     if data.advanced_conditions is not None:
         rule.advanced_conditions = data.advanced_conditions
+    if data.followup_action is not None:
+        rule.followup_action = data.followup_action
     if data.priority is not None:
         rule.priority = data.priority
     # Template overrides — explicitly passed null clears back to default
