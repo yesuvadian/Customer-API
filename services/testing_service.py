@@ -11,6 +11,74 @@ from utils.common_service import UTCDateTimeMixin
 logger = logging.getLogger(__name__)
 
 
+def _build_threshold_config_html(ev: dict) -> str:
+    """
+    Build an HTML table from evaluation result fields for use as
+    {{alert.thresholdconfig}} in eval_alert / eval_critical email templates.
+
+    Renders only fields that have ALERT or CRITICAL status, showing:
+      Field | Value | Unit | Status | Normal Range | Alert Range | Critical Range
+
+    Falls back to a plain text summary if no fields are present.
+    """
+    fields = [
+        f for f in (ev.get("fields") or [])
+        if f.get("status") in ("ALERT", "CRITICAL")
+    ]
+    if not fields:
+        # No per-field breakdown — show overall summary
+        return (
+            f"<p>Overall result: <strong>{ev.get('overall', '')}</strong>. "
+            f"{ev.get('summary', '')}</p>"
+        )
+
+    TD = "style='padding:5px 8px;border:1px solid #ddd;font-size:12px'"
+    TH = "style='padding:5px 8px;border:1px solid #ddd;background:#1E3C72;color:#fff;font-size:12px;text-align:left'"
+
+    def _fmt(val) -> str:
+        return str(val) if val is not None else "—"
+
+    def _range(lo, hi) -> str:
+        if lo is not None and hi is not None:
+            return f"{lo} – {hi}"
+        if lo is not None:
+            return f"≥ {lo}"
+        if hi is not None:
+            return f"≤ {hi}"
+        return "—"
+
+    rows = ""
+    for f in fields:
+        t = f.get("thresholds") or {}
+        status = f.get("status", "")
+        status_color = "#d32f2f" if status == "CRITICAL" else "#f57c00"
+        unit = f.get("unit") or ""
+        rows += (
+            f"<tr>"
+            f"<td {TD}>{f.get('label', f.get('key', ''))}</td>"
+            f"<td {TD}><strong>{_fmt(f.get('value'))} {unit}</strong></td>"
+            f"<td {TD} style='color:{status_color};font-weight:bold'>{status}</td>"
+            f"<td {TD}>{_range(t.get('normal_min'), t.get('normal_max'))}</td>"
+            f"<td {TD}>{_range(t.get('alert_min'), t.get('alert_max'))}</td>"
+            f"<td {TD}>{_range(t.get('critical_below'), t.get('critical_above'))}</td>"
+            f"</tr>"
+        )
+
+    return (
+        f"<table cellspacing='0' style='border-collapse:collapse;width:100%;margin-top:8px'>"
+        f"<tr>"
+        f"<th {TH}>Parameter</th>"
+        f"<th {TH}>Measured Value</th>"
+        f"<th {TH}>Status</th>"
+        f"<th {TH}>Normal Range</th>"
+        f"<th {TH}>Alert Range</th>"
+        f"<th {TH}>Critical Range</th>"
+        f"</tr>"
+        f"{rows}"
+        f"</table>"
+    )
+
+
 def _deduplicated_overall_sections(main_sections: list, overall_sections: list) -> list:
     """
     Return only those sections/fields from overall_sections that don't already
@@ -467,14 +535,15 @@ class TestingService:
                     NotificationService(self.db).fire(
                         event_type=_event_map[overall_threshold],
                         context={
-                            "request.number":   request.request_number or "",
-                            "equipment.ueic":   _eq_ueic,
-                            "eval.test_type":   template_key or "",
-                            "eval.overall":     overall_threshold,
-                            "result_summary":   ev.get("summary") or ev.get("finding") or "",
-                            "result_threshold": overall_threshold,
-                            "tester_name":      _tester_name,
-                            "eval.evaluated_at": str(result.tested_at or result.cts or "")[:19],
+                            "request.number":        request.request_number or "",
+                            "equipment.ueic":        _eq_ueic,
+                            "eval.test_type":        template_key or "",
+                            "eval.overall":          overall_threshold,
+                            "result_summary":        ev.get("summary") or ev.get("finding") or "",
+                            "result_threshold":      overall_threshold,
+                            "tester_name":           _tester_name,
+                            "eval.evaluated_at":     str(result.tested_at or result.cts or "")[:19],
+                            "alert.thresholdconfig": _build_threshold_config_html(ev),
                         },
                         organization_id=request.organization_id,
                         department_id=getattr(request, "department_id", None),

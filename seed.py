@@ -9050,6 +9050,14 @@ def _seed_notification_variables(session) -> int:
              description="Timestamp when the test evaluation was completed.",
              sample_value="2025-01-15 09:00 UTC",
              role_template_names=["Reviewing Officer", "Maintenance Officer"]),
+        dict(var_key="alert.thresholdconfig", label="Threshold Configuration Table",
+             group_name="Evaluation",          resolver_key="alert.thresholdconfig",
+             fallback_keys=[],
+             description="Auto-generated HTML table showing each parameter's measured value, "
+                          "status (ALERT/CRITICAL), and normal/alert/critical ranges. "
+                          "Populated only for eval_alert and eval_critical events.",
+             sample_value="<table>...</table>",
+             role_template_names=["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"]),
         # ── Organisation ──────────────────────────────────────────────────────
         dict(var_key="org.name", label="Organisation Name",
              group_name="Organisation", resolver_key="org_name",
@@ -9766,6 +9774,8 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Evaluated At</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.evaluated_at}}</td></tr>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Finding</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{result_summary}}</td></tr>"
             "</table>"
+            "<h4 style='margin-top:14px'>Threshold Configuration</h4>"
+            "{{alert.thresholdconfig}}"
             "<p>The evaluation report is attached to this email.</p>",
             ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
             [{"var_key": "report.retriepdf", "type": "pdf"}],
