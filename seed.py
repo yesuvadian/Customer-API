@@ -1469,9 +1469,11 @@ def seed_modules(session):
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
+{"name": "Notification Center",    "description": "Notification Center — manage templates, routing rules and schedules", "path": "org_notification_center",    "group_name": "Organization", "is_menu": True},
 {"name": "Notification Templates", "description": "Configure email/SMS/in-app notification templates per event type", "path": "org_notification_templates", "group_name": "Organization", "is_menu": False},
 {"name": "Notification Routing",   "description": "Configure routing rules — which roles receive which notifications", "path": "org_notification_routing",   "group_name": "Organization", "is_menu": False},
 {"name": "Notification Schedules", "description": "Configure scheduled notification rules (due-date reminders, digests)", "path": "org_notification_schedules", "group_name": "Organization", "is_menu": False},
+{"name": "Reporting Center",       "description": "Reporting Center — define, run and schedule operational reports",   "path": "org_reporting_center",       "group_name": "Organization", "is_menu": True},
 # ✅ REPORTING SUITE MODULE
 {"name": "Reports", "description": "Generic report engine — 14 SRS operational reports with Excel/PDF export", "path": "reports", "group_name": "Testing"},
 # ✅ DIRECT SUBMISSION MODULES (Stage 2 & Stage 10 — no tester assignment)
@@ -5281,12 +5283,14 @@ def seed_notifications_module_and_permissions(session):
     # 6. Assign permissions (ORG-SCOPED)
     #    Grant: Notifications + My Organization to Org Admin role
     # ─────────────────────────────────────────────────────────────
+    notif_center_mod    = session.query(Module).filter_by(path="org_notification_center").first()
     notif_template_mod  = session.query(Module).filter_by(path="org_notification_templates").first()
     notif_routing_mod   = session.query(Module).filter_by(path="org_notification_routing").first()
     notif_schedule_mod  = session.query(Module).filter_by(path="org_notification_schedules").first()
+    reporting_center_mod = session.query(Module).filter_by(path="org_reporting_center").first()
 
-    for mod in filter(None, [notifications_module, notif_template_mod,
-                              notif_routing_mod, notif_schedule_mod]):
+    for mod in filter(None, [notifications_module, notif_center_mod, notif_template_mod,
+                              notif_routing_mod, notif_schedule_mod, reporting_center_mod]):
         existing_perm = session.query(OrgRolePermission).filter_by(
             org_role_id=org_admin_role.id,
             module_id=mod.id
