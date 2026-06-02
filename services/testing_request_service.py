@@ -244,9 +244,27 @@ class TestingRequestService:
         # Trigger notification
         try:
             from services.notification_service import NotificationService
-            NotificationService(self.db).notify_request_submitted(request)
+            ns = NotificationService(self.db)
+            ns.notify_request_submitted(request)
+            ns.fire(
+                event_type="status_changed",
+                context={
+                    "request.number": request.request_number or str(request.id),
+                    "request.status": request.status.value,
+                    "request.title":  getattr(request, "title", "") or "",
+                    "status_from":    "draft",
+                    "status_to":      request.status.value,
+                },
+                organization_id=request.organization_id,
+                department_id=getattr(request, "department_id", None),
+                source_id=request.id,
+                source_type="testing_request",
+                severity="info",
+                workflow_type="testing_request",
+                status_from="draft",
+                status_to=request.status.value,
+            )
         except Exception as e:
-            # Log but don't fail the request
             import logging
             logging.getLogger(__name__).error(f"Notification failed: {e}")
 
@@ -278,9 +296,27 @@ class TestingRequestService:
         # Trigger notification
         try:
             from services.notification_service import NotificationService
-            NotificationService(self.db).notify_tester_assigned(request)
+            ns = NotificationService(self.db)
+            ns.notify_tester_assigned(request)
+            ns.fire(
+                event_type="status_changed",
+                context={
+                    "request.number": request.request_number or str(request.id),
+                    "request.status": request.status.value,
+                    "request.title":  getattr(request, "title", "") or "",
+                    "status_from":    "submitted",
+                    "status_to":      "assigned",
+                },
+                organization_id=request.organization_id,
+                department_id=getattr(request, "department_id", None),
+                source_id=request.id,
+                source_type="testing_request",
+                severity="info",
+                workflow_type="testing_request",
+                status_from="submitted",
+                status_to="assigned",
+            )
         except Exception as e:
-            # Log but don't fail the assignment
             import logging
             logging.getLogger(__name__).error(f"Notification failed: {e}")
         return request

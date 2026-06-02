@@ -11174,6 +11174,11 @@ def _seed_notification_routing_rules(session) -> int:
          ["email", "inapp"],
          "Test Results Submitted"),
 
+        ("status_changed",
+         ["testing_request", "taqc_inspection"], [],
+         ["email", "inapp"],
+         "Test Request Status Changed"),
+
         # ── Recommendations ───────────────────────────────────────────────────
         ("recommendation_approved",
          [], [],
