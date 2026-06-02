@@ -2591,6 +2591,55 @@ class NotificationService:
             severity=severity,
         )
 
+    @staticmethod
+    def build_digest_table(group: list, today) -> str:
+        """
+        Build the HTML table injected as {{digest_table}} in scheduled digest emails.
+
+        ``group`` is a list of (TestingRequest, due_date, rule) tuples — all
+        requests that matched the same (org, department, event_type) bucket.
+
+        Columns
+        -------
+        Equipment   — equipment.ueic or equipment_type.name
+        Department  — request.department.name
+        Due Date    — due_date (date object or None)
+        Days        — days overdue (positive) or days remaining (negative shown as positive)
+        Request     — request_number
+        Status      — request.status
+
+        To change the table structure (add/remove columns, change styles,
+        rename headers) edit this single method — all digest events share it.
+        """
+        TD = "style='padding:6px 10px;border:1px solid #ddd;font-size:13px'"
+        TH = "style='padding:6px 10px;border:1px solid #ddd;background:#1E3C72;color:#fff;font-size:13px;text-align:left'"
+
+        rows_html = "".join(
+            "<tr>"
+            f"<td {TD}>{getattr(getattr(r, 'equipment', None), 'ueic', '') or getattr(getattr(r, 'equipment_type', None), 'name', '') or ''}</td>"
+            f"<td {TD}>{getattr(getattr(r, 'department', None), 'name', '') or ''}</td>"
+            f"<td {TD}>{str(due or '')}</td>"
+            f"<td {TD}>{str(max((today - due).days, 0)) if due and due < today else str(max((due - today).days, 0)) if due else ''}</td>"
+            f"<td {TD}>{r.request_number or str(r.id)[:8]}</td>"
+            f"<td {TD}>{r.status.value if hasattr(r.status, 'value') else str(r.status)}</td>"
+            "</tr>"
+            for r, due, _ in group
+        )
+
+        return (
+            f"<table cellspacing='0' style='border-collapse:collapse;width:100%'>"
+            f"<tr>"
+            f"<th {TH}>Equipment</th>"
+            f"<th {TH}>Department</th>"
+            f"<th {TH}>Due Date</th>"
+            f"<th {TH}>Days</th>"
+            f"<th {TH}>Request</th>"
+            f"<th {TH}>Status</th>"
+            f"</tr>"
+            f"{rows_html}"
+            f"</table>"
+        )
+
     def _fire_schedule_notification(self, request, event_type: str, severity: str) -> None:
         """
         Shared helper for all scheduler-fired notifications.

@@ -475,8 +475,6 @@ def _check_schedule_notifications():
                     )
 
         # ── Fire one digest per (org, department, event_type) group ───────────
-        TD  = "style='padding:6px 10px;border:1px solid #ddd;font-size:13px'"
-        TH  = "style='padding:6px 10px;border:1px solid #ddd;background:#1E3C72;color:#fff;font-size:13px'"
         for (req_org, req_dept, event_type, rule_key), group in digest_groups.items():
             try:
                 rule      = group[0][2]
@@ -499,7 +497,6 @@ def _check_schedule_notifications():
                         NotificationLog.organization_id == req_org,
                         NotificationLog.event_type      == event_type,
                         NotificationLog.cts             >= cutoff_dt,
-                        # department scoped: match source_id of any req in this dept
                         NotificationLog.source_id.in_(
                             [r.id for r, _, _ in group]
                         ),
@@ -509,31 +506,10 @@ def _check_schedule_notifications():
                 if already:
                     continue
 
-                # ── Build HTML table rows for all matching requests ─────────
-                rows_html = "".join(
-                    "<tr>"
-                    f"<td {TD}>{getattr(getattr(r, 'equipment', None), 'ueic', '') or getattr(getattr(r, 'equipment_type', None), 'name', '') or ''}</td>"
-                    f"<td {TD}>{getattr(getattr(r, 'department', None), 'name', '') or ''}</td>"
-                    f"<td {TD}>{str(due or '')}</td>"
-                    f"<td {TD}>{str(max((today - due).days, 0)) if due and due < today else str(max((due - today).days, 0)) if due else ''}</td>"
-                    f"<td {TD}>{r.request_number or str(r.id)[:8]}</td>"
-                    f"<td {TD}>{r.status.value if hasattr(r.status, 'value') else str(r.status)}</td>"
-                    "</tr>"
-                    for r, due, _ in group
-                )
-                table_html = (
-                    f"<table cellspacing='0' style='border-collapse:collapse;width:100%'>"
-                    f"<tr>"
-                    f"<th {TH}>Equipment</th>"
-                    f"<th {TH}>Department</th>"
-                    f"<th {TH}>Due Date</th>"
-                    f"<th {TH}>Days</th>"
-                    f"<th {TH}>Request</th>"
-                    f"<th {TH}>Status</th>"
-                    f"</tr>"
-                    f"{rows_html}"
-                    f"</table>"
-                )
+                # ── Build digest table via NotificationService.build_digest_table()
+                # To change columns/styles edit that single method in
+                # services/notification_service.py — all digest events share it.
+                table_html = NotificationService.build_digest_table(group, today)
 
                 # ── Representative values for subject line ──────────────────
                 first_req, first_due, _ = group[0]
