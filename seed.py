@@ -10829,6 +10829,28 @@ def _seed_notification_schedule_rules(session) -> int:
     """
     from models import NotificationScheduleRule
 
+    # ── Default digest table columns ─────────────────────────────────────────
+    # Stored in the DB on each schedule rule so admins can customise per-rule
+    # from the Notification Center UI without touching code.
+    # Rules that don't produce digest emails leave digest_columns=None.
+    _DIGEST_COLS_DUE = [
+        {"field": "equipment",  "header": "Equipment"},
+        {"field": "department", "header": "Department"},
+        {"field": "due_date",   "header": "Due Date"},
+        {"field": "days",       "header": "Days Remaining"},
+        {"field": "request",    "header": "Request No."},
+        {"field": "status",     "header": "Status"},
+    ]
+    _DIGEST_COLS_OVERDUE = [
+        {"field": "equipment",  "header": "Equipment"},
+        {"field": "department", "header": "Department"},
+        {"field": "due_date",   "header": "Was Due"},
+        {"field": "days",       "header": "Days Overdue"},
+        {"field": "request",    "header": "Request No."},
+        {"field": "assigned_to","header": "Assigned To"},
+        {"field": "status",     "header": "Status"},
+    ]
+
     _DEFAULT_RULES = [
         # ── Due-date reminders (one-shot — no frequency; fires once when window opens) ──
 
@@ -10839,8 +10861,9 @@ def _seed_notification_schedule_rules(session) -> int:
             trigger_type="due_soon",
             offset_days=15,
             severity="info",
-            frequency=None,          # one-shot: fires once when due_date is 15 days away
+            frequency=None,
             applicable_categories=[],
+            digest_columns=_DIGEST_COLS_DUE,
         ),
         # SRS §8.2 #2 — 7-day final reminder
         dict(
@@ -10849,8 +10872,9 @@ def _seed_notification_schedule_rules(session) -> int:
             trigger_type="due_soon",
             offset_days=7,
             severity="alert",
-            frequency=None,          # one-shot: fires once when due_date is 7 days away
+            frequency=None,
             applicable_categories=[],
+            digest_columns=_DIGEST_COLS_DUE,
         ),
 
         # ── Overdue alerts (weekly repeat — keep notifying while still overdue) ──────
@@ -10862,8 +10886,9 @@ def _seed_notification_schedule_rules(session) -> int:
             trigger_type="overdue",
             offset_days=0,
             severity="alert",
-            frequency="weekly",      # re-fires every 7 days while test remains overdue
+            frequency="weekly",
             applicable_categories=[],
+            digest_columns=_DIGEST_COLS_OVERDUE,
         ),
         # SRS §8.2 #4 — escalation after 7 days overdue, repeats weekly
         dict(
@@ -10872,8 +10897,9 @@ def _seed_notification_schedule_rules(session) -> int:
             trigger_type="escalation",
             offset_days=7,
             severity="critical",
-            frequency="weekly",      # re-fires every 7 days while escalation condition holds
+            frequency="weekly",
             applicable_categories=[],
+            digest_columns=_DIGEST_COLS_OVERDUE,
         ),
 
         # ── Maintenance ──────────────────────────────────────────────────────────────
@@ -11013,7 +11039,12 @@ def _seed_notification_schedule_rules(session) -> int:
             )
             .first()
         )
-        if not existing:
+        if existing:
+            # Update digest_columns on existing rows so re-seeding keeps
+            # the column config in sync (only if rule still has DB default/NULL)
+            if existing.digest_columns is None and rule_def.get("digest_columns"):
+                existing.digest_columns = rule_def["digest_columns"]
+        else:
             # Build kwargs — only pass fields that exist on the model
             kwargs = {
                 "event_type":                rule_def["event_type"],
@@ -11025,6 +11056,7 @@ def _seed_notification_schedule_rules(session) -> int:
                 "applicable_categories":     rule_def.get("applicable_categories", []),
                 "applicable_workflow_types": rule_def.get("applicable_workflow_types", []),
                 "advanced_conditions":       rule_def.get("advanced_conditions"),
+                "digest_columns":            rule_def.get("digest_columns"),
                 "severity":                  rule_def.get("severity", "info"),
                 "is_active":                 rule_def.get("is_active", True),
             }
