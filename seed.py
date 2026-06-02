@@ -11259,8 +11259,8 @@ def _seed_notification_routing_rules(session) -> int:
 
         ("repair_delay",
          ["repair_lifecycle"], [],
-         ["email", "sms"],
-         "Repair Stage Delay — Email + SMS"),
+         ["email", "sms", "inapp"],
+         "Repair Stage Delay — Email + SMS + in-app"),
 
         ("repair_cancelled",
          [], [],
@@ -11290,8 +11290,8 @@ def _seed_notification_routing_rules(session) -> int:
 
         ("overhaul_stage_delay",
          [], [],
-         ["email", "sms"],
-         "Overhaul Stage Delay — Email + SMS"),
+         ["email", "sms", "inapp"],
+         "Overhaul Stage Delay — Email + SMS + in-app"),
 
         # ── Calibration Lifecycle ─────────────────────────────────────────────
         ("calibration_stage_changed",
@@ -11301,8 +11301,8 @@ def _seed_notification_routing_rules(session) -> int:
 
         ("calibration_stage_delay",
          [], [],
-         ["email", "sms"],
-         "Calibration Stage Delay — Email + SMS"),
+         ["email", "sms", "inapp"],
+         "Calibration Stage Delay — Email + SMS + in-app"),
 
         # ── Surveillance Lifecycle ────────────────────────────────────────────
         ("surveillance_stage_changed",
@@ -11312,8 +11312,8 @@ def _seed_notification_routing_rules(session) -> int:
 
         ("surveillance_stage_delay",
          [], [],
-         ["email", "sms"],
-         "Surveillance Stage Delay — Email + SMS"),
+         ["email", "sms", "inapp"],
+         "Surveillance Stage Delay — Email + SMS + in-app"),
 
         # ── Design / Systemic ─────────────────────────────────────────────────
         ("design_problem_alert",
