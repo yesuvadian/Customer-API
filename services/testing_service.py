@@ -113,6 +113,44 @@ class TestingService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Testing request not found")
         return request
 
+    def _user_label(self, user_id) -> str:
+        """Resolve a user's friendly display name for notification context."""
+        from models import User
+        if not user_id:
+            return "System"
+        u = self.db.query(User).filter(User.id == user_id).first()
+        if not u:
+            return str(user_id)
+        name = " ".join(filter(None, [u.firstname, u.lastname])).strip()
+        return name or u.email or str(user_id)
+
+    def _fire_status_changed(self, request, status_from: str, status_to: str, user_id) -> None:
+        """Emit the status_changed notification event for a lifecycle transition.
+        Fire-and-forget — never blocks the transaction."""
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).fire(
+                event_type="status_changed",
+                context={
+                    "request.number": request.request_number or str(request.id),
+                    "request.status": status_to,
+                    "request.title":  getattr(request, "title", "") or "",
+                    "status_from":    status_from,
+                    "status_to":      status_to,
+                    "changed_by":     self._user_label(user_id),
+                },
+                organization_id=request.organization_id,
+                department_id=getattr(request, "department_id", None),
+                source_id=request.id,
+                source_type="testing_request",
+                severity="info",
+                workflow_type="testing_request",
+                status_from=status_from,
+                status_to=status_to,
+            )
+        except Exception as _e:
+            logger.warning(f"status_changed notification failed: {_e}")
+
     def accept_assignment(self, request_id: UUID, tester_id: UUID) -> TestingRequest:
         request = self._get_request(request_id)
         if request.status != TestingRequestStatus.assigned:
@@ -130,6 +168,7 @@ class TestingService:
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
+        self._fire_status_changed(request, "assigned", "accepted", tester_id)
         return request
 
     def start_testing(self, request_id: UUID, tester_id: UUID) -> TestingRequest:
@@ -148,6 +187,7 @@ class TestingService:
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
+        self._fire_status_changed(request, "accepted", "in_progress", tester_id)
         return request
 
     # NOTE: Old upload_test_result (multipart form) removed.
@@ -163,6 +203,7 @@ class TestingService:
 
     def submit_test_results(self, request_id: UUID, tester_id: UUID, replacement_products=None) -> TestingRequest:
         request = self._get_request(request_id)
+        _prev_status = request.status.value
         if request.status not in (TestingRequestStatus.in_progress, TestingRequestStatus.test_submitted):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -235,6 +276,10 @@ class TestingService:
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
+
+        # Notify on the lifecycle status change (e.g. in_progress → under_approval)
+        if request.status.value != _prev_status:
+            self._fire_status_changed(request, _prev_status, request.status.value, tester_id)
 
         # ── Surveillance tracking: update if this is a surveillance test ──────
         if request.surveillance_workflow_id:
