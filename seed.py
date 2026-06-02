@@ -11431,6 +11431,7 @@ def run_seed():
         # org_role_permissions seeded AFTER orgs are created (see end of org section)
         migrate_report_tables(session)
         seed_report_definitions(session)
+        seed_report_query_keys(session)
         seed_user_roles(session, role_ids)
         assign_viewer_role_to_new_users(session, new_user_ids, role_ids)
         seed_plans(session)
