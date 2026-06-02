@@ -1371,6 +1371,7 @@ class RoutingRuleUpdate(BaseModel):
     applicable_status_to:   Optional[str] = None
     channels_enabled:    Optional[List[str]] = None
     recipient_roles_override: Optional[List[str]] = None
+    advanced_conditions: Optional[dict] = None
     priority: Optional[int] = None
     # Per-channel template overrides — pass null to clear back to default
     email_template_id: Optional[UUID] = None
@@ -1417,6 +1418,7 @@ def _rule_out(rule: NotificationRoutingRule, db: Optional[Session] = None) -> di
         "email_template_id": getattr(rule, 'email_template_id', None),
         "sms_template_id":   getattr(rule, 'sms_template_id', None),
         "inapp_template_id": getattr(rule, 'inapp_template_id', None),
+        "advanced_conditions": getattr(rule, 'advanced_conditions', None),
         "is_active": rule.is_active,
         "is_global": rule.organization_id is None,
         "cts": rule.cts,
@@ -1904,6 +1906,7 @@ def clone_routing_rule_as_org_override(
             if data.channels_enabled is not None
             else list(source.channels_enabled or ["email", "sms", "inapp"]),
         recipient_roles_override=data.recipient_roles_override or source.recipient_roles_override,
+        advanced_conditions=data.advanced_conditions if data.advanced_conditions is not None else source.advanced_conditions,
         priority=data.priority if data.priority is not None else 10,
         is_active=True,
     )
