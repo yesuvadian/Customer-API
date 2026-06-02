@@ -382,9 +382,27 @@ def _check_schedule_notifications():
                 return req_status_str == cond.get("on_status", "")
             return False
 
-        # ── Pass 1: per-request notifications (non-recurring trigger types) ─────
+        # ── Pass 1: digest notifications grouped by (org, department, rule) ──────
+        #
+        # Instead of firing one notification per request (which floods recipients
+        # with N emails for N overdue requests), we:
+        #   1. Evaluate every rule against every open request
+        #   2. Group matching requests by (org_id, department_id, event_type)
+        #   3. Fire ONE digest notification per group with an HTML table of all
+        #      matching requests — department_id scoping ensures each dept only
+        #      sees its own requests
+        #   4. Dedup at group level: skip the whole group if already sent today
+        #
+        from collections import defaultdict as _ddict
+        from models import NotificationLog
+        from datetime import datetime as _dt
+
+        # digest_groups[(org_id, dept_id, event_type, rule_key)] = [req, ...]
+        digest_groups: dict = _ddict(list)
+
         for req in requests:
             req_org = req.organization_id
+            req_dept = getattr(req, "department_id", None)
             req_status_str = (
                 req.status.value
                 if hasattr(req.status, "value")
@@ -399,11 +417,9 @@ def _check_schedule_notifications():
             except Exception:
                 due = None
 
-            # Category value
             req_cat = getattr(req.request_category, "value",
                               str(req.request_category or ""))
-            # Workflow type — derive the same way notification_service does
-            req_wf = nsvc._workflow_type(req) or ""
+            req_wf  = nsvc._workflow_type(req) or ""
 
             # Merge global + org rules (skip recurring — handled in pass 2)
             effective: dict = {
@@ -427,7 +443,7 @@ def _check_schedule_notifications():
                         if req_eq_type not in eq_types:
                             continue
 
-                    # ── Specific activity type filter (advanced_conditions) ─
+                    # ── Activity type filter (advanced_conditions) ─────────
                     adv_pre = getattr(rule, "advanced_conditions", None)
                     if adv_pre and isinstance(adv_pre, dict):
                         act_types = adv_pre.get("activity_types") or []
@@ -442,56 +458,124 @@ def _check_schedule_notifications():
                     if wf_types and req_wf and req_wf not in wf_types:
                         continue
 
-                    # ── Evaluate trigger ───────────────────────────────────
-                    # Note: advanced_conditions["activity_types"] was already
-                    # checked above for pre-filtering.  Here we only evaluate
-                    # time/status conditions (and/or logic) that remain.
+                    # ── Evaluate trigger condition ─────────────────────────
                     adv = getattr(rule, "advanced_conditions", None)
                     if adv and set(adv.keys()) - {"activity_types"}:
-                        # Has real trigger conditions beyond activity filter
                         matches = _evaluate_advanced(adv, due, req_status_str)
                     else:
                         matches = _evaluate_simple(rule, due, req_status_str)
 
                     if matches:
-                        # ── Frequency-aware dedup ──────────────────────────
-                        from models import NotificationLog
-                        from datetime import datetime as _dt
-
-                        rule_freq = getattr(rule, "frequency", None)
-                        freq_str  = (
-                            rule_freq.value
-                            if rule_freq and hasattr(rule_freq, "value")
-                            else (rule_freq or None)
-                        )
-                        cooldown_days = ScheduleFrequency.cooldown(freq_str, default=1)
-                        cutoff_dt = _dt.combine(
-                            today - timedelta(days=cooldown_days - 1),
-                            _dt.min.time()
-                        )
-
-                        already = (
-                            db.query(NotificationLog.id)
-                            .filter(
-                                NotificationLog.source_id == req.id,
-                                NotificationLog.event_type == event_type,
-                                NotificationLog.cts >= cutoff_dt,
-                            )
-                            .first()
-                        )
-                        if already:
-                            continue
-                        nsvc._fire_schedule_notification(
-                            req,
-                            event_type=event_type,
-                            severity=rule.severity,
-                        )
-                        fired_total += 1
+                        group_key = (req_org, req_dept, event_type, key)
+                        digest_groups[group_key].append((req, due, rule))
 
                 except Exception as _e:
                     logger.warning(
-                        f"[Notif] Rule {event_type} failed for req {req.id}: {_e}"
+                        f"[Notif] Rule {event_type} eval failed for req {req.id}: {_e}"
                     )
+
+        # ── Fire one digest per (org, department, event_type) group ───────────
+        TD  = "style='padding:6px 10px;border:1px solid #ddd;font-size:13px'"
+        TH  = "style='padding:6px 10px;border:1px solid #ddd;background:#1E3C72;color:#fff;font-size:13px'"
+        for (req_org, req_dept, event_type, rule_key), group in digest_groups.items():
+            try:
+                rule      = group[0][2]
+                rule_freq = getattr(rule, "frequency", None)
+                freq_str  = (
+                    rule_freq.value
+                    if rule_freq and hasattr(rule_freq, "value")
+                    else (rule_freq or None)
+                )
+                cooldown_days = ScheduleFrequency.cooldown(freq_str, default=1)
+                cutoff_dt = _dt.combine(
+                    today - timedelta(days=cooldown_days - 1),
+                    _dt.min.time()
+                )
+
+                # ── Dedup: skip if already sent for this org+dept+event today ─
+                already = (
+                    db.query(NotificationLog.id)
+                    .filter(
+                        NotificationLog.organization_id == req_org,
+                        NotificationLog.event_type      == event_type,
+                        NotificationLog.cts             >= cutoff_dt,
+                        # department scoped: match source_id of any req in this dept
+                        NotificationLog.source_id.in_(
+                            [r.id for r, _, _ in group]
+                        ),
+                    )
+                    .first()
+                )
+                if already:
+                    continue
+
+                # ── Build HTML table rows for all matching requests ─────────
+                rows_html = "".join(
+                    "<tr>"
+                    f"<td {TD}>{getattr(getattr(r, 'equipment', None), 'ueic', '') or getattr(getattr(r, 'equipment_type', None), 'name', '') or ''}</td>"
+                    f"<td {TD}>{getattr(getattr(r, 'department', None), 'name', '') or ''}</td>"
+                    f"<td {TD}>{str(due or '')}</td>"
+                    f"<td {TD}>{str(max((today - due).days, 0)) if due and due < today else str(max((due - today).days, 0)) if due else ''}</td>"
+                    f"<td {TD}>{r.request_number or str(r.id)[:8]}</td>"
+                    f"<td {TD}>{r.status.value if hasattr(r.status, 'value') else str(r.status)}</td>"
+                    "</tr>"
+                    for r, due, _ in group
+                )
+                table_html = (
+                    f"<table cellspacing='0' style='border-collapse:collapse;width:100%'>"
+                    f"<tr>"
+                    f"<th {TH}>Equipment</th>"
+                    f"<th {TH}>Department</th>"
+                    f"<th {TH}>Due Date</th>"
+                    f"<th {TH}>Days</th>"
+                    f"<th {TH}>Request</th>"
+                    f"<th {TH}>Status</th>"
+                    f"</tr>"
+                    f"{rows_html}"
+                    f"</table>"
+                )
+
+                # ── Representative values for subject line ──────────────────
+                first_req, first_due, _ = group[0]
+                first_eq = (
+                    getattr(getattr(first_req, "equipment", None), "ueic", "")
+                    or getattr(getattr(first_req, "equipment_type", None), "name", "")
+                    or "Equipment"
+                )
+                dept_name = getattr(getattr(first_req, "department", None), "name", "") or ""
+
+                nsvc.fire(
+                    event_type=event_type,
+                    context={
+                        # Digest-level variables
+                        "digest_table":    table_html,
+                        "digest_count":    str(len(group)),
+                        "dept.name":       dept_name,
+                        # Per-request fallbacks (used by SMS / inapp templates)
+                        "equipment":       first_eq,
+                        "equipment.ueic":  first_eq,
+                        "request.number":  first_req.request_number or "",
+                        "request.due_date": str(first_due or ""),
+                        "due_date":        str(first_due or ""),
+                        "days_remaining":  str(max((first_due - today).days, 0)) if first_due and first_due >= today else "0",
+                        "days_overdue":    str(max((today - first_due).days, 0)) if first_due and first_due < today else "0",
+                    },
+                    organization_id=req_org,
+                    department_id=req_dept,
+                    source_id=first_req.id,
+                    source_type="testing_request",
+                    severity=rule.severity,
+                    workflow_type=nsvc._workflow_type(first_req),
+                    equipment_type=nsvc._equipment_type(first_req),
+                    test_type=nsvc._test_type(first_req),
+                )
+                fired_total += len(group)
+
+            except Exception as _e:
+                logger.warning(
+                    f"[Notif] Digest fire failed for {event_type} "
+                    f"org={req_org} dept={req_dept}: {_e}"
+                )
 
         # ── Pass 2: aggregate notifications (recurring trigger type) ──────────
         #

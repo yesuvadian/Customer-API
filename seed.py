@@ -9997,102 +9997,84 @@ def _seed_notification_templates(session) -> int:
     # ── Scheduling ────────────────────────────────────────────────────────────
     _tmpl("due_reminder",
         _e(
-            "Test Due in {{days_remaining}} Days — {{equipment.ueic}}",
-            "<h3>Upcoming Test Due — 15-Day Reminder</h3>"
-            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Remaining</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_remaining}}</td></tr>"
-            "</table>"
-            "<p>Please ensure the test is scheduled and resources are allocated.</p>",
+            "{{digest_count}} Test(s) Due Soon — {{dept.name}}",
+            "<h3>Upcoming Tests Due — {{dept.name}}</h3>"
+            "<p>The following <b>{{digest_count}}</b> test request(s) are due soon and require attention.</p>"
+            "{{digest_table}}"
+            "<p>Please ensure tests are scheduled and resources are allocated.</p>",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
         _s(
-            "[KPTCL-SEACMS] Test due in {{days_remaining}} days for {{equipment.ueic}}"
-            " ({{equipment.department}}). Due: {{request.due_date}}.",
+            "[SEACMS] {{digest_count}} test(s) due soon in {{dept.name}}."
+            " Earliest: {{equipment.ueic}} due {{request.due_date}}.",
             ["Maintenance Officer"],
         ),
         _i(
-            "Test due in {{days_remaining}} days — {{equipment.ueic}}",
-            "Request {{request.number}} for {{equipment.ueic}} is due on {{request.due_date}}.",
+            "{{digest_count}} test(s) due soon — {{dept.name}}",
+            "{{digest_count}} request(s) due soon in {{dept.name}}. Earliest: {{equipment.ueic}} due {{request.due_date}}.",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
     )
 
     _tmpl("due_reminder_final",
         _e(
-            "FINAL REMINDER: Test Due in {{days_remaining}} Days — {{equipment.ueic}}",
-            "<h3 style='color:orange'>Final Reminder — Test Due in {{days_remaining}} Days</h3>"
-            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-            "</table>"
-            "<p><b>Action required:</b> Test must be completed by {{request.due_date}}.</p>",
+            "FINAL REMINDER: {{digest_count}} Test(s) Due — {{dept.name}}",
+            "<h3 style='color:orange'>Final Reminder — Tests Due Soon — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> test request(s) require immediate scheduling.</p>"
+            "{{digest_table}}"
+            "<p><b>Action required:</b> Ensure all listed tests are completed by their due dates.</p>",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
         _s(
-            "[KPTCL-SEACMS] FINAL REMINDER: Test for {{equipment.ueic}} due {{request.due_date}}"
-            " ({{days_remaining}} days). Dept: {{equipment.department}}.",
+            "[SEACMS] FINAL REMINDER: {{digest_count}} test(s) due in {{dept.name}}."
+            " Earliest: {{equipment.ueic}} due {{request.due_date}}.",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
         _i(
-            "Final reminder — {{equipment.ueic}} due {{request.due_date}}",
-            "Only {{days_remaining}} days left. Request {{request.number}} must be completed by {{request.due_date}}.",
+            "Final reminder — {{digest_count}} test(s) due — {{dept.name}}",
+            "{{digest_count}} test(s) require immediate action in {{dept.name}}. Earliest due: {{request.due_date}}.",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
     )
 
     _tmpl("overdue_alert",
         _e(
-            "[OVERDUE] Test Not Completed — {{equipment.ueic}} ({{days_overdue}} days)",
-            "<h3 style='color:red'>Test Overdue — Immediate Action Required</h3>"
-            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Was Due</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
-            "</table>"
-            "<p>Please take immediate action to complete or reschedule this test.</p>",
+            "[OVERDUE] {{digest_count}} Test(s) Not Completed — {{dept.name}}",
+            "<h3 style='color:red'>Tests Overdue — Immediate Action Required — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> test request(s) in your department are overdue.</p>"
+            "{{digest_table}}"
+            "<p>Please take immediate action to complete or reschedule these tests.</p>",
             ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
         ),
         _s(
-            "[KPTCL-SEACMS] OVERDUE: Test for {{equipment.ueic}} ({{equipment.department}})"
-            " is {{days_overdue}} days overdue. Req: {{request.number}}.",
+            "[SEACMS] OVERDUE: {{digest_count}} test(s) in {{dept.name}} are overdue."
+            " Oldest: {{equipment.ueic}} ({{days_overdue}}d). Req: {{request.number}}.",
             ["Reviewing Officer", "Maintenance Officer"],
         ),
         _i(
-            "Overdue {{days_overdue}} days — {{equipment.ueic}}",
-            "Test {{request.number}} for {{equipment.ueic}} is overdue by {{days_overdue}} days (was due {{request.due_date}}).",
+            "{{digest_count}} overdue test(s) — {{dept.name}}",
+            "{{digest_count}} test(s) are overdue in {{dept.name}}. Oldest: {{equipment.ueic}} overdue {{days_overdue}} days.",
             ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
         ),
     )
 
     _tmpl("overdue_escalation",
         _e(
-            "[ESCALATION] Test {{days_overdue}} Days Overdue — {{equipment.ueic}}",
-            "<h3 style='color:darkred'>Escalation: Test Critically Overdue</h3>"
-            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-            "</table>"
-            "<p>This has been escalated to zone/circle management.</p>",
+            "[ESCALATION] {{digest_count}} Test(s) Critically Overdue — {{dept.name}}",
+            "<h3 style='color:darkred'>Escalation: Tests Critically Overdue — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> test request(s) have been escalated to management.</p>"
+            "{{digest_table}}"
+            "<p>This has been escalated to zone/circle management for immediate intervention.</p>",
             ["Supervisory Officer", "Senior Management Approver"],
         ),
         _s(
-            "[KPTCL-SEACMS] ESCALATION: {{equipment.ueic}} test {{days_overdue}}d overdue."
-            " Dept: {{equipment.department}}. Req: {{request.number}}.",
+            "[SEACMS] ESCALATION: {{digest_count}} test(s) critically overdue in {{dept.name}}."
+            " Oldest: {{equipment.ueic}} ({{days_overdue}}d). Req: {{request.number}}.",
             ["Supervisory Officer", "Senior Management Approver"],
         ),
         _i(
-            "Escalation — {{equipment.ueic}} {{days_overdue}}d overdue",
-            "Critical: {{request.number}} for {{equipment.ueic}} is {{days_overdue}} days overdue.",
+            "Escalation — {{digest_count}} critical overdue — {{dept.name}}",
+            "{{digest_count}} test(s) critically overdue in {{dept.name}}. Oldest: {{equipment.ueic}} {{days_overdue}} days.",
             ["Supervisory Officer", "Senior Management Approver"],
         ),
     )
