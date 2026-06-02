@@ -9044,6 +9044,12 @@ def _seed_notification_variables(session) -> int:
              description="Name of the test type (e.g. IR Test, PI Test).",
              sample_value="IR Test",
              role_template_names=[]),
+        dict(var_key="eval.testname",    label="Test Name",
+             group_name="Evaluation",    resolver_key="test_name",
+             fallback_keys=["test_name", "eval.test_type"],
+             description="User-friendly test name (e.g. Short Circuit Test HV-IV).",
+             sample_value="Short Circuit Test HV-IV",
+             role_template_names=[]),
         dict(var_key="eval.evaluated_at", label="Evaluation Date/Time",
              group_name="Evaluation",     resolver_key="tested_at",
              fallback_keys=["tested_at", "evaluated_at"],
@@ -9764,12 +9770,12 @@ def _seed_notification_templates(session) -> int:
     # ── Evaluation ────────────────────────────────────────────────────────────
     _tmpl("eval_critical",
         _ea(
-            "[CRITICAL] {{equipment.ueic}} — {{eval.test_type}} Threshold Exceeded",
+            "[CRITICAL] {{equipment.ueic}} — {{eval.testname}} Threshold Exceeded",
             "<h3 style='color:red'>Critical Test Result — Immediate Action Required</h3>"
             "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.test_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.testname}}</td></tr>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Evaluated At</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.evaluated_at}}</td></tr>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Finding</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{result_summary}}</td></tr>"
@@ -9795,12 +9801,12 @@ def _seed_notification_templates(session) -> int:
 
     _tmpl("eval_alert",
         _e(
-            "[ALERT] {{equipment.ueic}} — {{eval.test_type}} Warning",
+            "[ALERT] {{equipment.ueic}} — {{eval.testname}} Warning",
             "<h3 style='color:orange'>Alert: Test Result Warning</h3>"
             "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.test_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.testname}}</td></tr>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Revised Interval</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{revised_interval}}</td></tr>"
             "</table>"

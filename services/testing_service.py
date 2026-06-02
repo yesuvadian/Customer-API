@@ -537,7 +537,7 @@ class TestingService:
                         context={
                             "request.number":        request.request_number or "",
                             "equipment.ueic":        _eq_ueic,
-                            "eval.test_type":        template_key or "",
+                            "eval.test_type":        result.test_name or test_name or template_key or "",
                             "eval.overall":          overall_threshold,
                             "result_summary":        ev.get("summary") or ev.get("finding") or "",
                             "result_threshold":      overall_threshold,
