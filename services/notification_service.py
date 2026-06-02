@@ -167,19 +167,66 @@ def _enrich_context_from_source(
                         ctx.setdefault("equipment.department", _eq_dept.name or "")
 
         elif source_type == "test_result":
-            from models import TestResult, TestingRequest, OrgDepartment
+            from models import TestResult, TestingRequest, OrgDepartment, CategoryDetails, CategoryMaster
+            from sqlalchemy.orm import joinedload as _jl2
             tr_res = db.query(TestResult).filter(TestResult.id == source_id).first()
             if not tr_res:
                 return
-            ctx.setdefault("eval.overall",     tr_res.overall_result or "")
+            ctx.setdefault("eval.overall",      tr_res.overall_result or "")
             ctx.setdefault("eval.evaluated_at", str(tr_res.tested_at or tr_res.cts)[:19] if (tr_res.tested_at or tr_res.cts) else "")
+            # Tester who submitted the result
+            if getattr(tr_res, "tested_by", None):
+                from models import User as _User2
+                _tester = db.query(_User2).filter(_User2.id == tr_res.tested_by).first()
+                if _tester:
+                    _tname = f"{_tester.firstname or ''} {_tester.lastname or ''}".strip() or _tester.email or ""
+                    ctx.setdefault("request.assigned_to", _tname)
+                    ctx.setdefault("tester.name",         _tname)
+                    ctx.setdefault("tester.email",        _tester.email or "")
             if tr_res.testing_request_id:
                 tr = db.query(TestingRequest).filter(
                     TestingRequest.id == tr_res.testing_request_id
                 ).first()
                 if tr:
-                    ctx.setdefault("request.number", tr.request_number or str(tr.id)[:8])
-                    ctx.setdefault("tr.status",       tr.status or "")
+                    ctx.setdefault("request.number",   tr.request_number or str(tr.id)[:8])
+                    ctx.setdefault("tr.status",        str(tr.status.value) if tr.status else "")
+                    ctx.setdefault("request.status",   str(tr.status.value) if tr.status else "")
+                    ctx.setdefault("request.title",    tr.title or "")
+                    ctx.setdefault("request.priority", tr.priority or "normal")
+                    if tr.due_date:
+                        ctx.setdefault("request.due_date", str(tr.due_date)[:10])
+                    # Originator / submitted_by
+                    if tr.originator_id:
+                        from models import User as _User3
+                        _orig = db.query(_User3).filter(_User3.id == tr.originator_id).first()
+                        if _orig:
+                            _oname = f"{_orig.firstname or ''} {_orig.lastname or ''}".strip() or _orig.email or ""
+                            ctx.setdefault("request.submitted_by", _oname)
+                            ctx.setdefault("originator",           _oname)
+                            ctx.setdefault("originator.email",     _orig.email or "")
+                    # Assigned tester name (from TR if not already set from TestResult)
+                    if tr.assigned_tester_id and not ctx.get("request.assigned_to"):
+                        from models import User as _User4
+                        _at = db.query(_User4).filter(_User4.id == tr.assigned_tester_id).first()
+                        if _at:
+                            _atname = f"{_at.firstname or ''} {_at.lastname or ''}".strip() or _at.email or ""
+                            ctx.setdefault("request.assigned_to", _atname)
+                    # Test type display name
+                    if tr.test_type_id:
+                        cat = db.query(CategoryDetails).filter(
+                            CategoryDetails.id == tr.test_type_id
+                        ).first()
+                        if cat:
+                            ctx.setdefault("eval.test_type", cat.name or "")
+                            ctx.setdefault("tr.test_type",   cat.name or "")
+                    # Equipment type display name
+                    if tr.equipment_type_id:
+                        eq_type = db.query(CategoryMaster).filter(
+                            CategoryMaster.id == tr.equipment_type_id
+                        ).first()
+                        if eq_type:
+                            ctx.setdefault("equipment.type", eq_type.name or "")
+                    # Department
                     if tr.department_id:
                         dept = db.query(OrgDepartment).filter(
                             OrgDepartment.id == tr.department_id
@@ -187,6 +234,21 @@ def _enrich_context_from_source(
                         if dept:
                             ctx.setdefault("dept.name", dept.name or "")
                             ctx.setdefault("dept.code", dept.code or "")
+                    # Equipment (asset register)
+                    if tr.equipment_id:
+                        from models import Equipment as _EqModel2
+                        eq2 = (
+                            db.query(_EqModel2)
+                            .options(_jl2(_EqModel2.department))
+                            .filter(_EqModel2.id == tr.equipment_id)
+                            .first()
+                        )
+                        if eq2:
+                            ctx.setdefault("equipment.ueic", getattr(eq2, "ueic", "") or "")
+                            ctx.setdefault("equipment.name", getattr(eq2, "name", "") or "")
+                            _eq2_dept = getattr(eq2, "department", None)
+                            if _eq2_dept:
+                                ctx.setdefault("equipment.department", _eq2_dept.name or "")
 
         elif source_type == "equipment":
             from models import Equipment, OrgDepartment, CategoryMaster
@@ -225,7 +287,7 @@ def _enrich_context_from_source(
     # ── Fallback: always ensure equipment.department has a value ─────────────
     # Must be outside the try/except so it runs even when an earlier step threw.
     # Uses the TR's own department if the equipment's department wasn't resolved.
-    if source_type == "testing_request":
+    if source_type in ("testing_request", "test_result"):
         ctx.setdefault("equipment.department", ctx.get("dept.name", "") or "")
 
 
