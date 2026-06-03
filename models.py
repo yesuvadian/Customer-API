@@ -1209,6 +1209,14 @@ class Equipment(Base):
     vector_group = Column(String(20), nullable=True) # e.g. "YNyn0d11", "Dyn11", "YNa0d11"
     impedance_pct = Column(Float, nullable=True)     # % impedance, e.g. 9.8, 13.5
 
+    # Pre-Commission QAP link (set at registration for Power Transformers)
+    precommission_request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.precommission_requests.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Audit
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -1222,6 +1230,7 @@ class Equipment(Base):
     organization = relationship("Organization", foreign_keys=[organization_id])
     department = relationship("OrgDepartment", back_populates="equipment", foreign_keys=[department_id])
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    precommission_request = relationship("PreCommissionRequest", foreign_keys=[precommission_request_id])
     # replaces_equipment: the OLD unit this one replaced (new → old)
     replaces_equipment = relationship(
         "Equipment", remote_side=[id], foreign_keys=[replaces_equipment_id],

@@ -37,7 +37,10 @@
         ↓
                                   (Repeat for all 9 QAP stages)
         ↓
+[cee.zone@utility.com]            Downloads QAP Report (PDF/HTML) on workflow completion
+        ↓
 [originator@utility.com]          Registers equipment → Links PCR on registration
+                                  equipment.precommission_request_id → FK stored on both sides
 ```
 
 ---
@@ -392,6 +395,65 @@ GET /precommission/requests/{pcr_id}
 
 GET /precommission/requests/unlinked
 → PCR-YYYYMMDD-0001 no longer appears in this list
+
+GET /equipment/{equipment_id}
+→ precommission_request_id: "<pcr-uuid>"   (FK stored on equipment record)
+→ precommission_request: { request_number: "PCR-...", vendor_name: "BHEL Bhopal", ... }
+```
+
+---
+
+### STEP 12 — Download QAP Report (PDF / HTML)
+
+**User:** `cee.zone@utility.com` / `admin123`  
+**Role:** Senior Management Approver  
+**Nav:** Pre-Commission Workflows → completed workflow card
+
+#### What to do
+1. Login as `cee.zone@utility.com`
+2. Navigate to **Pre-Commission Workflows**
+3. Find the `PCR-YYYYMMDD-0001` workflow card with status **COMPLETED**
+4. Tap the card → `WorkflowDetailSheet` opens
+5. In the header row, two icon buttons appear (only for completed workflows):
+   - 🌐 **HTML Report** button (teal)
+   - 📄 **PDF Report** button (red)
+6. Click **PDF Report** → browser downloads `QAP_PCR-YYYYMMDD-0001.pdf`
+7. Click **HTML Report** → in-app web view opens the QAP report
+
+#### Expected PDF Content
+The PDF replicates the KPTCL QAP table format (A3 landscape):
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Manufacturing Quality Plan for Power Transformers                        │
+├────────────────────────┬───────────────────────────┬─────────────────────┤
+│ A. Manufacturer:       │ B. Third Party (BPTIO):   │ As proposed by the  │
+│    M/s BHEL Bhopal     │    M/s BVQI India Pvt.Ltd │    Committee        │
+├──────────┬─────────────┴──┬────────────┬────────────┬──────┬─────────────┤
+│ PCR No.  │ 110kV          │ 31.5 MVA   │ Two-winding│ ONAN │ YNyn0       │
+├──────────┴────────────────┴────────────┴────────────┴──────┴─────────────┤
+│ Stage: RAW MATERIAL INSPECTION | Date: 15-07-2024 | ✓ Approved by EE TLSS│
+├──┬──────────────────────┬──────┬────────┬───────────┬───────┬─┬─┬─┬──────┤
+│# │ Components           │ Type │Quantum │Acceptance │Observed│M│B│A│Result│
+├──┼──────────────────────┼──────┼────────┼───────────┼───────┼─┼─┼─┼──────┤
+│1 │CRGO Grade Verification│Review│100%   │As per IS..│M3,0.27│✓│✓│✓│ PASS │
+│2 │Thickness of lamination│Dim.  │Sample │As per dwg │0.27mm  │✓│ │✓│ PASS │
+└──┴──────────────────────┴──────┴────────┴───────────┴───────┴─┴─┴─┴──────┘
+```
+
+- Pass rows highlighted **green**, Fail rows highlighted **red**
+- Stage headers in **blue** with approval stamp
+- Pending stages shown as *"Stage not yet inspected"*
+
+#### Verify (API)
+```
+GET /repair-workflows/{workflow_id}/report/pdf
+→ HTTP 200, Content-Type: application/pdf
+→ Content-Disposition: attachment; filename="QAP_PCR-YYYYMMDD-0001.pdf"
+
+GET /repair-workflows/{workflow_id}/report/html
+→ HTTP 200, Content-Type: text/html
+→ Full QAP table rendered as HTML
 ```
 
 ---
@@ -446,6 +508,7 @@ GET /precommission/requests/unlinked
 | Approve / Reject stage | ❌ | ✅ | ✅ | ❌ | ❌ |
 | Register equipment | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Link PCR on registration | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Download QAP PDF/HTML | ❌ | ✅ | ✅ | ❌ | ✅ |
 
 ---
 
@@ -469,6 +532,8 @@ GET /precommission/requests/unlinked
 | GET | `/category_details/details/by-master/PCR%20Voltage%20Class` | All | Voltage class dropdown options |
 | GET | `/category_details/details/by-master/PCR%20Transformer%20Type` | All | Transformer type options |
 | GET | `/category_details/details/by-master/PCR%20Cooling%20Class` | All | Cooling class options |
+| GET | `/repair-workflows/{id}/report/pdf` | All (completed) | Download QAP PDF report |
+| GET | `/repair-workflows/{id}/report/html` | All (completed) | View QAP HTML report |
 
 ---
 

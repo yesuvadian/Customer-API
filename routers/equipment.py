@@ -392,6 +392,9 @@ def create_equipment(
             PreCommissionService(db).link_equipment(
                 data.precommission_request_id, equipment.id, current_user
             )
+            # Also stamp the FK on the equipment record itself for direct lookup
+            equipment.precommission_request_id = data.precommission_request_id
+            db.flush()
         except Exception as _pcr_exc:
             print(f"[WARN] PCR link failed (non-fatal): {_pcr_exc}")
 
