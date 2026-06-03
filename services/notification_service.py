@@ -1606,11 +1606,15 @@ def _execute_followup_action(
         "summary":            "Follow-up after CRITICAL alert"
     }
     """
+    logger.info(f"[FollowupAction] action={action} source_type={source_type!r} source_id={source_id}")
+
     if not action.get("create_request"):
+        logger.info("[FollowupAction] Skipping — create_request is not true")
         return
 
     next_action_str = (action.get("next_action") or "").lower()
     if not next_action_str:
+        logger.info("[FollowupAction] Skipping — next_action is empty")
         return
 
     # ── Resolve the TestingRequest from the source ────────────────────────────
@@ -1622,6 +1626,7 @@ def _execute_followup_action(
 
     if source_type == "test_result" and source_id:
         result_row = db.query(TestResult).filter(TestResult.id == source_id).first()
+        logger.info(f"[FollowupAction] result_row={result_row} testing_request_id={getattr(result_row, 'testing_request_id', None)}")
         if result_row and result_row.testing_request_id:
             tr = db.query(TestingRequest).filter(
                 TestingRequest.id == result_row.testing_request_id
@@ -1635,6 +1640,8 @@ def _execute_followup_action(
             f"source_type={source_type!r} source_id={source_id}"
         )
         return
+
+    logger.info(f"[FollowupAction] TR={tr.request_number} equipment_id={tr.equipment_id} title={tr.title!r}")
 
     # ── Guard: skip if open follow-up already exists for this equipment ───────
     followup_category = next_action_str
@@ -1671,12 +1678,15 @@ def _execute_followup_action(
     except ValueError:
         _freq = ScheduleFrequency.yearly
 
+    _test_types = action.get("test_types") or []
+    logger.info(f"[FollowupAction] next_action={next_action_str!r} freq={_freq_str!r} test_types={_test_types} tr.test_type_id={tr.test_type_id}")
+
     mock_rec = Recommendation(
         testing_request_id  = tr.id,
         organization_id     = organization_id or tr.organization_id,
         next_action         = _next_action,
         schedule_frequency  = _freq,
-        test_types          = action.get("test_types") or [],
+        test_types          = _test_types,
         summary             = action.get("summary") or f"Auto follow-up: {next_action_str}",
         recommendation_type = "fail",
         submitted_by        = tr.created_by,
@@ -1694,6 +1704,7 @@ def _execute_followup_action(
         "inspection":  _RC.inspection,
     }
     _category = _rc_map.get(next_action_str)
+    logger.info(f"[FollowupAction] _category={_category}")
 
     svc = WorkflowDispatchService(db)
 
@@ -1710,19 +1721,19 @@ def _execute_followup_action(
                 f"schedule(s) for TR={tr.request_number}: {schedule_ids}"
             )
             # Force-create the first ticket immediately for each new schedule.
-            # The normal approval flow defers the first ticket to the advance window;
-            # threshold alert follow-ups need the ticket created right away.
             from services.test_request_schedule_service import TestRequestScheduleService
             from models import TestRequestSchedule as _TRS
             now = datetime.now(timezone.utc)
             for sid in schedule_ids:
                 if not sid:
+                    logger.warning(f"[FollowupAction] Schedule ID is empty — skipping ticket creation (check equipment_id and test_type_id on TR={tr.request_number})")
                     continue
                 sched = db.query(_TRS).filter(_TRS.id == sid).first()
                 if sched:
-                    TestRequestScheduleService.create_one_ticket(
+                    ticket_created = TestRequestScheduleService.create_one_ticket(
                         db=db, schedule=sched, now=now, force_run=True
                     )
+                    logger.info(f"[FollowupAction] create_one_ticket for schedule {sid}: created={ticket_created}")
         elif next_action_str == "repair_cycle":
             wf_id = svc._start_repair_workflow(tr, approver_id=tr.created_by)
             db.commit()
@@ -1736,8 +1747,9 @@ def _execute_followup_action(
                 f"for TR={tr.request_number}"
             )
     except Exception as _exc:
+        import traceback as _tb
         db.rollback()
-        logger.warning(f"[FollowupAction] Dispatch failed: {_exc}")
+        logger.warning(f"[FollowupAction] Dispatch failed: {_exc}\n{_tb.format_exc()}")
 
 
 # ── Core dispatch ─────────────────────────────────────────────────────────────
