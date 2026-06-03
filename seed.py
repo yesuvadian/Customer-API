@@ -6486,7 +6486,8 @@ FROM   public.equipment e
 LEFT JOIN public.org_departments  d   ON d.id  = e.department_id
 LEFT JOIN public."CategoryMaster" cm  ON cm.id = e.equipment_type_id
 LEFT JOIN public.testing_requests tr  ON tr.equipment_id = e.id
-LEFT JOIN public.failure_registry fr  ON fr.equipment_id = e.id
+LEFT JOIN public.testing_requests fr  ON fr.equipment_id = e.id
+                                     AND fr.request_category = 'failure_registry'
 LEFT JOIN public.test_results     res ON res.testing_request_id = tr.id
 WHERE  1=1
   {org_clause}
@@ -6559,10 +6560,10 @@ SELECT
     COUNT(DISTINCT e.id)        AS unit_count,
     ROUND(COUNT(fr.id)::numeric / NULLIF(COUNT(DISTINCT e.id), 0), 2)
                                 AS failure_rate_per_unit
-FROM   public.failure_registry fr
+FROM   public.testing_requests fr
 JOIN   public.equipment        e   ON e.id   = fr.equipment_id
 LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
-WHERE  1=1
+WHERE  fr.request_category = 'failure_registry'
   {org_clause}
   AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
   AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
@@ -6587,24 +6588,25 @@ ORDER  BY failure_rate_per_unit DESC NULLS LAST
             org_alias="fr",
             sql_template="""
 SELECT
-    fr.fr_number,
+    fr.request_number           AS fr_number,
     e.ueic                      AS equipment_ueic,
     cm.name                     AS equipment_type,
-    fr.failure_category,
-    fr.next_action              AS resolution_outcome,
-    fr.approval_status,
+    fr.form_data->>'failure_category' AS failure_category,
+    fr.form_data->>'next_action'      AS resolution_outcome,
+    fr.status                   AS approval_status,
     fr.cts::date                AS failure_date,
     wf.status                   AS linked_workflow_status,
     wf.id                       AS linked_workflow_id
-FROM   public.failure_registry fr
+FROM   public.testing_requests fr
 JOIN   public.equipment        e   ON e.id   = fr.equipment_id
 LEFT JOIN public."CategoryMaster"   cm ON cm.id = e.equipment_type_id
-LEFT JOIN public.workflow_sessions  wf ON wf.source_fr_id = fr.id
-WHERE  1=1
+LEFT JOIN public.repair_workflows   wf ON wf.source_failure_id = fr.id
+WHERE  fr.request_category = 'failure_registry'
   {org_clause}
   AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
   AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
-  AND  (:outcome IS NULL OR :outcome = 'all' OR fr.next_action = :outcome)
+  AND  (:outcome IS NULL OR :outcome = 'all'
+        OR fr.form_data->>'next_action' = :outcome)
 ORDER  BY fr.cts DESC
 """),
 
@@ -6710,14 +6712,14 @@ SELECT
     post.evaluation_result->>'overall'  AS post_repair_result,
     pre.tested_at                       AS pre_repair_tested_at,
     post.tested_at                      AS post_repair_tested_at
-FROM   public.workflow_sessions wf
+FROM   public.repair_workflows wf
 JOIN   public.equipment          e  ON e.id  = wf.equipment_id
-LEFT JOIN public.org_departments d  ON d.id  = wf.department_id
+LEFT JOIN public.org_departments d  ON d.id  = e.department_id
 LEFT JOIN LATERAL (
     SELECT res.evaluation_result, res.tested_at
     FROM   public.test_results res
     JOIN   public.testing_requests req ON req.id = res.testing_request_id
-    WHERE  req.equipment_id = e.id AND res.tested_at < wf.cts
+    WHERE  req.equipment_id = e.id AND res.tested_at < wf.created_at
     ORDER  BY res.tested_at DESC LIMIT 1
 ) pre  ON true
 LEFT JOIN LATERAL (
@@ -6725,7 +6727,7 @@ LEFT JOIN LATERAL (
     FROM   public.test_results res
     JOIN   public.testing_requests req ON req.id = res.testing_request_id
     WHERE  req.equipment_id = e.id
-      AND  req.category     = 'surveillance'
+      AND  req.surveillance_workflow_id IS NOT NULL
       AND  res.tested_at    > wf.completed_at
     ORDER  BY res.tested_at ASC LIMIT 1
 ) post ON true
