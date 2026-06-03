@@ -95,6 +95,7 @@ from routers import (
 )
 from routers import cumulative  # Cumulative / Overhaul lifecycle module
 from routers import calibration as calibration_router  # Calibration lifecycle module
+from routers import precommission as precommission_router  # Pre-Commission QAP module
 
 # Organization Multi-Tenancy
 from routers import organizations, org_departments, org_users, org_roles
@@ -1007,6 +1008,7 @@ app.include_router(annual_audits.router)       # Annual Audit observations
 app.include_router(test_register.router)       # NEW: Test Register catalogue
 app.include_router(cumulative.router)          # Cumulative / Overhaul lifecycle
 app.include_router(calibration_router.router)  # Calibration lifecycle
+app.include_router(precommission_router.router)  # Pre-Commission QAP
 
 # Equipment Asset Register
 app.include_router(equipment.router)
@@ -1060,6 +1062,16 @@ async def startup_event():
     import overhaul_hooks  # noqa: F401
     import surveillance_hooks  # noqa: F401
     logger.info("[Hooks] Workflow lifecycle hooks registered")
+
+    # Seed pre-commission QAP workflow stages (idempotent)
+    try:
+        _db = SessionLocal()
+        from seed_precommission_workflow import seed_precommission_stages
+        seed_precommission_stages(_db)
+        _db.close()
+        logger.info("[Seed] Pre-commission QAP workflow stages seeded")
+    except Exception as _e:
+        logger.warning(f"[Seed] Pre-commission seed failed on startup (non-fatal): {_e}")
 
     # Seed all notification defaults (event catalogue, variables, templates,
     # schedule rules, routing rules) — idempotent, safe to run on every restart

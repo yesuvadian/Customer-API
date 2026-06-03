@@ -4371,6 +4371,180 @@ TEST_TEMPLATES = {
         ],
     },
 
+    # ────────────────────────────────────────────────────────────
+    # Dielectric Frequency Response (DFR / IDAX) — Power Transformer
+    # Multi-session: FACTORY → SITE_RECEIPT → ON_BED → PRE_COMMISSIONING → MAINTENANCE
+    # enable_cross_session=True: each non-FACTORY session is compared vs FACTORY baseline
+    # ────────────────────────────────────────────────────────────
+    "dfr_idax_transformer": {
+        "key": "dfr_idax_transformer",
+        "name": "Dielectric Frequency Response (DFR / IDAX)",
+        "equipment_type": "Power Transformer",
+        "description": "DFR / IDAX insulation diagnostics test for transformer moisture and insulation assessment",
+        "supports_multi_session": True,
+        "multi_session": True,
+        "enable_cross_session": True,
+        "typical_session_interval_days": None,
+        # total sessions derived from len(session_types) automatically
+        "session_types": [
+            "FACTORY",
+            "SITE_RECEIPT",
+            "ON_BED",
+            "PRE_COMMISSIONING",
+            "MAINTENANCE",
+        ],
+        "sections": [
+            {
+                "title": "Transformer Configuration",
+                "fields": [
+                    {"key": "transformer_type",       "label": "Transformer Type",     "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
+                    {"key": "transformer_rating_mva", "label": "Transformer Rating",   "type": "number",   "unit": "MVA", "required": True},
+                    {"key": "hv_voltage_kv",          "label": "HV Voltage",           "type": "number",   "unit": "kV",  "required": True},
+                    {"key": "lv_voltage_kv",          "label": "LV Voltage",           "type": "number",   "unit": "kV",  "required": True},
+                    {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",     "type": "number",   "unit": "kV"},
+                    {"key": "manufacturer",           "label": "Manufacturer",         "type": "text"},
+                    {"key": "serial_number",          "label": "Serial Number",        "type": "text"},
+                ],
+            },
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",        "label": "Testing Kit Used",    "type": "text",   "required": True},
+                    {"key": "test_voltage_v",  "label": "Test Voltage",        "type": "number", "unit": "V",  "required": True},
+                    {"key": "ambient_temp_c",  "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",      "label": "Oil Temperature",     "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "DFR Measurement Data",
+                "fields": [
+                    {
+                        "key": "dfr_measurements",
+                        "label": "DFR Measurements",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "frequency_hz",      "label": "Frequency (Hz)",  "type": "number"},
+                            {"key": "capacitance_pf",    "label": "Capacitance (pF)","type": "number"},
+                            {"key": "tan_delta_percent", "label": "Tan Delta (%)",   "type": "number"},
+                        ],
+                        # Cross-session: average tan_delta compared vs FACTORY baseline
+                        "cross_session_evaluation": {
+                            "enabled": True,
+                            "baseline": {
+                                "strategy": "named_session",
+                                "session_name": "FACTORY",
+                            },
+                            "column_comparisons": {
+                                "tan_delta_percent": {
+                                    "aggregate_type": "avg",
+                                    "deviation_type": "absolute",
+                                    "normal_max": 0.3,
+                                    "alert_max": None,
+                                    "alert_min": None,
+                                    "critical_above": 1.5,
+                                    "critical_below": None,
+                                },
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "IDAX Analysis Results",
+                "fields": [
+                    {
+                        "key": "analysis_results",
+                        "label": "Analysis Results",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "columns": [
+                            {"key": "test_configuration",      "label": "Test Configuration",      "type": "readonly"},
+                            {"key": "moisture_percent",        "label": "Moisture in Paper (%)",   "type": "number"},
+                            {"key": "oil_conductivity_psm",   "label": "Oil Conductivity (pS/m)", "type": "number"},
+                            {"key": "moisture_in_oil_percent", "label": "Moisture in Oil (%)",    "type": "number"},
+                            {
+                                "key": "assessment",
+                                "label": "Assessment",
+                                "type": "dropdown",
+                                "options": ["Very Dry", "Good", "Acceptable", "Wet", "Critical"],
+                            },
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "TV-HV"},
+                        ],
+                        # Cross-session: row-by-row vs FACTORY, matched by test_configuration
+                        "cross_session_evaluation": {
+                            "enabled": True,
+                            "baseline": {
+                                "strategy": "named_session",
+                                "session_name": "FACTORY",
+                            },
+                            "match_by_column": "test_configuration",
+                            "column_comparisons": {
+                                "moisture_percent": {
+                                    "aggregate_type": None,
+                                    "deviation_type": "absolute",
+                                    "normal_max": 0.3,
+                                    "alert_max": None,
+                                    "alert_min": None,
+                                    "critical_above": 1.0,
+                                    "critical_below": None,
+                                },
+                                "oil_conductivity_psm": {
+                                    "aggregate_type": None,
+                                    "deviation_type": "relative_percent",
+                                    "normal_max": 20.0,
+                                    "alert_max": None,
+                                    "alert_min": None,
+                                    "critical_above": 50.0,
+                                    "critical_below": None,
+                                },
+                                "moisture_in_oil_percent": {
+                                    "aggregate_type": None,
+                                    "deviation_type": "absolute",
+                                    "normal_max": 5.0,
+                                    "alert_max": None,
+                                    "alert_min": None,
+                                    "critical_above": 15.0,
+                                    "critical_below": None,
+                                },
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result",
+                        "label": "Overall Result",
+                        "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"],
+                        "dropdown_evaluation": {
+                            "enabled": True,
+                            "value_severities": {
+                                "PASS":  "NORMAL",
+                                "ALERT": "ALERT",
+                                "FAIL":  "CRITICAL",
+                            },
+                        },
+                    },
+                    {"key": "observation",    "label": "Observation",   "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
 }
 
 
@@ -4422,6 +4596,10 @@ TEST_TYPE_TO_TEMPLATE = {
     "Tan Delta NCT Test": "tandelta_nct",
     # CVT
     "CVT Test Report": "cvt_test",
+
+    # ── DFR / IDAX (multi-session, cross-session comparison) ──
+    "Dielectric Frequency Response (DFR / IDAX)": "dfr_idax_transformer",
+    "DFR / IDAX":                                 "dfr_idax_transformer",
 
     # ── Oil test ──
     "Transformer Oil Test":             "transformer_oil_test",

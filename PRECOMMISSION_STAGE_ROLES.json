@@ -1,0 +1,56 @@
+[
+  {
+    "stage_code": "QAP_RAW_MATERIAL",
+    "roles":           ["Reviewing Officer", "Senior Management Approver"],
+    "assign_also":     ["Reviewing Officer"],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "QAP_CORE_ASSEMBLY",
+    "roles":           ["Reviewing Officer", "Senior Management Approver"],
+    "assign_also":     ["Reviewing Officer"],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "QAP_WINDING",
+    "roles":           ["Reviewing Officer", "Senior Management Approver"],
+    "assign_also":     ["Reviewing Officer"],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "QAP_ACTIVE_PART",
+    "roles":           ["Reviewing Officer", "Senior Management Approver"],
+    "assign_also":     ["Reviewing Officer"],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "QAP_TANK_FITTINGS",
+    "roles":           ["Reviewing Officer", "Senior Management Approver"],
+    "assign_also":     ["Reviewing Officer"],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "QAP_ACTIVE_IN_TANK",
+    "roles":           ["Reviewing Officer", "Senior Management Approver"],
+    "assign_also":     ["Reviewing Officer"],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "QAP_ROUTINE_TESTS",
+    "roles":           ["Reviewing Officer", "Senior Management Approver"],
+    "assign_also":     ["Reviewing Officer"],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "QAP_SPECIAL_TESTS",
+    "roles":           ["Reviewing Officer", "Senior Management Approver"],
+    "assign_also":     ["Reviewing Officer"],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "QAP_FINAL_DISPATCH",
+    "roles":           ["Reviewing Officer", "Senior Management Approver"],
+    "assign_also":     ["Reviewing Officer"],
+    "assignment_role": "Transformer Repair Coordinator"
+  }
+]

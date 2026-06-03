@@ -1094,6 +1094,7 @@ class TestingRequestResponse(BaseModel):
     total_sessions_planned: Optional[int] = None
     session_interval_days: Optional[int] = None
     session_count: int = 0  # Computed field
+    session_types: Optional[list] = None  # From template e.g. ["FACTORY","SITE_RECEIPT","ON_BED"]
 
     # Lifecycle flags — stamped at creation from template flags
     is_cumulative: Optional[bool] = False
@@ -2284,6 +2285,7 @@ class EquipmentCreate(BaseModel):
     pt_ratio: Optional[str] = None
     vector_group: Optional[str] = None
     impedance_pct: Optional[float] = None
+    precommission_request_id: Optional[UUID] = None   # optional PCR link on registration
 
 
 class EquipmentUpdate(BaseModel):

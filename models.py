@@ -911,6 +911,60 @@ class TAQCObservation(Base):
     reviewer = relationship("User", foreign_keys=[reviewer_id])
 
 
+class PreCommissionRequest(Base):
+    __tablename__ = "precommission_requests"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    request_number = Column(String(50), unique=True, nullable=False, index=True)
+
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=True)
+
+    # Purchase / vendor details
+    vendor_name = Column(String(255), nullable=False)
+    purchase_order_number = Column(String(100), nullable=False)
+    po_date = Column(Date, nullable=True)
+    rated_mva = Column(Numeric(10, 3), nullable=True)
+    voltage_class = Column(String(20), nullable=True)
+    quantity = Column(Integer, default=1, nullable=False)
+    transformer_type = Column(String(50), nullable=True)   # Two-winding / Three-winding / Auto Transformer
+    cooling_class    = Column(String(20), nullable=True)   # ONAN / ONAF / OFAF / ODAF
+    vector_group     = Column(String(30), nullable=True)   # e.g. YNyn0d11
+    factory_location = Column(String(255), nullable=True)
+    proposed_inspection_date = Column(Date, nullable=True)
+    remarks = Column(Text, nullable=True)
+
+    # Approval
+    approval_status = Column(String(20), nullable=False, default="pending")  # pending | approved | rejected
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approval_notes = Column(Text, nullable=True)
+    rejected_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    rejected_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Links set after events
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True, index=True)
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Audit
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    workflow = relationship("RepairWorkflow", foreign_keys=[workflow_id])
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
+    approver = relationship("User", foreign_keys=[approved_by])
+    rejecter = relationship("User", foreign_keys=[rejected_by])
+    creator = relationship("User", foreign_keys=[created_by])
+    modifier = relationship("User", foreign_keys=[modified_by])
+
+
 class RequestCategory(PyEnum):
     test = "test"
     maintenance = "maintenance"

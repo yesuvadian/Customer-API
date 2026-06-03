@@ -385,6 +385,16 @@ def create_equipment(
     db.commit()
     db.refresh(equipment)
 
+    # ── Optional: link to pre-commission request ─────────────────────────────
+    if data.precommission_request_id:
+        try:
+            from services.precommission_service import PreCommissionService
+            PreCommissionService(db).link_equipment(
+                data.precommission_request_id, equipment.id, current_user
+            )
+        except Exception as _pcr_exc:
+            print(f"[WARN] PCR link failed (non-fatal): {_pcr_exc}")
+
     try:
         from services.test_request_schedule_service import TestRequestScheduleService
         TestRequestScheduleService.instantiate_equipment_schedules(db, equipment, current_user.id)

@@ -1228,8 +1228,11 @@ def seed_category_master(session):
         {"name": "Bank Account Types", "description": "Dropdown values for company bank account types (e.g., savings, current, salary)."},
         {"name": "Bank Document Types", "description": "Dropdown values for required company bank documents (e.g., cancelled cheque, bank statement)."},
         {"name": "GST Slabs", "description": "GST percentage slabs applicable to goods and services in India."},
-        {"name": "Utility", "description": "Type of utility - Generation, Transmission, DISCOM."},
-        
+        {"name": "Utility",              "description": "Type of utility - Generation, Transmission, DISCOM."},
+        # ── Pre-Commission QAP lookup dropdowns ─────────────────────────────────
+        {"name": "PCR Voltage Class",    "description": "Voltage class options for pre-commission QAP transformer requests."},
+        {"name": "PCR Transformer Type", "description": "Winding configuration options for pre-commission QAP requests."},
+        {"name": "PCR Cooling Class",    "description": "Cooling method options for pre-commission QAP transformer requests."},
     ]
 
     master_ids = {}
@@ -1358,6 +1361,24 @@ def seed_category_details(session, master_ids):
         {"master_name": "Utility", "name": "Generation", "description": "Power generation utility"},
         {"master_name": "Utility", "name": "Transmission", "description": "Power transmission utility"},
         {"master_name": "Utility", "name": "DISCOM", "description": "Distribution company utility"},
+
+        # ---------------- PCR Voltage Class ----------------
+        {"master_name": "PCR Voltage Class", "name": "33kV",  "description": "33 kV voltage class transformer"},
+        {"master_name": "PCR Voltage Class", "name": "66kV",  "description": "66 kV voltage class transformer"},
+        {"master_name": "PCR Voltage Class", "name": "110kV", "description": "110 kV voltage class transformer"},
+        {"master_name": "PCR Voltage Class", "name": "220kV", "description": "220 kV voltage class transformer"},
+        {"master_name": "PCR Voltage Class", "name": "400kV", "description": "400 kV voltage class transformer"},
+
+        # ---------------- PCR Transformer Type ----------------
+        {"master_name": "PCR Transformer Type", "name": "Two-winding",      "description": "Standard two-winding power transformer"},
+        {"master_name": "PCR Transformer Type", "name": "Three-winding",    "description": "Three-winding power transformer"},
+        {"master_name": "PCR Transformer Type", "name": "Auto Transformer", "description": "Auto transformer"},
+
+        # ---------------- PCR Cooling Class ----------------
+        {"master_name": "PCR Cooling Class", "name": "ONAN", "description": "Oil Natural Air Natural"},
+        {"master_name": "PCR Cooling Class", "name": "ONAF", "description": "Oil Natural Air Forced"},
+        {"master_name": "PCR Cooling Class", "name": "OFAF", "description": "Oil Forced Air Forced"},
+        {"master_name": "PCR Cooling Class", "name": "ODAF", "description": "Oil Directed Air Forced"},
     ]
 
     for d in category_details_data:
@@ -1544,6 +1565,15 @@ def seed_modules(session):
  "description": "24-month post-commissioning surveillance with quarterly testing (Q1-Q4) and final evaluation. "
                 "Tracks DGA, BDV, IR, Oil Quality tests at enhanced frequency with quality ratings.",
  "path": "surveillance-workflows",
+ "group_name": "Field Operations"},
+# ✅ PRE-COMMISSION QAP MODULE
+{"name": "Pre-Commission Requests",
+ "description": "PCR approval queue — raise and approve pre-commission QAP requests before factory inspection begins.",
+ "path": "precommission-requests",
+ "group_name": "Field Operations"},
+{"name": "Pre-Commission Workflows",
+ "description": "9-stage Manufacturing QAP workflow for 110kV/66kV Power Transformers per KPTCL QAP circular.",
+ "path": "precommission-workflows",
  "group_name": "Field Operations"},
 # ✅ SURVEILLANCE DASHBOARD MODULE
 {"name": "Surveillance Dashboard",
@@ -2044,6 +2074,23 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Senior Management Approver",  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "TRC Member",                  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
+
+        # ✅ PRE-COMMISSION QAP — Request tickets (approval queue)
+        # Asset Data Officer creates PCR tickets; approvers approve/reject.
+        {"role": "Asset Data Officer",         "module": "Pre-Commission Requests", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer",          "module": "Pre-Commission Requests", "can_view": True, "can_add": True, "can_approve": True, "can_search": True},
+        {"role": "Supervisory Officer",        "module": "Pre-Commission Requests", "can_view": True, "can_approve": True, "can_search": True},
+        {"role": "Senior Management Approver", "module": "Pre-Commission Requests", "can_view": True, "can_approve": True, "can_search": True},
+        {"role": "Transformer Repair Coordinator", "module": "Pre-Commission Requests", "can_view": True, "can_search": True},
+
+        # ✅ PRE-COMMISSION QAP — 9-stage workflow execution
+        # Reviewing Officer is the primary stage actor (fills QAP forms, advances stages).
+        # Coordinator handles stage assignment. Senior Management Approver escalation.
+        {"role": "Reviewing Officer",          "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Supervisory Officer",        "module": "Pre-Commission Workflows", "can_view": True, "can_export": True},
+        {"role": "Asset Data Officer",         "module": "Pre-Commission Workflows", "can_view": True},
+        {"role": "Transformer Repair Coordinator", "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_assign": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -2464,6 +2511,7 @@ def seed_test_type_categories(session, master_ids):
                 "Capacitance & Tan Delta Test (Transformer)",
                 "Capacitance & Tan Delta Comparison",
                 "Transformer Oil Test",
+                "Dielectric Frequency Response (DFR / IDAX)",
             ],
             "maintenance": [
                 "Routine Preventive Maintenance",
@@ -3293,8 +3341,10 @@ def seed_role_templates(session):
     overhaul_workflows_module       = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
     calibration_workflows_module    = [mid for mid in [modules_by_name.get("Calibration Workflows")] if mid]
     annual_audit_workflows_module   = [mid for mid in [modules_by_name.get("Annual Audit Workflows")] if mid]
-    surveillance_workflows_module   = [mid for mid in [modules_by_name.get("Surveillance Workflows")] if mid]
-    surveillance_dashboard_module   = [mid for mid in [modules_by_name.get("Surveillance Dashboard")] if mid]
+    surveillance_workflows_module        = [mid for mid in [modules_by_name.get("Surveillance Workflows")] if mid]
+    surveillance_dashboard_module        = [mid for mid in [modules_by_name.get("Surveillance Dashboard")] if mid]
+    precommission_requests_module        = [mid for mid in [modules_by_name.get("Pre-Commission Requests")] if mid]
+    precommission_workflows_module       = [mid for mid in [modules_by_name.get("Pre-Commission Workflows")] if mid]
     schedule_compliance_module          = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
     test_schedule_templates_module      = [mid for mid in [modules_by_name.get("Test Schedule Templates")] if mid]
     maintenance_schedule_templates_module = [mid for mid in [modules_by_name.get("Maintenance Schedule Templates")] if mid]
@@ -3391,7 +3441,9 @@ def seed_role_templates(session):
                 _readwrite(testing_requests_module) +
                 _readwrite(equipment_module) +
                 _readwrite(breakdown_workflows_module) +
-                _readwrite(taqc_inspections_module)      # can create TA&QC inspection requests
+                _readwrite(taqc_inspections_module) +    # can create TA&QC inspection requests
+                _readwrite(precommission_requests_module) +   # can create PCR tickets
+                _readonly(precommission_workflows_module)     # view QAP workflow progress
             ),
         },
 
@@ -3479,7 +3531,9 @@ def seed_role_templates(session):
                 _approve(breakdown_workflows_module) +
                 _approve(overhaul_workflows_module) +        # OVERHAUL_TRIGGER review + OFFICER_VERIFICATION
                 _approve(calibration_workflows_module) +     # CAL_REVIEW + CAL_VERIFY
-                _approve(annual_audit_workflows_module) +    # COMPLIANCE_REVIEW
+                _approve(annual_audit_workflows_module) +        # COMPLIANCE_REVIEW
+                _approve(precommission_requests_module) +        # approve/reject PCR tickets
+                _approve(precommission_workflows_module) +       # QAP stage execution (primary actor)
                 _readonly(failure_registry_module)
             ),
         },
@@ -3504,9 +3558,11 @@ def seed_role_templates(session):
                 _readonly(equipment_module) +
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
-                _readonly(overhaul_workflows_module) +       # management visibility
-                _readonly(calibration_workflows_module) +    # management visibility
-                _readonly(annual_audit_workflows_module)     # management visibility
+                _readonly(overhaul_workflows_module) +            # management visibility
+                _readonly(calibration_workflows_module) +         # management visibility
+                _readonly(annual_audit_workflows_module) +        # management visibility
+                _approve(precommission_requests_module) +         # can approve PCR tickets
+                _readonly(precommission_workflows_module)         # management visibility
             ),
         },
 
@@ -3532,7 +3588,9 @@ def seed_role_templates(session):
                 _approve(breakdown_workflows_module) +
                 _approve(overhaul_workflows_module) +        # OFFICER_VERIFICATION final sign-off
                 _approve(calibration_workflows_module) +     # CAL_VERIFY final sign-off
-                _approve(annual_audit_workflows_module)      # OBSERVATION_CLOSURE final sign-off
+                _approve(annual_audit_workflows_module) +        # OBSERVATION_CLOSURE final sign-off
+                _approve(precommission_requests_module) +        # final approval authority for PCR tickets
+                _approve(precommission_workflows_module)         # QAP_FINAL_DISPATCH escalation approver
             ),
         },
 
@@ -3567,7 +3625,9 @@ def seed_role_templates(session):
                 _readwrite(breakdown_workflows_module) +
                 _readwrite(overhaul_workflows_module) +      # assignment_role for all 4 overhaul stages
                 _readwrite(calibration_workflows_module) +   # assignment_role for all 4 calibration stages
-                _readwrite(annual_audit_workflows_module) +  # assignment_role for all 5 annual audit stages
+                _readwrite(annual_audit_workflows_module) +       # assignment_role for all 5 annual audit stages
+                _readwrite(precommission_workflows_module) +      # assignment_role for all 9 QAP stages
+                _readonly(precommission_requests_module) +        # view PCR tickets for context
                 _readonly(testing_requests_module)
             ),
         },
@@ -8294,6 +8354,68 @@ def seed_calibration_template(session) -> int:
     return count
 
 
+def seed_dfr_template(session) -> int:
+    """
+    Seed the Dielectric Frequency Response (DFR / IDAX) OrgTestTemplate.
+
+    Strategy — identical to seed_transformer_oil_template:
+    - Read template_data from TEST_TEMPLATES["dfr_idax_transformer"] (single source of truth).
+    - Look up CategoryMaster "Testing Equipment" (description="Testing Equipment").
+    - Create CategoryDetails "Dielectric Frequency Response (DFR / IDAX)" if absent.
+    - Upsert OrgTestTemplate (template_key="dfr_idax_transformer", org_id=NULL, is_system=True).
+    """
+    from models import CategoryMaster, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    DFR_KEY = "dfr_idax_transformer"
+    template_data = TEST_TEMPLATES[DFR_KEY]
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Testing Equipment",
+            description="Testing Equipment",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+
+    detail = _get_or_create_category_detail(
+        session,
+        name="Dielectric Frequency Response (DFR / IDAX)",
+        category_master_id=master.id,
+        description="DFR / IDAX insulation diagnostics — multi-session moisture and insulation assessment for Power Transformers",
+        category_type="test",
+        is_active=True,
+    )
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == DFR_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=DFR_KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] DFR / IDAX template seeded (master_id={master.id}, detail_id={detail.id}).")
+    return count
+
+
 def seed_transformer_oil_template(session) -> int:
     """
     Seed the Transformer Oil Test OrgTestTemplate.
@@ -9227,18 +9349,37 @@ def _seed_notification_event_catalogue(session) -> int:
             event_type="eval_critical",
             label="Threshold Critical",
             group_name="Threshold Alerts",
-            description="Fired when a test evaluation result is CRITICAL (per test template thresholds).",
-            context_vars=["equipment", "ueic", "test_type", "result", "dept",
-                          "eval.overall", "eval.evaluated_at", "report.retriepdf"],
+            description=(
+                "Fired when a test evaluation result is CRITICAL — either from "
+                "per-session threshold bands OR from cross-session deviation comparison "
+                "(e.g. moisture increase vs FACTORY baseline on a DFR multi-session test)."
+            ),
+            context_vars=[
+                "equipment", "ueic", "test_type", "result", "dept",
+                "eval.overall", "eval.evaluated_at", "report.retriepdf",
+                # Standard threshold context
+                "request.number", "tester_name", "result_summary", "revised_interval",
+                # {{alert.thresholdconfig}} renders per-session AND cross-session deviation
+                # tables automatically — use this in email body templates
+                "alert.thresholdconfig",
+            ],
             default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
         ),
         dict(
             event_type="eval_alert",
             label="Threshold Alert",
             group_name="Threshold Alerts",
-            description="Fired when a test evaluation result is ALERT (per test template thresholds).",
-            context_vars=["equipment", "ueic", "test_type", "result", "dept",
-                          "eval.overall", "eval.evaluated_at", "report.retriepdf"],
+            description=(
+                "Fired when a test evaluation result is ALERT — either from "
+                "per-session threshold bands OR from cross-session deviation comparison "
+                "(e.g. tan delta increase vs FACTORY baseline on a DFR multi-session test)."
+            ),
+            context_vars=[
+                "equipment", "ueic", "test_type", "result", "dept",
+                "eval.overall", "eval.evaluated_at", "report.retriepdf",
+                "request.number", "tester_name", "result_summary", "revised_interval",
+                "alert.thresholdconfig",
+            ],
             default_roles=["Reviewing Officer", "Maintenance Officer"],
         ),
         # ── Testing Requests ──────────────────────────────────────────────────
@@ -11511,6 +11652,8 @@ def run_seed():
         print(f"[OK] Cumulative / Operations Tracking template: {n4} seeded.")
         n5 = seed_calibration_template(session)
         print(f"[OK] Calibration template: {n5} seeded.")
+        n5b = seed_dfr_template(session)
+        print(f"[OK] DFR / IDAX template: {n5b} seeded.")
         n6 = seed_transformer_oil_template(session)
         print(f"[OK] Transformer Oil Test template: {n6} seeded.")
         n7 = seed_capacitance_tandelta_template(session)

@@ -1,0 +1,723 @@
+{
+  "pcr_raw_material": {
+    "name": "Raw Material Inspection",
+    "template_type": "precommission_stage",
+    "sections": [
+      {
+        "title": "Inspection Visit Details",
+        "fields": [
+          { "key": "inspection_date",       "label": "Date of Inspection",            "type": "date",     "required": false },
+          { "key": "kptcl_members",         "label": "KPTCL Committee Members",       "type": "textarea", "required": false },
+          { "key": "third_party_agency",    "label": "Third Party Agency (B)",        "type": "text",     "required": false },
+          { "key": "manufacturer_rep",      "label": "Manufacturer Representative",   "type": "text",     "required": false },
+          { "key": "place_of_inspection",   "label": "Place of Inspection (Factory)", "type": "text",     "required": false }
+        ]
+      },
+      {
+        "title": "1.1 CRGO Core Laminations",
+        "fields": [
+          {
+            "key": "crgo_checks",
+            "label": "CRGO Core Lamination Checks",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Grade of CRGO steel",                              "type_of_check": "Review",      "quantum": "100%",   "acceptance": "As per IS 3024 / approved drawing" },
+              { "check_item": "Thickness of lamination",                          "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per approved drawing" },
+              { "check_item": "Width of lamination",                              "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per approved drawing" },
+              { "check_item": "Surface insulation resistance (SIR)",              "type_of_check": "Test",        "quantum": "Sample", "acceptance": "As per IS 3024" },
+              { "check_item": "Burr height",                                      "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "≤ 0.02 mm" },
+              { "check_item": "Mill test certificate / test reports verification","type_of_check": "Review",      "quantum": "100%",   "acceptance": "As per relevant IS / IEC standard" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "1.2 Conductors (Winding Wire / Strip)",
+        "fields": [
+          {
+            "key": "conductor_checks",
+            "label": "Conductor Checks",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Conductor material (copper / aluminium)",           "type_of_check": "Review",      "quantum": "100%",   "acceptance": "As per approved drawing / IS 1897" },
+              { "check_item": "Conductor dimensions (width & thickness)",          "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "Insulation type and thickness on conductor",        "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per approved drawing" },
+              { "check_item": "CTC (Continuously Transposed Conductor) dimensions","type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per approved drawing" },
+              { "check_item": "Conductor resistivity / conductivity",              "type_of_check": "Test",        "quantum": "Sample", "acceptance": "As per IS 1897" },
+              { "check_item": "Test certificate verification",                     "type_of_check": "Review",      "quantum": "100%",   "acceptance": "As per relevant IS / IEC standard" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "1.3 Insulating Materials (Pressboard / Kraft Paper)",
+        "fields": [
+          {
+            "key": "insulation_checks",
+            "label": "Insulating Material Checks",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Pressboard / Laminated densified wood — dimensions",  "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per IS 1576 / approved drawing" },
+              { "check_item": "Kraft paper — thickness and width",                   "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per IS 1576" },
+              { "check_item": "Pre-compressed pressboard — visual check",           "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "No cracks, delamination" },
+              { "check_item": "Insulating cylinder material — dimensions",           "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per approved drawing" },
+              { "check_item": "Test certificate / manufacturer's certificate",       "type_of_check": "Review",      "quantum": "100%",   "acceptance": "As per relevant IS / IEC standard" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "1.4 Transformer Oil",
+        "fields": [
+          {
+            "key": "oil_checks",
+            "label": "Transformer Oil Checks",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Dielectric Breakdown Voltage (BDV) — new oil",     "type_of_check": "Test",   "quantum": "100%",   "acceptance": "≥ 60 kV (as per IS 335)" },
+              { "check_item": "Water content (ppm)",                              "type_of_check": "Test",   "quantum": "100%",   "acceptance": "≤ 30 ppm (new oil)" },
+              { "check_item": "Acidity (neutralization value)",                   "type_of_check": "Test",   "quantum": "100%",   "acceptance": "≤ 0.03 mg KOH/g" },
+              { "check_item": "Interfacial tension at 27°C",                      "type_of_check": "Test",   "quantum": "100%",   "acceptance": "≥ 40 mN/m" },
+              { "check_item": "Flash point (closed cup)",                         "type_of_check": "Test",   "quantum": "Sample", "acceptance": "≥ 140°C" },
+              { "check_item": "Appearance / colour",                              "type_of_check": "Visual", "quantum": "100%",   "acceptance": "Clear, bright, free from sediment" },
+              { "check_item": "Test certificate from approved lab",               "type_of_check": "Review", "quantum": "100%",   "acceptance": "As per IS 335 / IEC 60296" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "1.5 Bushings",
+        "fields": [
+          {
+            "key": "bushing_checks",
+            "label": "Bushing Checks",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Type / designation of bushings (HV, LV, Neutral)", "type_of_check": "Review",   "quantum": "100%",   "acceptance": "As per approved drawing / BOM" },
+              { "check_item": "Visual inspection — chipping, cracks",             "type_of_check": "Visual",   "quantum": "100%",   "acceptance": "No cracks, chips or damage" },
+              { "check_item": "Creepage distance",                                "type_of_check": "Dimensional","quantum": "100%",  "acceptance": "As per IS 2099 / IEC 60137" },
+              { "check_item": "Test certificate from manufacturer",               "type_of_check": "Review",   "quantum": "100%",   "acceptance": "As per IS 2099 / IEC 60137" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "1.6 OLTC (On Load Tap Changer)",
+        "fields": [
+          {
+            "key": "oltc_checks",
+            "label": "OLTC Checks",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Make / model / type of OLTC",                       "type_of_check": "Review",     "quantum": "100%",   "acceptance": "As per approved BOM / specification" },
+              { "check_item": "Voltage rating and current rating",                  "type_of_check": "Review",     "quantum": "100%",   "acceptance": "As per approved specification" },
+              { "check_item": "Number of tap positions",                            "type_of_check": "Review",     "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "OLTC test certificate",                              "type_of_check": "Review",     "quantum": "100%",   "acceptance": "As per IEC 60214" },
+              { "check_item": "Visual condition — no damage",                       "type_of_check": "Visual",     "quantum": "100%",   "acceptance": "No physical damage" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "1.7 Cooling Equipment (Radiators / Fans)",
+        "fields": [
+          {
+            "key": "cooling_checks",
+            "label": "Cooling Equipment Checks",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Type / quantity of radiators",              "type_of_check": "Review",   "quantum": "100%",   "acceptance": "As per approved drawing / BOM" },
+              { "check_item": "Radiator dimensions and fin condition",     "type_of_check": "Visual",   "quantum": "100%",   "acceptance": "No dents, leakage or damage" },
+              { "check_item": "Hydraulic pressure test on radiators",     "type_of_check": "Test",     "quantum": "100%",   "acceptance": "No leakage at test pressure" },
+              { "check_item": "Fan motor — make, rating, quantity",       "type_of_check": "Review",   "quantum": "100%",   "acceptance": "As per approved BOM" },
+              { "check_item": "Cooling class marking",                    "type_of_check": "Visual",   "quantum": "100%",   "acceptance": "As per approved specification" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Overall Remarks — Raw Material Stage",
+        "fields": [
+          { "key": "overall_result",  "label": "Overall Stage Result",  "type": "dropdown", "options": ["Pass","Fail","Hold"] },
+          { "key": "overall_remarks", "label": "Overall Remarks",       "type": "textarea" },
+          { "key": "documents",       "label": "Supporting Documents",  "type": "file" }
+        ]
+      }
+    ]
+  },
+
+  "pcr_core_assembly": {
+    "name": "Core Building & Frame Assembly",
+    "template_type": "precommission_stage",
+    "sections": [
+      {
+        "title": "Inspection Visit Details",
+        "fields": [
+          { "key": "inspection_date",     "label": "Date of Inspection",            "type": "date",     "required": false },
+          { "key": "kptcl_members",       "label": "KPTCL Committee Members",       "type": "textarea", "required": false },
+          { "key": "third_party_agency",  "label": "Third Party Agency (B)",        "type": "text",     "required": false },
+          { "key": "manufacturer_rep",    "label": "Manufacturer Representative",   "type": "text",     "required": false }
+        ]
+      },
+      {
+        "title": "2. Core Building & Frame Assembly Checks",
+        "fields": [
+          {
+            "key": "core_checks",
+            "label": "Core & Frame Assembly Check Items",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Core stacking factor",                              "type_of_check": "Test",        "quantum": "100%",   "acceptance": "≥ 0.96" },
+              { "check_item": "Core dimensions — length, width, height",          "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "Number of limbs and yokes",                        "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "Step-lap joint arrangement",                       "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "Clamping arrangement — frame bolts, tightness",   "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "Uniform clamping, no loose bolts" },
+              { "check_item": "Core earthing arrangement",                        "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "Insulation between core and frame",                "type_of_check": "Test",        "quantum": "100%",   "acceptance": "As per specification" },
+              { "check_item": "Core loss measurement (if applicable at this stage)","type_of_check": "Test",      "quantum": "1 No.",  "acceptance": "As per approved design / IS 2026" },
+              { "check_item": "Visual inspection — no lamination damage",         "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "No burred edges, no lamination damage" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Overall Remarks — Core Assembly Stage",
+        "fields": [
+          { "key": "overall_result",  "label": "Overall Stage Result",  "type": "dropdown", "options": ["Pass","Fail","Hold"] },
+          { "key": "overall_remarks", "label": "Overall Remarks",       "type": "textarea" },
+          { "key": "documents",       "label": "Supporting Documents",  "type": "file" }
+        ]
+      }
+    ]
+  },
+
+  "pcr_winding": {
+    "name": "Winding Inspection",
+    "template_type": "precommission_stage",
+    "sections": [
+      {
+        "title": "Inspection Visit Details",
+        "fields": [
+          { "key": "inspection_date",     "label": "Date of Inspection",            "type": "date",     "required": false },
+          { "key": "kptcl_members",       "label": "KPTCL Committee Members",       "type": "textarea", "required": false },
+          { "key": "third_party_agency",  "label": "Third Party Agency (B)",        "type": "text",     "required": false },
+          { "key": "manufacturer_rep",    "label": "Manufacturer Representative",   "type": "text",     "required": false }
+        ]
+      },
+      {
+        "title": "3. Winding Checks",
+        "fields": [
+          {
+            "key": "winding_checks",
+            "label": "Winding Check Items",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "LV winding — conductor dimensions (width & thickness)",   "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "LV winding — number of turns",                            "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "LV winding — axial height",                               "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "LV winding — inner / outer diameter",                     "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "HV winding — conductor dimensions",                       "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "HV winding — number of turns per section",                "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "HV winding — axial height",                               "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "HV winding — inner / outer diameter",                     "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "Transposition of CTC conductors",                         "type_of_check": "Visual",      "quantum": "Sample", "acceptance": "Correct transposition as per design" },
+              { "check_item": "Inter-turn insulation / inter-layer insulation",          "type_of_check": "Visual",      "quantum": "Sample", "acceptance": "As per approved drawing" },
+              { "check_item": "Tap winding arrangement (if applicable)",                 "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "Overall visual condition of wound coil",                  "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "No loose ends, uniform winding" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Overall Remarks — Winding Stage",
+        "fields": [
+          { "key": "overall_result",  "label": "Overall Stage Result",  "type": "dropdown", "options": ["Pass","Fail","Hold"] },
+          { "key": "overall_remarks", "label": "Overall Remarks",       "type": "textarea" },
+          { "key": "documents",       "label": "Supporting Documents",  "type": "file" }
+        ]
+      }
+    ]
+  },
+
+  "pcr_active_part": {
+    "name": "Active Part Assembly",
+    "template_type": "precommission_stage",
+    "sections": [
+      {
+        "title": "Inspection Visit Details",
+        "fields": [
+          { "key": "inspection_date",     "label": "Date of Inspection",            "type": "date",     "required": false },
+          { "key": "kptcl_members",       "label": "KPTCL Committee Members",       "type": "textarea", "required": false },
+          { "key": "third_party_agency",  "label": "Third Party Agency (B)",        "type": "text",     "required": false },
+          { "key": "manufacturer_rep",    "label": "Manufacturer Representative",   "type": "text",     "required": false }
+        ]
+      },
+      {
+        "title": "4. Active Part (Core + Winding) Assembly Checks",
+        "fields": [
+          {
+            "key": "active_part_checks",
+            "label": "Active Part Assembly Check Items",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Placement of LV winding on core limb",                    "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per approved drawing" },
+              { "check_item": "Inter-winding clearance (LV to HV)",                      "type_of_check": "Dimensional", "quantum": "100%", "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "HV winding placement and centring",                        "type_of_check": "Dimensional", "quantum": "100%", "acceptance": "As per approved drawing" },
+              { "check_item": "End insulation / end rings assembly",                      "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per approved drawing, no gaps" },
+              { "check_item": "Clamping structure tightness and uniformity",              "type_of_check": "Visual",      "quantum": "100%", "acceptance": "Uniform clamping as per drawing" },
+              { "check_item": "Lead connections — HV / LV / Neutral",                    "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per approved drawing" },
+              { "check_item": "Tap changer connections and leads",                        "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per approved drawing" },
+              { "check_item": "Overall height of active part",                            "type_of_check": "Dimensional", "quantum": "100%", "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "Vapour phase / oven drying arrangement",                   "type_of_check": "Review",      "quantum": "100%", "acceptance": "As per drying schedule / process" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Overall Remarks — Active Part Assembly Stage",
+        "fields": [
+          { "key": "overall_result",  "label": "Overall Stage Result",  "type": "dropdown", "options": ["Pass","Fail","Hold"] },
+          { "key": "overall_remarks", "label": "Overall Remarks",       "type": "textarea" },
+          { "key": "documents",       "label": "Supporting Documents",  "type": "file" }
+        ]
+      }
+    ]
+  },
+
+  "pcr_tank_fittings": {
+    "name": "Tank & Accessories",
+    "template_type": "precommission_stage",
+    "sections": [
+      {
+        "title": "Inspection Visit Details",
+        "fields": [
+          { "key": "inspection_date",     "label": "Date of Inspection",            "type": "date",     "required": false },
+          { "key": "kptcl_members",       "label": "KPTCL Committee Members",       "type": "textarea", "required": false },
+          { "key": "third_party_agency",  "label": "Third Party Agency (B)",        "type": "text",     "required": false },
+          { "key": "manufacturer_rep",    "label": "Manufacturer Representative",   "type": "text",     "required": false }
+        ]
+      },
+      {
+        "title": "5. Tank & Accessories Checks",
+        "fields": [
+          {
+            "key": "tank_checks",
+            "label": "Tank & Accessories Check Items",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Tank dimensions (L × W × H)",                         "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing ± tolerance" },
+              { "check_item": "Tank plate thickness",                                 "type_of_check": "Dimensional", "quantum": "Sample", "acceptance": "As per approved drawing" },
+              { "check_item": "Welding quality — visual inspection",                 "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "No cracks, porosity, undercut" },
+              { "check_item": "Vacuum and pressure test on tank",                    "type_of_check": "Test",        "quantum": "100%",   "acceptance": "No leakage at specified vacuum/pressure" },
+              { "check_item": "Conservator dimensions and capacity",                 "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "Buchholz relay — make and type",                      "type_of_check": "Review",      "quantum": "100%",   "acceptance": "As per approved BOM" },
+              { "check_item": "Explosion vent — type and mounting",                  "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "Radiator mounting flanges — alignment",              "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "Proper alignment, no leakage" },
+              { "check_item": "Bushing pockets / turrets — dimensions",              "type_of_check": "Dimensional", "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "Oil drain valve, sampling valve, filter valve",      "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "As per approved drawing" },
+              { "check_item": "Painting — surface preparation and primer coat",     "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "As per specification (DFT ≥ specified μm)" },
+              { "check_item": "Earthing boss / lug on tank",                        "type_of_check": "Visual",      "quantum": "100%",   "acceptance": "As per approved drawing" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Overall Remarks — Tank & Accessories Stage",
+        "fields": [
+          { "key": "overall_result",  "label": "Overall Stage Result",  "type": "dropdown", "options": ["Pass","Fail","Hold"] },
+          { "key": "overall_remarks", "label": "Overall Remarks",       "type": "textarea" },
+          { "key": "documents",       "label": "Supporting Documents",  "type": "file" }
+        ]
+      }
+    ]
+  },
+
+  "pcr_active_in_tank": {
+    "name": "Active Part in Main Tank",
+    "template_type": "precommission_stage",
+    "sections": [
+      {
+        "title": "Inspection Visit Details",
+        "fields": [
+          { "key": "inspection_date",     "label": "Date of Inspection",            "type": "date",     "required": false },
+          { "key": "kptcl_members",       "label": "KPTCL Committee Members",       "type": "textarea", "required": false },
+          { "key": "third_party_agency",  "label": "Third Party Agency (B)",        "type": "text",     "required": false },
+          { "key": "manufacturer_rep",    "label": "Manufacturer Representative",   "type": "text",     "required": false }
+        ]
+      },
+      {
+        "title": "6. Active Part Lowering & Final Assembly Checks",
+        "fields": [
+          {
+            "key": "assembly_checks",
+            "label": "Active Part in Tank Check Items",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Lowering of active part into tank — visual check",       "type_of_check": "Visual",      "quantum": "100%", "acceptance": "No damage during lowering" },
+              { "check_item": "Clearance between active part and tank walls",           "type_of_check": "Dimensional", "quantum": "100%", "acceptance": "As per approved drawing" },
+              { "check_item": "Bushing installation — HV, LV, Neutral",                "type_of_check": "Visual",      "quantum": "100%", "acceptance": "Proper seating, no damage" },
+              { "check_item": "OLTC installation and connection",                       "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per OLTC manufacturer instruction" },
+              { "check_item": "Lead connections — correctness and tightness",           "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per approved drawing" },
+              { "check_item": "Radiator installation and valve alignment",              "type_of_check": "Visual",      "quantum": "100%", "acceptance": "No leakage, proper alignment" },
+              { "check_item": "Buchholz relay installation and pipe connection",        "type_of_check": "Visual",      "quantum": "100%", "acceptance": "Proper inclination, no air pocket" },
+              { "check_item": "Conservator mounting and piping",                        "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per approved drawing" },
+              { "check_item": "Oil filling process — filtered oil BDV before filling", "type_of_check": "Test",        "quantum": "100%", "acceptance": "BDV ≥ 60 kV" },
+              { "check_item": "Oil level in conservator after filling",                 "type_of_check": "Visual",      "quantum": "100%", "acceptance": "At marked level (25°C)" },
+              { "check_item": "Tank sealing — gaskets, cover bolting",                 "type_of_check": "Visual",      "quantum": "100%", "acceptance": "No oil seepage after 24 hrs" },
+              { "check_item": "Earthing connections — core, frame, tank",              "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per approved drawing" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Overall Remarks — Active Part in Tank Stage",
+        "fields": [
+          { "key": "overall_result",  "label": "Overall Stage Result",  "type": "dropdown", "options": ["Pass","Fail","Hold"] },
+          { "key": "overall_remarks", "label": "Overall Remarks",       "type": "textarea" },
+          { "key": "documents",       "label": "Supporting Documents",  "type": "file" }
+        ]
+      }
+    ]
+  },
+
+  "pcr_routine_tests": {
+    "name": "Pre-Delivery Routine Tests",
+    "template_type": "precommission_stage",
+    "sections": [
+      {
+        "title": "Test Visit Details",
+        "fields": [
+          { "key": "inspection_date",     "label": "Date of Testing",               "type": "date",     "required": false },
+          { "key": "kptcl_members",       "label": "KPTCL Committee Members",       "type": "textarea", "required": false },
+          { "key": "third_party_agency",  "label": "Third Party Agency (B)",        "type": "text",     "required": false },
+          { "key": "manufacturer_rep",    "label": "Manufacturer Representative",   "type": "text",     "required": false },
+          { "key": "test_lab",            "label": "Testing Lab / Test Bay",        "type": "text",     "required": false }
+        ]
+      },
+      {
+        "title": "7. Routine Test Results",
+        "fields": [
+          {
+            "key": "routine_test_checks",
+            "label": "Routine Test Check Items",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Test / Check Item",  "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed / Measured Value", "type": "text", "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Winding resistance — HV (all taps)",                      "type_of_check": "Test", "quantum": "100%", "acceptance": "As per design value ± 2%" },
+              { "check_item": "Winding resistance — LV",                                 "type_of_check": "Test", "quantum": "100%", "acceptance": "As per design value ± 2%" },
+              { "check_item": "Turns ratio — all tap positions",                         "type_of_check": "Test", "quantum": "100%", "acceptance": "Within ± 0.5% of declared ratio" },
+              { "check_item": "Vector group verification",                               "type_of_check": "Test", "quantum": "100%", "acceptance": "As per nameplate (e.g. YNyn0d11)" },
+              { "check_item": "No-load loss at rated voltage and frequency",             "type_of_check": "Test", "quantum": "100%", "acceptance": "≤ guaranteed value + tolerance (IS 2026)" },
+              { "check_item": "No-load current at rated voltage",                        "type_of_check": "Test", "quantum": "100%", "acceptance": "≤ guaranteed value (IS 2026)" },
+              { "check_item": "Load loss at rated current (principal tap)",              "type_of_check": "Test", "quantum": "100%", "acceptance": "≤ guaranteed value + tolerance (IS 2026)" },
+              { "check_item": "Impedance voltage at rated current (principal tap)",      "type_of_check": "Test", "quantum": "100%", "acceptance": "Within ± 5% of declared value (IS 2026)" },
+              { "check_item": "Insulation resistance (IR) — HV to LV & Earth",          "type_of_check": "Test", "quantum": "100%", "acceptance": "≥ 1000 MΩ at 5 kV (60-sec)" },
+              { "check_item": "Insulation resistance (IR) — LV to Earth",               "type_of_check": "Test", "quantum": "100%", "acceptance": "≥ 200 MΩ at 1 kV (60-sec)" },
+              { "check_item": "Separate source power frequency withstand test (HV)",    "type_of_check": "Test", "quantum": "100%", "acceptance": "As per IS 2026 / IEC 60076 (no breakdown)" },
+              { "check_item": "Induced overvoltage withstand test",                      "type_of_check": "Test", "quantum": "100%", "acceptance": "As per IS 2026 / IEC 60076 (no breakdown)" },
+              { "check_item": "Partial discharge measurement (if applicable)",           "type_of_check": "Test", "quantum": "1 No.", "acceptance": "As per IS 2026 / IEC 60076" },
+              { "check_item": "OLTC — operation check (all positions)",                  "type_of_check": "Functional", "quantum": "100%", "acceptance": "Smooth operation, no trip" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Overall Remarks — Routine Tests Stage",
+        "fields": [
+          { "key": "overall_result",  "label": "Overall Stage Result",  "type": "dropdown", "options": ["Pass","Fail","Hold"] },
+          { "key": "overall_remarks", "label": "Overall Remarks",       "type": "textarea" },
+          { "key": "test_report",     "label": "Test Report (PDF)",     "type": "file" }
+        ]
+      }
+    ]
+  },
+
+  "pcr_special_tests": {
+    "name": "Special / Type Tests",
+    "template_type": "precommission_stage",
+    "sections": [
+      {
+        "title": "Test Visit Details",
+        "fields": [
+          { "key": "inspection_date",     "label": "Date of Testing",               "type": "date",     "required": false },
+          { "key": "kptcl_members",       "label": "KPTCL Committee Members",       "type": "textarea", "required": false },
+          { "key": "third_party_agency",  "label": "Third Party Agency (B)",        "type": "text",     "required": false },
+          { "key": "manufacturer_rep",    "label": "Manufacturer Representative",   "type": "text",     "required": false },
+          { "key": "special_tests_applicable", "label": "Special Tests Applicable", "type": "dropdown", "options": ["Yes","No — waived by KPTCL"] }
+        ]
+      },
+      {
+        "title": "8. Special / Type Test Results",
+        "fields": [
+          {
+            "key": "special_test_checks",
+            "label": "Special Test Check Items",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Test / Check Item",  "type": "readonly", "width": "220" },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed / Measured Value", "type": "text", "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Lightning impulse withstand test — HV winding",      "type_of_check": "Test", "quantum": "1 No.", "acceptance": "As per IS 2026 / IEC 60076 (no breakdown or flashover)" },
+              { "check_item": "Lightning impulse withstand test — LV winding",      "type_of_check": "Test", "quantum": "1 No.", "acceptance": "As per IS 2026 / IEC 60076 (no breakdown or flashover)" },
+              { "check_item": "Temperature rise test (top oil & winding)",          "type_of_check": "Test", "quantum": "1 No.", "acceptance": "Top oil rise ≤ 40°C, Winding rise ≤ 55°C (ONAN)" },
+              { "check_item": "Short circuit withstand test",                       "type_of_check": "Test", "quantum": "1 No.", "acceptance": "No deformation, no electrical failure (IS 2026)" },
+              { "check_item": "Noise level measurement (if applicable)",            "type_of_check": "Test", "quantum": "1 No.", "acceptance": "As per specified dB level" },
+              { "check_item": "Harmonics and waveform (if applicable)",             "type_of_check": "Test", "quantum": "1 No.", "acceptance": "As per specification" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Overall Remarks — Special Tests Stage",
+        "fields": [
+          { "key": "overall_result",  "label": "Overall Stage Result",  "type": "dropdown", "options": ["Pass","Fail","NA — Waived"] },
+          { "key": "overall_remarks", "label": "Overall Remarks",       "type": "textarea" },
+          { "key": "test_report",     "label": "Test Report (PDF)",     "type": "file" }
+        ]
+      }
+    ]
+  },
+
+  "pcr_final_dispatch": {
+    "name": "Final Inspection & Dispatch",
+    "template_type": "precommission_stage",
+    "sections": [
+      {
+        "title": "Inspection Visit Details",
+        "fields": [
+          { "key": "inspection_date",     "label": "Date of Final Inspection",      "type": "date",     "required": false },
+          { "key": "kptcl_members",       "label": "KPTCL Committee Members",       "type": "textarea", "required": false },
+          { "key": "third_party_agency",  "label": "Third Party Agency (B)",        "type": "text",     "required": false },
+          { "key": "manufacturer_rep",    "label": "Manufacturer Representative",   "type": "text",     "required": false }
+        ]
+      },
+      {
+        "title": "9. Final Inspection & Pre-Dispatch Checks",
+        "fields": [
+          {
+            "key": "dispatch_checks",
+            "label": "Final Inspection Check Items",
+            "type": "table",
+            "fixed_rows": true,
+            "columns": [
+              { "key": "check_item",    "label": "Check Item",         "type": "readonly", "width": 220 },
+              { "key": "type_of_check", "label": "Type",               "type": "dropdown", "width": 110, "options": ["Visual","Dimensional","Functional","Review","Test"] },
+              { "key": "quantum",       "label": "Quantum",            "type": "dropdown", "width": 90,  "options": ["100%","Sample","Random","1 No."] },
+              { "key": "acceptance",    "label": "Acceptance Norms",   "type": "readonly", "width": 220 },
+              { "key": "observed",      "label": "Observed Value",     "type": "text",     "width": 160 },
+              { "key": "witness_m",     "label": "M",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_b",     "label": "B",                  "type": "boolean",  "width": 50  },
+              { "key": "witness_a",     "label": "A",                  "type": "boolean",  "width": 50  },
+              { "key": "result",        "label": "Result",             "type": "dropdown", "width": 90,  "options": ["Pass","Fail","NA"] },
+              { "key": "remarks",       "label": "Remarks",            "type": "textarea", "width": 180 }
+            ],
+            "default_rows": [
+              { "check_item": "Nameplate — rating, vector group, serial number",    "type_of_check": "Review",      "quantum": "100%", "acceptance": "As per approved specification" },
+              { "check_item": "Nameplate — material (stainless steel) and fixing",  "type_of_check": "Visual",      "quantum": "100%", "acceptance": "Permanently fixed, legible" },
+              { "check_item": "Marshalling box — wiring, relays, terminal blocks",  "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per approved schematic" },
+              { "check_item": "Buchholz relay — operation check (gas / surge)",     "type_of_check": "Functional",  "quantum": "100%", "acceptance": "Alarm and trip contacts operate correctly" },
+              { "check_item": "Oil level gauge / indicator",                        "type_of_check": "Functional",  "quantum": "100%", "acceptance": "Correct reading at ambient temperature" },
+              { "check_item": "Winding temperature indicator (WTI)",                "type_of_check": "Functional",  "quantum": "100%", "acceptance": "Alarm and trip contacts operate correctly" },
+              { "check_item": "Oil temperature indicator (OTI)",                    "type_of_check": "Functional",  "quantum": "100%", "acceptance": "Alarm and trip contacts operate correctly" },
+              { "check_item": "Pressure relief device — operation check",           "type_of_check": "Functional",  "quantum": "100%", "acceptance": "Operates at specified pressure" },
+              { "check_item": "Final painting — DFT and colour",                   "type_of_check": "Visual",      "quantum": "100%", "acceptance": "DFT ≥ specified value, uniform shade 631" },
+              { "check_item": "Oil leakage — 24-hour standing check",              "type_of_check": "Visual",      "quantum": "100%", "acceptance": "No oil seepage at joints, valves, bushings" },
+              { "check_item": "Tightness of all bolts and nuts",                   "type_of_check": "Visual",      "quantum": "100%", "acceptance": "All bolts torqued as per specification" },
+              { "check_item": "Packing and skid arrangement",                       "type_of_check": "Visual",      "quantum": "100%", "acceptance": "As per packing specification" },
+              { "check_item": "Documents despatched — test reports, manuals, DRG", "type_of_check": "Review",      "quantum": "100%", "acceptance": "Complete set as per contract" },
+              { "check_item": "Dispatch clearance certificate issued",              "type_of_check": "Review",      "quantum": "100%", "acceptance": "Signed by KPTCL representative" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Dispatch Clearance",
+        "fields": [
+          { "key": "overall_result",       "label": "Final Inspection Result",       "type": "dropdown", "options": ["Cleared for Dispatch","Hold — Pending Observations","Rejected"] },
+          { "key": "dispatch_date",        "label": "Expected Dispatch Date",        "type": "date" },
+          { "key": "overall_remarks",      "label": "Overall Remarks / Conditions",  "type": "textarea" },
+          { "key": "dispatch_certificate", "label": "Dispatch Clearance Certificate","type": "file" },
+          { "key": "test_reports",         "label": "Complete Test Reports (PDF)",   "type": "file" }
+        ]
+      }
+    ]
+  }
+}

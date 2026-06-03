@@ -54,6 +54,34 @@ class TestingRequestService:
             for r in data.get("rules", [])
         )
 
+    def _resolve_is_multi_session(self, test_type_id) -> tuple:
+        """
+        Return (is_multi_session, total_sessions_planned, session_interval_days)
+        from template's supports_multi_session / typical_total_sessions /
+        typical_session_interval_days. Same pattern as _resolve_is_cumulative().
+        """
+        if not test_type_id:
+            return False, None, None
+        tpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.test_type_id == test_type_id)
+            .order_by(OrgTestTemplate.version.desc())
+            .first()
+        )
+        if not tpl:
+            return False, None, None
+        data = tpl.template_data or {}
+        if data.get("supports_multi_session") or data.get("multi_session"):
+            session_types = data.get("session_types") or []
+            # Derive total from session_types length; fall back to explicit value
+            total = len(session_types) if session_types else data.get("typical_total_sessions")
+            return (
+                True,
+                total,
+                data.get("typical_session_interval_days"),
+            )
+        return False, None, None
+
     def _resolve_is_calibration(self, test_type_id) -> bool:
         """
         Return True if the template has enable_calibration=true OR a DATE_ADD rule.
@@ -82,6 +110,11 @@ class TestingRequestService:
         test_type_id = data.get("test_type_id")
         is_cumulative = self._resolve_is_cumulative(test_type_id)
         is_calibration = self._resolve_is_calibration(test_type_id)
+        _tpl_multi, _tpl_sessions, _tpl_interval = self._resolve_is_multi_session(test_type_id)
+        # Template-derived values; explicit payload values override if provided
+        _is_multi = data.get("is_multi_session") or _tpl_multi
+        _total    = data.get("total_sessions_planned") or _tpl_sessions
+        _interval = data.get("session_interval_days") or _tpl_interval
         request = TestingRequest(
             request_number=request_number,
             title=data["title"],
@@ -111,9 +144,9 @@ class TestingRequestService:
             status=TestingRequestStatus.draft,
             originator_id=originator_id,
             created_by=originator_id,
-            is_multi_session=data.get("is_multi_session", False),
-            total_sessions_planned=data.get("total_sessions_planned"),
-            session_interval_days=data.get("session_interval_days"),
+            is_multi_session=bool(_is_multi),
+            total_sessions_planned=_total,
+            session_interval_days=_interval,
             is_cumulative=is_cumulative,
             is_calibration=is_calibration,
             is_schedule_template=data.get("is_schedule_template", False),
