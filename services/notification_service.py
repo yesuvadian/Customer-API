@@ -279,7 +279,7 @@ def _enrich_context_from_source(
             rec = db.query(Recommendation).filter(Recommendation.id == source_id).first()
             if rec:
                 ctx.setdefault("recommendation.id",     str(rec.id))
-                ctx.setdefault("recommendation.status", rec.status or "")
+                ctx.setdefault("recommendation.status", rec.approval_status or "")
 
     except Exception as _exc:
         logger.warning(f"[Notif] _enrich_context_from_source({source_type}): {_exc}")
