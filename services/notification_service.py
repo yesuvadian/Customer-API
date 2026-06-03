@@ -1699,16 +1699,30 @@ def _execute_followup_action(
 
     try:
         if _category:
-            numbers = svc._create_schedules_for_action(
+            schedule_ids = svc._create_schedules_for_action(
                 tr, mock_rec,
                 approver_id=tr.created_by,
                 category=_category,
             )
             db.commit()
             logger.info(
-                f"[FollowupAction] Created {len(numbers)} {next_action_str} "
-                f"schedule(s) for TR={tr.request_number}: {numbers}"
+                f"[FollowupAction] Created {len(schedule_ids)} {next_action_str} "
+                f"schedule(s) for TR={tr.request_number}: {schedule_ids}"
             )
+            # Force-create the first ticket immediately for each new schedule.
+            # The normal approval flow defers the first ticket to the advance window;
+            # threshold alert follow-ups need the ticket created right away.
+            from services.test_request_schedule_service import TestRequestScheduleService
+            from models import TestRequestSchedule as _TRS
+            now = datetime.now(timezone.utc)
+            for sid in schedule_ids:
+                if not sid:
+                    continue
+                sched = db.query(_TRS).filter(_TRS.id == sid).first()
+                if sched:
+                    TestRequestScheduleService.create_one_ticket(
+                        db=db, schedule=sched, now=now, force_run=True
+                    )
         elif next_action_str == "repair_cycle":
             wf_id = svc._start_repair_workflow(tr, approver_id=tr.created_by)
             db.commit()
