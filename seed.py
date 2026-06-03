@@ -5966,10 +5966,12 @@ def seed_report_definitions(session):
         # ── Vendor & Repairer group ───────────────────────────────────────────────
         {
             "name": "Vendor Performance Ranking Report",
-            "description": "Vendor delivery timeliness and quality ranking.",
+            "description": "Vendor delivery timeliness and quality ranking. "
+                           "DISABLED: procurement_requests has no vendor/delivery "
+                           "tracking columns — on_demand until schema supports it.",
             "query_key": "vendor_performance_report",
             "output_format": "excel",
-            "frequency": "quarterly",
+            "frequency": "on_demand",
             "group_name": "Vendor & Repairer",
             "notification_event": "vendor_report_ready",
         },
@@ -6510,19 +6512,20 @@ ORDER  BY e.ueic
                         "and voltage class.",
             parameters_schema={"year": "int"},
             sort_order=10,
-            org_alias="fr",
+            org_alias="tr",
             sql_template="""
 SELECT
-    cm.name                                        AS equipment_type,
-    e.manufacturer                                 AS make,
+    cm.name                                              AS equipment_type,
+    e.manufacturer                                       AS make,
     e.voltage_class,
-    COUNT(fr.id)                                   AS failure_count,
-    COUNT(DISTINCT e.id)                           AS units_affected,
-    STRING_AGG(DISTINCT fr.failure_category, ', ') AS failure_categories
-FROM   public.failure_registry fr
-JOIN   public.equipment        e   ON e.id   = fr.equipment_id
+    COUNT(tr.id)                                         AS failure_count,
+    COUNT(DISTINCT e.id)                                 AS units_affected,
+    STRING_AGG(DISTINCT tr.form_data->>'failure_category', ', ') AS failure_categories
+FROM   public.testing_requests tr
+JOIN   public.equipment        e   ON e.id   = tr.equipment_id
 LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
-WHERE  EXTRACT(YEAR FROM fr.cts)
+WHERE  tr.request_category = 'failure_registry'
+  AND  EXTRACT(YEAR FROM tr.cts)
          = COALESCE(:year, EXTRACT(YEAR FROM NOW())::int - 1)
   {org_clause}
 GROUP  BY cm.name, e.manufacturer, e.voltage_class
@@ -6627,27 +6630,28 @@ SELECT
     d.name                          AS department,
     wf.id                           AS workflow_id,
     wf.status                       AS workflow_status,
-    wf.cts::date                    AS started_date,
-    wf.last_stage_name              AS current_stage,
-    wf.completed_stages             AS stages_done,
-    wf.total_stages                 AS stages_total,
-    ROUND(
-        COALESCE(wf.completed_stages, 0)::numeric
-        / NULLIF(wf.total_stages, 0) * 100, 1
-    )                               AS pct_complete,
-    EXTRACT(DAY FROM NOW() - wf.cts)::int AS days_elapsed
-FROM   public.workflow_sessions wf
+    wf.created_at::date             AS started_date,
+    sd.name                         AS current_stage,
+    COUNT(si.id) FILTER (WHERE si.status = 'completed') AS stages_done,
+    COUNT(si.id)                    AS stages_total,
+    ROUND(COALESCE(wf.progress, 0)::numeric, 1) AS pct_complete,
+    EXTRACT(DAY FROM NOW() - wf.created_at)::int AS days_elapsed
+FROM   public.repair_workflows wf
 JOIN   public.equipment          e ON e.id  = wf.equipment_id
-LEFT JOIN public.org_departments d ON d.id  = wf.department_id
+LEFT JOIN public.org_departments d ON d.id  = e.department_id
+LEFT JOIN public.repair_stage_definitions sd ON sd.id = wf.current_stage_id
+LEFT JOIN public.repair_stage_instances   si ON si.workflow_id = wf.id
 WHERE  wf.workflow_type = 'repair_lifecycle'
   AND  e.equipment_type_id IN (
            SELECT id FROM public."CategoryMaster"
            WHERE  name ILIKE '%transformer%')
   {org_clause}
-  AND  (:date_from::date IS NULL OR wf.cts >= :date_from::date)
-  AND  (:date_to::date   IS NULL OR wf.cts <= :date_to::date)
-  AND  (:department_id   IS NULL OR wf.department_id = :department_id::uuid)
-ORDER  BY wf.cts DESC
+  AND  (:date_from::date IS NULL OR wf.created_at >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR wf.created_at <= :date_to::date)
+  AND  (:department_id   IS NULL OR e.department_id = :department_id::uuid)
+GROUP  BY e.ueic, e.manufacturer, e.voltage_class, d.name, wf.id,
+          wf.status, wf.created_at, sd.name, wf.progress
+ORDER  BY wf.created_at DESC
 """),
 
         dict(
@@ -6765,7 +6769,7 @@ LEFT JOIN public.org_departments d  ON d.id   = e.department_id
 LEFT JOIN public.org_departments d2 ON d2.id  = d.parent_department_id
 LEFT JOIN public.org_departments d3 ON d3.id  = d2.parent_department_id
 LEFT JOIN public.org_departments d4 ON d4.id  = d3.parent_department_id
-WHERE  tr.category = 'maintenance'
+WHERE  tr.request_category = 'maintenance'
   AND  EXTRACT(MONTH FROM tr.due_date)
          = COALESCE(:month, EXTRACT(MONTH FROM NOW()))
   AND  EXTRACT(YEAR  FROM tr.due_date)
@@ -6876,28 +6880,31 @@ ORDER  BY pr.raised_at DESC
             description="TA&QC observation compliance status with ageing.",
             parameters_schema={"month": "int", "year": "int", "department_id": "uuid"},
             sort_order=10,
-            org_alias="ti",
+            org_alias="tai",
             sql_template="""
 SELECT
     d.name                          AS department,
-    ti.observation_category,
+    cd.name                         AS observation_category,
     COUNT(ti.id)                    AS total_observations,
-    COUNT(CASE WHEN ti.status = 'closed' THEN 1 END)  AS closed,
-    COUNT(CASE WHEN ti.status != 'closed' THEN 1 END) AS open,
+    COUNT(CASE WHEN ti.current_stage_code ILIKE '%clos%' THEN 1 END) AS closed,
+    COUNT(CASE WHEN ti.current_stage_code NOT ILIKE '%clos%'
+                 OR ti.current_stage_code IS NULL THEN 1 END)        AS open,
     ROUND(
-        COUNT(CASE WHEN ti.status = 'closed' THEN 1 END)::numeric
+        COUNT(CASE WHEN ti.current_stage_code ILIKE '%clos%' THEN 1 END)::numeric
         / NULLIF(COUNT(ti.id), 0) * 100, 1
     )                               AS compliance_pct,
     MAX(EXTRACT(DAY FROM NOW() - ti.cts))::int AS max_age_days
-FROM   public.taqc_inspections ti
-LEFT JOIN public.org_departments d ON d.id = ti.department_id
+FROM   public.taqc_observations ti
+JOIN   public.taqc_annual_inspections tai ON tai.id = ti.inspection_id
+LEFT JOIN public.org_departments d  ON d.id  = tai.department_id
+LEFT JOIN public."CategoryDetails" cd ON cd.id = ti.category_detail_id
 WHERE  EXTRACT(MONTH FROM ti.cts)
          = COALESCE(:month, EXTRACT(MONTH FROM NOW()))
   AND  EXTRACT(YEAR  FROM ti.cts)
          = COALESCE(:year,  EXTRACT(YEAR  FROM NOW()))
   {org_clause}
-  AND  (:department_id IS NULL OR ti.department_id = :department_id::uuid)
-GROUP  BY d.name, ti.observation_category
+  AND  (:department_id IS NULL OR tai.department_id = :department_id::uuid)
+GROUP  BY d.name, cd.name
 ORDER  BY compliance_pct ASC NULLS LAST
 """),
 
@@ -6956,35 +6963,20 @@ ORDER  BY on_time_pct DESC NULLS LAST
             org_alias="wf",
             sql_template="""
 SELECT
-    wf.repairer_name,
+    wf.vendor_name                      AS repairer_name,
     COUNT(wf.id)                        AS total_workflows,
     COUNT(CASE WHEN wf.status = 'completed' THEN 1 END) AS completed,
     ROUND(
-        AVG(EXTRACT(DAY FROM wf.completed_at - wf.cts))
+        AVG(EXTRACT(DAY FROM wf.completed_at - wf.created_at))
         FILTER (WHERE wf.completed_at IS NOT NULL), 1
-    )                                   AS avg_turnaround_days,
-    COUNT(DISTINCT CASE
-        WHEN srv.id IS NOT NULL THEN wf.id END) AS post_repair_surveillances,
-    COUNT(DISTINCT CASE
-        WHEN srv.id IS NOT NULL
-         AND res.evaluation_result->>'overall' = 'NORMAL'
-        THEN wf.id END)                 AS surveillance_pass_count
-FROM   public.workflow_sessions wf
-LEFT JOIN public.workflow_sessions srv
-       ON srv.equipment_id = wf.equipment_id
-      AND srv.workflow_type = 'surveillance'
-      AND srv.cts > wf.completed_at
-LEFT JOIN public.test_results res
-       ON res.testing_request_id IN (
-              SELECT id FROM public.testing_requests
-              WHERE  equipment_id = wf.equipment_id
-                AND  category     = 'surveillance')
+    )                                   AS avg_turnaround_days
+FROM   public.repair_workflows wf
 WHERE  wf.workflow_type  = 'repair_lifecycle'
-  AND  EXTRACT(YEAR FROM wf.cts)
+  AND  EXTRACT(YEAR FROM wf.created_at)
          = COALESCE(:year, EXTRACT(YEAR FROM NOW())::int - 1)
-  AND  wf.repairer_name IS NOT NULL
+  AND  wf.vendor_name IS NOT NULL
   {org_clause}
-GROUP  BY wf.repairer_name
+GROUP  BY wf.vendor_name
 ORDER  BY avg_turnaround_days ASC NULLS LAST
 """),
 

@@ -352,7 +352,9 @@ class ReportingService:
 
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = defn.name[:31]
+        # Excel sheet titles cannot contain \ / * ? : [ ] and are max 31 chars.
+        _safe_title = re.sub(r'[\\/*?:\[\]]', '-', defn.name or "Report")
+        ws.title = _safe_title[:31] or "Report"
 
         if not rows:
             ws["A1"] = "No data found for the selected parameters."
