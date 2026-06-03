@@ -1590,13 +1590,27 @@ def _execute_followup_action(
 ) -> None:
     """
     Auto-create a follow-up ticket when eval_alert / eval_critical fires
-    and the matched routing rule has followup_action: {create_request: true}.
+    and the matched routing rule has a followup_action config.
 
-    Ticket details (next_action, schedule_frequency, test_types) are read
-    from the Recommendation already linked to the TestingRequest — the same
-    object the tester filled in when submitting results.
+    Ticket details come from the routing rule's followup_action JSONB (defined
+    in the notification center), not from the linked Recommendation record.
+
+    action format (from NotificationRoutingRule.followup_action):
+    {
+        "create_request":     true,
+        "next_action":        "maintenance",   # test/maintenance/inspection/repair_cycle
+        "schedule_frequency": "yearly",
+        "schedule_start_date":"2026-01-01",
+        "schedule_end_date":  "2026-12-31",
+        "test_types":         [{"id": 5, "name": "BDV Test"}],
+        "summary":            "Follow-up after CRITICAL alert"
+    }
     """
     if not action.get("create_request"):
+        return
+
+    next_action_str = (action.get("next_action") or "").lower()
+    if not next_action_str:
         return
 
     # ── Resolve the TestingRequest from the source ────────────────────────────
@@ -1622,30 +1636,8 @@ def _execute_followup_action(
         )
         return
 
-    # ── Load the recommendation linked to this testing request ───────────────
-    rec = (
-        db.query(Recommendation)
-        .filter(Recommendation.testing_request_id == tr.id)
-        .order_by(Recommendation.cts.desc())
-        .first()
-    )
-    if not rec:
-        logger.warning(
-            f"[FollowupAction] No recommendation found for TR={tr.request_number}"
-        )
-        return
-
-    if not rec.next_action:
-        logger.info(
-            f"[FollowupAction] Skipping — recommendation for TR={tr.request_number} "
-            f"has no next_action set"
-        )
-        return
-
-    next_action_str = rec.next_action.value.lower()
-
     # ── Guard: skip if open follow-up already exists for this equipment ───────
-    followup_category = next_action_str  # "test" / "maintenance" / "inspection" / "repair_cycle"
+    followup_category = next_action_str
 
     if tr.equipment_id:
         existing = (
@@ -1666,7 +1658,33 @@ def _execute_followup_action(
             )
             return
 
-    # ── Dispatch via WorkflowDispatchService using the real recommendation ────
+    # ── Build Recommendation from notification center followup_action config ──
+    try:
+        _next_action = NextActionType(next_action_str)
+    except ValueError:
+        logger.warning(f"[FollowupAction] Invalid next_action={next_action_str!r}")
+        return
+
+    _freq_str = action.get("schedule_frequency") or "yearly"
+    try:
+        _freq = ScheduleFrequency(_freq_str)
+    except ValueError:
+        _freq = ScheduleFrequency.yearly
+
+    mock_rec = Recommendation(
+        testing_request_id  = tr.id,
+        organization_id     = organization_id or tr.organization_id,
+        next_action         = _next_action,
+        schedule_frequency  = _freq,
+        test_types          = action.get("test_types") or [],
+        summary             = action.get("summary") or f"Auto follow-up: {next_action_str}",
+        recommendation_type = "fail",
+        submitted_by        = tr.created_by,
+        created_by          = tr.created_by,
+        approval_status     = "approved",
+    )
+
+    # ── Dispatch via WorkflowDispatchService ──────────────────────────────────
     from services.workflow_dispatch_service import WorkflowDispatchService
     from models import RequestCategory as _RC
 
@@ -1682,7 +1700,7 @@ def _execute_followup_action(
     try:
         if _category:
             numbers = svc._create_schedules_for_action(
-                tr, rec,
+                tr, mock_rec,
                 approver_id=tr.created_by,
                 category=_category,
             )

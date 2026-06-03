@@ -554,6 +554,7 @@ class WorkflowDispatchService:
                 db=self.db,
                 schedule=schedule,
                 now=now,
+                force_run=True,
             )
             if created:
                 print(f"[Dispatch] First ticket created immediately for schedule {schedule.id}")
