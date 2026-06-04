@@ -8481,16 +8481,19 @@ def seed_tan_delta_templates(session) -> int:
          "Single-session SFRA with static correlation-coefficient acceptance floors (no factory baseline)."),
     ]
 
-    # These are Power Transformer test types — must hang off the "Power Transformer"
-    # equipment master (the same one the test-request form reads), NOT an arbitrary
-    # master that happens to share description="Testing Equipment".
-    master = session.query(CategoryMaster).filter(
-        CategoryMaster.name == "Power Transformer"
-    ).first()
-    if not master:
-        master = CategoryMaster(name="Power Transformer", description="Testing Equipment", is_active=True)
-        session.add(master)
-        session.flush()
+    # Resolve the equipment-type master PER TEMPLATE from its own equipment_type
+    # field (data-driven). The test type's CategoryDetails must hang off the same
+    # equipment-type master the test-request form reads (equipment_type_id ->
+    # CategoryMaster). This works for any equipment type, not just Power Transformer.
+    def _master_for(equipment_type_name: str):
+        m = session.query(CategoryMaster).filter(
+            CategoryMaster.name == equipment_type_name
+        ).first()
+        if not m:
+            m = CategoryMaster(name=equipment_type_name, description="Testing Equipment", is_active=True)
+            session.add(m)
+            session.flush()
+        return m
 
     count = 0
     for key, detail_name, desc in _TESTS:
@@ -8498,6 +8501,8 @@ def seed_tan_delta_templates(session) -> int:
             print(f"[WARN] Template '{key}' not found in TEST_TEMPLATES — skipping.")
             continue
         template_data = TEST_TEMPLATES[key]
+        equip_type = template_data.get("equipment_type") or "Power Transformer"
+        master = _master_for(equip_type)
         detail = _get_or_create_category_detail(
             session,
             name=detail_name,
@@ -8526,7 +8531,7 @@ def seed_tan_delta_templates(session) -> int:
             count += 1
 
     session.commit()
-    print(f"[OK] Tan-Delta / Capacitance / IDAX test types seeded ({len(_TESTS)} types, master_id={master.id}).")
+    print(f"[OK] Tan-Delta / Capacitance / IDAX / routine DFR-SFRA test types seeded ({len(_TESTS)} types).")
     return count
 
 
