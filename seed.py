@@ -2528,6 +2528,7 @@ def seed_test_type_categories(session, master_ids):
                 "Capacitance & Tan Delta Comparison",
                 "Transformer Oil Test",
                 "Dielectric Frequency Response (DFR / IDAX)",
+                "Sweep Frequency Response Analysis (SFRA)",
             ],
             "maintenance": [
                 "Routine Preventive Maintenance",
@@ -8438,6 +8439,68 @@ def seed_dfr_template(session) -> int:
     return count
 
 
+def seed_sfra_template(session) -> int:
+    """
+    Seed the Sweep Frequency Response Analysis (SFRA) OrgTestTemplate.
+
+    Strategy — identical to seed_dfr_template:
+    - Read template_data from TEST_TEMPLATES["sfra_transformer"] (single source of truth).
+    - Look up CategoryMaster "Testing Equipment" (description="Testing Equipment").
+    - Create CategoryDetails "Sweep Frequency Response Analysis (SFRA)" if absent.
+    - Upsert OrgTestTemplate (template_key="sfra_transformer", org_id=NULL, is_system=True).
+    """
+    from models import CategoryMaster, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    SFRA_KEY = "sfra_transformer"
+    template_data = TEST_TEMPLATES[SFRA_KEY]
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Testing Equipment",
+            description="Testing Equipment",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+
+    detail = _get_or_create_category_detail(
+        session,
+        name="Sweep Frequency Response Analysis (SFRA)",
+        category_master_id=master.id,
+        description="SFRA mechanical-integrity diagnostics — multi-session winding/core fingerprint comparison for Power Transformers (IEC 60076-18 / CIGRE 342)",
+        category_type="test",
+        is_active=True,
+    )
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == SFRA_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=SFRA_KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] SFRA template seeded (master_id={master.id}, detail_id={detail.id}).")
+    return count
+
+
 def seed_transformer_oil_template(session) -> int:
     """
     Seed the Transformer Oil Test OrgTestTemplate.
@@ -11676,6 +11739,8 @@ def run_seed():
         print(f"[OK] Calibration template: {n5} seeded.")
         n5b = seed_dfr_template(session)
         print(f"[OK] DFR / IDAX template: {n5b} seeded.")
+        n5c = seed_sfra_template(session)
+        print(f"[OK] SFRA template: {n5c} seeded.")
         n6 = seed_transformer_oil_template(session)
         print(f"[OK] Transformer Oil Test template: {n6} seeded.")
         n7 = seed_capacitance_tandelta_template(session)
