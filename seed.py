@@ -1485,9 +1485,13 @@ def seed_modules(session):
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
 {"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
 {"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
+{"name": "AE Dashboard",    "path": "ae_dashboard",    "description": "Field officer daily work overview — tests due, overdue maintenance, remedial actions", "group_name": "Testing", "is_menu": False},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "EE RT Dashboard",  "description": "EE RT relay testing & calibration dashboard — calibration compliance, overdue cals, expiring certs, FAIL count, open workflows", "path": "ee_rt_dashboard",  "group_name": "Testing", "is_menu": False},
+{"name": "SEE RT Dashboard", "description": "SEE RT circle-level calibration supervision dashboard — circle compliance, overdue, expiring, FAIL, open workflows", "path": "see_rt_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "CEE RT Dashboard", "description": "CEE RT RD zone-level calibration governance dashboard — zone compliance, relay assets, open workflows, FAIL count", "path": "cee_rt_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
 {"name": "Notification Center",    "description": "Notification Center — manage templates, routing rules and schedules", "path": "org_notification_center",    "group_name": "Organization", "is_menu": True},
@@ -2091,6 +2095,18 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Supervisory Officer",        "module": "Pre-Commission Workflows", "can_view": True, "can_export": True},
         {"role": "Asset Data Officer",         "module": "Pre-Commission Workflows", "can_view": True},
         {"role": "Transformer Repair Coordinator", "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_assign": True},
+
+        # ✅ AE DASHBOARD — Test Engineer (AE_JE)
+        {"role": "Test Engineer",              "module": "AE Dashboard",  "can_view": True},
+
+        # ✅ EE RT DASHBOARD — Reviewing Officer (RT track)
+        {"role": "Reviewing Officer",          "module": "EE RT Dashboard",  "can_view": True},
+
+        # ✅ SEE RT DASHBOARD — Supervisory Officer (RT track)
+        {"role": "Supervisory Officer",        "module": "SEE RT Dashboard", "can_view": True},
+
+        # ✅ CEE RT DASHBOARD — Senior Management Approver (RT RD track)
+        {"role": "Senior Management Approver", "module": "CEE RT Dashboard", "can_view": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -3311,10 +3327,13 @@ def seed_role_templates(session):
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
     asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
     test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
-    aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
-    see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
-    cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
-    admin_dashboard_module_id = modules_by_name.get("Admin Dashboard")
+    aee_dashboard_module_id    = modules_by_name.get("AEE Dashboard")
+    see_dashboard_module_id    = modules_by_name.get("SEE Dashboard")
+    cee_dashboard_module_id    = modules_by_name.get("CEE Dashboard")
+    admin_dashboard_module_id  = modules_by_name.get("Admin Dashboard")
+    ee_rt_dashboard_module_id  = modules_by_name.get("EE RT Dashboard")
+    see_rt_dashboard_module_id = modules_by_name.get("SEE RT Dashboard")
+    cee_rt_dashboard_module_id = modules_by_name.get("CEE RT Dashboard")
 
     # ── Named module-set shortcuts ─────────────────────────────────────────
     # Procurement modules (without Dashboard — added individually where needed)
@@ -3534,7 +3553,8 @@ def seed_role_templates(session):
                 _approve(annual_audit_workflows_module) +        # COMPLIANCE_REVIEW
                 _approve(precommission_requests_module) +        # approve/reject PCR tickets
                 _approve(precommission_workflows_module) +       # QAP stage execution (primary actor)
-                _readonly(failure_registry_module)
+                _readonly(failure_registry_module) +
+                _readonly([ee_rt_dashboard_module_id] if ee_rt_dashboard_module_id else [])  # EE RT track dashboard
             ),
         },
 
@@ -3562,7 +3582,8 @@ def seed_role_templates(session):
                 _readonly(calibration_workflows_module) +         # management visibility
                 _readonly(annual_audit_workflows_module) +        # management visibility
                 _approve(precommission_requests_module) +         # can approve PCR tickets
-                _readonly(precommission_workflows_module)         # management visibility
+                _readonly(precommission_workflows_module) +       # management visibility
+                _readonly([see_rt_dashboard_module_id] if see_rt_dashboard_module_id else [])  # SEE RT track dashboard
             ),
         },
 
@@ -3590,7 +3611,8 @@ def seed_role_templates(session):
                 _approve(calibration_workflows_module) +     # CAL_VERIFY final sign-off
                 _approve(annual_audit_workflows_module) +        # OBSERVATION_CLOSURE final sign-off
                 _approve(precommission_requests_module) +        # final approval authority for PCR tickets
-                _approve(precommission_workflows_module)         # QAP_FINAL_DISPATCH escalation approver
+                _approve(precommission_workflows_module) +       # QAP_FINAL_DISPATCH escalation approver
+                _readonly([cee_rt_dashboard_module_id] if cee_rt_dashboard_module_id else [])  # CEE RT RD track dashboard
             ),
         },
 
