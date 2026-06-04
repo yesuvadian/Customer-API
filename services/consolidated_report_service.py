@@ -155,7 +155,9 @@ class ConsolidatedReportService:
         date_to: Optional[date],
         equipment_ids: Optional[list[UUID]] = None,
     ) -> bytes:
-        """Flat tabular summary — one row per test result. Returns xlsx bytes."""
+        """One worksheet per equipment (parameters as rows), mirroring the
+        KPTCL per-equipment oil-test layout. Returns xlsx bytes."""
+        import re
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
@@ -165,63 +167,120 @@ class ConsolidatedReportService:
         )
 
         wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Test Summary"
+        wb.remove(wb.active)  # start clean — we add a sheet per equipment
 
-        headers = ["UEIC", "Substation", "Test Type", "Tested By",
-                   "Tested At", "Overall Result", "Evaluation"]
-        hdr_fill = PatternFill("solid", fgColor="1565C0")
-        hdr_font = Font(bold=True, color="FFFFFF", size=10)
+        navy_fill = PatternFill("solid", fgColor="1565C0")
+        sub_fill  = PatternFill("solid", fgColor="1A3A5C")
+        white_b   = Font(bold=True, color="FFFFFF", size=10)
+        bold9     = Font(bold=True, size=9)
         thin = Side(style="thin", color="CCCCCC")
-        bdr = Border(left=thin, right=thin, top=thin, bottom=thin)
+        bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-        # Title
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
-        t = ws.cell(row=1, column=1, value=self._title_line(equipment_type_id, date_from, date_to))
-        t.font = Font(bold=True, size=13, color="1565C0")
-        t.alignment = Alignment(horizontal="center")
-        ws.row_dimensions[1].height = 26
+        _tpl_cache: dict = {}
+        def _template(tkey):
+            if tkey not in _tpl_cache:
+                from services.evaluation_service import EvaluationService
+                _tpl_cache[tkey] = EvaluationService.get_template_data(tkey, self.db) or {}
+            return _tpl_cache[tkey]
 
-        # Header row
-        for ci, h in enumerate(headers, 1):
-            c = ws.cell(row=2, column=ci, value=h)
-            c.fill = hdr_fill
-            c.font = hdr_font
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            c.border = bdr
+        _used_titles: set = set()
+        def _sheet_title(raw: str) -> str:
+            base = re.sub(r'[\\/*?:\[\]]', '-', raw or "Equipment")[:28] or "Equipment"
+            title, n = base, 1
+            while title in _used_titles:
+                title = f"{base[:26]}_{n}"
+                n += 1
+            _used_titles.add(title)
+            return title
 
-        r = 3
+        if not grouped:
+            ws = wb.create_sheet("No Data")
+            ws["A1"] = "No test results found for the selected criteria."
+            buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
         for eq_id, g in grouped.items():
             req = g["request"]
             eq = self.db.query(Equipment).filter(
                 Equipment.id == req.equipment_id
             ).first() if req and req.equipment_id else None
-            ueic = eq.ueic if eq else "-"
-            substation = req.department.name if req and req.department else "-"
+            ueic = (eq.ueic if eq else None) or (str(eq_id)[:8] if eq_id != "unassigned" else "Unassigned")
+            ws = wb.create_sheet(_sheet_title(ueic))
+            ws.column_dimensions["A"].width = 34
+            for col in "BCDEF":
+                ws.column_dimensions[col].width = 18
+
+            r = 1
+            # Equipment identity header
+            c = ws.cell(row=r, column=1, value=f"Equipment: {ueic}")
+            c.font = Font(bold=True, size=12, color="1565C0"); r += 1
+            nd = (eq.nameplate_data or {}) if eq else {}
+            ident = [
+                ("Substation", req.department.name if req and req.department else "-"),
+                ("Make", (eq.manufacturer if eq else None) or nd.get("manufacturer_name", "-")),
+                ("Capacity (MVA)", nd.get("rated_mva_onan", "-")),
+                ("Vector Group", (eq.vector_group if eq else None) or nd.get("vector_group", "-")),
+                ("Serial Number", (eq.factory_serial_number if eq else None) or "-"),
+                ("Year of Mfg", (eq.year_of_manufacture if eq else None) or "-"),
+            ]
+            for label, val in ident:
+                ws.cell(row=r, column=1, value=label).font = bold9
+                ws.cell(row=r, column=2, value=str(val))
+                r += 1
+            r += 1  # spacer
+
+            # Each test result → sub-table(s)
             for result in g["results"]:
-                td = result.test_data or {}
-                ev = (result.evaluation_result or {}).get("overall", "-")
-                row_vals = [
-                    ueic,
-                    substation,
-                    result.test_name or result.template_key or "-",
-                    self._rs._user_name(result.tested_by),
-                    result.tested_at.strftime("%d-%b-%Y %H:%M") if result.tested_at else "-",
-                    (result.overall_result or td.get("overall_result") or "-"),
-                    ev,
-                ]
-                for ci, v in enumerate(row_vals, 1):
-                    c = ws.cell(row=r, column=ci, value=str(v))
-                    c.border = bdr
-                    c.font = Font(size=9)
+                tpl = _template(result.template_key)
+                # field label + table-column lookup from template
+                field_labels, table_cols = {}, {}
+                for sec in tpl.get("sections", []):
+                    for fld in sec.get("fields", []):
+                        field_labels[fld["key"]] = fld.get("label", fld["key"])
+                        if fld.get("type") == "table":
+                            table_cols[fld["key"]] = fld.get("columns", [])
+
+                # Test heading
+                tname = result.test_name or result.template_key or "Test"
+                tested = result.tested_at.strftime("%d-%b-%Y") if result.tested_at else "-"
+                hc = ws.cell(row=r, column=1,
+                             value=f"{tname}   (tested {tested}, result: "
+                                   f"{result.overall_result or '-'})")
+                hc.font = white_b; hc.fill = navy_fill
+                ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
                 r += 1
 
-        if r == 3:
-            ws.cell(row=3, column=1, value="No test results found for the selected criteria.")
+                td = result.test_data or {}
+                # Scalars first, then tables
+                scalar_keys = [k for k, v in td.items()
+                               if not (isinstance(v, list) and v and isinstance(v[0], dict))
+                               and k not in ("overall_result",)]
+                for k in scalar_keys:
+                    ws.cell(row=r, column=1, value=field_labels.get(k, k.replace("_", " ").title())).font = bold9
+                    ws.cell(row=r, column=2, value=str(td.get(k)) if td.get(k) is not None else "-")
+                    r += 1
 
-        # Column widths
-        for ci, w in enumerate([22, 24, 32, 20, 18, 14, 12], 1):
-            ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
+                # Table fields (BDV/IFT/FP/moisture/DGA etc.)
+                for k, v in td.items():
+                    if not (isinstance(v, list) and v and isinstance(v[0], dict)):
+                        continue
+                    r += 1
+                    ws.cell(row=r, column=1, value=field_labels.get(k, k.replace("_", " ").title())).font = bold9
+                    r += 1
+                    cols = table_cols.get(k) or [{"key": ck, "label": ck} for ck in v[0].keys()]
+                    cols = [c for c in cols if not c.get("hidden")]
+                    # header row
+                    for ci, col in enumerate(cols, 1):
+                        cc = ws.cell(row=r, column=ci, value=col.get("label", col["key"]))
+                        cc.font = Font(bold=True, color="FFFFFF", size=9)
+                        cc.fill = sub_fill; cc.border = bdr
+                    r += 1
+                    for row_dict in v:
+                        for ci, col in enumerate(cols, 1):
+                            val = row_dict.get(col["key"], "")
+                            cc = ws.cell(row=r, column=ci, value=str(val) if val is not None else "")
+                            cc.border = bdr; cc.font = Font(size=9)
+                        r += 1
+                r += 1  # spacer between tests
 
         buf = io.BytesIO()
         wb.save(buf)
