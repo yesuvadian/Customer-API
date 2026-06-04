@@ -2529,6 +2529,13 @@ def seed_test_type_categories(session, master_ids):
                 "Transformer Oil Test",
                 "Dielectric Frequency Response (DFR / IDAX)",
                 "Sweep Frequency Response Analysis (SFRA)",
+                "Tan-Delta, Capacitance & Insulation Diagnostics",
+                "Winding Tan-Delta & Capacitance Test",
+                "220kV Bushing Tan-Delta Test",
+                "66kV Bushing Tan-Delta Test",
+                "Insulation Diagnostics (IDAX)",
+                "Dielectric Frequency Response (DFR) — Routine",
+                "Sweep Frequency Response Analysis (SFRA) — Routine",
             ],
             "maintenance": [
                 "Routine Preventive Maintenance",
@@ -8439,6 +8446,87 @@ def seed_dfr_template(session) -> int:
     return count
 
 
+def seed_tan_delta_templates(session) -> int:
+    """
+    Seed the single-session Tan-Delta / Capacitance / IDAX test types
+    (individual + combined). Each reads template_data from TEST_TEMPLATES
+    (single source of truth) and is upserted as a Power Transformer test type
+    under the "Testing Equipment" CategoryMaster.
+    """
+    from models import CategoryMaster, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    # (template_key, CategoryDetails name, description)
+    _TESTS = [
+        ("tan_delta_capacitance_idax",
+         "Tan-Delta, Capacitance & Insulation Diagnostics",
+         "Combined Tan-Delta/Capacitance (DELTA 4000) and Insulation Diagnostics (IDAX) report."),
+        ("tan_delta_winding",
+         "Winding Tan-Delta & Capacitance Test",
+         "Winding insulation Tan-Delta and capacitance measurement with historical comparison."),
+        ("tan_delta_bushing_220kv",
+         "220kV Bushing Tan-Delta Test",
+         "220kV bushing Tan-Delta and capacitance measurement (R/Y/B phases)."),
+        ("tan_delta_bushing_66kv",
+         "66kV Bushing Tan-Delta Test",
+         "66kV bushing Tan-Delta and capacitance measurement (R/Y/B phases)."),
+        ("idax_insulation",
+         "Insulation Diagnostics (IDAX)",
+         "IDAX insulation diagnostics — % moisture and oil conductivity per winding configuration."),
+        ("dfr_routine",
+         "Dielectric Frequency Response (DFR) — Routine",
+         "Single-session DFR measurement for routine/maintenance testing (no factory baseline)."),
+        ("sfra_routine",
+         "Sweep Frequency Response Analysis (SFRA) — Routine",
+         "Single-session SFRA with static correlation-coefficient acceptance floors (no factory baseline)."),
+    ]
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(name="Testing Equipment", description="Testing Equipment", is_active=True)
+        session.add(master)
+        session.flush()
+
+    count = 0
+    for key, detail_name, desc in _TESTS:
+        if key not in TEST_TEMPLATES:
+            print(f"[WARN] Template '{key}' not found in TEST_TEMPLATES — skipping.")
+            continue
+        template_data = TEST_TEMPLATES[key]
+        detail = _get_or_create_category_detail(
+            session,
+            name=detail_name,
+            category_master_id=master.id,
+            description=desc,
+            category_type="test",
+            is_active=True,
+        )
+        existing = session.query(OrgTestTemplate).filter(
+            OrgTestTemplate.template_key == key,
+            OrgTestTemplate.org_id == None,  # noqa: E711
+        ).first()
+        if existing:
+            existing.test_type_id = detail.id
+            existing.template_data = template_data
+            existing.is_system = True
+        else:
+            session.add(OrgTestTemplate(
+                template_key=key,
+                org_id=None,
+                test_type_id=detail.id,
+                template_data=template_data,
+                is_system=True,
+                version=1,
+            ))
+            count += 1
+
+    session.commit()
+    print(f"[OK] Tan-Delta / Capacitance / IDAX test types seeded ({len(_TESTS)} types, master_id={master.id}).")
+    return count
+
+
 def seed_sfra_template(session) -> int:
     """
     Seed the Sweep Frequency Response Analysis (SFRA) OrgTestTemplate.
@@ -11741,6 +11829,8 @@ def run_seed():
         print(f"[OK] DFR / IDAX template: {n5b} seeded.")
         n5c = seed_sfra_template(session)
         print(f"[OK] SFRA template: {n5c} seeded.")
+        n5d = seed_tan_delta_templates(session)
+        print(f"[OK] Tan-Delta / Capacitance / IDAX test types: {n5d} seeded.")
         n6 = seed_transformer_oil_template(session)
         print(f"[OK] Transformer Oil Test template: {n6} seeded.")
         n7 = seed_capacitance_tandelta_template(session)

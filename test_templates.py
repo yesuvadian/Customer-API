@@ -4949,6 +4949,463 @@ TEST_TEMPLATES = {
         ],
     },
 
+    # ────────────────────────────────────────────────────────────
+    # INDIVIDUAL TESTS — single-session, executable on their own.
+    # Consolidated report combines whichever ran per transformer.
+    # ────────────────────────────────────────────────────────────
+
+    # ── Winding Tan-Delta & Capacitance (individual) ──────────────
+    "tan_delta_winding": {
+        "key": "tan_delta_winding",
+        "name": "Winding Tan-Delta & Capacitance Test",
+        "equipment_type": "Power Transformer",
+        "description": "Winding insulation Tan-Delta and capacitance measurement (DELTA 4000) with historical comparison.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "tan_delta_kit",         "label": "Testing Kit Used",    "type": "text", "required": True, "placeholder": "e.g. Megger DELTA 4000"},
+                    {"key": "date_of_previous_test", "label": "Date of Previous Test","type": "date"},
+                    {"key": "weather_condition",     "label": "Weather Condition",   "type": "text"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",            "label": "Oil Temperature",     "type": "number", "unit": "°C"},
+                ],
+            },
+            {
+                "title": "Winding Test Results",
+                "fields": [
+                    {
+                        "key": "winding_test_results",
+                        "label": "Winding Test Results",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_configuration",   "label": "Test Configuration",            "type": "readonly"},
+                            {"key": "kv",                   "label": "kV",                            "type": "number"},
+                            {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
+                            {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
+                            {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "HV-TV"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                # IEEE/IEC winding power-factor guidance (corrected to 20°C)
+                                "df_corrected_20c": {
+                                    "normal_min": None,    "normal_max": 0.5,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 1.0,
+                                },
+                            },
+                        },
+                    },
+                    {"key": "observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── 220kV Bushing Tan-Delta (individual) ──────────────────────
+    "tan_delta_bushing_220kv": {
+        "key": "tan_delta_bushing_220kv",
+        "name": "220kV Bushing Tan-Delta Test",
+        "equipment_type": "Power Transformer",
+        "description": "220kV bushing Tan-Delta and capacitance measurement (R/Y/B phases) with historical comparison.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "tan_delta_kit",         "label": "Testing Kit Used",    "type": "text", "required": True},
+                    {"key": "date_of_previous_test", "label": "Date of Previous Test","type": "date"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "220kV Bushing Details",
+                "fields": [
+                    {
+                        "key": "bushing_details", "label": "220kV Bushing Details", "type": "table",
+                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
+                        "columns": [
+                            {"key": "detail",  "label": "Details",         "type": "readonly"},
+                            {"key": "r_phase", "label": "220kV 'R' Phase", "type": "text"},
+                            {"key": "y_phase", "label": "220kV 'Y' Phase", "type": "text"},
+                            {"key": "b_phase", "label": "220kV 'B' Phase", "type": "text"},
+                        ],
+                        "default_rows": [{"detail": "Make"}, {"detail": "Sl. No."}, {"detail": "Y.O. Mfg."}],
+                    },
+                ],
+            },
+            {
+                "title": "220kV Bushing Test Results",
+                "fields": [
+                    {
+                        "key": "bushing_test_results", "label": "220kV Bushing Test Results", "type": "table",
+                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
+                        "columns": [
+                            {"key": "bushing",              "label": "Bushing",                       "type": "readonly"},
+                            {"key": "kv",                   "label": "kV",                            "type": "number"},
+                            {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
+                            {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
+                            {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
+                        ],
+                        "default_rows": [{"bushing": "'R' Phase"}, {"bushing": "'Y' Phase"}, {"bushing": "'B' Phase"}],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                # 220kV OIP bushing power-factor limits
+                                "df_corrected_20c": {
+                                    "normal_min": None,    "normal_max": 0.5,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 0.7,
+                                },
+                            },
+                        },
+                    },
+                    {"key": "observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── 66kV Bushing Tan-Delta (individual) ───────────────────────
+    "tan_delta_bushing_66kv": {
+        "key": "tan_delta_bushing_66kv",
+        "name": "66kV Bushing Tan-Delta Test",
+        "equipment_type": "Power Transformer",
+        "description": "66kV bushing Tan-Delta and capacitance measurement (R/Y/B phases) with historical comparison.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "tan_delta_kit",         "label": "Testing Kit Used",    "type": "text", "required": True},
+                    {"key": "date_of_previous_test", "label": "Date of Previous Test","type": "date"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "66kV Bushing Details",
+                "fields": [
+                    {
+                        "key": "bushing_details", "label": "66kV Bushing Details", "type": "table",
+                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
+                        "columns": [
+                            {"key": "detail",  "label": "Details",        "type": "readonly"},
+                            {"key": "r_phase", "label": "66kV 'R' Phase", "type": "text"},
+                            {"key": "y_phase", "label": "66kV 'Y' Phase", "type": "text"},
+                            {"key": "b_phase", "label": "66kV 'B' Phase", "type": "text"},
+                        ],
+                        "default_rows": [{"detail": "Make"}, {"detail": "Sl. No."}, {"detail": "Y.O. Mfg."}],
+                    },
+                ],
+            },
+            {
+                "title": "66kV Bushing Test Results",
+                "fields": [
+                    {
+                        "key": "bushing_test_results", "label": "66kV Bushing Test Results", "type": "table",
+                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
+                        "columns": [
+                            {"key": "bushing",              "label": "Bushing",                       "type": "readonly"},
+                            {"key": "kv",                   "label": "kV",                            "type": "number"},
+                            {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
+                            {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
+                            {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
+                        ],
+                        "default_rows": [{"bushing": "'R' Phase"}, {"bushing": "'Y' Phase"}, {"bushing": "'B' Phase"}],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                # 66kV OIP bushing power-factor limits
+                                "df_corrected_20c": {
+                                    "normal_min": None,    "normal_max": 0.7,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 1.0,
+                                },
+                            },
+                        },
+                    },
+                    {"key": "observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── IDAX Insulation Diagnostics (individual) ──────────────────
+    "idax_insulation": {
+        "key": "idax_insulation",
+        "name": "Insulation Diagnostics (IDAX)",
+        "equipment_type": "Power Transformer",
+        "description": "IDAX insulation diagnostics — % moisture and oil conductivity per winding configuration with historical comparison.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "idax_kit",              "label": "Testing Kit Used",    "type": "text", "required": True, "placeholder": "e.g. Megger IDAX 300"},
+                    {"key": "date_of_previous_test", "label": "Date of Previous Test","type": "date"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",            "label": "Oil Temperature",     "type": "number", "unit": "°C"},
+                ],
+            },
+            {
+                "title": "Insulation Diagnostics Results",
+                "fields": [
+                    {
+                        "key": "insulation_diagnostics", "label": "Insulation Diagnostics Results", "type": "table",
+                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_configuration",        "label": "Test Configuration",              "type": "readonly"},
+                            {"key": "moisture_percent",          "label": "% Moisture",                      "type": "number"},
+                            {"key": "moisture_analysis",         "label": "Tr. Analysis (% Moisture)",       "type": "dropdown", "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]},
+                            {"key": "moisture_previous_test",    "label": "% Moisture Previous Test",        "type": "number"},
+                            {"key": "oil_conductivity_psm",      "label": "Oil Conductivity (pS/m)",         "type": "number"},
+                            {"key": "oil_conductivity_analysis", "label": "Tr. Analysis (Oil Conductivity)", "type": "dropdown", "options": ["As new", "Acceptable", "Poor", "Bad"]},
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "HV-TV"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "moisture_percent": {
+                                    "normal_min": None,    "normal_max": 2.0,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 3.0,
+                                },
+                            },
+                        },
+                    },
+                    {"key": "observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── DFR (single-session, routine/maintenance — no baseline) ───────────────
+    "dfr_routine": {
+        "key": "dfr_routine",
+        "name": "Dielectric Frequency Response (DFR) — Routine",
+        "equipment_type": "Power Transformer",
+        "description": "Single-session Dielectric Frequency Response measurement for routine/maintenance testing (no factory-baseline comparison).",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",         "label": "Testing Kit Used",    "type": "text",   "required": True},
+                    {"key": "test_voltage_v",   "label": "Test Voltage",        "type": "number", "unit": "V",  "required": True},
+                    {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",       "label": "Oil Temperature",     "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "DFR Measurement Data",
+                "fields": [
+                    {
+                        "key": "dfr_measurements",
+                        "label": "DFR Measurements",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "frequency_hz",      "label": "Frequency (Hz)",   "type": "number"},
+                            {"key": "capacitance_pf",    "label": "Capacitance (pF)", "type": "number"},
+                            {"key": "tan_delta_percent", "label": "Tan Delta (%)",    "type": "number"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "tan_delta_percent": {
+                                    "normal_min": None,    "normal_max": 0.5,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 1.0,
+                                },
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── SFRA (single-session, routine/maintenance — static CC floors) ─────────
+    "sfra_routine": {
+        "key": "sfra_routine",
+        "name": "Sweep Frequency Response Analysis (SFRA) — Routine",
+        "equipment_type": "Power Transformer",
+        "description": "Single-session SFRA measurement for routine/maintenance testing. Uses static correlation-coefficient acceptance floors (no factory-baseline session).",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",          "label": "Testing Kit Used",         "type": "text",   "required": True},
+                    {"key": "sweep_range",       "label": "Sweep Frequency Range",    "type": "text",   "required": True},
+                    {"key": "measurement_points","label": "No. of Measurement Points","type": "number"},
+                    {"key": "tap_position",      "label": "Tap Position",             "type": "text"},
+                    {"key": "ambient_temp_c",    "label": "Ambient Temperature",      "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",        "label": "Oil Temperature",          "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "SFRA Trace Data",
+                "fields": [
+                    {
+                        "key": "sfra_measurements",
+                        "label": "SFRA Measurements (Amplitude vs Frequency)",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "winding",      "label": "Winding / Connection", "type": "text"},
+                            {"key": "frequency_hz", "label": "Frequency (Hz)",       "type": "number"},
+                            {"key": "amplitude_db", "label": "Amplitude (dB)",       "type": "number"},
+                            {"key": "phase_deg",    "label": "Phase (°)",            "type": "number"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Correlation Coefficient Analysis",
+                "fields": [
+                    {
+                        "key": "correlation_analysis",
+                        "label": "Per-Winding Correlation",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "winding",   "label": "Winding",               "type": "readonly"},
+                            {"key": "cc_lf",     "label": "CC — LF (1k–100kHz)",   "type": "number"},
+                            {"key": "cc_mf",     "label": "CC — MF (100k–600kHz)", "type": "number"},
+                            {"key": "cc_hf",     "label": "CC — HF (600k–1MHz)",   "type": "number"},
+                            {"key": "assessment","label": "Assessment", "type": "dropdown",
+                             "options": ["Normal", "Slight Deviation", "Marginal", "Abnormal"]},
+                        ],
+                        "default_rows": [
+                            {"winding": "HV-N"}, {"winding": "LV-N"}, {"winding": "TV-N"},
+                            {"winding": "HV-LV"}, {"winding": "HV-TV"}, {"winding": "LV-TV"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "remedial_action_text": "SFRA correlation below acceptance floor — investigate winding/core mechanical integrity",
+                            "column_evaluations": {
+                                "cc_lf": {"normal_min": 0.98, "normal_max": None, "alert_min": 0.95, "alert_max": None, "critical_below": 0.95, "critical_above": None},
+                                "cc_mf": {"normal_min": 0.98, "normal_max": None, "alert_min": 0.95, "alert_max": None, "critical_below": 0.95, "critical_above": None},
+                                "cc_hf": {"normal_min": 0.97, "normal_max": None, "alert_min": 0.93, "alert_max": None, "critical_below": 0.93, "critical_above": None},
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {
+                        "key": "fault_type", "label": "Suspected Fault Type", "type": "dropdown",
+                        "options": ["None", "Winding Deformation", "Axial Displacement",
+                                    "Radial Displacement / Buckling", "Shorted Turns",
+                                    "Core Movement", "Loose Connection / Lead"],
+                    },
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
 }
 
 
@@ -5005,9 +5462,20 @@ TEST_TYPE_TO_TEMPLATE = {
     "Dielectric Frequency Response (DFR / IDAX)": "dfr_idax_transformer",
     "DFR / IDAX":                                 "dfr_idax_transformer",
 
+    # ── Tan-Delta / Capacitance / IDAX (single-session, individual + combined) ──
+    "Tan-Delta, Capacitance & Insulation Diagnostics": "tan_delta_capacitance_idax",
+    "Winding Tan-Delta & Capacitance Test":            "tan_delta_winding",
+    "220kV Bushing Tan-Delta Test":                    "tan_delta_bushing_220kv",
+    "66kV Bushing Tan-Delta Test":                     "tan_delta_bushing_66kv",
+    "Insulation Diagnostics (IDAX)":                   "idax_insulation",
+
     # ── SFRA (multi-session, cross-session comparison) ──
     "Sweep Frequency Response Analysis (SFRA)":   "sfra_transformer",
     "SFRA":                                       "sfra_transformer",
+
+    # ── Single-session routine DFR / SFRA (no factory baseline) ──
+    "Dielectric Frequency Response (DFR) — Routine":        "dfr_routine",
+    "Sweep Frequency Response Analysis (SFRA) — Routine":   "sfra_routine",
 
     # ── Oil test ──
     "Transformer Oil Test":             "transformer_oil_test",

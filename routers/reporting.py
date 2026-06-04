@@ -116,6 +116,15 @@ class RunRequest(BaseModel):
     output_format: str  = "excel"   # excel | pdf
 
 
+class ConsolidatedReportRequest(BaseModel):
+    department_id:     UUID
+    equipment_type_id: int
+    test_type_ids:     list[int] = []
+    date_from:         Optional[str] = None   # "YYYY-MM-DD"
+    date_to:           Optional[str] = None
+    equipment_ids:     Optional[list[UUID]] = None
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 @router.get("/definitions/query-keys")
@@ -282,4 +291,49 @@ def download_report_file(
         path,
         media_type=media,
         headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
+# ── Consolidated Test Report (multi-equipment, multi-test PDF) ──────────────────
+
+@router.post("/consolidated-test-report")
+def consolidated_test_report(
+    body: ConsolidatedReportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate a single combined PDF spanning every equipment of the chosen type
+    within the user's department subtree, including the selected test types
+    completed in the given date range. Grouped per equipment.
+    """
+    from datetime import date as _date
+    from services.consolidated_report_service import ConsolidatedReportService
+
+    def _parse(d: Optional[str]) -> Optional[_date]:
+        if not d:
+            return None
+        try:
+            return _date.fromisoformat(d[:10])
+        except Exception:
+            return None
+
+    svc = ConsolidatedReportService(db)
+    pdf = svc.generate(
+        department_id=body.department_id,
+        equipment_type_id=body.equipment_type_id,
+        test_type_ids=body.test_type_ids,
+        date_from=_parse(body.date_from),
+        date_to=_parse(body.date_to),
+        equipment_ids=body.equipment_ids,
+    )
+
+    filename = f"consolidated_test_report_{(body.date_from or 'all')}_{(body.date_to or 'all')}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "X-Report-Filename": filename,
+        },
     )
