@@ -3327,10 +3327,13 @@ def seed_role_templates(session):
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
     asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
     test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
-    aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
-    see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
-    cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
-    admin_dashboard_module_id = modules_by_name.get("Admin Dashboard")
+    aee_dashboard_module_id    = modules_by_name.get("AEE Dashboard")
+    see_dashboard_module_id    = modules_by_name.get("SEE Dashboard")
+    cee_dashboard_module_id    = modules_by_name.get("CEE Dashboard")
+    admin_dashboard_module_id  = modules_by_name.get("Admin Dashboard")
+    ee_rt_dashboard_module_id  = modules_by_name.get("EE RT Dashboard")
+    see_rt_dashboard_module_id = modules_by_name.get("SEE RT Dashboard")
+    cee_rt_dashboard_module_id = modules_by_name.get("CEE RT Dashboard")
 
     # ── Named module-set shortcuts ─────────────────────────────────────────
     # Procurement modules (without Dashboard — added individually where needed)
@@ -3550,7 +3553,8 @@ def seed_role_templates(session):
                 _approve(annual_audit_workflows_module) +        # COMPLIANCE_REVIEW
                 _approve(precommission_requests_module) +        # approve/reject PCR tickets
                 _approve(precommission_workflows_module) +       # QAP stage execution (primary actor)
-                _readonly(failure_registry_module)
+                _readonly(failure_registry_module) +
+                _readonly([ee_rt_dashboard_module_id] if ee_rt_dashboard_module_id else [])  # EE RT track dashboard
             ),
         },
 
@@ -3578,7 +3582,8 @@ def seed_role_templates(session):
                 _readonly(calibration_workflows_module) +         # management visibility
                 _readonly(annual_audit_workflows_module) +        # management visibility
                 _approve(precommission_requests_module) +         # can approve PCR tickets
-                _readonly(precommission_workflows_module)         # management visibility
+                _readonly(precommission_workflows_module) +       # management visibility
+                _readonly([see_rt_dashboard_module_id] if see_rt_dashboard_module_id else [])  # SEE RT track dashboard
             ),
         },
 
@@ -3606,7 +3611,8 @@ def seed_role_templates(session):
                 _approve(calibration_workflows_module) +     # CAL_VERIFY final sign-off
                 _approve(annual_audit_workflows_module) +        # OBSERVATION_CLOSURE final sign-off
                 _approve(precommission_requests_module) +        # final approval authority for PCR tickets
-                _approve(precommission_workflows_module)         # QAP_FINAL_DISPATCH escalation approver
+                _approve(precommission_workflows_module) +       # QAP_FINAL_DISPATCH escalation approver
+                _readonly([cee_rt_dashboard_module_id] if cee_rt_dashboard_module_id else [])  # CEE RT RD track dashboard
             ),
         },
 
