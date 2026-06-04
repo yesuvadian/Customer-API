@@ -1063,13 +1063,24 @@ async def startup_event():
     import surveillance_hooks  # noqa: F401
     logger.info("[Hooks] Workflow lifecycle hooks registered")
 
-    # Seed pre-commission QAP workflow stages (idempotent)
+    # Seed pre-commission QAP workflow stages + org role mappings (idempotent)
     try:
         _db = SessionLocal()
-        from seed_precommission_workflow import seed_precommission_stages
+        from seed_precommission_workflow import (
+            seed_precommission_stages,
+            seed_precommission_role_mappings,
+        )
+        from models import Organization
         seed_precommission_stages(_db)
+        # Seed role mappings for every active org so buttons appear immediately
+        _orgs = _db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        for _org in _orgs:
+            try:
+                seed_precommission_role_mappings(_db, _org.id)
+            except Exception as _re:
+                logger.warning(f"[Seed] PCR role mapping failed for org {_org.id}: {_re}")
         _db.close()
-        logger.info("[Seed] Pre-commission QAP workflow stages seeded")
+        logger.info(f"[Seed] Pre-commission QAP workflow staged + role mappings seeded for {len(_orgs)} org(s)")
     except Exception as _e:
         logger.warning(f"[Seed] Pre-commission seed failed on startup (non-fatal): {_e}")
 

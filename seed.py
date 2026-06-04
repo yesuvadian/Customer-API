@@ -11850,6 +11850,25 @@ def run_seed():
                 session.rollback()
                 print(f"[WARN] Surveillance role mapping failed: {_e}")
 
+        # Pre-Commission QAP Workflow — 9-stage factory inspection workflow
+        print("\n--- Pre-Commission QAP Workflow Seeding ---")
+        try:
+            from seed_precommission_workflow import seed_precommission_stages
+            seed_precommission_stages(session)
+        except Exception as _e:
+            print(f"[WARN] Pre-commission workflow seed failed (non-fatal): {_e}")
+
+        # Pre-Commission role mappings — must run AFTER seed_precommission_stages
+        # Seed for all organizations so any org can use the module
+        all_orgs = session.query(Organization).filter(Organization.is_active.is_(True)).all()
+        for _org in all_orgs:
+            try:
+                from seed_precommission_workflow import seed_precommission_role_mappings
+                seed_precommission_role_mappings(session, _org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Pre-commission role mapping failed for org {_org.id}: {_e}")
+
         # TR / FR / TAQC Workflow Engine — states, transitions, permission matrix
         print("\n--- TR / FR / TAQC Workflow Engine Seeding ---")
         try:
