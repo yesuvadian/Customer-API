@@ -4460,6 +4460,7 @@ TEST_TEMPLATES = {
                         "type": "table",
                         "allow_add_rows": False,
                         "allow_delete_rows": False,
+                        "lock_default_rows": False,   # rows pre-filled from default_rows but cells must remain editable
                         "columns": [
                             {"key": "test_configuration",      "label": "Test Configuration",      "type": "readonly"},
                             {"key": "moisture_percent",        "label": "Moisture in Paper (%)",   "type": "number"},
