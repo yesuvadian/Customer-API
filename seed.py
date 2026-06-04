@@ -8481,11 +8481,14 @@ def seed_tan_delta_templates(session) -> int:
          "Single-session SFRA with static correlation-coefficient acceptance floors (no factory baseline)."),
     ]
 
+    # These are Power Transformer test types — must hang off the "Power Transformer"
+    # equipment master (the same one the test-request form reads), NOT an arbitrary
+    # master that happens to share description="Testing Equipment".
     master = session.query(CategoryMaster).filter(
-        CategoryMaster.description == "Testing Equipment"
+        CategoryMaster.name == "Power Transformer"
     ).first()
     if not master:
-        master = CategoryMaster(name="Testing Equipment", description="Testing Equipment", is_active=True)
+        master = CategoryMaster(name="Power Transformer", description="Testing Equipment", is_active=True)
         session.add(master)
         session.flush()
 
