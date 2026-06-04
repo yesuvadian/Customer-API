@@ -8,8 +8,25 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 from models import User, RequestCategory
-from services.dashboard_service import OPEN_STATUSES, CLOSED_STATUSES
 from services.dashboard_service import DashboardService, invalidate_dashboard_cache
+from models import TestingRequestStatus
+
+OPEN_STATUSES = (
+    TestingRequestStatus.submitted,
+    TestingRequestStatus.assigned,
+    TestingRequestStatus.accepted,
+    TestingRequestStatus.in_progress,
+    TestingRequestStatus.test_submitted,
+    TestingRequestStatus.under_approval,
+    TestingRequestStatus.under_review,
+    TestingRequestStatus.finance_pending,
+)
+CLOSED_STATUSES = (
+    TestingRequestStatus.approved,
+    TestingRequestStatus.rejected,
+    TestingRequestStatus.outcome_active,
+    TestingRequestStatus.commissioned,
+)
 
 router = APIRouter(
     prefix="/dashboard",
