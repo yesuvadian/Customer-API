@@ -1285,6 +1285,10 @@ class TestResultStructuredResponse(BaseModel):
     images: List[TestResultImageResponse] = []
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    # Template column definitions per table field — used by Flutter approval/review
+    # screens to render table data with correct column order and labels.
+    # { "dfr_measurements": [{key, label, type}, ...], "analysis_results": [...] }
+    table_columns: Optional[dict] = None
 
     class Config:
         from_attributes = True
