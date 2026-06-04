@@ -1027,11 +1027,20 @@ class RepairWorkflowService:
     ) -> list:
         q = self.db.query(RepairWorkflow)
         if status == "annual_audit":
-            # Annual Audit workflows are a separate type — show only them
             q = q.filter(RepairWorkflow.workflow_code == "ANNUAL_AUDIT")
-            status = None  # don't apply status filter below
+            status = None
+        elif status == "pre_commission":
+            q = q.filter(RepairWorkflow.workflow_code == "PRE_COMMISSION")
+            status = None
+        elif status == "surveillance":
+            q = q.filter(RepairWorkflow.workflow_code == "SURVEILLANCE")
+            status = None
         else:
-            q = q.filter(or_(RepairWorkflow.workflow_code.is_(None), RepairWorkflow.workflow_code != "ANNUAL_AUDIT"))
+            # Default: exclude non-repair workflow types from general list
+            q = q.filter(or_(
+                RepairWorkflow.workflow_code.is_(None),
+                RepairWorkflow.workflow_code.notin_(["ANNUAL_AUDIT", "PRE_COMMISSION", "SURVEILLANCE"]),
+            ))
         if equipment_id:
             q = q.filter(RepairWorkflow.equipment_id == equipment_id)
         if status:
