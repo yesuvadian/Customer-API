@@ -1,8 +1,30 @@
 import uuid
 from enum import Enum as PyEnum
 from pydantic import BaseModel, EmailStr, Field, constr
+from pydantic import GetCoreSchemaHandler
+from pydantic_core import core_schema
 from typing import Annotated, Dict, List, Literal, Optional
 from uuid import UUID
+
+
+class AnyEmail(str):
+    """Email field that accepts non-public TLDs like .local, .internal, .test.
+    Used in response schemas so demo/internal users don't break serialisation."""
+
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        return cls(str(v))
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler: GetCoreSchemaHandler):
+        return core_schema.no_info_plain_validator_function(
+            lambda v: cls(str(v)),
+            serialization=core_schema.to_string_ser_schema(),
+        )
 from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
@@ -22,7 +44,7 @@ class ProductSubCategorySchema(BaseModel):
         orm_mode = True
 
 class UserBase(BaseModel):
-    email: EmailStr
+    email: AnyEmail
     firstname: Optional[str]
     lastname: Optional[str]
     phone_number: str
@@ -552,7 +574,7 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 class UserRegistor(BaseModel):
-    email: EmailStr
+    email: AnyEmail
     password: str
     firstname: str
     lastname: str
@@ -571,7 +593,7 @@ class UserRegistor(BaseModel):
     
 class UserResponse(BaseModel):
     id: UUID
-    email: EmailStr
+    email: AnyEmail
 
     firstname: Optional[str] = None
     lastname: Optional[str] = None
@@ -605,7 +627,7 @@ class LoginResponse(BaseModel):
     privileges: Dict[str, Dict[str, bool]]
 
 class PasswordResetRequest(BaseModel):
-    email: EmailStr
+    email: AnyEmail
 
 
 class PasswordResetConfirm(BaseModel):
@@ -1780,7 +1802,7 @@ class BulkPermissionUpdate(BaseModel):
 # ==========================================
 
 class OrgUserCreate(BaseModel):
-    email: EmailStr
+    email: AnyEmail
     password: str
     firstname: str
     lastname: Optional[str] = None
@@ -1852,7 +1874,7 @@ class OrgUserWithRoles(BaseModel):
 # ==========================================
 
 class OrgInvitationCreate(BaseModel):
-    email: EmailStr
+    email: AnyEmail
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     org_role_id: Optional[UUID] = None

@@ -3,6 +3,20 @@ load_dotenv()  # ✅ MUST be first before any other import
 
 import os
 import logging
+
+# ── Allow .local / .internal / non-public TLDs in email fields ──────────
+# Patch email_validator before pydantic imports it so that demo/internal
+# addresses like user@utility.local pass EmailStr validation.
+try:
+    import email_validator as _ev
+    _orig_validate = _ev.validate_email
+    def _lenient_validate(email, *args, **kwargs):
+        kwargs["check_deliverability"] = False
+        return _orig_validate(email, *args, **kwargs)
+    _ev.validate_email = _lenient_validate
+except Exception:
+    pass
+# ────────────────────────────────────────────────────────────────────────
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse

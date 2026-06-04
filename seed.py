@@ -1464,7 +1464,11 @@ def seed_modules(session):
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
 {"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
 {"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
+{"name": "EE RT Dashboard",  "description": "EE RT relay testing & calibration dashboard — calibration compliance, overdue cals, expiring certs, FAIL count, open workflows", "path": "ee_rt_dashboard",  "group_name": "Testing", "is_menu": False},
+{"name": "SEE RT Dashboard", "description": "SEE RT circle-level calibration supervision dashboard — circle compliance, overdue, expiring, FAIL, open workflows", "path": "see_rt_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "CEE RT Dashboard", "description": "CEE RT RD zone-level calibration governance dashboard — zone compliance, relay assets, open workflows, FAIL count", "path": "cee_rt_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "AE Dashboard",    "path": "ae_dashboard",    "description": "Field officer daily work overview — tests due, overdue maintenance, remedial actions", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
@@ -1510,10 +1514,11 @@ def seed_modules(session):
                 "repair_workflow_definitions. New workflow types appear automatically.",
  "path": "workflow-dashboard",
  "group_name": "Field Operations"},
-# ✅ BREAKDOWN WORKFLOW MODULE  (renamed from "Repair Workflows" — path unchanged: repair-workflows)
+# ✅ REPAIR WORKFLOW MODULE  (seed name kept as "Breakdown Workflows" for DB compat; drawer label = "Repair Workflows")
 {"name": "Breakdown Workflows",
  "rename_from": "Repair Workflows",
- "description": "Unplanned breakdown repair lifecycle — 10-stage workflow from Failure Reporting to Commissioning. "
+ "description": "Repair Workflows — Power Transformer Repair Lifecycle (SRS §7). "
+                "10-stage workflow from Failure Reporting to Commissioning. "
                 "Config (org-admin only): define stages, forms, roles, transitions. "
                 "Execution: stage-role RBAC driven; each stage locks to authorized roles only.",
  "path": "repair-workflows",
@@ -1572,6 +1577,26 @@ def seed_modules(session):
                 "substation, and compliance band. Accessible to EE TLSS, AEE, org-admin.",
  "path": "schedule_compliance",
  "group_name": "Condition Monitoring"},
+# ── MISSING MODULES — added per Menu_Restructure_Recommendation.md S1–S3 ──────
+# S2: Calibration module (path existed in drawer but was missing from seed_modules)
+{"name": "Calibration",
+ "description": "SRS §5.3–5.4 — Relay and instrument calibration records: calibration status, "
+                "due-date tracking, pass/fail results, and certificate upload. "
+                "Accessible to: EE_RT, SEE_RT, CEE_RT_RD.",
+ "path": "calibration",
+ "group_name": "Condition Monitoring"},
+# S3: Test Results / test_result_approvals (path existed in drawer but was missing from seed_modules)
+{"name": "Test Results",
+ "description": "SRS §5.2 — Test result records with automated NORMAL/ALERT/CRITICAL evaluation "
+                "per configured thresholds. Trend charts and remedial action triggers.",
+ "path": "test_result_approvals",
+ "group_name": "Condition Monitoring"},
+# S1: Cumulative Operations (path existed in drawer but was missing from seed_modules)
+{"name": "Cumulative Operations",
+ "description": "SRS §4.2.1 — CB operations counter and OLTC tap-change counter tracking. "
+                "Auto-triggers overhaul workflow when cumulative ops exceed configured threshold.",
+ "path": "cumulative",
+ "group_name": "Maintenance"},
     ]
 
     module_ids = {}
@@ -2042,6 +2067,67 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Senior Management Approver",  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "TRC Member",                  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
+
+        # ✅ TEST SCHEDULES & SCHEDULE COMPLIANCE — S4 (SRS §4 Testing Schedule)
+        # Schedule Templates (test_templates path) controlled above; these cover
+        # the live schedule list (testing_schedules) and compliance view (schedule_compliance).
+        {"role": "Maintenance Officer",        "module": "Test Schedule Templates",  "can_view": True},
+        {"role": "Reviewing Officer",          "module": "Test Schedule Templates",  "can_view": True},
+        {"role": "Supervisory Officer",        "module": "Test Schedule Templates",  "can_view": True},
+        {"role": "Senior Management Approver", "module": "Test Schedule Templates",  "can_view": True},
+        {"role": "Test Engineer",              "module": "Test Schedule Templates",  "can_view": True},
+
+        # ✅ CUMULATIVE OPERATIONS — S5 (SRS §5 Maintenance Log)
+        # AE/JE and Maintenance Officer field-write; EE TLSS approve; SEE/CEE read-only.
+        {"role": "Test Engineer",              "module": "Cumulative Operations", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Maintenance Officer",        "module": "Cumulative Operations", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Reviewing Officer",          "module": "Cumulative Operations", "can_view": True, "can_approve": True},
+        {"role": "Supervisory Officer",        "module": "Cumulative Operations", "can_view": True},
+        {"role": "Senior Management Approver", "module": "Cumulative Operations", "can_view": True},
+
+        # ✅ CALIBRATION — S6 (SRS §Appendix E Relay UEIC Calibration)
+        # EE RT writes calibration data; SEE/CEE review; Reviewing Officer approves.
+        {"role": "Reviewing Officer",          "module": "Calibration", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Supervisory Officer",        "module": "Calibration", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Senior Management Approver", "module": "Calibration", "can_view": True},
+        {"role": "Test Engineer",              "module": "Calibration", "can_view": True},
+        {"role": "Maintenance Officer",        "module": "Calibration", "can_view": True},
+
+        # ✅ TEST RESULTS — S7 (SRS §4.5 Test Result Approvals)
+        # Test Engineers submit; EE TLSS (Reviewing Officer) approves; SEE/CEE read-only.
+        {"role": "Test Engineer",              "module": "Test Results", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Maintenance Officer",        "module": "Test Results", "can_view": True, "can_add": True},
+        {"role": "Reviewing Officer",          "module": "Test Results", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Supervisory Officer",        "module": "Test Results", "can_view": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Test Results", "can_view": True},
+
+        # ✅ AE DASHBOARD — Test Engineer (AE_JE)
+        {"role": "Test Engineer",              "module": "AE Dashboard",  "can_view": True},
+
+        # ✅ AEE DASHBOARD — Maintenance Officer (AEE_MAINTENANCE) + Procurement Officer (per _DFT_ROLE_MODULE_PATH)
+        {"role": "Maintenance Officer",        "module": "AEE Dashboard", "can_view": True},
+        {"role": "Procurement Officer",        "module": "AEE Dashboard", "can_view": True},
+
+        # ✅ SEE DASHBOARD — Supervisory Officer (SEE_WM / SEE_RT)
+        {"role": "Supervisory Officer",        "module": "SEE Dashboard", "can_view": True},
+
+        # ✅ CEE DASHBOARD — Senior Management Approver (CEE / CEE_RT_RD)
+        {"role": "Senior Management Approver", "module": "CEE Dashboard", "can_view": True},
+
+        # ✅ ASSET DASHBOARD — Asset Data Officer
+        {"role": "Asset Data Officer",         "module": "Asset Dashboard",            "can_view": True},
+
+        # ✅ TEST COORDINATOR DASHBOARD — Test & Work Coordinator
+        {"role": "Test & Work Coordinator",    "module": "Test Coordinator Dashboard", "can_view": True},
+
+        # ✅ EE RT DASHBOARD — Reviewing Officer (RT track)
+        {"role": "Reviewing Officer",          "module": "EE RT Dashboard",  "can_view": True},
+
+        # ✅ SEE RT DASHBOARD — Supervisory Officer (RT track)
+        {"role": "Supervisory Officer",        "module": "SEE RT Dashboard", "can_view": True},
+
+        # ✅ CEE RT DASHBOARD — Senior Management Approver (RT RD track)
+        {"role": "Senior Management Approver", "module": "CEE RT Dashboard", "can_view": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -3122,6 +3208,26 @@ def migrate_equipment_register(session):
 
 # ----------------- Migrate Schema -----------------
 
+def migrate_modules_description_to_text(session):
+    """Widen modules.description from VARCHAR(255) to TEXT so long SRS descriptions fit."""
+    from sqlalchemy import text
+    try:
+        session.execute(text("""
+            ALTER TABLE public.modules
+            ALTER COLUMN description TYPE TEXT;
+        """))
+        session.commit()
+        print("[OK] modules.description column widened to TEXT.")
+    except Exception as e:
+        session.rollback()
+        # Column may already be TEXT — not an error
+        msg = str(e)
+        if 'does not exist' in msg or 'already' in msg.lower():
+            print("[SKIP] modules.description already TEXT or table missing.")
+        else:
+            print(f"[OK] modules.description migration: {msg[:120]}")
+
+
 def migrate_testing_request_columns(session):
     """Add columns to testing_requests and create tester_locations table if missing."""
     from sqlalchemy import text
@@ -3261,6 +3367,9 @@ def seed_role_templates(session):
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
     asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
     test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
+    ee_rt_dashboard_module_id  = modules_by_name.get("EE RT Dashboard")
+    see_rt_dashboard_module_id = modules_by_name.get("SEE RT Dashboard")
+    cee_rt_dashboard_module_id = modules_by_name.get("CEE RT Dashboard")
     aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
     see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
     cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
@@ -3299,6 +3408,20 @@ def seed_role_templates(session):
     procurement_approvals_module = [mid for mid in [modules_by_name.get("Procurement Approvals")] if mid]
     taqc_inspections_module      = [mid for mid in [modules_by_name.get("TA&QC Inspections")] if mid]
     failure_registry_module      = [mid for mid in [modules_by_name.get("Failure Registry")] if mid]
+    notifications_module         = [mid for mid in [modules_by_name.get("Notifications")] if mid]
+    reports_module               = [mid for mid in [modules_by_name.get("Reports")] if mid]
+    calibration_module           = [mid for mid in [modules_by_name.get("Calibration")] if mid]
+    test_results_module          = [mid for mid in [modules_by_name.get("Test Results")] if mid]
+    cumulative_module            = [mid for mid in [modules_by_name.get("Cumulative Operations")] if mid]
+
+    # Role-specific dashboard modules as lists (for use in permissions_template)
+    see_dashboard_module         = [see_dashboard_module_id] if see_dashboard_module_id else []
+    cee_dashboard_module         = [cee_dashboard_module_id] if cee_dashboard_module_id else []
+    ee_tlss_dashboard_module     = [ee_tlss_dashboard_module_id] if ee_tlss_dashboard_module_id else []
+    aee_dashboard_module_list    = [aee_dashboard_module_id] if aee_dashboard_module_id else []
+    ee_rt_dashboard_module       = [ee_rt_dashboard_module_id]  if ee_rt_dashboard_module_id  else []
+    see_rt_dashboard_module      = [see_rt_dashboard_module_id] if see_rt_dashboard_module_id else []
+    cee_rt_dashboard_module      = [cee_rt_dashboard_module_id] if cee_rt_dashboard_module_id else []
 
     dashboard_module = [mid for mid in [modules_by_name.get("Dashboard")] if mid]
 
@@ -3411,7 +3534,9 @@ def seed_role_templates(session):
                 _readwrite(breakdown_workflows_module) +
                 _readwrite(overhaul_workflows_module) +      # OVERHAUL_TRIGGER, OVERHAUL_EXECUTION, COMPLETION_UPLOAD
                 _readwrite(calibration_workflows_module) +   # CAL_REVIEW, CAL_EXECUTION, CAL_CERTIFICATE
-                _readwrite(annual_audit_workflows_module)    # OBSERVATION_REPORTING, OBSERVATION_ASSIGNMENT
+                _readwrite(annual_audit_workflows_module) +  # OBSERVATION_REPORTING, OBSERVATION_ASSIGNMENT
+                _readwrite(cumulative_module) +              # S5: AEE tracks CB/OLTC cumulative ops (SRS §4.2.1)
+                _readonly(test_results_module)               # S7: view test results
             ),
         },
 
@@ -3426,12 +3551,14 @@ def seed_role_templates(session):
             "permissions_template": (
                 _readonly(testing_requests_module) +
                 _readwrite(testing_module) +
+                _readwrite(test_results_module) +            # S7: AE/tester enters test results
                 _readonly(equipment_module) +
                 _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module) +
                 _readwrite(overhaul_workflows_module) +      # OVERHAUL_EXECUTION, COMPLETION_UPLOAD
                 _readwrite(calibration_workflows_module) +   # CAL_EXECUTION, CAL_CERTIFICATE
-                _readonly(annual_audit_workflows_module)     # view-only; TA&QC Inspector is the actor
+                _readonly(annual_audit_workflows_module) +   # view-only; TA&QC Inspector is the actor
+                _readwrite(cumulative_module)                # S5: AE logs CB/OLTC operations (SRS §4.2.1)
             ),
         },
 
@@ -3466,18 +3593,22 @@ def seed_role_templates(session):
             "default_module_id": ee_tlss_dashboard_module_id,
             "permissions_template": (
                 _readwrite(dashboard_module) +
+                _readonly(ee_tlss_dashboard_module) +        # explicit access to EE TLSS role dashboard
                 _approve(approvals_module) +
                 _approve(recommendations_module) +
                 _readwrite(testing_requests_module) +
                 _approve(testing_request_approvals_module) +
                 _readwrite(testing_module) +
+                _approve(test_results_module) +              # S7: Reviewing Officer approves test results
                 _readonly(equipment_module) +
                 _readonly(procurement_modules) +
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
                 _approve(overhaul_workflows_module) +        # OVERHAUL_TRIGGER review + OFFICER_VERIFICATION
+                _readwrite(calibration_module) +             # S6: EE_RT manages calibration records
                 _approve(calibration_workflows_module) +     # CAL_REVIEW + CAL_VERIFY
                 _approve(annual_audit_workflows_module) +    # COMPLIANCE_REVIEW
+                _readonly(cumulative_module) +               # S5: EE_TLSS views cumulative ops
                 _readonly(failure_registry_module)
             ),
         },
@@ -3493,18 +3624,28 @@ def seed_role_templates(session):
             "default_module_id": see_dashboard_module_id,
             "permissions_template": (
                 _readonly(dashboard_module) +
+                _readonly(see_dashboard_module) +            # explicit access to SEE role dashboard
                 _approve(approvals_module) +
                 _readonly(recommendations_module) +
                 _readonly(testing_requests_module) +
                 _readwrite(testing_module) +
+                _readonly(test_results_module) +             # S7: SEE_WM views test results
                 _approve(testing_request_approvals_module) +
                 _readonly(vendor_documents_module) +
                 _readonly(equipment_module) +
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
+                _readwrite(taqc_inspections_module) +         # SEE_WM: create & edit TA&QC inspections (SRS §6)
+                _approve(surveillance_workflows_module) +     # SEE_WM: approve post-repair surveillance stages (SRS §7.3)
+                _readonly(surveillance_dashboard_module) +   # SEE_WM: view surveillance summary
                 _readonly(overhaul_workflows_module) +       # management visibility
+                _readonly(calibration_module) +              # S6: SEE_RT management visibility on calibration records
                 _readonly(calibration_workflows_module) +    # management visibility
-                _readonly(annual_audit_workflows_module)     # management visibility
+                _readonly(annual_audit_workflows_module) +   # management visibility
+                _readonly(cumulative_module) +               # S5: SEE_WM monitors CB/OLTC counters
+                _readonly(failure_registry_module) +         # SEE_WM: view failure reports (SRS §3.4)
+                _readonly(notifications_module) +            # SEE_WM: receives notifications (SRS §8.2)
+                _readwrite(reports_module)                   # SEE_WM: export reports (SRS §9)
             ),
         },
 
@@ -3519,8 +3660,10 @@ def seed_role_templates(session):
             "default_module_id": cee_dashboard_module_id,
             "permissions_template": (
                 _readwrite(dashboard_module) +
+                _readonly(cee_dashboard_module) +            # explicit access to CEE role dashboard
                 _approve(approvals_module) +
                 _full(testing_module) +
+                _readonly(test_results_module) +             # S7: CEE views test results
                 _readwrite(equipment_module) +
                 _readonly(testing_requests_module) +
                 _readonly(procurement_modules) +
@@ -3529,8 +3672,13 @@ def seed_role_templates(session):
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
                 _approve(overhaul_workflows_module) +        # OFFICER_VERIFICATION final sign-off
+                _readonly(calibration_module) +              # S6: CEE_RT_RD management visibility on calibration
                 _approve(calibration_workflows_module) +     # CAL_VERIFY final sign-off
-                _approve(annual_audit_workflows_module)      # OBSERVATION_CLOSURE final sign-off
+                _approve(annual_audit_workflows_module) +    # OBSERVATION_CLOSURE final sign-off
+                _readonly(cumulative_module) +               # S5: CEE views cumulative ops summary
+                _readonly(failure_registry_module) +
+                _readonly(notifications_module) +
+                _readwrite(reports_module)
             ),
         },
 
@@ -8313,6 +8461,7 @@ def run_seed():
         print("=" * 80 + "\n")
 
         # Core System
+        migrate_modules_description_to_text(session)
         migrate_testing_request_columns(session)
         migrate_equipment_register(session)
         role_ids = seed_roles(session)
@@ -9683,11 +9832,15 @@ _DFT_ROLE_MODULE_PATH = {
     "System Administrator":             "admin_dashboard",
     "Asset Data Officer":               "asset_dashboard",
     "Maintenance Officer":              "aee_dashboard",
-    "Test Engineer":                    "aee_dashboard",
+    "Test Engineer":                    "ae_dashboard",
     "Test & Work Coordinator":          "test_coordinator_dashboard",
-    "Reviewing Officer":                "ee_tlss_dashboard",
-    "Supervisory Officer":              "see_dashboard",
-    "Senior Management Approver":       "cee_dashboard",
+    "Reviewing Officer":                "ee_tlss_dashboard",   # O&M track
+    "Supervisory Officer":              "see_dashboard",        # O&M track
+    "Senior Management Approver":       "cee_dashboard",        # O&M track
+    # RT track — dedicated calibration dashboards
+    "EE RT":                            "ee_rt_dashboard",
+    "SEE RT":                           "see_rt_dashboard",
+    "CEE RT RD":                        "cee_rt_dashboard",
     "TA&QC Inspector":                  "ee_tlss_dashboard",
     "Transformer Repair Coordinator":   "ee_tlss_dashboard",
     "Procurement Officer":              "aee_dashboard",

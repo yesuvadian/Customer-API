@@ -401,10 +401,12 @@ def login_user(db: Session, email: str, password: str):
         raise
 
     except Exception as e:
-        print(f"Login error: {e}")
+        import traceback
+        print(f"[LOGIN ERROR] {type(e).__name__}: {e}")
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred during login."
+            detail=f"Login error: {type(e).__name__}: {e}"
         )
 # ==============================
 # Authentication Logic

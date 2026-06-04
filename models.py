@@ -26,7 +26,7 @@ from sqlalchemy.orm import relationship
 from database import Base
 from utils.common_service import UTCDateTimeMixin
 import uuid
-from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, Date, DateTime, func
+from sqlalchemy import Column, String, Text, Boolean, Integer, ForeignKey, Date, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -1691,7 +1691,7 @@ class Module(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(50), unique=True, nullable=False)
-    description = Column(String(255))
+    description = Column(Text)          # Text (unlimited) — descriptions can be long SRS references
     path = Column(String(255))
     group_name = Column(String(50))
     is_active = Column(Boolean, default=True)

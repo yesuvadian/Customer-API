@@ -1897,3 +1897,19 @@ def clone_schedule_rule_as_org_override(
     db.commit()
     db.refresh(clone)
     return _srule_out(clone)
+
+
+# ── SSE stream stub ───────────────────────────────────────────────────────────
+# The Flutter client polls /notifications/stream for real-time push.
+# A full SSE implementation is a future sprint item; for now return an empty
+# keep-alive response so the client gets 200 instead of 404.
+from fastapi.responses import StreamingResponse
+
+@router.get("/stream")
+def notification_stream(
+    current_user: User = Depends(get_current_user),
+):
+    """Server-Sent Events stub — returns an empty SSE stream (204-style keep-alive)."""
+    def _empty():
+        yield ": keep-alive\n\n"
+    return StreamingResponse(_empty(), media_type="text/event-stream")
