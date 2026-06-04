@@ -996,6 +996,14 @@ async def replace_equipment(
     db.refresh(new)
 
     try:
+        from services.test_request_schedule_service import TestRequestScheduleService
+        TestRequestScheduleService.instantiate_equipment_schedules(db, new, current_user.id)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"[WARN] instantiate_equipment_schedules failed for replacement: {exc}")
+
+    try:
         from services.notification_service import NotificationService
         eq_type_name = (
             existing.equipment_type.name
