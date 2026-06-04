@@ -43,7 +43,7 @@ class ConsolidatedReportService:
         self._rs = ReportService(db)  # reuse section builders + styles
 
     # ─── Public entry ────────────────────────────────────────────────────────
-    def generate(
+    def _query_grouped(
         self,
         department_id: UUID,
         equipment_type_id: int,
@@ -51,16 +51,14 @@ class ConsolidatedReportService:
         date_from: Optional[date],
         date_to: Optional[date],
         equipment_ids: Optional[list[UUID]] = None,
-    ) -> bytes:
-        """Build the consolidated PDF and return raw bytes."""
+    ) -> dict:
+        """Run the filtered query and return {eq_id: {request, results}} grouped + deduped."""
         dept_ids = get_dept_subtree_ids(self.db, department_id)
 
         q = (
             self.db.query(TestResult)
             .join(TestingRequest, TestResult.testing_request_id == TestingRequest.id)
-            .options(
-                joinedload(TestResult.test_session),
-            )
+            .options(joinedload(TestResult.test_session))
             .filter(
                 TestingRequest.department_id.in_(dept_ids),
                 TestingRequest.equipment_type_id == equipment_type_id,
@@ -75,10 +73,8 @@ class ConsolidatedReportService:
         if date_to:
             q = q.filter(TestResult.tested_at <= datetime.combine(date_to, datetime.max.time()))
 
-        # Need equipment_id grouping — fetch the parent request too
         results = q.order_by(TestResult.tested_at.asc()).all()
 
-        # Group by equipment_id (results with no equipment fall under "Unassigned")
         grouped: dict = {}
         for r in results:
             req = self.db.query(TestingRequest).filter(
@@ -87,9 +83,24 @@ class ConsolidatedReportService:
             eq_id = str(req.equipment_id) if req and req.equipment_id else "unassigned"
             grouped.setdefault(eq_id, {"request": req, "results": []})["results"].append(r)
 
-        # Deduplicate per equipment: collapse duplicate (template_key) keeping latest
         for g in grouped.values():
             g["results"] = self._dedup_results(g["results"])
+        return grouped
+
+    def generate(
+        self,
+        department_id: UUID,
+        equipment_type_id: int,
+        test_type_ids: list[int],
+        date_from: Optional[date],
+        date_to: Optional[date],
+        equipment_ids: Optional[list[UUID]] = None,
+    ) -> bytes:
+        """Build the consolidated PDF and return raw bytes."""
+        grouped = self._query_grouped(
+            department_id, equipment_type_id, test_type_ids,
+            date_from, date_to, equipment_ids,
+        )
 
         # ── Build PDF ──────────────────────────────────────────────────────────
         buffer = io.BytesIO()
@@ -134,6 +145,87 @@ class ConsolidatedReportService:
         out = buffer.getvalue()
         buffer.close()
         return out
+
+    def generate_excel(
+        self,
+        department_id: UUID,
+        equipment_type_id: int,
+        test_type_ids: list[int],
+        date_from: Optional[date],
+        date_to: Optional[date],
+        equipment_ids: Optional[list[UUID]] = None,
+    ) -> bytes:
+        """Flat tabular summary — one row per test result. Returns xlsx bytes."""
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+        grouped = self._query_grouped(
+            department_id, equipment_type_id, test_type_ids,
+            date_from, date_to, equipment_ids,
+        )
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Test Summary"
+
+        headers = ["UEIC", "Substation", "Test Type", "Tested By",
+                   "Tested At", "Overall Result", "Evaluation"]
+        hdr_fill = PatternFill("solid", fgColor="1565C0")
+        hdr_font = Font(bold=True, color="FFFFFF", size=10)
+        thin = Side(style="thin", color="CCCCCC")
+        bdr = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        # Title
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+        t = ws.cell(row=1, column=1, value=self._title_line(equipment_type_id, date_from, date_to))
+        t.font = Font(bold=True, size=13, color="1565C0")
+        t.alignment = Alignment(horizontal="center")
+        ws.row_dimensions[1].height = 26
+
+        # Header row
+        for ci, h in enumerate(headers, 1):
+            c = ws.cell(row=2, column=ci, value=h)
+            c.fill = hdr_fill
+            c.font = hdr_font
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.border = bdr
+
+        r = 3
+        for eq_id, g in grouped.items():
+            req = g["request"]
+            eq = self.db.query(Equipment).filter(
+                Equipment.id == req.equipment_id
+            ).first() if req and req.equipment_id else None
+            ueic = eq.ueic if eq else "-"
+            substation = req.department.name if req and req.department else "-"
+            for result in g["results"]:
+                td = result.test_data or {}
+                ev = (result.evaluation_result or {}).get("overall", "-")
+                row_vals = [
+                    ueic,
+                    substation,
+                    result.test_name or result.template_key or "-",
+                    self._rs._user_name(result.tested_by),
+                    result.tested_at.strftime("%d-%b-%Y %H:%M") if result.tested_at else "-",
+                    (result.overall_result or td.get("overall_result") or "-"),
+                    ev,
+                ]
+                for ci, v in enumerate(row_vals, 1):
+                    c = ws.cell(row=r, column=ci, value=str(v))
+                    c.border = bdr
+                    c.font = Font(size=9)
+                r += 1
+
+        if r == 3:
+            ws.cell(row=3, column=1, value="No test results found for the selected criteria.")
+
+        # Column widths
+        for ci, w in enumerate([22, 24, 32, 20, 18, 14, 12], 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
     @staticmethod
