@@ -315,6 +315,28 @@ def _build_session_html(session: TestSession, readings: list, request: TestingRe
     def fmt(v):
         if v is None:
             return "-"
+        if isinstance(v, list) and v and isinstance(v[0], dict):
+            # Table field — render as a proper HTML sub-table
+            cols = list(v[0].keys())
+            header = "".join(
+                f"<th style='padding:4px 8px;background:#e8f0fe;color:#1b3a6b;"
+                f"font-size:11px;white-space:nowrap'>{c.replace('_',' ').title()}</th>"
+                for c in cols
+            )
+            rows_html = ""
+            for row in v:
+                cells = "".join(
+                    f"<td style='padding:4px 8px;border:1px solid #e0e0e0;font-size:11px'>"
+                    f"{row.get(c, '—')}</td>"
+                    for c in cols
+                )
+                rows_html += f"<tr>{cells}</tr>"
+            return (
+                f"<table style='border-collapse:collapse;width:100%;margin:2px 0'>"
+                f"<tr>{header}</tr>{rows_html}</table>"
+            )
+        if isinstance(v, list):
+            return ", ".join(str(i) for i in v) if v else "—"
         if isinstance(v, dict):
             import json
             return f"<pre style='margin:0;font-size:12px'>{json.dumps(v, indent=2)}</pre>"
@@ -587,36 +609,81 @@ def download_session_pdf(
         story.append(Paragraph("Form Submission", h2_style))
         td = test_result.test_data
         overall = (td.get("overall_result") or "").upper()
-        form_rows = [
-            [Paragraph("Field", ParagraphStyle("TH", fontSize=9, textColor=rl_colors.white, fontName="Helvetica-Bold")),
-             Paragraph("Value", ParagraphStyle("TH", fontSize=9, textColor=rl_colors.white, fontName="Helvetica-Bold"))],
-        ]
+
+        _cell_style   = ParagraphStyle("Cell",  fontSize=9)
+        _key_style    = ParagraphStyle("CellK", fontSize=9, fontName="Helvetica-Bold")
+        _th_style     = ParagraphStyle("TH",    fontSize=9, textColor=rl_colors.white, fontName="Helvetica-Bold")
+        _sub_th_style = ParagraphStyle("STH",   fontSize=8, textColor=rl_colors.white, fontName="Helvetica-Bold")
+        _sub_td_style = ParagraphStyle("STD",   fontSize=8)
+
+        def _table_style(hdr_color=navy):
+            return TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), hdr_color),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#f5f8ff")]),
+                ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#CCCCCC")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#DDDDDD")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ])
+
+        # Scalar fields → two-column key/value table
+        scalar_rows = [[Paragraph("Field", _th_style), Paragraph("Value", _th_style)]]
+        # Table fields (list of dicts) → collected for separate sub-tables below
+        table_fields: list[tuple[str, list]] = []
+
         for k, v in td.items():
             if k == "overall_result":
                 continue
-            form_rows.append([
-                Paragraph(k.replace("_", " ").title(), ParagraphStyle("Cell", fontSize=9, fontName="Helvetica-Bold")),
-                Paragraph(str(v) if v is not None else "-", ParagraphStyle("Cell", fontSize=9)),
-            ])
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                table_fields.append((k, v))
+            else:
+                scalar_rows.append([
+                    Paragraph(k.replace("_", " ").title(), _key_style),
+                    Paragraph(str(v) if v is not None else "—", _cell_style),
+                ])
+
         if overall:
-            result_color = rl_colors.HexColor("#1A7340") if overall == "PASS" else rl_colors.HexColor("#B71C1C") if overall == "FAIL" else rl_colors.black
-            form_rows.append([
-                Paragraph("Overall Result", ParagraphStyle("Cell", fontSize=9, fontName="Helvetica-Bold")),
-                Paragraph(overall, ParagraphStyle("Res", fontSize=9, textColor=result_color, fontName="Helvetica-Bold")),
+            res_color = rl_colors.HexColor("#1A7340") if overall == "PASS" \
+                else rl_colors.HexColor("#B71C1C") if overall == "FAIL" \
+                else rl_colors.black
+            scalar_rows.append([
+                Paragraph("Overall Result", _key_style),
+                Paragraph(overall, ParagraphStyle("Res", fontSize=9,
+                          textColor=res_color, fontName="Helvetica-Bold")),
             ])
-        form_table = Table(form_rows, colWidths=[2.2 * inch, 4.6 * inch])
-        form_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), navy),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#f5f8ff")]),
-            ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#CCCCCC")),
-            ("INNERGRID", (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#DDDDDD")),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-        ]))
-        story += [form_table, Spacer(1, 0.15 * inch)]
+
+        if len(scalar_rows) > 1:  # header + at least one row
+            t = Table(scalar_rows, colWidths=[2.2 * inch, 4.6 * inch])
+            t.setStyle(_table_style())
+            story += [t, Spacer(1, 0.1 * inch)]
+
+        # Table fields — rendered as labelled sub-tables with all columns including calculated
+        for field_key, rows in table_fields:
+            story.append(Paragraph(
+                field_key.replace("_", " ").title(),
+                ParagraphStyle("SubH", parent=h2_style, fontSize=10, spaceBefore=8, spaceAfter=4)
+            ))
+            if not rows:
+                story.append(Paragraph("No data.", _cell_style))
+                continue
+            cols = list(rows[0].keys())
+            available_w = 6.8 * inch
+            col_w = available_w / max(len(cols), 1)
+            col_widths_sub = [col_w] * len(cols)
+
+            sub_header = [Paragraph(c.replace("_", " ").title(), _sub_th_style) for c in cols]
+            sub_rows = [sub_header]
+            for row in rows:
+                sub_rows.append([
+                    Paragraph(str(row.get(c, "—")) if row.get(c) is not None else "—", _sub_td_style)
+                    for c in cols
+                ])
+            sub_t = Table(sub_rows, colWidths=col_widths_sub, repeatRows=1)
+            sub_t.setStyle(_table_style(hdr_color=teal))
+            story += [sub_t, Spacer(1, 0.12 * inch)]
 
     # Readings section
     story.append(Paragraph(f"Readings ({len(readings)})", h2_style))
