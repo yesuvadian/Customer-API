@@ -1086,6 +1086,16 @@ async def startup_event():
     except Exception as _e:
         logger.warning(f"[Seed] Pre-commission seed failed on startup (non-fatal): {_e}")
 
+    # Seed DFR template — idempotent upsert, ensures lock_default_rows:false is live
+    try:
+        _db = SessionLocal()
+        from seed import seed_dfr_template
+        seed_dfr_template(_db)
+        _db.close()
+        logger.info("[Seed] DFR / IDAX template upserted on startup")
+    except Exception as _e:
+        logger.warning(f"[Seed] DFR template seed failed on startup (non-fatal): {_e}")
+
     # Seed all notification defaults (event catalogue, variables, templates,
     # schedule rules, routing rules) — idempotent, safe to run on every restart
     try:
