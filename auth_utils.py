@@ -17,39 +17,32 @@ from utils.common_service import UTCDateTimeMixin
 from utils.email_service import EmailService
 
 
-#from mixins.time_utils import UTCDateTimeMixin  # ✅ import mixin
-
-# ==============================
-# Configuration
-# ==============================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
 MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", 5))
 LOGIN_LOCK_DURATION_MIN = int(os.getenv("LOGIN_LOCK_DURATION_MIN", 15))
-PASSWORD_HISTORY_LIMIT=int(os.getenv("PASSWORD_HISTORY_LIMIT", 5))
+PASSWORD_HISTORY_LIMIT = int(os.getenv("PASSWORD_HISTORY_LIMIT", 5))
 SECRET_KEY = os.getenv("SECRET_KEY", "your_super_secret_key_here")
 ALGORITHM = "HS256"
-RESET_TOKEN_EXPIRE_MINUTES=int(os.getenv("RESET_TOKEN_EXPIRE_MINUTES", 300))
+RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("RESET_TOKEN_EXPIRE_MINUTES", 300))
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-#BASE_URL=os.getenv("BASE_URL", "http://localhost:59685")
+
 
 # ==============================
 # Token Utilities
 # ==============================
+
 def create_refresh_token(user_id: str) -> str:
     """Create a JWT refresh token."""
     expire = UTCDateTimeMixin._utc_now() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {"sub": str(user_id), "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-# ----------------------------------------------------------------
-# 🔍 Verify and decode password reset token
-# ----------------------------------------------------------------
+
+
 def verify_reset_token(token: str) -> Optional[str]:
-    """
-    Verify a password reset token and return the user_id if valid.
-    """
+    """Verify a password reset token and return the user_id if valid."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != "password_reset":
@@ -75,19 +68,18 @@ def verify_reset_token(token: str) -> Optional[str]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid reset token"
         )
+
+
 def generate_reset_token(user_id: str) -> str:
-    """
-    Create a short-lived JWT token for password reset.
-    """
+    """Create a short-lived JWT token for password reset."""
     expire = UTCDateTimeMixin._utc_now() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(user_id),
         "exp": expire,
         "type": "password_reset",
     }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-    return token
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT access token."""
@@ -103,13 +95,10 @@ def decode_access_token(token: str):
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
         return None
-def get_registration_user(token: str = Depends(oauth2_scheme)) -> str:
-    """
-    Validate registration token issued in Step 1.
-    - Ensures token exists
-    - Ensures token contains a "sub" and type "register"
-    """
 
+
+def get_registration_user(token: str = Depends(oauth2_scheme)) -> str:
+    """Validate registration token issued in Step 1."""
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -125,33 +114,38 @@ def get_registration_user(token: str = Depends(oauth2_scheme)) -> str:
         if not user_or_session_id or token_type != "register":
             raise HTTPException(status_code=401, detail="Invalid registration token")
 
-        # Optional: enforce expiration
         if exp and UTCDateTimeMixin._utc_now().timestamp() > exp:
             raise HTTPException(status_code=401, detail="Registration token expired")
 
-        return user_or_session_id  # This identifies the pending user/session
+        return user_or_session_id
 
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired registration token",
         )
+
+
+# ==============================
+# Privilege Builder
+# ==============================
+
 def build_user_privileges(db: Session, user_id) -> dict:
     """
-    Build the merged privilege dict for a user from all their roles (old + org system).
+    Build the merged privilege dict for a user from all their roles.
     Returns: { "ModuleName": { "can_view": bool, ... , "is_active": bool }, ... }
     """
     modules_map = {
         m.id: {
             "name": m.name,
-            "is_active": m.is_active  # UI visibility ONLY
+            "is_active": m.is_active
         }
         for m in db.query(Module).all()
     }
 
     filtered_privileges = {}
 
-    # Old role system privileges (try-except in case table doesn't exist)
+    # Old role system privileges
     try:
         raw_privs = db.query(RoleModulePrivilege).filter(
             RoleModulePrivilege.role_id.in_(
@@ -180,16 +174,10 @@ def build_user_privileges(db: Session, user_id) -> dict:
                     "is_active": module_info["is_active"],
                 }
 
-            for key in [
-                "can_view",
-                "can_add",
-                "can_edit",
-                "can_delete",
-                "can_search",
-                "can_import",
-                "can_export",
-            ]:
+            for key in ["can_view", "can_add", "can_edit", "can_delete",
+                        "can_search", "can_import", "can_export"]:
                 filtered_privileges[mod_name][key] |= bool(getattr(priv, key, None) or False)
+
     except Exception as e:
         print(f"[INFO] Old role system not available in build_user_privileges: {e}")
         db.rollback()
@@ -224,27 +212,20 @@ def build_user_privileges(db: Session, user_id) -> dict:
                     "is_active": module_info["is_active"],
                 }
 
-            # Merge org role permissions (OR logic)
-            for key in [
-                "can_view",
-                "can_add",
-                "can_edit",
-                "can_delete",
-                "can_import",
-                "can_export",
-                "can_approve",
-                "can_assign",
-            ]:
+            for key in ["can_view", "can_add", "can_edit", "can_delete",
+                        "can_import", "can_export", "can_approve", "can_assign"]:
                 filtered_privileges[mod_name][key] |= bool(getattr(priv, key, None) or False)
 
     return filtered_privileges
 
 
+# ==============================
+# Login User (primary login function)
+# ==============================
 
 def login_user(db: Session, email: str, password: str):
     try:
-        print("[DEBUG] login_user called - NEW VERSION WITH DASHBOARD_TYPE")
-        # Always use UTC-aware time
+        print("[DEBUG] login_user called")
         now = UTCDateTimeMixin._utc_now()
 
         # Step 1: Fetch user
@@ -273,11 +254,11 @@ def login_user(db: Session, email: str, password: str):
             db.add(security)
             db.flush()
 
-        # Step 4: Account locked? Show remaining time
-        if security.login_locked_until and security.login_locked_until > now:
-            remaining = security.login_locked_until - now
-            remaining_minutes = int(remaining.total_seconds() // 60)
-
+        # Step 4: Account locked check
+        locked_until = UTCDateTimeMixin._make_aware(security.login_locked_until)
+        if locked_until and locked_until > now:
+            remaining = locked_until - now
+            remaining_minutes = max(1, int(remaining.total_seconds() // 60))
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Account locked. Try again in {remaining_minutes} minute(s)."
@@ -285,78 +266,72 @@ def login_user(db: Session, email: str, password: str):
 
         # Step 5: Password verification
         if verify_password(password, user.password_hash):
-
-            # Reset attempts
+            # ✅ Correct password — reset attempts and clear expired lock
             security.failed_login_attempts = 0
-
-            # Clear lock ONLY if expired
-            if security.login_locked_until and security.login_locked_until <= now:
+            if locked_until and locked_until <= now:
                 security.login_locked_until = None
-
             db.commit()
-
         else:
-            # FAILED LOGIN
-            security.failed_login_attempts += 1
+            # ❌ Wrong password — increment attempts
+            db.rollback()  # clear any dirty state before writing
+            security.failed_login_attempts = (security.failed_login_attempts or 0) + 1
 
-            # Lock account
             if security.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
                 security.login_locked_until = now + timedelta(minutes=LOGIN_LOCK_DURATION_MIN)
                 db.commit()
-
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Too many failed attempts. Account locked for {LOGIN_LOCK_DURATION_MIN} minute(s)."
                 )
 
-            # Not locked yet → generic error
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
             )
 
-        # Step 6: Load roles from organization role system
+        # Step 6: Load roles — initialize org_user_roles before if/else
         from models import OrgUserRole, OrgRole
 
         role_names = []
-        dashboard_type = "generic"  # default
+        dashboard_type = "generic"
+        org_user_roles = []  # ✅ always initialized
 
-        # Super-admin users bypass the org-role requirement
         if getattr(user, "usertype", None) == "super_admin":
             role_names = ["super_admin"]
             dashboard_type = "admin"
         else:
-            org_user_roles = db.query(OrgUserRole).filter_by(user_id=user.id, is_active=True).all()
+            org_user_roles = db.query(OrgUserRole).filter_by(
+                user_id=user.id, is_active=True
+            ).all()
+
             if org_user_roles:
                 org_role_ids = [ur.org_role_id for ur in org_user_roles]
                 org_roles = db.query(OrgRole).filter(OrgRole.id.in_(org_role_ids)).all()
                 role_names = [r.name for r in org_roles]
 
-                # Use dashboard_type from the first active role
-                # If user has multiple roles, prioritize: admin > supervisor > field > generic
                 priority = {"admin": 4, "supervisor": 3, "field": 2, "generic": 1}
                 for role in org_roles:
                     role_dashboard = getattr(role, "default_dashboard_type", "generic")
                     if priority.get(role_dashboard, 0) > priority.get(dashboard_type, 0):
                         dashboard_type = role_dashboard
 
-        # Check if user has at least one role
+        # Step 7: Ensure user has at least one role
         if not role_names:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User has no roles assigned. Contact administrator."
             )
 
-        # -------------------------------------------------------
-        # Step 7: Privileges (uses shared helper)
-        # -------------------------------------------------------
+        # Step 8: Build privileges
         filtered_privileges = build_user_privileges(db, user.id)
-        primary_department_id = None
 
+        # Step 9: Primary department
+        primary_department_id = None
         if org_user_roles:
             primary_department_id = org_user_roles[0].department_id
-        # Step 8: Plan info
+
+        # Step 10: Plan info
         plan = None
         if user.plan_id:
             plan_obj = db.query(Plan).filter_by(id=user.plan_id).first()
@@ -368,7 +343,7 @@ def login_user(db: Session, email: str, password: str):
                     "plan_limit": plan_obj.plan_limit,
                 }
 
-        # Step 9: Login success
+        # Step 11: Build and return result
         result = {
             "access_token": create_access_token({"sub": str(user.id)}),
             "refresh_token": create_refresh_token(str(user.id)),
@@ -393,7 +368,6 @@ def login_user(db: Session, email: str, password: str):
             "privileges": filtered_privileges
         }
 
-        # Debug log
         print(f"[DEBUG] dashboard_type in result: {result['user'].get('dashboard_type')}")
         return result
 
@@ -406,24 +380,39 @@ def login_user(db: Session, email: str, password: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred during login."
         )
+
+
 # ==============================
-# Authentication Logic
+# Authenticate User (session-based)
 # ==============================
+
 def authenticate_user(db: Session, username: str, password: str, request=None):
     """
-    Authenticate a user using the user_security table for tracking
-    failed logins and lockouts. Uses UTCDateTimeMixin for all datetime operations.
-    Creates a UserSession on successful login.
+    Authenticate a user and create a UserSession on success.
+    Raises HTTPException on all failure cases.
     """
     if not username or not password:
-        return {"error": "Username and password required", "status": 400}
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username and password are required"
+        )
 
-    # 🔍 Find user
+    # Find user
     user = db.query(User).filter(User.email == username).first()
     if not user:
-        return {"error": "Invalid credentials", "status": 401}
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials"
+        )
 
-    # 🔐 Ensure user_security record exists
+    # Check user is active
+    if not user.isactive:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive. Please contact administrator."
+        )
+
+    # Ensure security record exists
     security = db.query(UserSecurity).filter_by(user_id=user.id).first()
     if not security:
         security = UserSecurity(user_id=user.id)
@@ -433,44 +422,51 @@ def authenticate_user(db: Session, username: str, password: str, request=None):
 
     now = UTCDateTimeMixin._utc_now()
 
-    # 🚫 Check if account is locked
+    # Check lock
     locked_until = UTCDateTimeMixin._make_aware(security.login_locked_until)
     if locked_until:
         if locked_until <= now:
-            # 🔓 Lock expired — clear it automatically
+            # Lock expired — clear it
             security.login_locked_until = None
             db.commit()
         else:
-            # 🚷 Still locked
             seconds_left = (locked_until - now).total_seconds()
-            remaining_minutes = int(seconds_left // 60)
-            if remaining_minutes == 0 and seconds_left > 0:
-                remaining_minutes = 1
-            return {
-                "error": f"Account locked. Try again in {remaining_minutes} minutes.",
-                "status": 403,
-            }
+            remaining_minutes = max(1, int(seconds_left // 60))
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Account locked. Try again in {remaining_minutes} minute(s)."
+            )
 
-    # 🔑 Verify password
+    # Verify password
     if not verify_password(password, user.password_hash):
+        db.rollback()  # clear dirty state before writing
         security.failed_login_attempts = (security.failed_login_attempts or 0) + 1
+
         if security.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
             security.login_locked_until = now + timedelta(minutes=LOGIN_LOCK_DURATION_MIN)
             security.failed_login_attempts = 0
-        db.commit()
-        return {"error": "Invalid credentials", "status": 401}
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Too many failed attempts. Account locked for {LOGIN_LOCK_DURATION_MIN} minute(s)."
+            )
 
-    # ✅ Successful login
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials"
+        )
+
+    # Successful login — reset security counters
     security.failed_login_attempts = 0
     security.login_locked_until = None
     db.commit()
 
-    # -----------------------------
-    # Create a user session (JWT tracking)
-    # -----------------------------
+    # Create tokens
     access_token = create_access_token({"sub": str(user.id)})
     refresh_token = create_refresh_token(str(user.id))
 
+    # Create session
     session = UserSession(
         user_id=user.id,
         access_token=access_token,
@@ -496,16 +492,16 @@ def authenticate_user(db: Session, username: str, password: str, request=None):
 # ==============================
 # Get Current User
 # ==============================
-from fastapi import Depends, HTTPException, Request, status
 
 _optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+
 
 def get_current_user(
     request: Request,
     header_token: Optional[str] = Depends(_optional_oauth2_scheme),
     db: Session = Depends(get_db)
 ):
-    # If middleware already validated the user, reuse it (avoids double JWT decode)
+    # Reuse middleware-validated user if available
     if hasattr(request.state, "user") and request.state.user is not None:
         return request.state.user
 
@@ -525,7 +521,6 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Decode JWT
     try:
         payload = jwt.decode(raw_token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id_str = payload.get("sub")
@@ -535,7 +530,6 @@ def get_current_user(
     except Exception:
         raise credentials_exception
 
-    # Get user
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise credentials_exception
@@ -543,9 +537,12 @@ def get_current_user(
     return user
 
 
+# ==============================
+# Password Reset
+# ==============================
 
 def requestpasswordreset(db: Session, email: str, request: Request) -> str:
-    # 🔍 1. Find the user
+    # Find user
     user = db.query(User).filter_by(email=email).first()
     if not user:
         raise HTTPException(
@@ -553,17 +550,17 @@ def requestpasswordreset(db: Session, email: str, request: Request) -> str:
             detail="User not found"
         )
 
-    # 🔒 2. Invalidate any previous unused tokens
+    # Invalidate previous unused tokens
     db.query(PasswordResetToken).filter(
         PasswordResetToken.user_id == user.id,
         PasswordResetToken.used == False
     ).update({"used": True})
     db.commit()
 
-    # 🧩 3. Generate a new token
+    # Generate new token
     reset_token = generate_reset_token(user.id)
 
-    # 💾 4. Store the token in DB
+    # Store token
     token_entry = PasswordResetToken(
         user_id=user.id,
         token=reset_token,
@@ -574,13 +571,11 @@ def requestpasswordreset(db: Session, email: str, request: Request) -> str:
     db.add(token_entry)
     db.commit()
 
-    # 📧 5. Send email via your existing EmailService
+    # Send email
     email_service = EmailService()
     email_service.send_password_reset(to_email=user.email, token=reset_token)
 
-    # 🔗 6. Return link for debugging or frontend testing
     reset_link = f"{email_service.base_url}/reset-password?token={reset_token}&email={user.email}"
-
     return reset_link
 
 
@@ -591,7 +586,7 @@ def resetpassword(db: Session, token: str, new_password: str):
             detail="Token and new password are required"
         )
 
-    # 1️⃣ Verify JWT and extract user_id
+    # Verify JWT and extract user_id
     user_id = verify_reset_token(token)
     if not user_id:
         raise HTTPException(
@@ -599,7 +594,7 @@ def resetpassword(db: Session, token: str, new_password: str):
             detail="Invalid or expired reset token"
         )
 
-    # 2️⃣ Check if token is already used
+    # Check token record
     from models import PasswordResetToken
     token_entry = db.query(PasswordResetToken).filter_by(token=token).first()
     if not token_entry:
@@ -620,7 +615,7 @@ def resetpassword(db: Session, token: str, new_password: str):
             detail="Reset token has expired"
         )
 
-    # 3️⃣ Fetch user
+    # Fetch user
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
         raise HTTPException(
@@ -628,13 +623,14 @@ def resetpassword(db: Session, token: str, new_password: str):
             detail="User not found"
         )
 
-    # 4️⃣ Check if new password matches old ones
+    # Check password not same as current
     if verify_password(new_password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="New password cannot be the same as the current password."
         )
 
+    # Check password history
     history = (
         db.query(PasswordHistory)
         .filter_by(user_id=user_id)
@@ -650,11 +646,11 @@ def resetpassword(db: Session, token: str, new_password: str):
                 detail=f"New password cannot be one of your last {PASSWORD_HISTORY_LIMIT} passwords."
             )
 
-    # 5️⃣ Update password
+    # Update password
     new_hash = get_password_hash(new_password)
     user.password_hash = new_hash
 
-    # Ensure UserSecurity record exists
+    # Ensure security record exists
     security = db.query(UserSecurity).filter_by(user_id=user.id).first()
     if not security:
         security = UserSecurity(user_id=user.id)
@@ -664,7 +660,7 @@ def resetpassword(db: Session, token: str, new_password: str):
     security.failed_login_attempts = 0
     security.login_locked_until = None
 
-    # 6️⃣ Save to PasswordHistory
+    # Save to history
     pw_entry = PasswordHistory(
         user_id=user.id,
         password_hash=new_hash,
@@ -674,10 +670,10 @@ def resetpassword(db: Session, token: str, new_password: str):
     )
     db.add(pw_entry)
 
-    # 7️⃣ Mark token as used
+    # Mark token used
     token_entry.used = True
 
-    # 8️⃣ Prune old password history
+    # Prune old history
     total_history = (
         db.query(PasswordHistory)
         .filter_by(user_id=user.id)
