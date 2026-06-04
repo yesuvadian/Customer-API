@@ -110,6 +110,7 @@ from routers import admin_notification_events as admin_notification_events_route
 
 # Dashboard KPIs
 from routers import dashboard_kpi
+from routers import dashboard_role_kpi
 
 # Reporting Suite
 from routers import reporting as reporting_router
@@ -1020,6 +1021,7 @@ app.include_router(admin_notification_events_router.router)
 
 # Dashboard KPIs
 app.include_router(dashboard_kpi.router)
+app.include_router(dashboard_role_kpi.router)
 
 # Reporting Suite
 app.include_router(reporting_router.router)
