@@ -64,6 +64,20 @@ def create_request(
         raise HTTPException(400, str(e))
 
 
+@router.post("/config/ensure")
+def ensure_config(
+    db:   Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Idempotently seed PRE_COMMISSION stage role mappings for this org."""
+    try:
+        from seed_precommission_workflow import seed_precommission_role_mappings
+        seeded = seed_precommission_role_mappings(db, user.organization_id)
+        return {"message": "Pre-commission configuration ready", "role_mappings_upserted": seeded}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
 @router.get("/requests/unlinked")
 def list_unlinked_requests(
     db:   Session = Depends(get_db),

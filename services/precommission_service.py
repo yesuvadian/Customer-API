@@ -280,6 +280,13 @@ class PreCommissionService:
     # ── Internal workflow creation ────────────────────────────────────────────
 
     def _create_qap_workflow(self, pcr: PreCommissionRequest, user: User) -> RepairWorkflow:
+        # Ensure org-specific role mappings are seeded (idempotent)
+        try:
+            from seed_precommission_workflow import seed_precommission_role_mappings
+            seed_precommission_role_mappings(self.db, pcr.organization_id)
+        except Exception as _e:
+            print(f"[WARN] precommission role mapping seed failed (non-fatal): {_e}")
+
         wf_def = self.db.query(RepairWorkflowDefinition).filter_by(
             workflow_code=WORKFLOW_CODE
         ).first()
