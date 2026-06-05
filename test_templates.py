@@ -4955,14 +4955,19 @@ TEST_TEMPLATES = {
                             },
                             "match_by_column": "frequency_hz",
                             "column_comparisons": {
+                                # Amplitude deviation is bidirectional — a winding/core
+                                # shift can move the trace UP or DOWN. Thresholds are
+                                # symmetric so |deviation| drives the status:
+                                #   |dev| <= 3 dB → NORMAL, 3–6 dB → ALERT, > 6 dB → CRITICAL
                                 "amplitude_db": {
                                     "aggregate_type": None,
                                     "deviation_type": "absolute",
+                                    "normal_min": -3.0,
                                     "normal_max": 3.0,
-                                    "alert_max": None,
                                     "alert_min": None,
+                                    "alert_max": None,
+                                    "critical_below": -6.0,
                                     "critical_above": 6.0,
-                                    "critical_below": None,
                                 },
                             },
                         },
