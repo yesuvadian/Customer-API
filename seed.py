@@ -1159,9 +1159,18 @@ def seed_roles(session):
     # =========================
     {"name": "FINANCE_OFFICER", "description": "Approves estimates and financial sanction for repair"},
 
-    # NOTE: KPTCL field roles (AE_JE, AEE_MAINTENANCE, EE_TLSS, SEE_WM,
-    # EE_RT, SEE_RT, CEE_TRANSMISSION_ZONE, CEE_RT_RD) are now seeded as
-    # OrgRoles via seed_seacms_roles_users.py — source of truth for KPTCL.
+    # =========================
+    # ⚡ KPTCL FIELD ROLES (system Role table — used by seed_privileges)
+    # OrgRole equivalents with full permissions seeded by seed_seacms_roles_users.py
+    # =========================
+    {"name": "AE_JE", "description": "Assistant Engineer / Junior Engineer - failure reporting & commissioning"},
+    {"name": "AEE_MAINTENANCE", "description": "Assistant Executive Engineer - field maintenance authority"},
+    {"name": "EE_TLSS", "description": "Executive Engineer - Transmission Line & Substation reviewer"},
+    {"name": "SEE_WM", "description": "Superintending Engineer - Works & Maintenance supervisor"},
+    {"name": "EE_RT", "description": "Executive Engineer - Research & Testing"},
+    {"name": "SEE_RT", "description": "Superintending Engineer - Research & Testing"},
+    {"name": "CEE_TRANSMISSION_ZONE", "description": "Chief Engineer Executive - Transmission zone authority"},
+    {"name": "CEE_RT_RD", "description": "Chief Engineer Executive - Research, Testing & R&D"},
 
 ]
 
@@ -11861,6 +11870,10 @@ def run_seed():
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")
+        # seed_role_templates seeds generic OrgRole names (Reviewing Officer,
+        # Maintenance Officer, etc.) that stage workflows resolve by name via
+        # db.query(OrgRole).filter_by(name=...). Must run before workflow seeding.
+        seed_role_templates(session)
         seed_super_admin(session)
         seed_tester_role_module_requirements(session)
         seed_sample_organization(session)
