@@ -1515,9 +1515,15 @@ def _resolve_routing(
     activity_type: Optional[str] = None,
     status_from: Optional[str] = None,
     status_to: Optional[str] = None,
+    require_followup: bool = False,
 ) -> Optional["NotificationRoutingRule"]:
     """
     Find the best-matching active routing rule for a fire() call.
+
+    When require_followup=True, only rules whose followup_action has
+    create_request=true are considered — used to find the ticket-creating rule
+    independently of the channel-routing rule (an org may have a notification-only
+    rule that wins channel selection while a separate rule carries the followup).
 
     Resolution order
     ────────────────
@@ -1559,6 +1565,10 @@ def _resolve_routing(
     )
 
     for rule in candidates:
+        if require_followup:
+            _fa = rule.followup_action or {}
+            if not _fa.get("create_request"):
+                continue
         if not _scope_matches(rule.applicable_workflow_types,  workflow_type):
             continue
         if not _scope_matches(rule.applicable_equipment_types, equipment_type):
@@ -2046,23 +2056,41 @@ class NotificationService:
             # If the matched routing rule has a followup_action config, create
             # the downstream ticket using WorkflowDispatchService — same logic
             # as the recommendation wizard approval flow.
-            if (
-                event_type in ("eval_alert", "eval_critical")
-                and routing
-                and getattr(routing, 'followup_action', None)
-            ):
-                try:
-                    _execute_followup_action(
-                        db=self.db,
-                        action=routing.followup_action,
-                        source_id=source_id,
-                        source_type=source_type,
-                        organization_id=organization_id,
-                        department_id=department_id,
-                    )
-                except Exception as _fa_exc:
-                    logger.warning(
-                        f"[Notif] followup_action failed for event={event_type!r}: {_fa_exc}"
+            if event_type in ("eval_alert", "eval_critical"):
+                # The channel-routing rule may be a notification-only rule (no
+                # followup_action). Resolve the ticket-creating rule independently
+                # so a separate matching rule with a followup_action still fires.
+                followup_rule = routing if (
+                    routing and (routing.followup_action or {}).get("create_request")
+                ) else _resolve_routing(
+                    self.db, event_type, organization_id,
+                    workflow_type=workflow_type,
+                    equipment_type=equipment_type,
+                    test_type=test_type,
+                    activity_type=activity_type,
+                    status_from=status_from,
+                    status_to=status_to,
+                    require_followup=True,
+                )
+                if followup_rule and followup_rule.followup_action:
+                    try:
+                        _execute_followup_action(
+                            db=self.db,
+                            action=followup_rule.followup_action,
+                            source_id=source_id,
+                            source_type=source_type,
+                            organization_id=organization_id,
+                            department_id=department_id,
+                        )
+                    except Exception as _fa_exc:
+                        logger.warning(
+                            f"[Notif] followup_action failed for event={event_type!r}: {_fa_exc}"
+                        )
+                else:
+                    logger.info(
+                        f"[Notif] {event_type}: no routing rule with a followup_action "
+                        f"matched (org={organization_id}, equip_type={equipment_type!r}, "
+                        f"workflow={workflow_type!r}) — notification sent, no ticket created"
                     )
 
         except Exception as exc:
