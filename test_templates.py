@@ -527,14 +527,23 @@ TEST_TEMPLATES = {
         "name": "Physical inspection",
         "equipment_type": "Transformer",
         "description": "Visual and physical condition assessment of transformer",
+        "context_bindings": {"location": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "location", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Transformer Identification",
                 "fields": [
                     {"key": "transformer_make", "label": "Transformer Make", "type": "text", "required": True},
                     {"key": "transformer_serial", "label": "Serial Number", "type": "text", "required": True},
                     {"key": "transformer_rating", "label": "Rating", "type": "text", "placeholder": "e.g. 100 kVA"},
-                    {"key": "location", "label": "Installation Location", "type": "text"},
                 ]
             },
             {
@@ -1021,7 +1030,18 @@ TEST_TEMPLATES = {
         "name": "Transformer Physical Inspection",
         "equipment_type": "Power Transformer",
         "description": "Physical inspection and megger test results for power transformers",
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class", "vector_group": "equipment.vector_group"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Physical Inspection",
                 "fields": [
@@ -1801,7 +1821,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": True,
         "typical_session_interval_days": 180,
         "typical_total_sessions": 2,
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "rated_mva": "equipment.rated_mva", "voltage_class": "equipment.voltage_class", "vector_group": "equipment.vector_group"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "rated_mva", "label": "Rated MVA", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                ],
+            },
             # ── SRS §5.2.1: Universal metadata mandatory on every maintenance record ──
             {
                 "title": "Test / Maintenance Metadata",
@@ -1936,7 +1968,17 @@ TEST_TEMPLATES = {
         "supports_multi_session": True,
         "typical_session_interval_days": 365,
         "typical_total_sessions": 1,
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             # ── SRS §5.2.1: Universal metadata ──
             {
                 "title": "Inspection Metadata",
@@ -3476,7 +3518,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "nameplate.substation_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Maintenance Metadata",
                 "fields": [
@@ -3526,12 +3580,22 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "nameplate.substation_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",      "label": "Station Name",       "type": "text", "required": True},
-                    {"key": "bay_number",         "label": "Bay Number",          "type": "text"},
                     {"key": "inspection_date",    "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type",    "label": "Inspection Category", "type": "dropdown", "required": True,
                      "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
@@ -3783,7 +3847,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "nameplate.substation_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Maintenance Metadata",
                 "fields": [
@@ -3826,12 +3902,22 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "nameplate.substation_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",       "type": "text", "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",          "type": "text"},
                     {"key": "inspection_date",  "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type",  "label": "Inspection Category", "type": "dropdown", "required": True,
                      "options": ["Electrical Safety", "General Maintenance", "Documentation"]},
@@ -4197,7 +4283,17 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Maintenance Metadata",
                 "fields": [
@@ -4243,11 +4339,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",       "type": "text", "required": True},
                     {"key": "battery_id",      "label": "Battery Set ID",     "type": "text"},
                     {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
@@ -4290,11 +4395,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",       "type": "text", "required": True},
                     {"key": "panel_id",        "label": "Panel / Bay ID",     "type": "text"},
                     {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
@@ -4333,11 +4447,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",       "type": "text", "required": True},
                     {"key": "feeder_id",       "label": "Feeder / Bay ID",    "type": "text"},
                     {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
@@ -4433,7 +4556,16 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Maintenance Information",
                 "fields": [
@@ -4486,7 +4618,16 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Information",
                 "fields": [
