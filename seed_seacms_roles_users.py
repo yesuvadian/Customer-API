@@ -100,17 +100,12 @@ ROLE_DEFS = [
         "description": "Assistant Engineer / Junior Engineer / Substation Operator — Field",
         "dashboard_path": "ae_dashboard",
         "permissions": [
-            # ASSETS
             ("equipment",                  RW),
-            # CONDITION MONITORING
             ("testing_requests",           READ),
             ("testing",                    RW),
-            ("cumulative",                 RW),
-            # MAINTENANCE
-            # WORKFLOWS (read-only on repair/overhaul that AE/JE can see)
-            # OUTPUT
+            ("repair-workflows",           RW),
+            ("overhaul-workflows",         RW),
             ("notifications",              READ),
-            # DASHBOARDS
             ("ae_dashboard",               READ),
         ],
     },
@@ -119,10 +114,8 @@ ROLE_DEFS = [
         "description": "Assistant Executive Engineer – Maintenance / Nodal Officer — Field Supervisor",
         "dashboard_path": "aee_dashboard",
         "permissions": [
-            # ASSETS
             ("equipment",                  RW),
             ("failure_registry",           RW),
-            # CONDITION MONITORING
             ("testing_requests",           RW_APPROVE),
             ("testing",                    RW),
             ("recommendations",            READ_APPROVE),
@@ -130,22 +123,16 @@ ROLE_DEFS = [
             ("testing_request_approvals",  READ_APPROVE),
             ("maintenance_schedules",      READ),
             ("schedule_compliance",        READ),
-            # MAINTENANCE
-            ("cumulative",                 RW_APPROVE),
-            # REPAIR & LIFECYCLE
             ("repair-workflows",           RW_APPROVE),
             ("overhaul-workflows",         RW_APPROVE),
+            ("calibration-workflows",      RW_APPROVE),
             ("surveillance-workflows",     RW_APPROVE),
             ("surveillance-dashboard",     EXPORT),
-            # TA&QC
             ("taqc_inspections",           RW),
             ("annual_audits",              RW),
             ("annual-audit-workflows",     RW_APPROVE),
-            ("annual-audit-queue",         ASSIGN),
-            # OUTPUT
             ("notifications",              READ),
             ("reports",                    EXPORT),
-            # DASHBOARDS
             ("aee_dashboard",              READ),
             ("workflow-dashboard",         READ),
         ],
@@ -155,32 +142,24 @@ ROLE_DEFS = [
         "description": "Executive Engineer – Transmission Line Sub-Station — Zone Officer",
         "dashboard_path": "ee_tlss_dashboard",
         "permissions": [
-            # ASSETS
             ("equipment",                  RW),
             ("failure_registry",           RW),
-            # CONDITION MONITORING
             ("testing_requests",           RW_APPROVE),
             ("testing",                    RW),
             ("recommendations",            READ_APPROVE),
             ("approvals",                  READ_APPROVE),
             ("maintenance_schedules",      READ),
             ("schedule_compliance",        READ),
-            # MAINTENANCE
-            ("cumulative",                 APPROVE),
-            # REPAIR & LIFECYCLE
             ("repair-workflows",           RW_APPROVE),
             ("overhaul-workflows",         RW_APPROVE),
+            ("calibration-workflows",      RW_APPROVE),
             ("surveillance-workflows",     RW_APPROVE),
             ("surveillance-dashboard",     EXPORT),
-            # TA&QC
             ("taqc_inspections",           RW),
             ("annual_audits",              RW),
             ("annual-audit-workflows",     RW_APPROVE),
-            ("annual-audit-queue",         ASSIGN),
-            # OUTPUT
             ("notifications",              READ),
             ("reports",                    EXPORT),
-            # DASHBOARDS
             ("ee_tlss_dashboard",          READ),
             ("workflow-dashboard",         READ),
         ],
@@ -222,18 +201,13 @@ ROLE_DEFS = [
         "description": "Executive Engineer – Relay & Testing — RT Wing",
         "dashboard_path": "ee_rt_dashboard",
         "permissions": [
-            # ASSETS
             ("equipment",                  RW),
-            # CONDITION MONITORING
             ("testing",                    RW),
             ("test_register",              READ),
-            ("calibration",                RW_APPROVE),
             ("calibration-workflows",      RW_APPROVE),
-            # DASHBOARDS
             ("ee_rt_dashboard",            READ),
             ("ee_tlss_dashboard",          READ),
             ("workflow-dashboard",         READ),
-            # OUTPUT
             ("notifications",              READ),
             ("reports",                    EXPORT),
         ],
@@ -243,18 +217,13 @@ ROLE_DEFS = [
         "description": "Superintending Electrical Engineer – Relay & Testing — RT Wing",
         "dashboard_path": "see_rt_dashboard",
         "permissions": [
-            # ASSETS
             ("equipment",                  READ),
-            # CONDITION MONITORING
             ("testing",                    RW),
             ("test_register",              READ),
-            ("calibration",                RW_APPROVE),
             ("calibration-workflows",      RW_APPROVE),
-            # DASHBOARDS
             ("see_rt_dashboard",           READ),
             ("see_dashboard",              READ),
             ("workflow-dashboard",         READ),
-            # OUTPUT
             ("notifications",              READ),
             ("reports",                    EXPORT),
         ],
@@ -293,21 +262,15 @@ ROLE_DEFS = [
         "description": "Chief Electrical Engineer – RT & R&D — Senior Management",
         "dashboard_path": "cee_rt_dashboard",
         "permissions": [
-            # ASSETS
             ("equipment",                  RW),
-            # CONDITION MONITORING
             ("testing",                    READ),
             ("test_register",              READ),
-            ("calibration",                RW_APPROVE),
             ("calibration-workflows",      RW_APPROVE),
             ("testing_request_approvals",  READ_APPROVE),
-            # TEST TEMPLATES
             ("test_templates",             RW),
-            # DASHBOARDS
             ("cee_rt_dashboard",           READ),
             ("cee_dashboard",              READ),
             ("workflow-dashboard",         READ),
-            # OUTPUT
             ("notifications",              READ),
             ("reports",                    EXPORT),
         ],
