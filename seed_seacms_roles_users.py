@@ -14,6 +14,9 @@ Engineering designation roles:
   CEE_TRANSMISSION_ZONE     → cee_dashboard
   CEE_RT_RD                 → cee_rt_dashboard
 
+Admin / system roles:
+  System Administrator       → admin_dashboard
+
 Operational / support roles:
   Asset Data Officer         → asset_dashboard
   Transformer Repair Coordinator → ee_tlss_dashboard
@@ -310,6 +313,19 @@ ROLE_DEFS = [
         ],
     },
 
+    # ── Admin / System Roles ──────────────────────────────────────────────────
+    {
+        "name":        "System Administrator",
+        "description": "Manages organisation structure: users, roles and departments.",
+        "dashboard_path": "admin_dashboard",
+        "permissions": [
+            ("organizations",              FULL),
+            ("org_user_roles",             FULL),
+            ("org_role_permissions",       FULL),
+            ("notifications",              READ),
+        ],
+    },
+
     # ── Operational / Support Roles ───────────────────────────────────────────
     {
         "name":        "Asset Data Officer",
@@ -383,6 +399,7 @@ USER_DEFS = [
     ("see.rt@utility.local",          "Anand",     "Krishnamurthy", "9900001006", "BAN",                "SEE_RT"),
     ("cee.transmission@utility.local","Rajesh",    "Srinivasan",    "9900001007", "BAN",                "CEE_TRANSMISSION_ZONE"),
     ("cee.rtrd@utility.local",        "Prakash",   "Murthy",        "9900001008", "BAN",                "CEE_RT_RD"),
+    ("orgadmin@utility.com",           "Org",       "Admin",         "9900001000", "BAN",                "System Administrator"),
     ("asset.officer@utility.local",   "Kavitha",   "Nair",          "9900001009", "BAN",                "Asset Data Officer"),
     ("trc@utility.local",             "Sanjay",    "Reddy",         "9900001010", "BAN",                "Transformer Repair Coordinator"),
     ("taqc.inspector@utility.local",  "Deepa",     "Menon",         "9900001011", "BAN",                "TA&QC Inspector"),
@@ -428,6 +445,8 @@ def seed():
             for k, v in dept_map.items():
                 if code in k or k.startswith(code[:3]):
                     return v
+            print("Department map:", dept_map)
+            print("All departments:", len(all_depts))
             # Fallback: Bangalore Zone
             return dept_map.get("BAN") or all_depts[0].id
 

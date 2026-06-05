@@ -5372,7 +5372,8 @@ def seed_notifications_module_and_permissions(session):
     ).first()
 
     if not org_user_role:
-        raise Exception("User is not part of KPTCL organization")
+        print("[WARN] seed_notifications_module_and_permissions: orgadmin@utility.com has no OrgUserRole — skipping notification permissions")
+        return
 
     # ─────────────────────────────────────────────────────────────
     # 5. Get Org Admin role (ORG-SCOPED)
@@ -5384,7 +5385,8 @@ def seed_notifications_module_and_permissions(session):
     ).first()
 
     if not org_admin_role:
-        raise Exception("Org Admin role not found for KPTCL")
+        print("[WARN] seed_notifications_module_and_permissions: 'System Administrator' OrgRole not found for KPTCL — skipping")
+        return
 
     # ─────────────────────────────────────────────────────────────
     # 6. Assign permissions (ORG-SCOPED)
