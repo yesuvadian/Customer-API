@@ -8500,6 +8500,9 @@ def seed_tan_delta_templates(session) -> int:
         ("sfra_routine",
          "Sweep Frequency Response Analysis (SFRA) — Routine",
          "Single-session SFRA with static correlation-coefficient acceptance floors (no factory baseline)."),
+        ("transformer_physical_inspection",
+         "Transformer Physical Inspection",
+         "Physical inspection and megger test results for power transformers."),
     ]
 
     # Resolve the equipment-type master PER TEMPLATE from its own equipment_type
