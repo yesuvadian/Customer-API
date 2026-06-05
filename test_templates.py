@@ -527,7 +527,7 @@ TEST_TEMPLATES = {
         "name": "Physical inspection",
         "equipment_type": "Transformer",
         "description": "Visual and physical condition assessment of transformer",
-        "context_bindings": {"location": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "context_bindings": {"location": "nameplate.location", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
             {
                 "title": "Equipment Details",
@@ -853,7 +853,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Electronic Tri-vector Meter",
         "description": "Testing of energy meters at substations",
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
         },
         "sections": [
             {
@@ -906,7 +906,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Protection Relay",
         "description": "Testing of relays at substations with phase-wise readings",
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
         },
         "sections": [
             {
@@ -954,7 +954,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Power Transformer",
         "description": "Power transformer nameplate details and OLTC details",
         "context_bindings": {
-            "location":           "nameplate.substation_name",
+            "location":           "nameplate.location",
             "make":               "equipment.manufacturer",
             "rated_mva":          "equipment.rated_mva",
             "rated_voltage":      "equipment.voltage_class",
@@ -1450,7 +1450,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Current Transformer",
         "description": "Current transformer insulation test report with nameplate and IR measurements",
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
             "ct_make":      "equipment.manufacturer",
             "ct_sl_no":     "equipment.factory_serial_number",
             "ct_yom":       "nameplate.yom",
@@ -1519,7 +1519,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Current Transformer",
         "description": "Detailed CT ratio test with phase-wise readings across multiple cores",
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
         },
         "sections": [
             {
@@ -1588,7 +1588,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Capacitor Voltage Transformer",
         "description": "CVT test report with details, insulation resistance, and ratio test",
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
             "cvt_make":     "equipment.manufacturer",
             "cvt_sl_no":    "equipment.factory_serial_number",
             "cvt_yom":      "nameplate.yom",
@@ -1669,7 +1669,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Current Transformer",
         "description": "Capacitance and tan delta test results for current transformers",
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
             "ct_make":      "equipment.manufacturer",
             "ct_sl_no":     "equipment.factory_serial_number",
         },
@@ -1725,7 +1725,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Power Transformer",
         "description": "Comparison of capacitance and tan delta values across transformer bushings and CTs",
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "nameplate.location",
         },
         "sections": [
             {
@@ -1765,7 +1765,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Current Transformer",
         "description": "Capacitance and tan delta results for neutral current transformers",
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
             "nct_make":     "equipment.manufacturer",
             "nct_sl_no":    "equipment.factory_serial_number",
         },
@@ -3065,7 +3065,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":    "nameplate.substation_name",
+            "station_name":    "equipment.department_name",
             "bay_number":      "equipment.bay_number",
             "cb_make":         "equipment.manufacturer",
             "cb_serial":       "equipment.factory_serial_number",
@@ -3136,7 +3136,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":    "nameplate.substation_name",
+            "station_name":    "equipment.department_name",
             "bay_number":      "equipment.bay_number",
             "cb_make":         "equipment.manufacturer",
             "cb_serial":       "equipment.factory_serial_number",
@@ -3223,7 +3223,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":    "nameplate.substation_name",
+            "station_name":    "equipment.department_name",
             "bay_number":      "equipment.bay_number",
             "cb_make":         "equipment.manufacturer",
             "cb_serial":       "equipment.factory_serial_number",
@@ -3293,7 +3293,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":    "nameplate.substation_name",
+            "station_name":    "equipment.department_name",
             "bay_number":      "equipment.bay_number",
             "cb_make":         "equipment.manufacturer",
             "cb_serial":       "equipment.factory_serial_number",
@@ -3362,7 +3362,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":    "nameplate.substation_name",
+            "station_name":    "equipment.department_name",
             "bay_number":      "equipment.bay_number",
             "cb_make":         "equipment.manufacturer",
             "cb_serial":       "equipment.factory_serial_number",
@@ -3462,7 +3462,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":    "nameplate.substation_name",
+            "station_name":    "equipment.department_name",
             "bay_number":      "equipment.bay_number",
             "cb_make":         "equipment.manufacturer",
             "cb_serial":       "equipment.factory_serial_number",
@@ -3518,7 +3518,7 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
-        "context_bindings": {"station_name": "nameplate.substation_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
             {
                 "title": "Equipment Details",
@@ -3580,7 +3580,7 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
-        "context_bindings": {"station_name": "nameplate.substation_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
             {
                 "title": "Equipment Details",
@@ -3638,7 +3638,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":    "nameplate.substation_name",
+            "station_name":    "equipment.department_name",
             "bay_number":      "equipment.bay_number",
             "sa_make":         "equipment.manufacturer",
             "sa_serial":       "equipment.factory_serial_number",
@@ -3708,7 +3708,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":    "nameplate.substation_name",
+            "station_name":    "equipment.department_name",
             "bay_number":      "equipment.bay_number",
             "sa_make":         "equipment.manufacturer",
             "sa_serial":       "equipment.factory_serial_number",
@@ -3780,7 +3780,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":    "nameplate.substation_name",
+            "station_name":    "equipment.department_name",
             "bay_number":      "equipment.bay_number",
             "sa_make":         "equipment.manufacturer",
             "sa_serial":       "equipment.factory_serial_number",
@@ -3847,7 +3847,7 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
-        "context_bindings": {"station_name": "nameplate.substation_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
             {
                 "title": "Equipment Details",
@@ -3902,7 +3902,7 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
-        "context_bindings": {"station_name": "nameplate.substation_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
             {
                 "title": "Equipment Details",
@@ -3958,7 +3958,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":   "nameplate.substation_name",
+            "station_name":   "equipment.department_name",
             "battery_make":   "equipment.manufacturer",
             "rated_voltage_v":"equipment.voltage_class",
         },
@@ -4026,7 +4026,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
             "battery_make": "equipment.manufacturer",
         },
         "sections": [
@@ -4091,7 +4091,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
             "battery_make": "equipment.manufacturer",
         },
         "sections": [
@@ -4159,7 +4159,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name": "nameplate.substation_name",
+            "station_name": "equipment.department_name",
             "battery_make": "equipment.manufacturer",
         },
         "sections": [
@@ -4219,7 +4219,7 @@ TEST_TEMPLATES = {
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
         "context_bindings": {
-            "station_name":   "nameplate.substation_name",
+            "station_name":   "equipment.department_name",
             "battery_make":   "equipment.manufacturer",
             "rated_voltage_v":"equipment.voltage_class",
         },
@@ -4283,7 +4283,7 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
-        "context_bindings": {"station_name": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
             {
                 "title": "Equipment Details",
@@ -4339,7 +4339,7 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
-        "context_bindings": {"station_name": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
             {
                 "title": "Equipment Details",
@@ -4395,7 +4395,7 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
-        "context_bindings": {"station_name": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
             {
                 "title": "Equipment Details",
@@ -4447,7 +4447,7 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
-        "context_bindings": {"station_name": "nameplate.substation_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
             {
                 "title": "Equipment Details",
