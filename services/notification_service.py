@@ -1665,6 +1665,11 @@ def _execute_followup_action(
                 TestingRequest.request_category == followup_category,
                 TestingRequest.status.in_(["submitted", "assigned", "accepted", "in_progress"]),
                 TestingRequest.is_schedule_template.is_(False),
+                # Don't count the triggering test request itself — otherwise an
+                # alert whose follow-up category matches the in-progress test
+                # (e.g. next_action="test") is blocked by the very test that
+                # fired it. Only pre-existing OTHER open follow-ups should skip.
+                TestingRequest.id != tr.id,
             )
             .first()
         )
