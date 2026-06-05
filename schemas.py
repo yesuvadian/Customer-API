@@ -2300,7 +2300,7 @@ class EquipmentCreate(BaseModel):
     organization_id: Optional[UUID] = None
     department_id: UUID
     equipment_type_id: int
-    voltage_class: Optional[str] = None
+    voltage_class: str  # Required — used for UEIC generation and test threshold lookups
     bay_number: Optional[str] = None
     nameplate_data: Optional[dict] = None
     commissioned_date: Optional[datetime] = None

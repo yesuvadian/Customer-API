@@ -2390,6 +2390,12 @@ TEST_TEMPLATES = {
     "supports_multi_session": False,
     "typical_session_interval_days": 365,
     "typical_total_sessions": 1,
+    # Automatically inject equipment fields into the form context.
+    # Keys are form field names; values are "namespace.field" paths.
+    # Supported namespaces: "equipment" (top-level), "nameplate" (nameplate_data JSONB).
+    "context_bindings": {
+        "transformer_voltage": "equipment.voltage_class",
+    },
     "sections": [
 
         # ── Oil Test Results ─────────────────────────────────────────────────
@@ -2407,7 +2413,74 @@ TEST_TEMPLATES = {
                         {"key": "test_name",      "label": "Parameter",       "type": "readonly"},
                         {"key": "unit",           "label": "Unit",            "type": "readonly"},
                         {"key": "measured_value", "label": "Measured Value",  "type": "number"},
-                        {"key": "condition",      "label": "Condition",       "type": "text"},
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "measured_value",
+                                    "lookup_fields": [
+                                        "test_name",
+                                        {
+                                            "field": "$form.transformer_voltage",
+                                            "mapping": {
+                                                "11":  "<=72.5kV",
+                                                "33":  "<=72.5kV",
+                                                "66":  "<=72.5kV",
+                                                "110": "72.5-170kV",
+                                                "132": "72.5-170kV",
+                                                "220": ">170kV",
+                                                "400": ">170kV",
+                                            },
+                                        },
+                                    ],
+                                    "thresholds": {
+                                        "Acidity": {
+                                            ">170kV":     {"Good": [0, 0.10], "Fair": [0.10, 0.15], "Poor": [0.15, None]},
+                                            "72.5-170kV": {"Good": [0, 0.10], "Fair": [0.10, 0.20], "Poor": [0.20, None]},
+                                            "<=72.5kV":   {"Good": [0, 0.15], "Fair": [0.15, 0.30], "Poor": [0.30, None]},
+                                        },
+                                        "Resistivity at 90C": {
+                                            ">170kV":     {"Poor": [0, 3],   "Fair": [3,   10],   "Good": [10,  None]},
+                                            "72.5-170kV": {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
+                                            "<=72.5kV":   {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
+                                        },
+                                        "Tan Delta at 90C": {
+                                            ">170kV":     {"Good": [0, 0.2], "Poor": [0.2, None]},
+                                            "72.5-170kV": {"Good": [0, 0.5], "Poor": [0.5, None]},
+                                            "<=72.5kV":   {"Good": [0, 0.5], "Poor": [0.5, None]},
+                                        },
+                                        "BDV Top (T)": {
+                                            ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
+                                            "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
+                                            "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
+                                        },
+                                        "BDV Bottom (B)": {
+                                            ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
+                                            "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
+                                            "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
+                                        },
+                                        "Interfacial Tension": {
+                                            ">170kV":     {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
+                                            "72.5-170kV": {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
+                                            "<=72.5kV":   {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
+                                        },
+                                        "Flash Point": {
+                                            ">170kV":     {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
+                                            "72.5-170kV": {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
+                                            "<=72.5kV":   {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
+                                        },
+                                        "Water Content": {
+                                            ">170kV":     {"Good": [0, 15], "Fair": [15, 20], "Poor": [20, None]},
+                                            "72.5-170kV": {"Good": [0, 20], "Fair": [20, 30], "Poor": [30, None]},
+                                            "<=72.5kV":   {"Good": [0, 30], "Fair": [30, 40], "Poor": [40, None]},
+                                        },
+                                    },
+                                },
+                            },
+                        },
                         {"key": "remarks",        "label": "Remarks",         "type": "text"},
                     ],
                     "default_rows": [
