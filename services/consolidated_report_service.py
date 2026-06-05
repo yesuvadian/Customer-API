@@ -55,20 +55,7 @@ class ConsolidatedReportService:
         """Run the filtered query and return {eq_id: {request, results}} grouped + deduped."""
         dept_ids = get_dept_subtree_ids(self.db, department_id)
 
-        # Only include requests where testing is complete — i.e. results have
-        # been submitted by the tester. Excludes draft / assigned / in_progress.
         from models import TestingRequestStatus as TRS
-        _completed_statuses = [
-            TRS.test_submitted,    # tester submitted results, awaiting review
-            TRS.under_approval,    # under technical reviewer
-            TRS.under_review,      # reviewer sent back, tester revising
-            TRS.approved,          # reviewer approved
-            TRS.outcome_active,    # approved + downstream action dispatched
-            TRS.commissioned,      # TAQC approved, equipment commissioned
-            TRS.completed,         # explicitly marked complete
-            TRS.closed,            # no further action needed
-        ]
-
         q = (
             self.db.query(TestResult)
             .join(TestingRequest, TestResult.testing_request_id == TestingRequest.id)
@@ -76,7 +63,7 @@ class ConsolidatedReportService:
             .filter(
                 TestingRequest.department_id.in_(dept_ids),
                 TestingRequest.equipment_type_id == equipment_type_id,
-                TestingRequest.status.in_(_completed_statuses),
+                TestingRequest.status.in_([TRS.completed, TRS.closed]),
             )
         )
         if test_type_ids:
