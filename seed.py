@@ -1144,14 +1144,6 @@ def seed_roles(session):
     {"name": "APPROVER", "description": "Reviews and approves or rejects recommendations"},
 
     # =========================
-    # ⚡ KPTCL FIELD ROLES
-    # =========================
-    {"name": "AE_JE", "description": "Assistant Engineer / Junior Engineer - failure reporting & commissioning"},
-    {"name": "AEE_MAINTENANCE", "description": "Assistant Executive Engineer - field maintenance authority"},
-    {"name": "EE_TLSS", "description": "Executive Engineer - Transmission Line & Substation reviewer"},
-    {"name": "SEE_WM", "description": "Superintending Engineer - Works & Maintenance supervisor"},
-
-    # =========================
     # 🧠 TECHNICAL / COMMITTEE
     # =========================
     {"name": "TRC_MEMBER", "description": "Transformer Repair Committee member responsible for stage review decisions"},
@@ -1167,14 +1159,9 @@ def seed_roles(session):
     # =========================
     {"name": "FINANCE_OFFICER", "description": "Approves estimates and financial sanction for repair"},
 
-    # =========================
-    # 🏢 SPECIALIZED ENGINEERING (R&D / TRANSMISSION)
-    # =========================
-    {"name": "EE_RT", "description": "Executive Engineer - Research & Testing"},
-    {"name": "SEE_RT", "description": "Superintending Engineer - Research & Testing"},
-
-    {"name": "CEE_TRANSMISSION_ZONE", "description": "Chief Engineer Executive - Transmission zone authority"},
-    {"name": "CEE_RT_RD", "description": "Chief Engineer Executive - Research, Testing & R&D"}
+    # NOTE: KPTCL field roles (AE_JE, AEE_MAINTENANCE, EE_TLSS, SEE_WM,
+    # EE_RT, SEE_RT, CEE_TRANSMISSION_ZONE, CEE_RT_RD) are now seeded as
+    # OrgRoles via seed_seacms_roles_users.py — source of truth for KPTCL.
 
 ]
 
@@ -11874,13 +11861,26 @@ def run_seed():
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")
-        seed_role_templates(session)
         seed_super_admin(session)
         seed_tester_role_module_requirements(session)
         seed_sample_organization(session)
 
         # Seed KPTCL Organization with Departments
         kptcl_org = seed_kptcl_organization(session)
+
+        # ── KPTCL Org Roles + Users (source of truth) ──────────────────────────
+        # Seeds AE_JE, AEE_MAINTENANCE, EE_TLSS, SEE_WM, EE_RT, SEE_RT,
+        # CEE_TRANSMISSION_ZONE, CEE_RT_RD as OrgRoles with full module
+        # permissions and one demo user per role.
+        print("\n--- KPTCL Org Roles & Demo Users (seed_seacms_roles_users) ---")
+        try:
+            from seed_seacms_roles_users import seed as seed_seacms_roles_users
+            seed_seacms_roles_users()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] KPTCL org roles seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
         if kptcl_org:
             print("\n--- KPTCL Department Hierarchy Seeding ---")
             try:
