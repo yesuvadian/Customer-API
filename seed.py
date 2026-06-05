@@ -5673,9 +5673,16 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         substation_name = (row.get("substation") or "").strip()
         dept_id = dept_map.get(substation_name.lower())
         if not dept_id:
-            print(f"  [WARN] Department not found for substation: '{substation_name}' — skipping row")
-            skipped += 1
-            continue
+            # Fallback: try parent division name from the row
+            division_name = (row.get("division") or "").strip()
+            if division_name:
+                dept_id = dept_map.get(division_name.lower())
+            if not dept_id:
+                print(f"  [WARN] Department not found for substation: '{substation_name}' — skipping row")
+                skipped += 1
+                continue
+            else:
+                print(f"  [INFO] Substation '{substation_name}' mapped to parent division '{division_name}'")
 
         raw_type = (row.get("equipment_type") or "").strip()
         equip_type_id = None
@@ -13460,12 +13467,17 @@ def seed_dept_filter_users(session, org=None):
         name="RT South Division", code="RT_SOUTH",
         parent_id=circle.id,
     )
+    div_east   = _dft_get_or_create_dept(
+        session, oid,
+        name="RT East Division", code="RT_EAST",
+        parent_id=circle.id,
+    )
     div_mysuru = _dft_get_or_create_dept(
         session, oid,
         name="Mysuru Division", code="MYSURU",
         parent_id=circle.id,
     )
-    dept_map = {"north": div_north, "south": div_south, "mysuru": div_mysuru}
+    dept_map = {"north": div_north, "south": div_south, "east": div_east, "mysuru": div_mysuru}
     for slug, dept in dept_map.items():
         print(f"  Div [{slug:6s}]: {dept.name}  ({dept.id})")
 
