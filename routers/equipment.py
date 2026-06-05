@@ -909,6 +909,9 @@ async def replace_equipment(
     pt_ratio: Optional[str] = Form(None),
     vector_group: Optional[str] = Form(None),
     impedance_pct: Optional[float] = Form(None),
+    precommission_request_id: Optional[str] = Form(
+        None, description="Optional: link the replacement to a completed, unlinked pre-commission request"
+    ),
     analysis_report: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -994,6 +997,21 @@ async def replace_equipment(
     db.commit()
     db.refresh(old)
     db.refresh(new)
+
+    # ── Optional: link the replacement to a pre-commission request ───────────
+    if precommission_request_id:
+        try:
+            _pcr_uuid = UUID(precommission_request_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="precommission_request_id must be a valid UUID.")
+        try:
+            from services.precommission_service import PreCommissionService
+            PreCommissionService(db).link_equipment(_pcr_uuid, new.id, current_user)
+            new.precommission_request_id = _pcr_uuid
+            db.commit()
+            db.refresh(new)
+        except Exception as _pcr_exc:
+            print(f"[WARN] PCR link failed on replace (non-fatal): {_pcr_exc}")
 
     try:
         from services.test_request_schedule_service import TestRequestScheduleService
