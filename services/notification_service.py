@@ -1657,13 +1657,21 @@ def _execute_followup_action(
     followup_category = next_action_str
 
     if tr.equipment_id:
+        # Open = any non-terminal status. Generated follow-up tickets start as
+        # 'draft' (then assigned/submitted), so the dedup MUST include draft —
+        # otherwise a second alert fire creates a duplicate ticket because the
+        # first (draft) follow-up isn't matched.
+        _open_statuses = [
+            "draft", "submitted", "assigned", "accepted", "in_progress",
+            "test_submitted", "under_approval", "under_review",
+        ]
         existing = (
             db.query(TestingRequest)
             .filter(
                 TestingRequest.equipment_id     == tr.equipment_id,
                 TestingRequest.organization_id  == (organization_id or tr.organization_id),
                 TestingRequest.request_category == followup_category,
-                TestingRequest.status.in_(["submitted", "assigned", "accepted", "in_progress"]),
+                TestingRequest.status.in_(_open_statuses),
                 TestingRequest.is_schedule_template.is_(False),
                 # Don't count the triggering test request itself — otherwise an
                 # alert whose follow-up category matches the in-progress test
