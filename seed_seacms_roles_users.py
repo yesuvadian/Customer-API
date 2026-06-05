@@ -1,20 +1,26 @@
 """
 seed_seacms_roles_users.py
 ==========================
-Creates 8 SEACMS OrgRoles for KPTCL with correct permissions per Role_Module_Matrix.md,
-then creates one demo user per role.
+SOURCE OF TRUTH for all KPTCL OrgRoles and demo users.
+Creates 12 OrgRoles with per-module OrgRolePermissions, then one demo user per role.
 
-Roles created:
-  AE_JE                  → ae_dashboard           (id=286)
-  AEE_MAINTENANCE        → aee_dashboard           (id=285)
-  EE_TLSS                → ee_tlss_dashboard       (id=282)
-  SEE_WM                 → see_dashboard           (id=287)
-  EE_RT                  → ee_rt_dashboard         (id=313)
-  SEE_RT                 → see_rt_dashboard        (id=314)
-  CEE_TRANSMISSION_ZONE  → cee_dashboard           (id=288)
-  CEE_RT_RD              → cee_rt_dashboard        (id=315)
+Engineering designation roles:
+  AE_JE                     → ae_dashboard
+  AEE_MAINTENANCE            → aee_dashboard
+  EE_TLSS                   → ee_tlss_dashboard
+  SEE_WM                    → see_dashboard
+  EE_RT                     → ee_rt_dashboard
+  SEE_RT                    → see_rt_dashboard
+  CEE_TRANSMISSION_ZONE     → cee_dashboard
+  CEE_RT_RD                 → cee_rt_dashboard
 
-All users password: Kptcl@2026
+Operational / support roles:
+  Asset Data Officer         → asset_dashboard
+  Transformer Repair Coordinator → ee_tlss_dashboard
+  TA&QC Inspector            → ee_tlss_dashboard
+  Procurement Officer        → aee_dashboard
+
+All demo users password: Kptcl@2026
 """
 
 import uuid
@@ -303,6 +309,63 @@ ROLE_DEFS = [
             ("reports",                    EXPORT),
         ],
     },
+
+    # ── Operational / Support Roles ───────────────────────────────────────────
+    {
+        "name":        "Asset Data Officer",
+        "description": "Creates testing requests and raises procurement. Can start repair workflows.",
+        "dashboard_path": "asset_dashboard",
+        "permissions": [
+            ("equipment",                  RW),
+            ("testing_requests",           RW),
+            ("failure_registry",           RW),
+            ("taqc_inspections",           RW),
+            ("precommission-requests",     RW),
+            ("precommission-workflows",    READ),
+            ("asset_dashboard",            READ),
+            ("notifications",              READ),
+        ],
+    },
+    {
+        "name":        "Transformer Repair Coordinator",
+        "description": "Assigns users to repair, overhaul, calibration and audit workflow stages.",
+        "dashboard_path": "ee_tlss_dashboard",
+        "permissions": [
+            ("repair-workflows",           RW_APPROVE),
+            ("overhaul-workflows",         RW_APPROVE),
+            ("calibration-workflows",      RW_APPROVE),
+            ("annual-audit-workflows",     RW_APPROVE),
+            ("surveillance-workflows",     RW_APPROVE),
+            ("precommission-workflows",    RW_APPROVE),
+            ("precommission-requests",     READ),
+            ("testing_requests",           READ),
+            ("workflow-dashboard",         READ),
+            ("ee_tlss_dashboard",          READ),
+            ("notifications",              READ),
+        ],
+    },
+    {
+        "name":        "TA&QC Inspector",
+        "description": "Technical Assurance & Quality Control Inspector. Performs annual substation inspections.",
+        "dashboard_path": "ee_tlss_dashboard",
+        "permissions": [
+            ("taqc_inspections",           RW),
+            ("annual-audit-workflows",     RW_APPROVE),
+            ("failure_registry",           READ),
+            ("ee_tlss_dashboard",          READ),
+            ("notifications",              READ),
+        ],
+    },
+    {
+        "name":        "Procurement Officer",
+        "description": "Manages procurement activities. Read-only access to repair workflows.",
+        "dashboard_path": "aee_dashboard",
+        "permissions": [
+            ("repair-workflows",           READ),
+            ("aee_dashboard",              READ),
+            ("notifications",              READ),
+        ],
+    },
 ]
 
 
@@ -320,6 +383,10 @@ USER_DEFS = [
     ("see.rt@utility.local",          "Anand",     "Krishnamurthy", "9900001006", "BAN",                "SEE_RT"),
     ("cee.transmission@utility.local","Rajesh",    "Srinivasan",    "9900001007", "BAN",                "CEE_TRANSMISSION_ZONE"),
     ("cee.rtrd@utility.local",        "Prakash",   "Murthy",        "9900001008", "BAN",                "CEE_RT_RD"),
+    ("asset.officer@utility.local",   "Kavitha",   "Nair",          "9900001009", "BAN",                "Asset Data Officer"),
+    ("trc@utility.local",             "Sanjay",    "Reddy",         "9900001010", "BAN",                "Transformer Repair Coordinator"),
+    ("taqc.inspector@utility.local",  "Deepa",     "Menon",         "9900001011", "BAN",                "TA&QC Inspector"),
+    ("procurement@utility.local",     "Ramesh",    "Iyer",          "9900001012", "BAN",                "Procurement Officer"),
 ]
 
 

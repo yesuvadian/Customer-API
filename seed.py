@@ -11870,10 +11870,6 @@ def run_seed():
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")
-        # seed_role_templates seeds generic OrgRole names (Reviewing Officer,
-        # Maintenance Officer, etc.) that stage workflows resolve by name via
-        # db.query(OrgRole).filter_by(name=...). Must run before workflow seeding.
-        seed_role_templates(session)
         seed_super_admin(session)
         seed_tester_role_module_requirements(session)
         seed_sample_organization(session)

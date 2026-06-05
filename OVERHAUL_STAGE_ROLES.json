@@ -1,26 +1,42 @@
 [
   {
     "stage_code": "OVERHAUL_TRIGGER",
-    "roles":           ["Reviewing Officer", "Maintenance Officer"],
-    "assign_also":     ["Reviewing Officer"],
+    "roles": [
+      "EE_TLSS",
+      "AEE_MAINTENANCE"
+    ],
+    "assign_also": [
+      "EE_TLSS"
+    ],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "OVERHAUL_EXECUTION",
-    "roles":           ["Test Engineer", "Maintenance Officer"],
-    "assign_also":     [],
+    "roles": [
+      "AE_JE",
+      "AEE_MAINTENANCE"
+    ],
+    "assign_also": [],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "COMPLETION_UPLOAD",
-    "roles":           ["Test Engineer", "Maintenance Officer"],
-    "assign_also":     [],
+    "roles": [
+      "AE_JE",
+      "AEE_MAINTENANCE"
+    ],
+    "assign_also": [],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "OFFICER_VERIFICATION",
-    "roles":           ["Reviewing Officer", "Senior Management Approver"],
-    "assign_also":     ["Reviewing Officer"],
+    "roles": [
+      "EE_TLSS",
+      "CEE_TRANSMISSION_ZONE"
+    ],
+    "assign_also": [
+      "EE_TLSS"
+    ],
     "assignment_role": "Transformer Repair Coordinator"
   }
 ]
