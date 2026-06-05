@@ -252,6 +252,23 @@ class ReportService:
 
         table = self._detail_table(data, styles)
         elements.append(table)
+
+        # Bushing details (identity) — from the linked equipment nameplate register
+        nd = (request.equipment.nameplate_data or {}) if request.equipment else {}
+        bushings = nd.get("bushing_details")
+        if isinstance(bushings, list) and bushings:
+            elements.append(Spacer(1, 2 * mm))
+            elements.extend(self._build_list_table(
+                "Bushing Details",
+                bushings,
+                [
+                    {"key": "winding",   "label": "Winding / Level"},
+                    {"key": "phase",     "label": "Phase"},
+                    {"key": "make",      "label": "Make"},
+                    {"key": "serial_no", "label": "Sl. No."},
+                    {"key": "yo_mfg",    "label": "Y.O. Mfg."},
+                ],
+            ))
         return elements
 
     # ───────────────────────────────────────────────────

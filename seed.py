@@ -179,6 +179,27 @@ NAMEPLATE_TEMPLATES = {
                 ]
             },
             {
+                "title": "Bushing Details",
+                "fields": [
+                    {
+                        "key": "bushing_details",
+                        "label": "Bushing Details (per winding / phase)",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "read_only": False,
+                        "columns": [
+                            {"key": "winding",   "label": "Winding / Level", "type": "dropdown",
+                             "options": ["HV (220kV)", "HV (400kV)", "HV (110kV)", "MV (66kV)", "MV (33kV)", "LV (11kV)", "Tertiary", "Neutral"]},
+                            {"key": "phase",     "label": "Phase",   "type": "dropdown", "options": ["R", "Y", "B", "N"]},
+                            {"key": "make",      "label": "Make",    "type": "text"},
+                            {"key": "serial_no", "label": "Sl. No.", "type": "text"},
+                            {"key": "yo_mfg",    "label": "Y.O. Mfg.", "type": "number"},
+                        ],
+                    },
+                ]
+            },
+            {
                 "title": "Insulating Oil",
                 "fields": [
                     {"key": "oil_type",                  "label": "Oil Type",           "type": "dropdown", "required": False, "read_only": False,

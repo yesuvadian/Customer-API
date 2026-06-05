@@ -352,4 +352,21 @@ class ConsolidatedReportService:
             ["DOC", doc_date, "", ""],
         ]
         elements.append(self._rs._detail_table(data, styles))
+
+        # Bushing details (identity) — from the equipment nameplate register
+        bushings = nd.get("bushing_details")
+        if isinstance(bushings, list) and bushings:
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph("Bushing Details", styles.get("SmallNote", styles["CellLabel"])))
+            elements.extend(self._rs._build_list_table(
+                "Bushing Details",
+                bushings,
+                [
+                    {"key": "winding",   "label": "Winding / Level"},
+                    {"key": "phase",     "label": "Phase"},
+                    {"key": "make",      "label": "Make"},
+                    {"key": "serial_no", "label": "Sl. No."},
+                    {"key": "yo_mfg",    "label": "Y.O. Mfg."},
+                ],
+            ))
         return elements

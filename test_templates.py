@@ -2392,48 +2392,10 @@ TEST_TEMPLATES = {
     "typical_total_sessions": 1,
     "sections": [
 
-        # ── Section 1 — Equipment & Test Details (NO CHANGE) ─────────────────
-        {
-            "title": "Equipment & Test Details",
-            "fields": [
-                {"key": "reference_no",          "label": "Reference No.",           "type": "text",     "required": False},
-                {"key": "substation_name",        "label": "Substation Name",         "type": "text",     "required": True},
-                {"key": "sample_no",              "label": "Sample No.",              "type": "text",     "required": False},
-                {"key": "doc",                    "label": "Date of Commissioning",   "type": "date",     "required": False},
-                {"key": "yom",                    "label": "Year of Manufacture",     "type": "text",     "required": False},
-                {"key": "date_of_filtration",     "label": "Date of Last Filtration", "type": "date",     "required": False},
-                {"key": "date_of_test",           "label": "Date of Test",            "type": "date",     "required": True},
-                {"key": "transformer_voltage",    "label": "Transformer Voltage",     "type": "dropdown", "required": True,
-                 "options": ["11kV", "33kV", "66kV", "110kV", "132kV", "220kV", "400kV"]},
-            ],
-        },
-
-        # ── Section 2 — Oil Test Measurements ───────────────────────────────
+        # ── Oil Test Results ─────────────────────────────────────────────────
         {
             "title": "Oil Test Measurements",
             "fields": [
-                {
-                    "key": "threshold_reference",
-                    "label": "IS 1866:2017 Acceptable Limits (Good Range)",
-                    "type": "calculated",
-                    "rule": {
-                        "type": "LOOKUP",
-                        "config": {
-                            "field": "$form.transformer_voltage",
-                            "mapping": {
-                                "11kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
-                                "33kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
-                                "66kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
-                                "110kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
-                                "132kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
-                                "220kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
-                                "400kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
-                            }
-                        }
-                    }
-                },
-
-                # ── Oil Test Results Table (NO CHANGE to existing) ───────────
                 {
                     "key": "oil_test_results",
                     "label": "Test Results as per IS 1866:2017",
@@ -2445,75 +2407,8 @@ TEST_TEMPLATES = {
                         {"key": "test_name",      "label": "Parameter",       "type": "readonly"},
                         {"key": "unit",           "label": "Unit",            "type": "readonly"},
                         {"key": "measured_value", "label": "Measured Value",  "type": "number"},
-                        {
-                            "key": "condition",
-                            "label": "Condition",
-                            "type": "calculated",
-                            "rule": {
-                                "type": "THRESHOLD",
-                                "config": {
-                                    "input_field": "measured_value",
-                                    "lookup_fields": [
-                                        "test_name",
-                                        {
-                                            "field": "$form.transformer_voltage",
-                                            "mapping": {
-                                                "11kV":  "<=72.5kV",
-                                                "33kV":  "<=72.5kV",
-                                                "66kV":  "<=72.5kV",
-                                                "110kV": "72.5-170kV",
-                                                "132kV": "72.5-170kV",
-                                                "220kV": ">170kV",
-                                                "400kV": ">170kV",
-                                            },
-                                        },
-                                    ],
-                                    "thresholds": {
-                                        "Acidity": {
-                                            ">170kV":     {"Good": [0, 0.10], "Fair": [0.10, 0.15], "Poor": [0.15, None]},
-                                            "72.5-170kV": {"Good": [0, 0.10], "Fair": [0.10, 0.20], "Poor": [0.20, None]},
-                                            "<=72.5kV":   {"Good": [0, 0.15], "Fair": [0.15, 0.30], "Poor": [0.30, None]},
-                                        },
-                                        "Resistivity at 90C": {
-                                            ">170kV":     {"Poor": [0, 3],   "Fair": [3,   10],   "Good": [10,  None]},
-                                            "72.5-170kV": {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
-                                            "<=72.5kV":   {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
-                                        },
-                                        "Tan Delta at 90C": {
-                                            ">170kV":     {"Good": [0, 0.2], "Poor": [0.2, None]},
-                                            "72.5-170kV": {"Good": [0, 0.5], "Poor": [0.5, None]},
-                                            "<=72.5kV":   {"Good": [0, 0.5], "Poor": [0.5, None]},
-                                        },
-                                        "BDV Top (T)": {
-                                            ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
-                                            "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
-                                            "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
-                                        },
-                                        "BDV Bottom (B)": {
-                                            ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
-                                            "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
-                                            "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
-                                        },
-                                        "Interfacial Tension": {
-                                            ">170kV":     {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
-                                            "72.5-170kV": {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
-                                            "<=72.5kV":   {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
-                                        },
-                                        "Flash Point": {
-                                            ">170kV":     {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
-                                            "72.5-170kV": {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
-                                            "<=72.5kV":   {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
-                                        },
-                                        "Water Content": {
-                                            ">170kV":     {"Good": [0, 15], "Fair": [15, 20], "Poor": [20, None]},
-                                            "72.5-170kV": {"Good": [0, 20], "Fair": [20, 30], "Poor": [30, None]},
-                                            "<=72.5kV":   {"Good": [0, 30], "Fair": [30, 40], "Poor": [40, None]},
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                        {"key": "remarks", "label": "Remarks", "type": "text"},
+                        {"key": "condition",      "label": "Condition",       "type": "text"},
+                        {"key": "remarks",        "label": "Remarks",         "type": "text"},
                     ],
                     "default_rows": [
                         {"test_name": "Acidity",              "unit": "mg KOH/g"},
@@ -2524,31 +2419,6 @@ TEST_TEMPLATES = {
                         {"test_name": "Interfacial Tension",  "unit": "mN/m"},
                         {"test_name": "Flash Point",          "unit": "°C"},
                         {"test_name": "Water Content",        "unit": "ppm"},
-                    ],
-                },
-
-                # ── ✅ NEW — Dissolved Gas Analysis (DGA) Table ──────────────
-                {
-                    "key": "dga_test_results",
-                    "label": "Test Report of Dissolved Gas Analysis (as per IS 10593:2018)",
-                    "type": "table",
-                    "allow_add_rows": False,
-                    "allow_delete_rows": False,
-                    "lock_default_rows": False,
-                    "columns": [
-                        {"key": "gas_name",       "label": "Gases",                              "type": "readonly"},
-                        {"key": "permissible_limit", "label": "Permissible Limits (IS 10593:2018)", "type": "readonly"},
-                        {"key": "bottom_value",   "label": "Bottom (ppm)",                       "type": "number"},
-                        {"key": "remarks",        "label": "Remarks",                            "type": "text"},
-                    ],
-                    "default_rows": [
-                        {"gas_name": "Methane CH₄",         "permissible_limit": "30–130"},
-                        {"gas_name": "Ethane C₂H₆",         "permissible_limit": "20–90"},
-                        {"gas_name": "Ethylene C₂H₄",       "permissible_limit": "60–280"},
-                        {"gas_name": "Acetylene C₂H₂",      "permissible_limit": "2–20"},
-                        {"gas_name": "Hydrogen H₂",         "permissible_limit": "50–150"},
-                        {"gas_name": "Carbon-dioxide CO₂",  "permissible_limit": "3800–14000"},
-                        {"gas_name": "Carbon monoxide CO",  "permissible_limit": "400–600"},
                     ],
                 },
             ],
@@ -4795,30 +4665,12 @@ TEST_TEMPLATES = {
                             {"test_configuration": "HV-TV"},
                         ],
                     },
-                    # b. 220kV Bushing Details
-                    {
-                        "key": "bushing_220kv_details",
-                        "label": "b. 220kV Bushing Details",
-                        "type": "table",
-                        "allow_add_rows": False,
-                        "allow_delete_rows": False,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "detail",   "label": "Details",          "type": "readonly"},
-                            {"key": "r_phase",  "label": "220kV 'R' Phase",  "type": "text"},
-                            {"key": "y_phase",  "label": "220kV 'Y' Phase",  "type": "text"},
-                            {"key": "b_phase",  "label": "220kV 'B' Phase",  "type": "text"},
-                        ],
-                        "default_rows": [
-                            {"detail": "Make"},
-                            {"detail": "Sl. No."},
-                            {"detail": "Y.O. Mfg."},
-                        ],
-                    },
-                    # c. 220kV Bushing Test Results
+                    # Bushing identity (Make/Sl.No./Y.O.Mfg) comes from the
+                    # Equipment register nameplate (bushing_details) — not re-entered here.
+                    # a. 220kV Bushing Test Results
                     {
                         "key": "bushing_220kv_results",
-                        "label": "c. 220kV Bushing Test Results",
+                        "label": "220kV Bushing Test Results",
                         "type": "table",
                         "allow_add_rows": False,
                         "allow_delete_rows": False,
@@ -4838,30 +4690,10 @@ TEST_TEMPLATES = {
                             {"bushing": "'B' Phase"},
                         ],
                     },
-                    # d. 66kV Bushing Details
-                    {
-                        "key": "bushing_66kv_details",
-                        "label": "d. 66kV Bushing Details",
-                        "type": "table",
-                        "allow_add_rows": False,
-                        "allow_delete_rows": False,
-                        "lock_default_rows": False,
-                        "columns": [
-                            {"key": "detail",   "label": "Details",         "type": "readonly"},
-                            {"key": "r_phase",  "label": "66kV 'R' Phase",  "type": "text"},
-                            {"key": "y_phase",  "label": "66kV 'Y' Phase",  "type": "text"},
-                            {"key": "b_phase",  "label": "66kV 'B' Phase",  "type": "text"},
-                        ],
-                        "default_rows": [
-                            {"detail": "Make"},
-                            {"detail": "Sl. No."},
-                            {"detail": "Y.O. Mfg."},
-                        ],
-                    },
-                    # e. 66kV Bushing Test Results
+                    # b. 66kV Bushing Test Results (identity from nameplate register)
                     {
                         "key": "bushing_66kv_results",
-                        "label": "e. 66kV Bushing Test Results",
+                        "label": "66kV Bushing Test Results",
                         "type": "table",
                         "allow_add_rows": False,
                         "allow_delete_rows": False,
@@ -5047,22 +4879,6 @@ TEST_TEMPLATES = {
                 ],
             },
             {
-                "title": "220kV Bushing Details",
-                "fields": [
-                    {
-                        "key": "bushing_details", "label": "220kV Bushing Details", "type": "table",
-                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
-                        "columns": [
-                            {"key": "detail",  "label": "Details",         "type": "readonly"},
-                            {"key": "r_phase", "label": "220kV 'R' Phase", "type": "text"},
-                            {"key": "y_phase", "label": "220kV 'Y' Phase", "type": "text"},
-                            {"key": "b_phase", "label": "220kV 'B' Phase", "type": "text"},
-                        ],
-                        "default_rows": [{"detail": "Make"}, {"detail": "Sl. No."}, {"detail": "Y.O. Mfg."}],
-                    },
-                ],
-            },
-            {
                 "title": "220kV Bushing Test Results",
                 "fields": [
                     {
@@ -5122,22 +4938,6 @@ TEST_TEMPLATES = {
                     {"key": "tan_delta_kit",         "label": "Testing Kit Used",    "type": "text", "required": True},
                     {"key": "date_of_previous_test", "label": "Date of Previous Test","type": "date"},
                     {"key": "ambient_temp_c",        "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
-                ],
-            },
-            {
-                "title": "66kV Bushing Details",
-                "fields": [
-                    {
-                        "key": "bushing_details", "label": "66kV Bushing Details", "type": "table",
-                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
-                        "columns": [
-                            {"key": "detail",  "label": "Details",        "type": "readonly"},
-                            {"key": "r_phase", "label": "66kV 'R' Phase", "type": "text"},
-                            {"key": "y_phase", "label": "66kV 'Y' Phase", "type": "text"},
-                            {"key": "b_phase", "label": "66kV 'B' Phase", "type": "text"},
-                        ],
-                        "default_rows": [{"detail": "Make"}, {"detail": "Sl. No."}, {"detail": "Y.O. Mfg."}],
-                    },
                 ],
             },
             {
