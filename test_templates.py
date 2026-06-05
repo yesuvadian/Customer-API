@@ -843,14 +843,10 @@ TEST_TEMPLATES = {
         "name": "Meter Testing",
         "equipment_type": "Electronic Tri-vector Meter",
         "description": "Testing of energy meters at substations",
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+        },
         "sections": [
-            {
-                "title": "Test Information",
-                "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
-            },
             {
                 "title": "Meter Test Readings",
                 "fields": [
@@ -893,14 +889,10 @@ TEST_TEMPLATES = {
         "name": "Relay Testing",
         "equipment_type": "Protection Relay",
         "description": "Testing of relays at substations with phase-wise readings",
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+        },
         "sections": [
-            {
-                "title": "Test Information",
-                "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
-            },
             {
                 "title": "Relay Test Readings",
                 "fields": [
@@ -938,29 +930,27 @@ TEST_TEMPLATES = {
         "name": "Power Transformer Test Report",
         "equipment_type": "Power Transformer",
         "description": "Power transformer nameplate details and OLTC details",
+        "context_bindings": {
+            "location":           "nameplate.substation_name",
+            "make":               "equipment.manufacturer",
+            "rated_mva":          "equipment.rated_mva",
+            "rated_voltage":      "equipment.voltage_class",
+            "rated_current":      "nameplate.rated_current",
+            "rated_insulation":   "nameplate.rated_insulation",
+            "frequency":          "nameplate.frequency",
+            "vector_group":       "equipment.vector_group",
+            "impedance_voltage":  "nameplate.impedance_voltage",
+            "sl_no":              "equipment.factory_serial_number",
+            "type_of_cooling":    "nameplate.type_of_cooling",
+            "yom":                "nameplate.yom",
+            "date_of_commission": "nameplate.date_of_commission",
+        },
         "sections": [
-            {
-                "title": "Test Information",
-                "fields": [
-                    {"key": "location", "label": "Location of the Transformer", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
-            },
             {
                 "title": "Transformer Nameplate Details",
                 "fields": [
-                    {"key": "make", "label": "Make", "type": "text", "required": True},
                     {"key": "tr_class", "label": "Class", "type": "text"},
-                    {"key": "rated_mva", "label": "Rated MVA", "type": "text", "required": True},
-                    {"key": "rated_voltage", "label": "Rated Voltage", "type": "text"},
-                    {"key": "rated_current", "label": "Rated Current", "type": "text"},
-                    {"key": "rated_insulation", "label": "Rated Insulation", "type": "text"},
-                    {"key": "frequency", "label": "Frequency", "type": "text"},
                     {"key": "phases_hv_iv_lv", "label": "Phases HV/IV/LV", "type": "text"},
-                    {"key": "vector_group", "label": "Vector Group", "type": "text"},
-                    {"key": "impedance_voltage", "label": "Impedance Voltage", "type": "text"},
-                    {"key": "sl_no", "label": "Serial Number", "type": "text"},
-                    {"key": "type_of_cooling", "label": "Type of Cooling", "type": "text"},
                     {"key": "total_mass", "label": "Total Mass", "type": "text", "unit": "kg"},
                     {"key": "transport_mass", "label": "Transport Mass", "type": "text", "unit": "kg"},
                     {"key": "untanking_mass", "label": "Untanking Mass", "type": "text", "unit": "kg"},
@@ -974,10 +964,8 @@ TEST_TEMPLATES = {
                     {"key": "lo_of_keb", "label": "L.O of KEB", "type": "text"},
                     {"key": "date_of_order", "label": "Date of Order", "type": "date"},
                     {"key": "date_of_testing_maker", "label": "Date of Testing by Maker", "type": "date"},
-                    {"key": "yom", "label": "Year of Manufacture", "type": "text"},
                     {"key": "taps_on_hv", "label": "Taps available on HV", "type": "text"},
                     {"key": "specification", "label": "Specification", "type": "text"},
-                    {"key": "date_of_commission", "label": "Date of Commission", "type": "date"},
                 ]
             },
             {
@@ -1408,14 +1396,17 @@ TEST_TEMPLATES = {
         "name": "CT Insulation Test",
         "equipment_type": "Current Transformer",
         "description": "Current transformer insulation test report with nameplate and IR measurements",
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+            "ct_make":      "equipment.manufacturer",
+            "ct_sl_no":     "equipment.factory_serial_number",
+            "ct_yom":       "nameplate.yom",
+        },
         "sections": [
             {
                 "title": "CT Details",
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                    {"key": "ct_make", "label": "Make", "type": "text"},
                     {"key": "actr", "label": "ACTR", "type": "text"},
                     {"key": "core1_burden", "label": "Core 1 Burden", "type": "text"},
                     {"key": "core2_burden", "label": "Core 2 Burden", "type": "text"},
@@ -1426,8 +1417,6 @@ TEST_TEMPLATES = {
                     {"key": "highest_system_voltage", "label": "Highest System Voltage", "type": "text"},
                     {"key": "insulation_level", "label": "Insulation Level", "type": "text"},
                     {"key": "stc", "label": "STC", "type": "text"},
-                    {"key": "ct_sl_no", "label": "Serial Number", "type": "text"},
-                    {"key": "ct_yom", "label": "Year of Manufacture", "type": "text"},
                 ]
             },
             {
@@ -1466,13 +1455,14 @@ TEST_TEMPLATES = {
         "name": "CT Ratio Test (Detailed)",
         "equipment_type": "Current Transformer",
         "description": "Detailed CT ratio test with phase-wise readings across multiple cores",
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+        },
         "sections": [
             {
                 "title": "Test Information",
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                     {"key": "polarity", "label": "Polarity", "type": "text"},
                 ]
             },
@@ -1527,14 +1517,17 @@ TEST_TEMPLATES = {
         "name": "CVT Test Report",
         "equipment_type": "Capacitor Voltage Transformer",
         "description": "CVT test report with details, insulation resistance, and ratio test",
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+            "cvt_make":     "equipment.manufacturer",
+            "cvt_sl_no":    "equipment.factory_serial_number",
+            "cvt_yom":      "nameplate.yom",
+        },
         "sections": [
             {
                 "title": "CVT Details",
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                    {"key": "cvt_make", "label": "Make", "type": "text"},
                     {"key": "core1_burden", "label": "Core 1 - Burden", "type": "text"},
                     {"key": "core1_class", "label": "Core 1 - Class", "type": "text"},
                     {"key": "core2_burden", "label": "Core 2 - Burden", "type": "text"},
@@ -1543,8 +1536,6 @@ TEST_TEMPLATES = {
                     {"key": "core3_class", "label": "Core 3 - Class", "type": "text"},
                     {"key": "insulation", "label": "Insulation", "type": "text"},
                     {"key": "cvt_type", "label": "Type", "type": "text"},
-                    {"key": "cvt_yom", "label": "Year of Manufacture", "type": "text"},
-                    {"key": "cvt_sl_no", "label": "Serial Number", "type": "text"},
                 ]
             },
             {
@@ -1597,15 +1588,16 @@ TEST_TEMPLATES = {
         "name": "Capacitance & Tan Delta Test (CT)",
         "equipment_type": "Current Transformer",
         "description": "Capacitance and tan delta test results for current transformers",
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+            "ct_make":      "equipment.manufacturer",
+            "ct_sl_no":     "equipment.factory_serial_number",
+        },
         "sections": [
             {
                 "title": "Test Information",
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text"},
-                    {"key": "ct_make", "label": "CT Make", "type": "text"},
-                    {"key": "ct_sl_no", "label": "CT Serial No", "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                 ]
             },
             {
@@ -1643,14 +1635,10 @@ TEST_TEMPLATES = {
         "name": "Capacitance & Tan Delta Comparison",
         "equipment_type": "Power Transformer",
         "description": "Comparison of capacitance and tan delta values across transformer bushings and CTs",
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+        },
         "sections": [
-            {
-                "title": "Test Information",
-                "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
-            },
             {
                 "title": "Comparison Values",
                 "fields": [
@@ -1680,16 +1668,12 @@ TEST_TEMPLATES = {
         "name": "Tan Delta NCT Test",
         "equipment_type": "Current Transformer",
         "description": "Capacitance and tan delta results for neutral current transformers",
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+            "nct_make":     "equipment.manufacturer",
+            "nct_sl_no":    "equipment.factory_serial_number",
+        },
         "sections": [
-            {
-                "title": "NCT Details",
-                "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "nct_make", "label": "NCT Make", "type": "text"},
-                    {"key": "nct_sl_no", "label": "NCT Serial No", "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
-            },
             {
                 "title": "NCT Tan Delta Readings",
                 "fields": [
@@ -2953,20 +2937,21 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "nameplate.substation_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+            "rated_current_a": "nameplate.rated_current",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",       "label": "Station Name",          "type": "text",     "required": True},
-                    {"key": "bay_number",          "label": "Bay Number",             "type": "text",     "required": True},
-                    {"key": "date_of_testing",     "label": "Date of Testing",        "type": "date",     "required": True},
-                    {"key": "cb_make",             "label": "CB Make",                "type": "text",     "required": True},
-                    {"key": "cb_model",            "label": "CB Model",               "type": "text"},
-                    {"key": "cb_serial",           "label": "Serial Number",          "type": "text"},
-                    {"key": "voltage_class_kv",    "label": "Voltage Class",          "type": "number",   "unit": "kV",     "required": True},
-                    {"key": "rated_current_a",     "label": "Rated Current",          "type": "number",   "unit": "A"},
-                    {"key": "instrument_used",     "label": "Instrument Used",        "type": "text"},
-                    {"key": "test_current_a",      "label": "Test Current (DLRO)",    "type": "number",   "unit": "A"},
+                    {"key": "cb_model",        "label": "CB Model",            "type": "text"},
+                    {"key": "instrument_used", "label": "Instrument Used",     "type": "text"},
+                    {"key": "test_current_a",  "label": "Test Current (DLRO)", "type": "number", "unit": "A"},
                 ],
             },
             {
@@ -3011,16 +2996,17 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "nameplate.substation_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",       "type": "text",   "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",          "type": "text",   "required": True},
-                    {"key": "date_of_testing",  "label": "Date of Testing",     "type": "date",   "required": True},
-                    {"key": "cb_make",          "label": "CB Make",             "type": "text"},
-                    {"key": "cb_serial",        "label": "Serial Number",       "type": "text"},
-                    {"key": "voltage_class_kv", "label": "Voltage Class",       "type": "number", "unit": "kV",  "required": True},
                     {"key": "test_voltage_kv",  "label": "Megger Test Voltage", "type": "number", "unit": "kV",  "required": True},
                     {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C"},
                     {"key": "humidity_pct",     "label": "Relative Humidity",   "type": "number", "unit": "%"},
@@ -3086,19 +3072,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "nameplate.substation_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",       "label": "Station Name",            "type": "text",   "required": True},
-                    {"key": "bay_number",          "label": "Bay Number",               "type": "text",   "required": True},
-                    {"key": "date_of_testing",     "label": "Date of Testing",          "type": "date",   "required": True},
-                    {"key": "cb_make",             "label": "CB Make",                  "type": "text"},
-                    {"key": "cb_serial",           "label": "Serial Number",            "type": "text"},
-                    {"key": "voltage_class_kv",    "label": "Voltage Class",            "type": "number", "unit": "kV", "required": True},
-                    {"key": "rated_pressure_bar",  "label": "Rated Gas Pressure",       "type": "number", "unit": "bar (20°C)"},
-                    {"key": "min_op_pressure_bar", "label": "Min Operating Pressure",   "type": "number", "unit": "bar"},
-                    {"key": "alarm_pressure_bar",  "label": "Alarm Pressure Setting",   "type": "number", "unit": "bar"},
+                    {"key": "rated_pressure_bar",  "label": "Rated Gas Pressure",     "type": "number", "unit": "bar (20°C)"},
+                    {"key": "min_op_pressure_bar", "label": "Min Operating Pressure", "type": "number", "unit": "bar"},
+                    {"key": "alarm_pressure_bar",  "label": "Alarm Pressure Setting", "type": "number", "unit": "bar"},
                 ],
             },
             {
@@ -3144,18 +3131,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "nameplate.substation_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",    "type": "text", "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",       "type": "text", "required": True},
-                    {"key": "date_of_testing",  "label": "Date of Testing",  "type": "date", "required": True},
-                    {"key": "cb_make",          "label": "CB Make",          "type": "text"},
-                    {"key": "cb_serial",        "label": "Serial Number",    "type": "text"},
-                    {"key": "voltage_class_kv", "label": "Voltage Class",    "type": "number", "unit": "kV", "required": True},
-                    {"key": "analyzer_make",    "label": "Analyzer Make",    "type": "text"},
-                    {"key": "analyzer_serial",  "label": "Analyzer Serial",  "type": "text"},
+                    {"key": "analyzer_make",   "label": "Analyzer Make",   "type": "text"},
+                    {"key": "analyzer_serial", "label": "Analyzer Serial", "type": "text"},
                 ],
             },
             {
@@ -3201,18 +3189,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "nameplate.substation_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",       "type": "text",   "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",          "type": "text",   "required": True},
-                    {"key": "date_of_testing",  "label": "Date of Testing",     "type": "date",   "required": True},
-                    {"key": "cb_make",          "label": "CB Make",             "type": "text"},
-                    {"key": "cb_serial",        "label": "Serial Number",       "type": "text"},
-                    {"key": "voltage_class_kv", "label": "Voltage Class",       "type": "number", "unit": "kV", "required": True},
-                    {"key": "rated_voltage_dc", "label": "Rated Control Voltage","type": "number", "unit": "Vdc"},
-                    {"key": "analyzer_make",    "label": "Analyzer Make/Model", "type": "text"},
+                    {"key": "rated_voltage_dc", "label": "Rated Control Voltage", "type": "number", "unit": "Vdc"},
+                    {"key": "analyzer_make",    "label": "Analyzer Make/Model",   "type": "text"},
                 ],
             },
             {
@@ -3289,17 +3278,18 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "nameplate.substation_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "rated_current_a": "nameplate.rated_current",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",         "label": "Station Name",           "type": "text",     "required": True},
-                    {"key": "bay_number",             "label": "Bay Number",              "type": "text",     "required": True},
-                    {"key": "date_of_testing",        "label": "Date of Testing",         "type": "date",     "required": True},
-                    {"key": "cb_make",                "label": "CB Make",                 "type": "text"},
-                    {"key": "cb_serial",              "label": "Serial Number",           "type": "text"},
-                    {"key": "rated_control_voltage_v","label": "Rated Control Voltage",   "type": "number",   "unit": "V",  "required": True},
-                    {"key": "rated_current_a",        "label": "Rated Current",           "type": "number",   "unit": "A"},
+                    {"key": "rated_control_voltage_v", "label": "Rated Control Voltage", "type": "number", "unit": "V", "required": True},
                 ],
             },
             {
@@ -3430,19 +3420,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "nameplate.substation_name",
+            "bay_number":      "equipment.bay_number",
+            "sa_make":         "equipment.manufacturer",
+            "sa_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+            "rated_voltage_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",       "type": "text",   "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",          "type": "text",   "required": True},
-                    {"key": "date_of_testing",  "label": "Date of Testing",     "type": "date",   "required": True},
-                    {"key": "sa_make",          "label": "Surge Arrestor Make", "type": "text"},
-                    {"key": "sa_serial",        "label": "Serial Number",       "type": "text"},
-                    {"key": "voltage_class_kv", "label": "Voltage Class",       "type": "number", "unit": "kV",  "required": True},
-                    {"key": "rated_voltage_kv", "label": "Rated Voltage (Ur)",  "type": "number", "unit": "kV"},
-                    {"key": "test_voltage_kv",  "label": "Megger Test Voltage", "type": "number", "unit": "kV",  "required": True},
-                    {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C"},
+                    {"key": "test_voltage_kv", "label": "Megger Test Voltage", "type": "number", "unit": "kV", "required": True},
+                    {"key": "ambient_temp_c",  "label": "Ambient Temperature", "type": "number", "unit": "°C"},
                 ],
             },
             {
@@ -3487,19 +3478,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "nameplate.substation_name",
+            "bay_number":      "equipment.bay_number",
+            "sa_make":         "equipment.manufacturer",
+            "sa_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+            "rated_voltage_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",     "label": "Station Name",         "type": "text",   "required": True},
-                    {"key": "bay_number",        "label": "Bay Number",            "type": "text",   "required": True},
-                    {"key": "date_of_testing",   "label": "Date of Testing",       "type": "date",   "required": True},
-                    {"key": "sa_make",           "label": "Surge Arrestor Make",   "type": "text"},
-                    {"key": "sa_serial",         "label": "Serial Number",         "type": "text"},
-                    {"key": "voltage_class_kv",  "label": "Voltage Class",         "type": "number", "unit": "kV",  "required": True},
-                    {"key": "rated_voltage_kv",  "label": "Rated Voltage (Ur)",    "type": "number", "unit": "kV"},
                     {"key": "nominal_discharge_ka", "label": "Nominal Discharge Current", "type": "number", "unit": "kA"},
-                    {"key": "test_equipment",    "label": "Test Equipment Used",   "type": "text"},
+                    {"key": "test_equipment",        "label": "Test Equipment Used",       "type": "text"},
                 ],
             },
             {
@@ -3546,18 +3538,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "nameplate.substation_name",
+            "bay_number":      "equipment.bay_number",
+            "sa_make":         "equipment.manufacturer",
+            "sa_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+            "rated_voltage_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",      "label": "Station Name",           "type": "text",   "required": True},
-                    {"key": "bay_number",         "label": "Bay Number",              "type": "text",   "required": True},
-                    {"key": "date_of_testing",    "label": "Date of Testing",         "type": "date",   "required": True},
-                    {"key": "sa_make",            "label": "Surge Arrestor Make",     "type": "text"},
-                    {"key": "sa_serial",          "label": "Serial Number",           "type": "text"},
-                    {"key": "voltage_class_kv",   "label": "Voltage Class",           "type": "number", "unit": "kV",  "required": True},
-                    {"key": "rated_voltage_kv",   "label": "Rated Voltage (Ur)",      "type": "number", "unit": "kV"},
-                    {"key": "test_equipment",     "label": "Test Equipment Used",     "type": "text"},
+                    {"key": "test_equipment", "label": "Test Equipment Used", "type": "text"},
                 ],
             },
             {
@@ -3689,19 +3682,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":   "nameplate.substation_name",
+            "battery_make":   "equipment.manufacturer",
+            "rated_voltage_v":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",      "type": "text", "required": True},
-                    {"key": "battery_id",      "label": "Battery Set ID",    "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Testing",   "type": "date", "required": True},
-                    {"key": "battery_make",    "label": "Make",              "type": "text"},
-                    {"key": "battery_type",    "label": "Battery Type",      "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
-                    {"key": "num_cells",       "label": "Number of Cells",   "type": "number"},
-                    {"key": "rated_voltage_v", "label": "Rated Bank Voltage","type": "number", "unit": "V"},
-                    {"key": "hydrometer_make", "label": "Hydrometer Make",   "type": "text"},
-                    {"key": "electrolyte_temp_c", "label": "Electrolyte Temperature", "type": "number", "unit": "°C"},
+                    {"key": "battery_id",         "label": "Battery Set ID",          "type": "text"},
+                    {"key": "battery_type",        "label": "Battery Type",            "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
+                    {"key": "num_cells",           "label": "Number of Cells",         "type": "number"},
+                    {"key": "hydrometer_make",     "label": "Hydrometer Make",         "type": "text"},
+                    {"key": "electrolyte_temp_c",  "label": "Electrolyte Temperature", "type": "number", "unit": "°C"},
                 ],
             },
             {
@@ -3747,18 +3741,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+            "battery_make": "equipment.manufacturer",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",       "label": "Station Name",         "type": "text",   "required": True},
-                    {"key": "battery_id",          "label": "Battery Set ID",       "type": "text"},
-                    {"key": "date_of_testing",     "label": "Date of Testing",      "type": "date",   "required": True},
-                    {"key": "battery_make",        "label": "Make",                 "type": "text"},
-                    {"key": "num_cells",           "label": "Number of Cells",      "type": "number"},
-                    {"key": "charger_output_v",    "label": "Charger Output Voltage","type": "number","unit": "V"},
-                    {"key": "rated_float_v",       "label": "Rated Float Voltage/Cell","type": "number","unit": "V"},
-                    {"key": "multimeter_make",     "label": "Multimeter Make",      "type": "text"},
+                    {"key": "battery_id",       "label": "Battery Set ID",          "type": "text"},
+                    {"key": "num_cells",         "label": "Number of Cells",         "type": "number"},
+                    {"key": "charger_output_v",  "label": "Charger Output Voltage",  "type": "number", "unit": "V"},
+                    {"key": "rated_float_v",     "label": "Rated Float Voltage/Cell","type": "number", "unit": "V"},
+                    {"key": "multimeter_make",   "label": "Multimeter Make",         "type": "text"},
                 ],
             },
             {
@@ -3803,20 +3798,21 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+            "battery_make": "equipment.manufacturer",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",      "label": "Station Name",            "type": "text",   "required": True},
-                    {"key": "battery_id",         "label": "Battery Set ID",          "type": "text"},
-                    {"key": "date_of_testing",    "label": "Date of Testing",         "type": "date",   "required": True},
-                    {"key": "battery_make",       "label": "Make",                    "type": "text"},
-                    {"key": "battery_type",       "label": "Battery Type",            "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
-                    {"key": "rated_capacity_ah",  "label": "Rated Capacity",          "type": "number", "unit": "Ah", "required": True},
-                    {"key": "discharge_rate_hr",  "label": "Discharge Rate",          "type": "number", "unit": "hr (e.g. 10)"},
-                    {"key": "discharge_current_a","label": "Discharge Current",       "type": "number", "unit": "A",  "required": True},
-                    {"key": "initial_voltage_v",  "label": "Initial Voltage",         "type": "number", "unit": "V",  "required": True},
-                    {"key": "cutoff_voltage_v",   "label": "End-of-Discharge Voltage","type": "number", "unit": "V"},
+                    {"key": "battery_id",          "label": "Battery Set ID",          "type": "text"},
+                    {"key": "battery_type",        "label": "Battery Type",            "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
+                    {"key": "rated_capacity_ah",   "label": "Rated Capacity",          "type": "number", "unit": "Ah", "required": True},
+                    {"key": "discharge_rate_hr",   "label": "Discharge Rate",          "type": "number", "unit": "hr (e.g. 10)"},
+                    {"key": "discharge_current_a", "label": "Discharge Current",       "type": "number", "unit": "A",  "required": True},
+                    {"key": "initial_voltage_v",   "label": "Initial Voltage",         "type": "number", "unit": "V",  "required": True},
+                    {"key": "cutoff_voltage_v",    "label": "End-of-Discharge Voltage","type": "number", "unit": "V"},
                 ],
             },
             {
@@ -3862,15 +3858,16 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name": "nameplate.substation_name",
+            "battery_make": "equipment.manufacturer",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",    "type": "text", "required": True},
-                    {"key": "battery_id",      "label": "Battery Set ID",  "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Check",   "type": "date", "required": True},
-                    {"key": "battery_make",    "label": "Make",            "type": "text"},
-                    {"key": "num_cells",       "label": "Number of Cells", "type": "number"},
+                    {"key": "battery_id", "label": "Battery Set ID",  "type": "text"},
+                    {"key": "num_cells",  "label": "Number of Cells", "type": "number"},
                 ],
             },
             {
@@ -3913,18 +3910,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":   "nameplate.substation_name",
+            "battery_make":   "equipment.manufacturer",
+            "rated_voltage_v":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
                 "fields": [
-                    {"key": "station_name",       "label": "Station Name",          "type": "text",   "required": True},
-                    {"key": "battery_id",          "label": "Battery Set ID",        "type": "text"},
-                    {"key": "date_of_testing",     "label": "Date of Testing",       "type": "date",   "required": True},
-                    {"key": "battery_make",        "label": "Make",                  "type": "text"},
-                    {"key": "num_cells",           "label": "Number of Cells",       "type": "number"},
-                    {"key": "rated_voltage_v",     "label": "Rated Bank Voltage",    "type": "number", "unit": "V"},
-                    {"key": "multimeter_make",     "label": "Multimeter Make",       "type": "text"},
-                    {"key": "charger_status",      "label": "Charger Status",        "type": "dropdown", "options": ["Float Charge", "Boost Charge", "Off / Standalone"]},
+                    {"key": "battery_id",     "label": "Battery Set ID",  "type": "text"},
+                    {"key": "num_cells",      "label": "Number of Cells", "type": "number"},
+                    {"key": "multimeter_make","label": "Multimeter Make", "type": "text"},
+                    {"key": "charger_status", "label": "Charger Status",  "type": "dropdown", "options": ["Float Charge", "Boost Charge", "Off / Standalone"]},
                 ],
             },
             {
@@ -4336,17 +4334,19 @@ TEST_TEMPLATES = {
             "PRE_COMMISSIONING",
             "MAINTENANCE",
         ],
+        "context_bindings": {
+            "manufacturer":   "equipment.manufacturer",
+            "serial_number":  "equipment.factory_serial_number",
+        },
         "sections": [
             {
                 "title": "Transformer Configuration",
                 "fields": [
-                    {"key": "transformer_type",       "label": "Transformer Type",     "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
-                    {"key": "transformer_rating_mva", "label": "Transformer Rating",   "type": "number",   "unit": "MVA", "required": True},
-                    {"key": "hv_voltage_kv",          "label": "HV Voltage",           "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "lv_voltage_kv",          "label": "LV Voltage",           "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",     "type": "number",   "unit": "kV"},
-                    {"key": "manufacturer",           "label": "Manufacturer",         "type": "text"},
-                    {"key": "serial_number",          "label": "Serial Number",        "type": "text"},
+                    {"key": "transformer_type",       "label": "Transformer Type",   "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
+                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number",   "unit": "MVA", "required": True},
+                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number",   "unit": "kV",  "required": True},
+                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number",   "unit": "kV",  "required": True},
+                    {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",   "type": "number",   "unit": "kV"},
                 ],
             },
             {
@@ -4514,6 +4514,11 @@ TEST_TEMPLATES = {
             "PRE_COMMISSIONING",
             "MAINTENANCE",
         ],
+        "context_bindings": {
+            "manufacturer":  "equipment.manufacturer",
+            "serial_number": "equipment.factory_serial_number",
+            "vector_group":  "equipment.vector_group",
+        },
         "sections": [
             {
                 "title": "Transformer Configuration",
@@ -4523,9 +4528,6 @@ TEST_TEMPLATES = {
                     {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number",   "unit": "kV",  "required": True},
                     {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number",   "unit": "kV",  "required": True},
                     {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",   "type": "number",   "unit": "kV"},
-                    {"key": "vector_group",           "label": "Vector Group",       "type": "text"},
-                    {"key": "manufacturer",           "label": "Manufacturer",       "type": "text"},
-                    {"key": "serial_number",          "label": "Serial Number",      "type": "text"},
                 ],
             },
             {
@@ -4677,6 +4679,14 @@ TEST_TEMPLATES = {
         "description": "Combined Tan-Delta/Capacitance (DELTA 4000) and Insulation Diagnostics (IDAX) test report for Power Transformers — winding and bushing measurements with historical comparison.",
         "supports_multi_session": False,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "make":               "equipment.manufacturer",
+            "capacity_mva":       "equipment.rated_mva",
+            "serial_number":      "equipment.factory_serial_number",
+            "year_of_manufacture":"nameplate.yom",
+            "vector_group":       "equipment.vector_group",
+            "doc":                "nameplate.date_of_commission",
+        },
         "sections": [
             # ── Test Information ──────────────────────────────────────────────
             {
@@ -4691,14 +4701,8 @@ TEST_TEMPLATES = {
             {
                 "title": "Transformer Details",
                 "fields": [
-                    {"key": "make",               "label": "Make",             "type": "text",   "required": True},
-                    {"key": "capacity_mva",        "label": "Capacity",         "type": "number", "unit": "MVA", "required": True},
-                    {"key": "voltage_ratio",       "label": "Voltage Ratio",    "type": "text",   "placeholder": "e.g. 220/66/11 kV"},
-                    {"key": "serial_number",       "label": "Serial Number",    "type": "text"},
-                    {"key": "year_of_manufacture", "label": "Year of Mfg.",     "type": "number"},
-                    {"key": "vector_group",        "label": "Vector Group",     "type": "text",   "placeholder": "e.g. YNyn0d11"},
-                    {"key": "oil_temp_c",          "label": "Oil Temperature",  "type": "number", "unit": "°C"},
-                    {"key": "doc",                 "label": "DOC",              "type": "date"},
+                    {"key": "voltage_ratio", "label": "Voltage Ratio", "type": "text", "placeholder": "e.g. 220/66/11 kV"},
+                    {"key": "oil_temp_c",    "label": "Oil Temperature","type": "number", "unit": "°C"},
                 ],
             },
             # ── Tan-Delta & Capacitance Test ──────────────────────────────────
