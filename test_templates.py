@@ -848,6 +848,13 @@ TEST_TEMPLATES = {
         },
         "sections": [
             {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                ],
+            },
+            {
                 "title": "Meter Test Readings",
                 "fields": [
                     {
@@ -893,6 +900,13 @@ TEST_TEMPLATES = {
             "station_name": "nameplate.substation_name",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Relay Test Readings",
                 "fields": [
@@ -946,6 +960,25 @@ TEST_TEMPLATES = {
             "date_of_commission": "nameplate.date_of_commission",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "location", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "rated_mva", "label": "Rated MVA", "type": "readonly"},
+                    {"key": "rated_voltage", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_current", "label": "Rated Current", "type": "readonly"},
+                    {"key": "rated_insulation", "label": "Rated Insulation", "type": "readonly"},
+                    {"key": "frequency", "label": "Frequency", "type": "readonly"},
+                    {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                    {"key": "impedance_voltage", "label": "Impedance Voltage", "type": "readonly"},
+                    {"key": "sl_no", "label": "Serial Number", "type": "readonly"},
+                    {"key": "type_of_cooling", "label": "Type of Cooling", "type": "readonly"},
+                    {"key": "yom", "label": "Year of Manufacture", "type": "readonly"},
+                    {"key": "date_of_commission", "label": "Date of Commission", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Transformer Nameplate Details",
                 "fields": [
@@ -1404,6 +1437,16 @@ TEST_TEMPLATES = {
         },
         "sections": [
             {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "ct_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "ct_sl_no", "label": "Serial Number", "type": "readonly"},
+                    {"key": "ct_yom", "label": "Year of Manufacture", "type": "readonly"},
+                ],
+            },
+            {
                 "title": "CT Details",
                 "fields": [
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
@@ -1459,6 +1502,13 @@ TEST_TEMPLATES = {
             "station_name": "nameplate.substation_name",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Test Information",
                 "fields": [
@@ -1524,6 +1574,16 @@ TEST_TEMPLATES = {
             "cvt_yom":      "nameplate.yom",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "cvt_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cvt_sl_no", "label": "Serial Number", "type": "readonly"},
+                    {"key": "cvt_yom", "label": "Year of Manufacture", "type": "readonly"},
+                ],
+            },
             {
                 "title": "CVT Details",
                 "fields": [
@@ -1595,6 +1655,15 @@ TEST_TEMPLATES = {
         },
         "sections": [
             {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "ct_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "ct_sl_no", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
                 "title": "Test Information",
                 "fields": [
                     {"key": "bay_name", "label": "Bay Name", "type": "text"},
@@ -1640,6 +1709,13 @@ TEST_TEMPLATES = {
         },
         "sections": [
             {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                ],
+            },
+            {
                 "title": "Comparison Values",
                 "fields": [
                     {
@@ -1674,6 +1750,15 @@ TEST_TEMPLATES = {
             "nct_sl_no":    "equipment.factory_serial_number",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "nct_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "nct_sl_no", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "NCT Tan Delta Readings",
                 "fields": [
@@ -2948,6 +3033,18 @@ TEST_TEMPLATES = {
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_current_a", "label": "Rated Current", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
                 "fields": [
                     {"key": "cb_model",        "label": "CB Model",            "type": "text"},
                     {"key": "instrument_used", "label": "Instrument Used",     "type": "text"},
@@ -3004,6 +3101,17 @@ TEST_TEMPLATES = {
             "voltage_class_kv":"equipment.voltage_class",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Equipment Details",
                 "fields": [
@@ -3082,6 +3190,17 @@ TEST_TEMPLATES = {
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
                 "fields": [
                     {"key": "rated_pressure_bar",  "label": "Rated Gas Pressure",     "type": "number", "unit": "bar (20°C)"},
                     {"key": "min_op_pressure_bar", "label": "Min Operating Pressure", "type": "number", "unit": "bar"},
@@ -3141,6 +3260,17 @@ TEST_TEMPLATES = {
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
                 "fields": [
                     {"key": "analyzer_make",   "label": "Analyzer Make",   "type": "text"},
                     {"key": "analyzer_serial", "label": "Analyzer Serial", "type": "text"},
@@ -3197,6 +3327,17 @@ TEST_TEMPLATES = {
             "voltage_class_kv":"equipment.voltage_class",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Equipment Details",
                 "fields": [
@@ -3286,6 +3427,18 @@ TEST_TEMPLATES = {
             "rated_current_a": "nameplate.rated_current",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_current_a", "label": "Rated Current", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Equipment Details",
                 "fields": [
@@ -3431,6 +3584,18 @@ TEST_TEMPLATES = {
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "sa_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "sa_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_voltage_kv", "label": "Rated Voltage (kV)", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
                 "fields": [
                     {"key": "test_voltage_kv", "label": "Megger Test Voltage", "type": "number", "unit": "kV", "required": True},
                     {"key": "ambient_temp_c",  "label": "Ambient Temperature", "type": "number", "unit": "°C"},
@@ -3487,6 +3652,18 @@ TEST_TEMPLATES = {
             "rated_voltage_kv":"equipment.voltage_class",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "sa_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "sa_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_voltage_kv", "label": "Rated Voltage (kV)", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Equipment Details",
                 "fields": [
@@ -3547,6 +3724,18 @@ TEST_TEMPLATES = {
             "rated_voltage_kv":"equipment.voltage_class",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "sa_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "sa_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_voltage_kv", "label": "Rated Voltage (kV)", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Equipment Details",
                 "fields": [
@@ -3690,6 +3879,15 @@ TEST_TEMPLATES = {
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "rated_voltage_v", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
                 "fields": [
                     {"key": "battery_id",         "label": "Battery Set ID",          "type": "text"},
                     {"key": "battery_type",        "label": "Battery Type",            "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
@@ -3748,6 +3946,14 @@ TEST_TEMPLATES = {
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
                 "fields": [
                     {"key": "battery_id",       "label": "Battery Set ID",          "type": "text"},
                     {"key": "num_cells",         "label": "Number of Cells",         "type": "number"},
@@ -3803,6 +4009,14 @@ TEST_TEMPLATES = {
             "battery_make": "equipment.manufacturer",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Equipment Details",
                 "fields": [
@@ -3865,6 +4079,14 @@ TEST_TEMPLATES = {
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
                 "fields": [
                     {"key": "battery_id", "label": "Battery Set ID",  "type": "text"},
                     {"key": "num_cells",  "label": "Number of Cells", "type": "number"},
@@ -3916,6 +4138,15 @@ TEST_TEMPLATES = {
             "rated_voltage_v":"equipment.voltage_class",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "rated_voltage_v", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Equipment Details",
                 "fields": [
@@ -4340,6 +4571,14 @@ TEST_TEMPLATES = {
         },
         "sections": [
             {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
                 "title": "Transformer Configuration",
                 "fields": [
                     {"key": "transformer_type",       "label": "Transformer Type",   "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
@@ -4521,6 +4760,15 @@ TEST_TEMPLATES = {
         },
         "sections": [
             {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                ],
+            },
+            {
                 "title": "Transformer Configuration",
                 "fields": [
                     {"key": "transformer_type",       "label": "Transformer Type",   "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
@@ -4688,6 +4936,18 @@ TEST_TEMPLATES = {
             "doc":                "nameplate.date_of_commission",
         },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "capacity_mva", "label": "Rated MVA", "type": "readonly"},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "readonly"},
+                    {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                    {"key": "doc", "label": "Date of Commission", "type": "readonly"},
+                ],
+            },
             # ── Test Information ──────────────────────────────────────────────
             {
                 "title": "Test Information",
