@@ -2241,6 +2241,33 @@ class ApproverTesterSelection(BaseModel):
         from_attributes = True
 
 
+class BatchApproverTesterSelection(BaseModel):
+    """Request body for batch-approving multiple testing requests to one tester"""
+    request_ids: List[UUID]
+    tester_role_id: UUID
+    tester_id: UUID
+    comment: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BatchApprovalResult(BaseModel):
+    """Per-request outcome inside a batch approval response"""
+    request_id: str
+    request_number: Optional[str] = None
+    success: bool
+    message: str
+
+
+class BatchApprovalResponse(BaseModel):
+    """Response from batch approve-and-assign"""
+    total: int
+    succeeded: int
+    failed: int
+    results: List[BatchApprovalResult]
+
+
 class RejectionRequest(BaseModel):
     """Request body for rejecting a testing request"""
     rejection_comment: str  # Required rejection reason

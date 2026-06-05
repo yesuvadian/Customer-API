@@ -14,6 +14,9 @@ from models import RequestCategory, User, TestingRequest, OrgRole, OrgUserRole, 
 from schemas import (
     TestingRequestOut,
     ApproverTesterSelection,
+    BatchApproverTesterSelection,
+    BatchApprovalResponse,
+    BatchApprovalResult,
     RejectionRequest,
     ApprovalResponse,
     TesterInfo
@@ -49,6 +52,7 @@ def _enrich(req):
         req.assigned_tester_name = f"{req.assigned_tester.firstname or ''} {req.assigned_tester.lastname or ''}".strip() or req.assigned_tester.email
     else:
         req.assigned_tester_name = None
+
     return req
 
 
@@ -392,6 +396,96 @@ def approve_and_assign_tester(
         assigned_tester_id=str(testing_request.assigned_tester_id),
         assigned_tester_email=tester.email,
         new_status=testing_request.status
+    )
+
+
+@router.post("/batch-approve-and-assign", response_model=BatchApprovalResponse)
+def batch_approve_and_assign(
+    selection: BatchApproverTesterSelection,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Approve multiple testing requests and assign them all to the same tester.
+
+    The approver selects a tester role + user once, and every request in
+    request_ids is approved and assigned to that user in a single call.
+    Requests that are already past the approvable state are skipped (not
+    counted as failures) so the caller receives a clear per-item breakdown.
+    """
+    # Validate tester exists and has the role
+    tester = db.query(User).filter(User.id == selection.tester_id).first()
+    if not tester:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Selected tester not found")
+
+    has_role = db.query(OrgUserRole).filter(
+        OrgUserRole.user_id == selection.tester_id,
+        OrgUserRole.org_role_id == selection.tester_role_id,
+        OrgUserRole.is_active == True
+    ).first()
+    if not has_role:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected user does not have the specified tester role"
+        )
+
+    workflow_service = TestingRequestWorkflowService(db)
+    results: list[BatchApprovalResult] = []
+
+    for req_id in selection.request_ids:
+        testing_request = db.query(TestingRequest).filter(
+            TestingRequest.id == req_id
+        ).first()
+
+        if not testing_request:
+            results.append(BatchApprovalResult(
+                request_id=str(req_id),
+                success=False,
+                message="Request not found"
+            ))
+            continue
+
+        if testing_request.request_category == RequestCategory.repair_lifecycle:
+            results.append(BatchApprovalResult(
+                request_id=str(req_id),
+                request_number=testing_request.request_number,
+                success=False,
+                message="Repair lifecycle requests cannot be batch-approved"
+            ))
+            continue
+
+        if testing_request.status not in [
+            TestingRequestStatus.pending_approval,
+            TestingRequestStatus.submitted,
+        ]:
+            results.append(BatchApprovalResult(
+                request_id=str(req_id),
+                request_number=testing_request.request_number,
+                success=False,
+                message=f"Cannot approve: current status is {testing_request.status.value}"
+            ))
+            continue
+
+        success, message = workflow_service.approve_and_assign_tester(
+            testing_request=testing_request,
+            user=current_user,
+            tester_id=selection.tester_id,
+            tester_role_id=selection.tester_role_id,
+            comment=selection.comment
+        )
+        results.append(BatchApprovalResult(
+            request_id=str(req_id),
+            request_number=testing_request.request_number,
+            success=success,
+            message=message
+        ))
+
+    succeeded = sum(1 for r in results if r.success)
+    return BatchApprovalResponse(
+        total=len(results),
+        succeeded=succeeded,
+        failed=len(results) - succeeded,
+        results=results
     )
 
 
