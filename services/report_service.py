@@ -585,10 +585,13 @@ class ReportService:
         if not col_keys:
             return elements
 
-        # Build header row — pre-wrap long labels so pdfx doesn't clip them
+        # Build header row — pre-wrap long labels so pdfx doesn't clip them.
+        # wordWrap="CJK" lets any long/unbreakable token wrap inside narrow
+        # columns, preventing reportlab "flowable too large" crashes.
         lbl_style = ParagraphStyle("tblHdr", fontSize=8, textColor=colors.white,
-                                   fontName="Helvetica-Bold", leading=10)
-        val_style = ParagraphStyle("tblVal", fontSize=8, textColor=colors.black, leading=10)
+                                   fontName="Helvetica-Bold", leading=10, wordWrap="CJK")
+        val_style = ParagraphStyle("tblVal", fontSize=8, textColor=colors.black,
+                                   leading=10, wordWrap="CJK")
 
         def _wrap_label(text: str, width: int = 12) -> str:
             return '<br/>'.join(textwrap.wrap(text, width=width)) or text
@@ -606,13 +609,16 @@ class ReportService:
                 row.append(Paragraph(val, val_style))
             table_data.append(row)
 
-        # Calculate column widths — short labels get narrower columns
+        # Calculate column widths — weighted by label length, but with a minimum
+        # width per column so a short-label column can still hold its data and
+        # never collapses to a near-zero width (which crashes reportlab).
         page_width = A4[0] - 30 * mm
         num_cols = len(col_keys)
-        # Assign weight by label length (min 1) so long labels get more space
         weights = [max(1, len(lbl)) for lbl in col_labels]
-        total_weight = sum(weights)
-        col_widths = [page_width * w / total_weight for w in weights]
+        total_weight = sum(weights) or 1
+        min_w = min(28.0, page_width / num_cols)         # never below 28pt (or even split)
+        remaining = max(0.0, page_width - min_w * num_cols)
+        col_widths = [min_w + remaining * (w / total_weight) for w in weights]
 
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
