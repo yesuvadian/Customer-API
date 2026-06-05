@@ -539,6 +539,15 @@ class WorkflowDispatchService:
         self.db.add(schedule)
         self.db.flush()   # populate schedule.id
 
+        # Diagnostic: every operational schedule is bound to ONE equipment.
+        # If schedules appear for "all similar equipment", this log shows the
+        # single equipment each create targets — confirming no fan-out here.
+        print(
+            f"[Dispatch] OPERATIONAL schedule bound to equipment_id={tr.equipment_id} "
+            f"(UEIC={getattr(getattr(tr,'equipment',None),'ueic','?')}) "
+            f"test_type_id={test_type_id} from TR={tr.request_number}"
+        )
+
         print(
             f"[Dispatch] Created operational schedule id={schedule.id} "
             f"(category={category.value}, freq={freq.value}, "
