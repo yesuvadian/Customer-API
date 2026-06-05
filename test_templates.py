@@ -956,7 +956,7 @@ TEST_TEMPLATES = {
         "context_bindings": {
             "location":           "nameplate.location",
             "make":               "equipment.manufacturer",
-            "rated_mva":          "equipment.rated_mva",
+            "rated_mva":          "nameplate.rated_mva",
             "rated_voltage":      "equipment.voltage_class",
             "rated_current":      "nameplate.rated_current",
             "rated_insulation":   "nameplate.rated_insulation",
@@ -1821,7 +1821,7 @@ TEST_TEMPLATES = {
         "supports_multi_session": True,
         "typical_session_interval_days": 180,
         "typical_total_sessions": 2,
-        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "rated_mva": "equipment.rated_mva", "voltage_class": "equipment.voltage_class", "vector_group": "equipment.vector_group"},
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "rated_mva": "nameplate.rated_mva", "voltage_class": "equipment.voltage_class", "vector_group": "equipment.vector_group"},
         "sections": [
             {
                 "title": "Equipment Details",
@@ -5070,7 +5070,7 @@ TEST_TEMPLATES = {
         "typical_total_sessions": 1,
         "context_bindings": {
             "make":               "equipment.manufacturer",
-            "capacity_mva":       "equipment.rated_mva",
+            "capacity_mva":       "nameplate.rated_mva",
             "serial_number":      "equipment.factory_serial_number",
             "year_of_manufacture":"nameplate.yom",
             "vector_group":       "equipment.vector_group",
