@@ -192,6 +192,7 @@ def _to_response(db: Session, eq: Equipment) -> dict:
         "latitude": float(eq.latitude) if eq.latitude is not None else None,
         "longitude": float(eq.longitude) if eq.longitude is not None else None,
         "phase": eq.phase,
+        "rated_mva": float(eq.rated_mva) if eq.rated_mva is not None else None,
         "ct_ratio_actual": eq.ct_ratio_actual,
         "ct_ratio_current": eq.ct_ratio_current,
         "pt_ratio": eq.pt_ratio,
