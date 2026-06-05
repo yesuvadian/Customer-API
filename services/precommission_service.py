@@ -152,13 +152,27 @@ class PreCommissionService:
         return [self._pcr_to_dict(r) for r in rows]
 
     def list_unlinked(self, user: User) -> list[dict]:
-        """Approved PCR requests with no equipment linked — for equipment registration dropdown."""
+        """
+        PCR requests eligible to be linked to an equipment on
+        create/replace — for the equipment registration dropdown.
+
+        A request appears only when ALL of the following hold:
+          • belongs to the user's organization
+          • approved (a QAP workflow exists)
+          • its QAP workflow is COMPLETED (in-progress ones are excluded)
+          • not already linked to an equipment (equipment_id IS NULL)
+        """
         rows = (
             self.db.query(PreCommissionRequest)
+            .join(
+                RepairWorkflow,
+                RepairWorkflow.id == PreCommissionRequest.workflow_id,
+            )
             .filter(
                 PreCommissionRequest.organization_id == user.organization_id,
                 PreCommissionRequest.approval_status  == "approved",
                 PreCommissionRequest.equipment_id.is_(None),
+                RepairWorkflow.status == "completed",
             )
             .order_by(PreCommissionRequest.cts.desc())
             .all()
