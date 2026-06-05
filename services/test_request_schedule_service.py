@@ -363,6 +363,41 @@ class TestRequestScheduleService(UTCDateTimeMixin):
              if now.date() < trigger_date.date():
                 return False
 
+            # ── Cross-path dedup ─────────────────────────────────────────────
+            # Multiple paths can create a follow-up for the same equipment+test
+            # (threshold-alert followup on save AND recommendation dispatch on
+            # approval). Guard here — the single chokepoint for ALL generated
+            # tickets — so only ONE open ticket exists per equipment+test_type.
+            if schedule.equipment_id and schedule.test_type_id:
+                from models import TestingRequestStatus as _TRS
+                _open = [
+                    _TRS.draft, _TRS.submitted, _TRS.assigned, _TRS.accepted,
+                    _TRS.in_progress, _TRS.test_submitted, _TRS.under_approval,
+                    _TRS.under_review,
+                ]
+                _dup = (
+                    db.query(TestingRequest)
+                    .filter(
+                        TestingRequest.equipment_id == schedule.equipment_id,
+                        TestingRequest.test_type_id == schedule.test_type_id,
+                        TestingRequest.status.in_(_open),
+                        TestingRequest.is_schedule_template.is_(False),
+                        # Only consider already-generated follow-up tickets — NOT
+                        # the manually-created test that triggered this. The
+                        # original test has source_schedule_id = NULL, so it
+                        # won't block its own follow-up.
+                        TestingRequest.source_schedule_id.isnot(None),
+                    )
+                    .first()
+                )
+                if _dup:
+                    logger.info(
+                        "[ScheduleService] Skipping ticket — open request %s already "
+                        "exists for equipment %s test_type %s",
+                        _dup.request_number, schedule.equipment_id, schedule.test_type_id,
+                    )
+                    return False
+
             existing_generated = (
                 db.query(TestingRequest)
                 .filter(
