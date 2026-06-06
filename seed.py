@@ -12066,16 +12066,15 @@ def seed_workflow(session):
 _DFT_ROLES = [
     ("System Administrator",              False, True),
     ("Asset Data Officer",                False, False),
-    ("Maintenance Officer",               False, False),
-    ("Test Engineer",                     False, False),
+    ("AEE_MAINTENANCE",                   False, False),
+    ("AE_JE",                             False, False),
     ("Test & Work Coordinator",           False, False),
-    ("Reviewing Officer",                 False, True),
-    ("Supervisory Officer",               False, False),
-    ("Senior Management Approver",        False, True),
+    ("EE_TLSS",                           False, True),
+    ("SEE_WM",                            False, False),
+    ("CEE_TRANSMISSION_ZONE",             False, True),
     ("TA&QC Inspector",                   False, False),
     ("Transformer Repair Coordinator",    False, False),
     ("Procurement Officer",               False, False),
-    ("Procurement Approver",              False, False),
 ]
 
 _DFT_DEPTS = [
@@ -12087,31 +12086,29 @@ _DFT_DEPTS = [
 _DFT_ROLE_EMAIL = {
     "System Administrator":             "sysadmin",
     "Asset Data Officer":               "assetofficer",
-    "Maintenance Officer":              "maintoff",
-    "Test Engineer":                    "testengineer",
+    "AEE_MAINTENANCE":                  "maintoff",
+    "AE_JE":                            "testengineer",
     "Test & Work Coordinator":          "testcoord",
-    "Reviewing Officer":                "reviewoff",
-    "Supervisory Officer":              "supervoff",
-    "Senior Management Approver":       "seniormgmt",
+    "EE_TLSS":                          "reviewoff",
+    "SEE_WM":                           "supervoff",
+    "CEE_TRANSMISSION_ZONE":            "seniormgmt",
     "TA&QC Inspector":                  "taqc",
     "Transformer Repair Coordinator":   "repaircoord",
     "Procurement Officer":              "procoff",
-    "Procurement Approver":             "procappr",
 }
 
 _DFT_ROLE_FNAME = {
     "System Administrator":             "SysAdmin",
     "Asset Data Officer":               "AssetOfficer",
-    "Maintenance Officer":              "MaintOfficer",
-    "Test Engineer":                    "TestEngineer",
+    "AEE_MAINTENANCE":                  "AEE",
+    "AE_JE":                            "AE",
     "Test & Work Coordinator":          "TestCoordinator",
-    "Reviewing Officer":                "ReviewOfficer",
-    "Supervisory Officer":              "SupervOfficer",
-    "Senior Management Approver":       "SeniorMgmt",
+    "EE_TLSS":                          "EE",
+    "SEE_WM":                           "SEE",
+    "CEE_TRANSMISSION_ZONE":            "CEE",
     "TA&QC Inspector":                  "TAQCInspector",
     "Transformer Repair Coordinator":   "RepairCoord",
     "Procurement Officer":              "ProcOfficer",
-    "Procurement Approver":             "ProcApprover",
 }
 
 _DFT_PHONE = {
@@ -12521,16 +12518,15 @@ def _dft_get_or_create_dept(session, org_id, name, code,
 _DFT_ROLE_MODULE_PATH = {
     "System Administrator":             "admin_dashboard",
     "Asset Data Officer":               "asset_dashboard",
-    "Maintenance Officer":              "aee_dashboard",
-    "Test Engineer":                    "aee_dashboard",
+    "AEE_MAINTENANCE":                  "aee_dashboard",
+    "AE_JE":                            "ae_dashboard",
     "Test & Work Coordinator":          "test_coordinator_dashboard",
-    "Reviewing Officer":                "ee_tlss_dashboard",
-    "Supervisory Officer":              "see_dashboard",
-    "Senior Management Approver":       "cee_dashboard",
+    "EE_TLSS":                          "ee_tlss_dashboard",
+    "SEE_WM":                           "see_dashboard",
+    "CEE_TRANSMISSION_ZONE":            "cee_dashboard",
     "TA&QC Inspector":                  "ee_tlss_dashboard",
     "Transformer Repair Coordinator":   "ee_tlss_dashboard",
     "Procurement Officer":              "aee_dashboard",
-    "Procurement Approver":             "see_dashboard",
 }
 
 
@@ -12861,10 +12857,10 @@ def seed_dept_filter_users(session, org=None):
     print("\n[5] Top-level hierarchy users  (circle + zone)")
     _top_level_users = [
         # (email,                   fname,  lname,    role_name,             dept_obj)
-        ("ee.circle@utility.com",   "EE",   "Circle", "Reviewing Officer",             circle),
-        ("see.circle@utility.com",  "SEE",  "Circle", "Reviewing Officer",  circle),
-        ("cee.zone@utility.com",    "CEE",  "Zone",   "System Administrator",           zone),
-        ("see.zone@utility.com",    "SEE",  "Zone",   "Reviewing Officer",  zone),
+        ("ee.circle@utility.com",   "EE",   "Circle", "EE_TLSS",             circle),
+        ("see.circle@utility.com",  "SEE",  "Circle", "SEE_WM",              circle),
+        ("cee.zone@utility.com",    "CEE",  "Zone",   "CEE_TRANSMISSION_ZONE", zone),
+        ("see.zone@utility.com",    "SEE",  "Zone",   "SEE_WM",              zone),
     ]
     for email, fname, lname, role_name, dept_obj in _top_level_users:
         phone = "9000000099"
