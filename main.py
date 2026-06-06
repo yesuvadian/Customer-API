@@ -1074,15 +1074,23 @@ async def startup_event():
         )
         from models import Organization
         seed_precommission_stages(_db)
-        # Seed role mappings for every active org so buttons appear immediately
+        # Seed role mappings only for orgs that have the required OrgRoles
+        from models import OrgRole
         _orgs = _db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        seeded = 0
         for _org in _orgs:
+            has_roles = _db.query(OrgRole).filter_by(
+                organization_id=_org.id, name="EE_TLSS"
+            ).first()
+            if not has_roles:
+                continue
             try:
                 seed_precommission_role_mappings(_db, _org.id)
+                seeded += 1
             except Exception as _re:
                 logger.warning(f"[Seed] PCR role mapping failed for org {_org.id}: {_re}")
         _db.close()
-        logger.info(f"[Seed] Pre-commission QAP workflow staged + role mappings seeded for {len(_orgs)} org(s)")
+        logger.info(f"[Seed] Pre-commission QAP workflow staged + role mappings seeded for {seeded} org(s)")
     except Exception as _e:
         logger.warning(f"[Seed] Pre-commission seed failed on startup (non-fatal): {_e}")
 
