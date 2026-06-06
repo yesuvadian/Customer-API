@@ -8860,7 +8860,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when equipment is retired and a replacement unit is commissioned.",
             context_vars=["old_ueic", "new_ueic", "equipment_type", "department",
                           "reason_type", "reason", "replaced_by", "replaced_on"],
-            default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            default_roles=["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="equipment_registered",
@@ -8868,7 +8868,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment Lifecycle",
             description="Fired when a new equipment unit is commissioned into the register.",
             context_vars=["equipment", "equipment_type", "department", "manufacturer", "commissioned_by"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="equipment_retired",
@@ -8876,7 +8876,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment Lifecycle",
             description="Fired when an equipment unit is decommissioned / retired.",
             context_vars=["equipment", "equipment_type", "department", "reason", "retired_by"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="design_problem_alert",
@@ -8884,7 +8884,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment Lifecycle",
             description="Fired when a systemic design problem is identified for a make/model.",
             context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
-            default_roles=["Senior Management Approver", "Reviewing Officer"],
+            default_roles=["CEE_TRANSMISSION_ZONE", "EE_TLSS"],
         ),
         # ── Threshold Alerts ──────────────────────────────────────────────────
         dict(
@@ -8905,7 +8905,7 @@ def _seed_notification_event_catalogue(session) -> int:
                 # tables automatically — use this in email body templates
                 "alert.thresholdconfig",
             ],
-            default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="eval_alert",
@@ -8922,7 +8922,7 @@ def _seed_notification_event_catalogue(session) -> int:
                 "request.number", "tester_name", "result_summary", "revised_interval",
                 "alert.thresholdconfig",
             ],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         # ── Testing Requests ──────────────────────────────────────────────────
         dict(
@@ -8932,7 +8932,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when an originator submits a new test request.",
             context_vars=["request.number", "request.title", "request.priority",
                           "request.submitted_by", "equipment.ueic", "equipment.department"],
-            default_roles=["Reviewing Officer"],
+            default_roles=["EE_TLSS"],
         ),
         dict(
             event_type="request_rejected",
@@ -8940,7 +8940,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a testing request is rejected by an approver.",
             context_vars=["request.number", "request.title", "equipment.ueic", "rejected_by", "reason"],
-            default_roles=["Asset Data Officer", "Reviewing Officer"],
+            default_roles=["Asset Data Officer", "EE_TLSS"],
         ),
         dict(
             event_type="tester_assigned",
@@ -8949,7 +8949,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a test request is assigned to a field/lab tester.",
             context_vars=["request.number", "request.title", "request.assigned_to",
                           "request.due_date", "equipment.ueic"],
-            default_roles=["Test Engineer", "Maintenance Officer"],
+            default_roles=["AE_JE", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="tester_declined",
@@ -8957,7 +8957,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a tester declines an assignment — notifies the Test & Work Coordinator.",
             context_vars=["request.number", "tester_name", "reason"],
-            default_roles=["Test & Work Coordinator", "Reviewing Officer"],
+            default_roles=["Test & Work Coordinator", "EE_TLSS"],
         ),
         dict(
             event_type="test_submitted",
@@ -8966,7 +8966,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a tester submits test results for review.",
             context_vars=["request.number", "request.title", "request.submitted_by",
                           "equipment.ueic", "eval.overall", "report.retriepdf"],
-            default_roles=["Reviewing Officer"],
+            default_roles=["EE_TLSS"],
         ),
         dict(
             event_type="status_changed",
@@ -8974,7 +8974,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a normal workflow status changes.",
             context_vars=["request.number", "request.status", "request.title", "equipment.ueic"],
-            default_roles=["Reviewing Officer", "Asset Data Officer"],
+            default_roles=["EE_TLSS", "Asset Data Officer"],
         ),
         dict(
             event_type="recommendation_approved",
@@ -8982,7 +8982,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a technical approver approves a recommendation.",
             context_vars=["request.number", "recommendation_type", "product_count"],
-            default_roles=["Asset Data Officer", "Maintenance Officer"],
+            default_roles=["Asset Data Officer", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="recommendation_rejected",
@@ -8990,7 +8990,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a technical approver rejects a recommendation.",
             context_vars=["request.number", "reason"],
-            default_roles=["Test Engineer", "Asset Data Officer"],
+            default_roles=["AE_JE", "Asset Data Officer"],
         ),
         dict(
             event_type="repair_cancelled",
@@ -8998,7 +8998,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair Lifecycle",
             description="Fired when an active repair workflow is cancelled.",
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="overhaul_cancelled",
@@ -9006,7 +9006,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair Lifecycle",
             description="Fired when an active overhaul workflow is cancelled.",
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="calibration_cancelled",
@@ -9014,7 +9014,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair Lifecycle",
             description="Fired when an active calibration workflow is cancelled.",
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="surveillance_cancelled",
@@ -9022,7 +9022,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair Lifecycle",
             description="Fired when an active surveillance workflow is cancelled.",
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="procurement_pending",
@@ -9030,7 +9030,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a procurement request is created — notifies Procurement Approvers.",
             context_vars=["request.number", "pr_number", "title"],
-            default_roles=["Procurement Approver", "Reviewing Officer"],
+            default_roles=["Procurement Officer", "EE_TLSS"],
         ),
         dict(
             event_type="procurement_decision",
@@ -9038,7 +9038,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when Procurement approves or rejects a procurement request.",
             context_vars=["request.number", "pr_number", "decision", "notes"],
-            default_roles=["Asset Data Officer", "Reviewing Officer"],
+            default_roles=["Asset Data Officer", "EE_TLSS"],
         ),
         # ── Schedule Reminders ────────────────────────────────────────────────
         dict(
@@ -9048,7 +9048,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired 15 days before a scheduled test is due (SRS §8.2 #1).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="due_reminder_final",
@@ -9057,7 +9057,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Final reminder fired 7 days before a scheduled test is due (SRS §8.2 #2).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="overdue_alert",
@@ -9066,7 +9066,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a scheduled test passes its due date without completion (SRS §8.2 #3).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_overdue"],
-            default_roles=["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE", "SEE_WM"],
         ),
         dict(
             event_type="overdue_escalation",
@@ -9075,7 +9075,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Escalation fired when a test is more than 7 days overdue (SRS §8.2 #4).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "days_overdue", "equipment.department"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         # ── Stage Workflows ───────────────────────────────────────────────────
         # "Stage Workflows" covers repair / overhaul lifecycle stages
@@ -9085,7 +9085,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired each time the repair workflow advances to the next stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["Maintenance Officer", "Transformer Repair Coordinator"],
+            default_roles=["AEE_MAINTENANCE", "Transformer Repair Coordinator"],
         ),
         dict(
             event_type="repair_delay",
@@ -9093,7 +9093,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when a repair stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["Maintenance Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="overhaul_recommended",
@@ -9101,7 +9101,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when the repair workflow reaches completion — overhaul is done.",
             context_vars=["equipment", "equipment_type", "department", "operation_count", "operation_threshold"],
-            default_roles=["Maintenance Officer", "Senior Management Approver", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE", "EE_TLSS"],
         ),
         dict(
             event_type="overhaul_stage_changed",
@@ -9109,7 +9109,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired each time the overhaul workflow advances to the next stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="overhaul_stage_delay",
@@ -9117,7 +9117,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when an overhaul stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["Maintenance Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="calibration_stage_changed",
@@ -9125,7 +9125,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired each time the calibration workflow advances to the next stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="calibration_stage_delay",
@@ -9133,7 +9133,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when a calibration stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["Maintenance Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="surveillance_stage_changed",
@@ -9141,7 +9141,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired each time the surveillance workflow advances to the next quarter stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="surveillance_stage_delay",
@@ -9149,7 +9149,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when a surveillance stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["Maintenance Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
         # ── Failure Register ──────────────────────────────────────────────────
         dict(
@@ -9158,7 +9158,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Failure Register",
             description="Fired when a new Failure Registry entry is submitted and is awaiting review.",
             context_vars=["fr_number", "equipment", "originator", "category"],
-            default_roles=["Test & Work Coordinator", "Reviewing Officer"],
+            default_roles=["Test & Work Coordinator", "EE_TLSS"],
         ),
         dict(
             event_type="fr_approved",
@@ -9166,7 +9166,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Failure Register",
             description="Fired when a Failure Registry submission is approved.",
             context_vars=["fr_number", "equipment", "approved_by", "next_action"],
-            default_roles=["Asset Data Officer", "Maintenance Officer"],
+            default_roles=["Asset Data Officer", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="fr_rejected",
@@ -9184,7 +9184,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired on the first working day of the month — distributes the monthly MIS report.",
             context_vars=["report_month", "tests_completed", "critical_count", "overdue_count",
                           "report_pdf_url", "report_xls_url"],
-            default_roles=["Supervisory Officer", "Senior Management Approver", "Reviewing Officer"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE", "EE_TLSS"],
         ),
         # ── Report-Ready events (fired by run_scheduled_reports) ──────────────────
         dict(
@@ -9193,7 +9193,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the scheduled Overdue Test Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"],
         ),
         dict(
             event_type="alert_report_ready",
@@ -9201,7 +9201,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the weekly ALERT/CRITICAL Equipment Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"],
         ),
         dict(
             event_type="compliance_report_ready",
@@ -9209,7 +9209,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly Test Compliance Status Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Reviewing Officer", "Supervisory Officer"],
+            default_roles=["EE_TLSS", "SEE_WM"],
         ),
         dict(
             event_type="repair_report_ready",
@@ -9217,7 +9217,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly Transformer Repair Status Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="annual_failure_report_ready",
@@ -9225,7 +9225,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the annual Equipment Failure Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="pm_report_ready",
@@ -9233,7 +9233,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly PM Compliance Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="remedial_report_ready",
@@ -9241,7 +9241,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly Remedial Action Pending Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="taqc_report_ready",
@@ -9249,7 +9249,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly TA&QC Observation Compliance Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Reviewing Officer", "Supervisory Officer"],
+            default_roles=["EE_TLSS", "SEE_WM"],
         ),
         dict(
             event_type="vendor_report_ready",
@@ -9257,7 +9257,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the quarterly Vendor Performance Ranking Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="repairer_report_ready",
@@ -9265,7 +9265,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the annual Repairer Performance Ranking Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="oltc_report_ready",
@@ -9273,7 +9273,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly OLTC/CB Operations Count Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer"],
+            default_roles=["AEE_MAINTENANCE"],
         ),
         dict(
             event_type="post_repair_report_ready",
@@ -9281,7 +9281,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when a Post-Repair Transformer Evaluation report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
     ]
 
@@ -11232,22 +11232,9 @@ def run_seed():
                 print("[INFO] You can retry with:")
                 print(f"       python seed.py --kptcl {kptcl_org.id}")
 
-            try:
-                seed_kptcl_equipment(session, str(kptcl_org.id))
-            except FileNotFoundError:
-                print("[WARN] equipment_seed.xlsx not found. Skipping equipment seeding.")
-            except Exception as e:
-                print(f"[WARN] KPTCL equipment seeding failed: {e}")
-
-        # Annual Audit role mappings for KPTCL (stages must already exist from seed_annual_audit_stages above)
-        if kptcl_org:
-            try:
-                session.rollback()  # clear any aborted transaction from earlier steps
-                from seed_annual_audit import seed_annual_audit_role_mappings
-                seed_annual_audit_role_mappings(session, kptcl_org.id)
-            except Exception as e:
-                session.rollback()
-                print(f"[WARN] Annual Audit role mapping failed: {e}")
+            # Equipment seeding moved after seed_dept_filter_users so RT_EAST/RT_NORTH
+            # etc. divisions exist for the substation→division fallback lookup
+            pass
 
         # Sample Equipment (after departments + equipment types exist)
         seed_sample_equipment(session, kptcl_org)
@@ -11454,6 +11441,25 @@ def run_seed():
         # Zoho + Notifications — after seacms so roles and users exist
         seed_zoho_import_mapping(session, kptcl_org)
         seed_notifications_module_and_permissions(session)
+
+        # Equipment + Annual Audit role mappings — after seed_dept_filter_users
+        # so RT_EAST/RT_NORTH/BLR_CIRCLE depts exist for equipment lookup,
+        # and after seed_seacms_roles_users so KPTCL OrgRoles exist for stage mapping
+        if kptcl_org:
+            try:
+                seed_kptcl_equipment(session, str(kptcl_org.id))
+            except FileNotFoundError:
+                print("[WARN] equipment_seed.xlsx not found. Skipping equipment seeding.")
+            except Exception as e:
+                print(f"[WARN] KPTCL equipment seeding failed: {e}")
+
+            try:
+                session.rollback()
+                from seed_annual_audit import seed_annual_audit_role_mappings
+                seed_annual_audit_role_mappings(session, kptcl_org.id)
+            except Exception as e:
+                session.rollback()
+                print(f"[WARN] Annual Audit role mapping failed: {e}")
 
         # Rename duplicate test templates (add category to name for uniqueness)
         print("\n--- Renaming Duplicate Test Templates ---")
