@@ -67,13 +67,28 @@ def run_migration_from_file(session, migration_file: str, migration_name: str) -
         with open(migration_file, encoding='latin-1') as fh:
             sql_content = fh.read()
 
-    # Split on semicolons, skip blank/comment-only chunks
+    # Split on semicolons, but respect dollar-quoted $$ blocks (PL/pgSQL functions)
     statements = []
-    for raw in sql_content.split(";"):
-        lines = [l.split("--")[0].strip() for l in raw.split("\n")]
-        clean = "\n".join(l for l in lines if l).strip()
-        if clean:
-            statements.append(clean)
+    current = []
+    in_dollar_quote = False
+    for line in sql_content.split("\n"):
+        # Track entry/exit of $$ dollar-quote blocks
+        stripped = line.strip()
+        dollar_count = stripped.count("$$")
+        if dollar_count % 2 != 0:          # odd number → toggle state
+            in_dollar_quote = not in_dollar_quote
+        current.append(line)
+        if not in_dollar_quote and stripped.endswith(";"):
+            chunk = "\n".join(current).strip().rstrip(";").strip()
+            # Strip single-line comments from non-dollar-quoted content
+            if chunk:
+                statements.append(chunk)
+            current = []
+    # Any remaining content
+    if current:
+        chunk = "\n".join(current).strip().rstrip(";").strip()
+        if chunk:
+            statements.append(chunk)
 
     if not statements:
         print(f"[WARN] {migration_name}: No statements found — skipping")
