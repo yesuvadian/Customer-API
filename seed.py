@@ -11431,14 +11431,13 @@ def run_seed():
                 session.rollback()
                 print(f"[WARN] Surveillance role mapping failed: {_e}")
 
-        all_orgs = session.query(Organization).filter(Organization.is_active.is_(True)).all()
-        for _org in all_orgs:
+        if kptcl_org:
             try:
                 from seed_precommission_workflow import seed_precommission_role_mappings
-                seed_precommission_role_mappings(session, _org.id)
+                seed_precommission_role_mappings(session, kptcl_org.id)
             except Exception as _e:
                 session.rollback()
-                print(f"[WARN] Pre-commission role mapping failed for org {_org.id}: {_e}")
+                print(f"[WARN] Pre-commission role mapping failed: {_e}")
 
         # Equipment + Annual Audit role mappings — after seed_dept_filter_users
         # so RT_EAST/RT_NORTH/BLR_CIRCLE depts exist for equipment lookup,
