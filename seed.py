@@ -4693,7 +4693,8 @@ def seed_notifications_module_and_permissions(session):
     # ─────────────────────────────────────────────────────────────
     user = session.query(User).filter_by(email="orgadmin@utility.com").first()
     if not user:
-        raise Exception("User orgadmin@utility.com not found")
+        print("[WARN] seed_notifications_module_and_permissions: orgadmin@utility.com not found — skipping")
+        return
 
     # ─────────────────────────────────────────────────────────────
     # 4. Validate user belongs to KPTCL org
@@ -11291,9 +11292,7 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Missing role permissions backfill failed (non-fatal): {_e}")
 
-        # Zoho Import Mapping (after KPTCL org + departments exist)
-        seed_zoho_import_mapping(session, kptcl_org)
-        seed_notifications_module_and_permissions(session)
+        # Zoho Import Mapping — moved after seacms so Asset Data Officer role exists
         
         # Org role permissions — AFTER all orgs + org_roles are created
         # DISABLED: This grants VIEW to ALL modules for ALL roles, breaking RBAC
@@ -11451,6 +11450,10 @@ def run_seed():
             import traceback
             print(f"[WARN] KPTCL org roles seed failed (non-fatal): {_e}")
             traceback.print_exc()
+
+        # Zoho + Notifications — after seacms so roles and users exist
+        seed_zoho_import_mapping(session, kptcl_org)
+        seed_notifications_module_and_permissions(session)
 
         # Rename duplicate test templates (add category to name for uniqueness)
         print("\n--- Renaming Duplicate Test Templates ---")
