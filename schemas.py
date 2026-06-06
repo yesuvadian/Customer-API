@@ -571,7 +571,7 @@ class UserRegistor(BaseModel):
     
 class UserResponse(BaseModel):
     id: UUID
-    email: EmailStr
+    email: str
 
     firstname: Optional[str] = None
     lastname: Optional[str] = None
