@@ -19,6 +19,7 @@ Admin / system roles:
 
 Operational / support roles:
   Asset Data Officer         → asset_dashboard
+  Test & Work Coordinator    → test_coordinator_dashboard
   Transformer Repair Coordinator → ee_tlss_dashboard
   TA&QC Inspector            → ee_tlss_dashboard
   Procurement Officer        → aee_dashboard
@@ -288,6 +289,26 @@ ROLE_DEFS = [
         ],
     },
 
+    {
+        "name":        "Test & Work Coordinator",
+        "description": "Approves testing requests, assigns testers, and coordinates field maintenance work.",
+        "dashboard_path": "test_coordinator_dashboard",
+        "permissions": [
+            ("equipment",                  READ),
+            ("testing_requests",           RW_APPROVE),
+            ("testing_request_approvals",  RW_APPROVE),
+            ("repair-workflows",           RW_APPROVE),
+            ("overhaul-workflows",         RW_APPROVE),
+            ("calibration-workflows",      RW_APPROVE),
+            ("annual-audit-workflows",     RW_APPROVE),
+            ("surveillance-workflows",     RW_APPROVE),
+            ("precommission-workflows",    RW_APPROVE),
+            ("workflow-dashboard",         READ),
+            ("test_coordinator_dashboard", READ),
+            ("notifications",              READ),
+        ],
+    },
+
     # ── Admin / System Roles ──────────────────────────────────────────────────
     {
         "name":        "System Administrator",
@@ -368,19 +389,21 @@ ROLE_DEFS = [
 
 USER_DEFS = [
     # (email, firstname, lastname, phone, dept_code, role_name)
-    ("ae.je@utility.local",           "Ravi",      "Kumar",         "9900001001", "BAN_NORTH_SECTION",  "AE_JE"),
-    ("aee.maintenance@utility.local", "Suresh",    "Patil",         "9900001002", "BAN_NORTH_DIV",      "AEE_MAINTENANCE"),
-    ("ee.tlss@utility.local",         "Nagaraj",   "Hegde",         "9900001003", "BAN",                "EE_TLSS"),
-    ("see.wm@utility.local",          "Venkatesh", "Rao",           "9900001004", "BAN",                "SEE_WM"),
-    ("ee.rt@utility.local",           "Mohan",     "Prasad",        "9900001005", "BAN_RT_DIV",         "EE_RT"),
-    ("see.rt@utility.local",          "Anand",     "Krishnamurthy", "9900001006", "BAN",                "SEE_RT"),
-    ("cee.transmission@utility.local","Rajesh",    "Srinivasan",    "9900001007", "BAN",                "CEE_TRANSMISSION_ZONE"),
-    ("cee.rtrd@utility.local",        "Prakash",   "Murthy",        "9900001008", "BAN",                "CEE_RT_RD"),
-    ("orgadmin@utility.com",           "Org",       "Admin",         "9900001000", "BAN",                "System Administrator"),
-    ("asset.officer@utility.local",   "Kavitha",   "Nair",          "9900001009", "BAN",                "Asset Data Officer"),
-    ("trc@utility.local",             "Sanjay",    "Reddy",         "9900001010", "BAN",                "Transformer Repair Coordinator"),
-    ("taqc.inspector@utility.local",  "Deepa",     "Menon",         "9900001011", "BAN",                "TA&QC Inspector"),
-    ("procurement@utility.local",     "Ramesh",    "Iyer",          "9900001012", "BAN",                "Procurement Officer"),
+    # dept codes: RT_NORTH, RT_SOUTH, RT_EAST, MYSURU, BLR_CIRCLE (from seed_dept_filter_users)
+    ("ae.je@utility.local",           "Ravi",      "Kumar",         "9900001001", "RT_NORTH",    "AE_JE"),
+    ("aee.maintenance@utility.local", "Suresh",    "Patil",         "9900001002", "RT_NORTH",    "AEE_MAINTENANCE"),
+    ("ee.tlss@utility.local",         "Nagaraj",   "Hegde",         "9900001003", "BLR_CIRCLE",  "EE_TLSS"),
+    ("see.wm@utility.local",          "Venkatesh", "Rao",           "9900001004", "BLR_CIRCLE",  "SEE_WM"),
+    ("ee.rt@utility.local",           "Mohan",     "Prasad",        "9900001005", "RT_EAST",     "EE_RT"),
+    ("see.rt@utility.local",          "Anand",     "Krishnamurthy", "9900001006", "BLR_CIRCLE",  "SEE_RT"),
+    ("cee.transmission@utility.local","Rajesh",    "Srinivasan",    "9900001007", "BLR_CIRCLE",  "CEE_TRANSMISSION_ZONE"),
+    ("cee.rtrd@utility.local",        "Prakash",   "Murthy",        "9900001008", "BLR_CIRCLE",  "CEE_RT_RD"),
+    ("orgadmin@utility.com",          "Org",       "Admin",         "9900001000", "BLR_CIRCLE",  "System Administrator"),
+    ("asset.officer@utility.local",   "Kavitha",   "Nair",          "9900001009", "BLR_CIRCLE",  "Asset Data Officer"),
+    ("trc@utility.local",             "Sanjay",    "Reddy",         "9900001010", "BLR_CIRCLE",  "Transformer Repair Coordinator"),
+    ("taqc.inspector@utility.local",  "Deepa",     "Menon",         "9900001011", "BLR_CIRCLE",  "TA&QC Inspector"),
+    ("procurement@utility.local",     "Ramesh",    "Iyer",          "9900001012", "BLR_CIRCLE",  "Procurement Officer"),
+    ("tw.coordinator@utility.local",  "Kiran",     "Sharma",        "9900001013", "BLR_CIRCLE",  "Test & Work Coordinator"),
 ]
 
 
