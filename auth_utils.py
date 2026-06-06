@@ -171,7 +171,7 @@ def build_user_privileges(db: Session, user_id) -> dict:
                     "can_export": False,
                     "can_approve": False,
                     "can_assign": False,
-                    "is_active": module_info["is_active"],
+                    "is_active": bool(module_info["is_active"]) if module_info["is_active"] is not None else True,
                 }
 
             for key in ["can_view", "can_add", "can_edit", "can_delete",
@@ -209,7 +209,7 @@ def build_user_privileges(db: Session, user_id) -> dict:
                     "can_export": False,
                     "can_approve": False,
                     "can_assign": False,
-                    "is_active": module_info["is_active"],
+                    "is_active": bool(module_info["is_active"]) if module_info["is_active"] is not None else True,
                 }
 
             for key in ["can_view", "can_add", "can_edit", "can_delete",
