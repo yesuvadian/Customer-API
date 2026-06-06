@@ -8859,10 +8859,10 @@ def _seed_notification_event_catalogue(session) -> int:
         for rt in session.query(RoleTemplate).all()
     }
 
-    # Human-readable guard: catch stale/typo role names before the UUID
-    # resolution silently drops them.  Every name in default_roles MUST match
-    # a live RoleTemplate row.
-    _VALID_ROLES = set(_rt_map.keys())  # dynamic — always in sync with RoleTemplate table
+    # Also accept KPTCL OrgRole names as valid (RoleTemplate replaced by OrgRole)
+    from models import OrgRole as _OrgRole
+    _org_role_names = {r.name for r in session.query(_OrgRole).all()}
+    _VALID_ROLES = set(_rt_map.keys()) | _org_role_names
 
     # group_name values below MUST match the Flutter _groupIcons keys in
     # notification_center_page.dart so every group renders with an icon.
