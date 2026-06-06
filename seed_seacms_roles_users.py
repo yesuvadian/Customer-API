@@ -414,18 +414,24 @@ def seed():
         # Also index by name fragment for fallback
         dept_name_map = {d.name: d.id for d in all_depts}
 
+        if not all_depts:
+            print("[WARN] No departments found for KPTCL — run seed_kptcl_departments first.")
+            print("[WARN] OrgRoles will be created but users will have no department assignment.")
+
         def _dept(code):
-            """Return dept id by code, fallback to Bangalore Zone."""
+            """Return dept id by code, fallback to first available dept or None."""
             if code in dept_map:
                 return dept_map[code]
-            # Try prefix match
+            # Try prefix match on code
             for k, v in dept_map.items():
                 if code in k or k.startswith(code[:3]):
                     return v
-            print("Department map:", dept_map)
-            print("All departments:", len(all_depts))
-            # Fallback: Bangalore Zone
-            return dept_map.get("BAN") or all_depts[0].id
+            # Try name map fallback (e.g. 'BAN' matches 'Bangalore...')
+            for name, did in dept_name_map.items():
+                if code.upper() in name.upper():
+                    return did
+            # Last resort: first dept or None
+            return all_depts[0].id if all_depts else None
 
         # ── Create/update OrgRoles ──────────────────────────────────────
         org_role_ids = {}
