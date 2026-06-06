@@ -11316,10 +11316,10 @@ def run_seed():
             print(f"[WARN] Notification defaults seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
-        # Repair Workflow — stages, templates, roles, transitions
+        # Repair Workflow — stages, templates, transitions only (roles deferred)
         print("\n--- Repair Workflow Seeding ---")
         try:
-            seed_workflow(session)
+            seed_workflow(session, skip_roles=True)
         except Exception as _e:
             print(f"[WARN] Repair workflow seed failed (non-fatal): {_e}")
 
@@ -11424,6 +11424,14 @@ def run_seed():
 
         # ── All workflow role mappings — after seed_seacms_roles_users ───────────
         # OrgRoles (EE_TLSS, AEE_MAINTENANCE, etc.) must exist before stage→role
+
+        # Repair workflow role assignments (stages already seeded above)
+        print("\n--- Repair Workflow Role Assignments ---")
+        try:
+            seed_workflow(session, skip_roles=False)
+        except Exception as _e:
+            print(f"[WARN] Repair workflow role assignment failed (non-fatal): {_e}")
+
         if kptcl_org:
             try:
                 from seed_overhaul_workflow import seed_overhaul_role_mappings
@@ -11664,7 +11672,7 @@ def seed_zoho_import_mapping(session, kptcl_org):
     session.add(mapping)
     session.commit()
     print(f"[OK] Zoho import mapping created: KPTCL -> Originator, dept={dept.name if dept else 'None'}")
-def seed_workflow(db):
+def seed_workflow(db, skip_roles=False):
 
     import uuid
     from datetime import datetime
@@ -11777,6 +11785,11 @@ def seed_workflow(db):
     # roles[]         → can_edit=True, can_approve=True, can_assign=False
     # assignment_role → can_edit=False, can_approve=False, can_assign=True
     # -------------------------------
+    if skip_roles:
+        db.commit()
+        print("[OK] Repair workflow seeded successfully (roles deferred)")
+        return
+
     for entry in stage_role_list:
         stage_code = entry.get("stage_code")
         stage_id = stage_map_by_code.get(stage_code)
