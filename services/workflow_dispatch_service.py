@@ -412,11 +412,18 @@ class WorkflowDispatchService:
         rec: Recommendation,
         approver_id: UUID,
         category: RequestCategory,
+        force_immediate_ticket: bool = False,
     ) -> list[str]:
         """
         Create one operational schedule per recommended test type.
         Falls back to tr.test_type_id (single) when no test_types list is present.
         Returns list of schedule ids/numbers created.
+
+        force_immediate_ticket: when True the first ticket is created right away
+        (force_run), regardless of the advance window. Used by the threshold-alert
+        follow-up path, which needs the ticket immediately. The normal
+        recommendation-approval path leaves it False so the first ticket is
+        deferred to the advance window.
         """
         test_types: list[dict] = rec.test_types or []
         if test_types:
@@ -429,12 +436,14 @@ class WorkflowDispatchService:
 
             return [
                 self._create_schedule(tr, rec, approver_id, category=category,
-                                      test_type_id=_safe_int(t.get("id")))
+                                      test_type_id=_safe_int(t.get("id")),
+                                      force_immediate_ticket=force_immediate_ticket)
                 for t in test_types
             ]
         # Legacy / TAQC path — single test_type_id on the TR
         return [self._create_schedule(tr, rec, approver_id, category=category,
-                                      test_type_id=tr.test_type_id)]
+                                      test_type_id=tr.test_type_id,
+                                      force_immediate_ticket=force_immediate_ticket)]
 
     def _create_schedule(
         self,
@@ -443,6 +452,7 @@ class WorkflowDispatchService:
         approver_id: UUID,
         category: RequestCategory,
         test_type_id: Optional[int] = None,
+        force_immediate_ticket: bool = False,
     ) -> str:
         """
         Create an operational TestRequestSchedule for recurring work triggered by
@@ -557,12 +567,16 @@ class WorkflowDispatchService:
 
         # Immediate first-ticket trigger (same logic as onboarding).
         # The scheduler daemon creates subsequent tickets on each next_run_date.
+        # force_immediate_ticket=True (threshold-alert follow-up) forces the
+        # first ticket now even for long-period schedules; the normal approval
+        # path defers it to the advance window.
         try:
             self.db.refresh(schedule)
             created = TestRequestScheduleService.create_one_ticket(
                 db=self.db,
                 schedule=schedule,
                 now=now,
+                force_run=force_immediate_ticket,
             )
             if created:
                 print(f"[Dispatch] First ticket created immediately for schedule {schedule.id}")

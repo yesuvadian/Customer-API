@@ -1733,30 +1733,20 @@ def _execute_followup_action(
 
     try:
         if _category:
+            # force_immediate_ticket=True → _create_schedule creates the first
+            # ticket right away (single creation point). Do NOT also create the
+            # ticket here, or the same schedule would yield two tickets.
             schedule_ids = svc._create_schedules_for_action(
                 tr, mock_rec,
                 approver_id=tr.created_by,
                 category=_category,
+                force_immediate_ticket=True,
             )
             db.commit()
             logger.info(
                 f"[FollowupAction] Created {len(schedule_ids)} {next_action_str} "
                 f"schedule(s) for TR={tr.request_number}: {schedule_ids}"
             )
-            # Force-create the first ticket immediately for each new schedule.
-            from services.test_request_schedule_service import TestRequestScheduleService
-            from models import TestRequestSchedule as _TRS
-            now = datetime.now(timezone.utc)
-            for sid in schedule_ids:
-                if not sid:
-                    logger.warning(f"[FollowupAction] Schedule ID is empty — skipping ticket creation (check equipment_id and test_type_id on TR={tr.request_number})")
-                    continue
-                sched = db.query(_TRS).filter(_TRS.id == sid).first()
-                if sched:
-                    ticket_created = TestRequestScheduleService.create_one_ticket(
-                        db=db, schedule=sched, now=now, force_run=True
-                    )
-                    logger.info(f"[FollowupAction] create_one_ticket for schedule {sid}: created={ticket_created}")
         elif next_action_str == "repair_cycle":
             wf_id = svc._start_repair_workflow(tr, approver_id=tr.created_by)
             db.commit()
