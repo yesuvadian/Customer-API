@@ -11348,39 +11348,12 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Overhaul workflow seed failed (non-fatal): {_e}")
 
-        # Overhaul role mappings — must run AFTER seed_overhaul_stages so stage rows exist
-        if kptcl_org:
-            try:
-                from seed_overhaul_workflow import seed_overhaul_role_mappings
-                seed_overhaul_role_mappings(session, kptcl_org.id)
-            except Exception as _e:
-                session.rollback()
-                print(f"[WARN] Overhaul role mapping failed: {_e}")
-
         # Calibration Workflow — definition + stages for DATE_ADD fail trigger
         try:
             from seed_calibration_workflow import seed_calibration_stages
             seed_calibration_stages(session)
         except Exception as _e:
             print(f"[WARN] Calibration workflow seed failed (non-fatal): {_e}")
-
-        # Calibration role mappings — must run AFTER seed_calibration_stages
-        if kptcl_org:
-            try:
-                from seed_calibration_workflow import seed_calibration_role_mappings
-                seed_calibration_role_mappings(session, kptcl_org.id)
-            except Exception as _e:
-                session.rollback()
-                print(f"[WARN] Calibration role mapping failed: {_e}")
-
-        # Surveillance role mappings — must run AFTER seed_surveillance_stages
-        if kptcl_org:
-            try:
-                from seed_surveillance_workflow import seed_surveillance_role_mappings
-                seed_surveillance_role_mappings(session, kptcl_org.id)
-            except Exception as _e:
-                session.rollback()
-                print(f"[WARN] Surveillance role mapping failed: {_e}")
 
         # Pre-Commission QAP Workflow — 9-stage factory inspection workflow
         print("\n--- Pre-Commission QAP Workflow Seeding ---")
@@ -11390,16 +11363,8 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Pre-commission workflow seed failed (non-fatal): {_e}")
 
-        # Pre-Commission role mappings — must run AFTER seed_precommission_stages
-        # Seed for all organizations so any org can use the module
-        all_orgs = session.query(Organization).filter(Organization.is_active.is_(True)).all()
-        for _org in all_orgs:
-            try:
-                from seed_precommission_workflow import seed_precommission_role_mappings
-                seed_precommission_role_mappings(session, _org.id)
-            except Exception as _e:
-                session.rollback()
-                print(f"[WARN] Pre-commission role mapping failed for org {_org.id}: {_e}")
+        # NOTE: All workflow role mappings moved after seed_seacms_roles_users
+        # so KPTCL OrgRoles exist before stage→role assignments are made
 
         # TR / FR / TAQC Workflow Engine — states, transitions, permission matrix
         print("\n--- TR / FR / TAQC Workflow Engine Seeding ---")
@@ -11441,6 +11406,39 @@ def run_seed():
         # Zoho + Notifications — after seacms so roles and users exist
         seed_zoho_import_mapping(session, kptcl_org)
         seed_notifications_module_and_permissions(session)
+
+        # ── All workflow role mappings — after seed_seacms_roles_users ───────────
+        # OrgRoles (EE_TLSS, AEE_MAINTENANCE, etc.) must exist before stage→role
+        if kptcl_org:
+            try:
+                from seed_overhaul_workflow import seed_overhaul_role_mappings
+                seed_overhaul_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Overhaul role mapping failed: {_e}")
+
+            try:
+                from seed_calibration_workflow import seed_calibration_role_mappings
+                seed_calibration_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Calibration role mapping failed: {_e}")
+
+            try:
+                from seed_surveillance_workflow import seed_surveillance_role_mappings
+                seed_surveillance_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Surveillance role mapping failed: {_e}")
+
+        all_orgs = session.query(Organization).filter(Organization.is_active.is_(True)).all()
+        for _org in all_orgs:
+            try:
+                from seed_precommission_workflow import seed_precommission_role_mappings
+                seed_precommission_role_mappings(session, _org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Pre-commission role mapping failed for org {_org.id}: {_e}")
 
         # Equipment + Annual Audit role mappings — after seed_dept_filter_users
         # so RT_EAST/RT_NORTH/BLR_CIRCLE depts exist for equipment lookup,
@@ -12541,6 +12539,9 @@ def _dft_get_or_create_role(session, org_id, name,
     r = session.query(OrgRole).filter_by(
         organization_id=org_id, name=name
     ).first()
+    module_path = _DFT_ROLE_MODULE_PATH.get(name)
+    mod = session.query(Module).filter_by(path=module_path).first() if module_path else None
+
     if r:
         # Sync flags so re-seeding always fixes stale DB state
         updated = False
@@ -12550,11 +12551,6 @@ def _dft_get_or_create_role(session, org_id, name,
         if r.is_dept_admin != is_dept_admin:
             r.is_dept_admin = is_dept_admin
             updated = True
-    module_path = _DFT_ROLE_MODULE_PATH.get(name)
-
-    if module_path:
-        mod = session.query(Module).filter_by(path=module_path).first()
-
         if mod and r.default_module_id != mod.id:
             r.default_module_id = mod.id
             updated = True
