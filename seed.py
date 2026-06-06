@@ -11907,20 +11907,6 @@ def run_seed():
             except Exception as e:
                 print(f"[WARN] KPTCL equipment seeding failed: {e}")
 
-        # ── 2. KPTCL Org Roles + Users — AFTER departments are committed ────────
-        # Seeds AE_JE, AEE_MAINTENANCE, EE_TLSS, SEE_WM, EE_RT, SEE_RT,
-        # CEE_TRANSMISSION_ZONE, CEE_RT_RD as OrgRoles with full module
-        # permissions and one demo user per role.
-        # Must run after seed_kptcl_departments so dept lookup succeeds.
-        print("\n--- KPTCL Org Roles & Demo Users (seed_seacms_roles_users) ---")
-        try:
-            from seed_seacms_roles_users import seed as seed_seacms_roles_users
-            seed_seacms_roles_users()
-        except Exception as _e:
-            import traceback
-            print(f"[WARN] KPTCL org roles seed failed (non-fatal): {_e}")
-            traceback.print_exc()
-
         # Annual Audit role mappings for KPTCL (stages must already exist from seed_annual_audit_stages above)
         if kptcl_org:
             try:
@@ -12121,6 +12107,18 @@ def run_seed():
         except Exception as _e:
             import traceback
             print(f"[WARN] Dept-filter seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── KPTCL Org Roles + Users — LAST, after ALL departments exist ──────────
+        # BLR_CIRCLE, RT_NORTH, RT_EAST etc. are created by seed_dept_filter_users.
+        # Must run after both seed_kptcl_departments AND seed_dept_filter_users.
+        print("\n--- KPTCL Org Roles & Demo Users (seed_seacms_roles_users) ---")
+        try:
+            from seed_seacms_roles_users import seed as seed_seacms_roles_users
+            seed_seacms_roles_users()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] KPTCL org roles seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
         # Rename duplicate test templates (add category to name for uniqueness)
