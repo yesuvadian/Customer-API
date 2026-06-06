@@ -534,6 +534,9 @@ def seed():
             if user:
                 user.organization_id = kptcl.id
                 user.department_id   = dept_id
+                user.password_hash   = password_hash  # always reset to Kptcl@2026
+                user.isactive        = True
+                user.email_confirmed = True
                 user.mts = datetime.now()
                 user_id = user.id
                 action = "UPDATED"
