@@ -1868,3 +1868,683 @@ def get_asset_dashboard(
             ]
         }
     }
+
+
+# ── AE / JE Dashboard ─────────────────────────────────────────────────────────
+
+@router.get("/ae")
+def get_ae_dashboard(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    AE / JE Dashboard — Field-officer level view.
+    Scoped to the user's department (substation cluster).
+    Covers overdue tests, maintenance, TA&QC pending, remedial actions, and alerts.
+    """
+    from models import TestingRequest, Equipment, Recommendation, TestResult
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+
+    svc = _svc(db, current_user, org_id, dept_id)
+    now              = datetime.now(timezone.utc)
+    thirty_days_fwd  = now + timedelta(days=30)
+
+    dept_cond_tr = (TestingRequest.department_id.in_(svc.dept_ids)) if svc.dept_ids else True
+
+    # ── KPIs ──────────────────────────────────────────────────────────────────
+
+    my_assigned = db.query(func.count(TestingRequest.id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond_tr,
+        TestingRequest.status.in_(OPEN_STATUSES),
+        TestingRequest.is_schedule_template.is_(False),
+    ).scalar() or 0
+
+    overdue_tests = db.query(func.count(TestingRequest.id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond_tr,
+        TestingRequest.request_category == RequestCategory.test,
+        TestingRequest.status.in_(OPEN_STATUSES),
+        TestingRequest.due_date < now,
+        TestingRequest.is_schedule_template.is_(False),
+    ).scalar() or 0
+
+    maintenance_due = db.query(func.count(TestingRequest.id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond_tr,
+        TestingRequest.request_category == RequestCategory.maintenance,
+        TestingRequest.due_date < now,
+        TestingRequest.status.in_(OPEN_STATUSES),
+        TestingRequest.is_schedule_template.is_(False),
+    ).scalar() or 0
+
+    try:
+        taqc_pending = db.query(func.count(TestingRequest.id)).filter(
+            TestingRequest.organization_id == svc.org_id,
+            dept_cond_tr,
+            TestingRequest.request_category == RequestCategory.taqc_inspection,
+            TestingRequest.status.in_(OPEN_STATUSES),
+        ).scalar() or 0
+    except Exception:
+        taqc_pending = 0
+
+    open_remediation_count = db.query(func.count(Recommendation.id)).filter(
+        Recommendation.organization_id == svc.org_id,
+        Recommendation.approval_status == 'pending',
+    ).scalar() or 0
+
+    try:
+        critical_alerts = db.query(func.count(func.distinct(TestResult.testing_request_id))).filter(
+            TestResult.organization_id == svc.org_id,
+            TestResult.evaluation_result.isnot(None),
+            TestResult.evaluation_result['overall'].astext.in_(['CRITICAL', 'ALERT']),
+        ).scalar() or 0
+    except Exception:
+        critical_alerts = 0
+
+    # ── Upcoming Tests (next 30 days) ─────────────────────────────────────────
+
+    upcoming_rows = db.query(TestingRequest).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond_tr,
+        TestingRequest.request_category == RequestCategory.test,
+        TestingRequest.status.in_(['scheduled', 'pending_approval', 'assigned']),
+        TestingRequest.due_date.between(now, thirty_days_fwd),
+        TestingRequest.is_schedule_template.is_(False),
+    ).order_by(TestingRequest.due_date.asc()).limit(20).all()
+
+    upcoming_tests = [
+        {
+            'id': str(r.id),
+            'title': f"{r.test_type.name if r.test_type else 'Test'} — {r.department.name if r.department else ''}",
+            'ueic': r.equipment.ueic if r.equipment else '',
+            'due_date': r.due_date.strftime('%d-%b-%Y') if r.due_date else None,
+            'status': r.status.value if hasattr(r.status, 'value') else str(r.status),
+        }
+        for r in upcoming_rows
+    ]
+
+    # ── Overdue test list + age bands ─────────────────────────────────────────
+
+    overdue_rows = db.query(TestingRequest).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond_tr,
+        TestingRequest.request_category == RequestCategory.test,
+        TestingRequest.status.in_(OPEN_STATUSES),
+        TestingRequest.due_date < now,
+        TestingRequest.is_schedule_template.is_(False),
+    ).order_by(TestingRequest.due_date.asc()).limit(30).all()
+
+    overdue_test_list = []
+    bands = {'0_7': 0, '7_30': 0, '30_plus': 0}
+    for r in overdue_rows:
+        days = (now.date() - r.due_date.date()).days if r.due_date else 0
+        if   days >= 30: bands['30_plus'] += 1; esc = 'T+30 RED'
+        elif days >= 7:  bands['7_30']   += 1; esc = 'T+7 ORANGE'
+        else:            bands['0_7']    += 1; esc = 'T+0 YELLOW'
+        overdue_test_list.append({
+            'id': str(r.id),
+            'ueic': r.equipment.ueic if r.equipment else '',
+            'test_type': r.test_type.name if r.test_type else 'Test',
+            'substation': r.department.name if r.department else '',
+            'days_overdue': days,
+            'escalation': esc,
+        })
+
+    overdue_test_bands = [
+        {'label': '0–7 days',  'count': bands['0_7'],    'color': '#D97706'},
+        {'label': '7–30 days', 'count': bands['7_30'],   'color': '#EA580C'},
+        {'label': '30+ days',  'count': bands['30_plus'],'color': '#DC2626'},
+    ]
+
+    # ── Maintenance overdue list ───────────────────────────────────────────────
+
+    maint_rows = db.query(TestingRequest).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond_tr,
+        TestingRequest.request_category == RequestCategory.maintenance,
+        TestingRequest.due_date < now,
+        TestingRequest.status.in_(OPEN_STATUSES),
+        TestingRequest.is_schedule_template.is_(False),
+    ).order_by(TestingRequest.due_date.asc()).limit(20).all()
+
+    maintenance_overdue_list = [
+        {
+            'id': str(r.id),
+            'ueic': r.equipment.ueic if r.equipment else '',
+            'equipment': r.equipment.manufacturer or r.equipment.ueic if r.equipment else '',
+            'maintenance_type': r.title,
+            'days_overdue': (now.date() - r.due_date.date()).days if r.due_date else 0,
+            'due_date': r.due_date.strftime('%d-%b-%Y') if r.due_date else None,
+        }
+        for r in maint_rows
+    ]
+
+    # ── Open remediation list ─────────────────────────────────────────────────
+
+    rem_rows = db.query(Recommendation).filter(
+        Recommendation.organization_id == svc.org_id,
+        Recommendation.approval_status == 'pending',
+    ).order_by(Recommendation.cts.asc()).limit(15).all()
+
+    open_remediation_list = []
+    for rec in rem_rows:
+        req = rec.testing_request
+        days_open = (now - rec.cts).days if rec.cts else 0
+        open_remediation_list.append({
+            'id': str(rec.id),
+            'ueic': req.equipment.ueic if req and req.equipment else '',
+            'description': rec.summary or rec.detailed_notes or '',
+            'days_open': days_open,
+            'is_overdue': days_open > 14,
+        })
+
+    remedial_compliance = {
+        'pending': open_remediation_count,
+        'overdue': sum(1 for r in open_remediation_list if r['is_overdue']),
+        'compliance_pct': max(0, 100 - min(100, open_remediation_count * 5)),
+    }
+
+    # ── TA&QC pending list ────────────────────────────────────────────────────
+
+    try:
+        taqc_rows = db.query(TestingRequest).filter(
+            TestingRequest.organization_id == svc.org_id,
+            dept_cond_tr,
+            TestingRequest.request_category == RequestCategory.taqc_inspection,
+            TestingRequest.status.in_(OPEN_STATUSES),
+        ).order_by(TestingRequest.cts.desc()).limit(15).all()
+    except Exception:
+        taqc_rows = []
+
+    taqc_pending_list = [
+        {
+            'id': str(r.id),
+            'request_number': r.request_number,
+            'ueic': r.equipment.ueic if r.equipment else '',
+            'substation': r.department.name if r.department else '',
+            'status': r.status.value if hasattr(r.status, 'value') else str(r.status),
+            'created': r.cts.strftime('%d-%b-%Y') if r.cts else None,
+        }
+        for r in taqc_rows
+    ]
+
+    # ── Alerts feed (ALERT / CRITICAL equipment) ──────────────────────────────
+
+    try:
+        alert_rows = db.query(
+            TestResult, TestingRequest, Equipment
+        ).join(
+            TestingRequest, TestResult.testing_request_id == TestingRequest.id
+        ).join(
+            Equipment, TestingRequest.equipment_id == Equipment.id
+        ).filter(
+            TestingRequest.organization_id == svc.org_id,
+            dept_cond_tr,
+            TestResult.evaluation_result.isnot(None),
+            TestResult.evaluation_result['overall'].astext.in_(['CRITICAL', 'ALERT']),
+        ).order_by(TestResult.cts.desc()).limit(15).all()
+    except Exception:
+        alert_rows = []
+
+    alerts_feed = [
+        {
+            'id': str(result.id),
+            'ueic': eq.ueic if eq else '',
+            'equipment': eq.manufacturer or eq.ueic if eq else '',
+            'severity': (result.evaluation_result or {}).get('overall', 'ALERT').lower(),
+            'timestamp': result.cts.strftime('%d-%b-%Y %H:%M') if result.cts else None,
+            'substation': req.department.name if req.department else '',
+        }
+        for result, req, eq in alert_rows
+    ]
+
+    # ── Substations summary ───────────────────────────────────────────────────
+
+    subs_q = db.query(
+        TestingRequest.department_id,
+        func.count(TestingRequest.id).label('total'),
+    ).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond_tr,
+        TestingRequest.is_schedule_template.is_(False),
+    ).group_by(TestingRequest.department_id).limit(20).all()
+
+    substations_summary = []
+    for row in subs_q:
+        if row.department_id:
+            from models import OrgDepartment
+            dept = db.query(OrgDepartment).filter(OrgDepartment.id == row.department_id).first()
+            open_count = db.query(func.count(TestingRequest.id)).filter(
+                TestingRequest.organization_id == svc.org_id,
+                TestingRequest.department_id == row.department_id,
+                TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.is_schedule_template.is_(False),
+            ).scalar() or 0
+            substations_summary.append({
+                'name':        dept.name if dept else str(row.department_id),
+                'total_tests': row.total or 0,
+                'open_tests':  open_count,
+            })
+
+    return {
+        'kpis': {
+            'my_assigned_tests':  my_assigned,
+            'overdue_tests':      overdue_tests,
+            'maintenance_due':    maintenance_due,
+            'taqc_pending':       taqc_pending,
+            'open_remediation':   open_remediation_count,
+            'critical_alerts':    critical_alerts,
+        },
+        'upcoming_tests':           upcoming_tests,
+        'overdue_test_list':        overdue_test_list,
+        'overdue_test_bands':       overdue_test_bands,
+        'maintenance_overdue_list': maintenance_overdue_list,
+        'open_remediation_list':    open_remediation_list,
+        'taqc_pending_list':        taqc_pending_list,
+        'alerts_feed':              alerts_feed,
+        'remedial_compliance':      remedial_compliance,
+        'substations_summary':      substations_summary,
+    }
+
+
+# ── Shared helpers: RT / calibration KPIs ─────────────────────────────────────
+
+def _cal_kpis(db, svc, dept_cond, now, ninety_days_ago, thirty_days_fwd):
+    """Compute calibration-related KPI counts reused across EE RT / SEE RT / CEE RT."""
+    from models import TestingRequest, Equipment
+    from sqlalchemy import func
+
+    total_assets = db.query(func.count(Equipment.id)).filter(
+        Equipment.organization_id == svc.org_id,
+        Equipment.status == 'active',
+    ).scalar() or 0
+
+    # Try calibration category; fall back gracefully if enum value doesn't exist
+    try:
+        cal_cat = RequestCategory.calibration
+        cal_filter_extra = [TestingRequest.request_category == cal_cat]
+    except AttributeError:
+        cal_filter_extra = []
+
+    base_cal = [
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond,
+        TestingRequest.is_schedule_template.is_(False),
+        *cal_filter_extra,
+    ]
+
+    total_cal = db.query(func.count(TestingRequest.id)).filter(
+        *base_cal,
+        TestingRequest.cts >= ninety_days_ago,
+    ).scalar() or 0
+
+    completed_cal = db.query(func.count(TestingRequest.id)).filter(
+        *base_cal,
+        TestingRequest.status.in_(CLOSED_STATUSES),
+        TestingRequest.cts >= ninety_days_ago,
+    ).scalar() or 0
+
+    cal_compliance = int((completed_cal / total_cal * 100)) if total_cal > 0 else 0
+
+    overdue_cal = db.query(func.count(TestingRequest.id)).filter(
+        *base_cal,
+        TestingRequest.status.in_(OPEN_STATUSES),
+        TestingRequest.due_date < now,
+    ).scalar() or 0
+
+    expiring_soon = db.query(func.count(TestingRequest.id)).filter(
+        *base_cal,
+        TestingRequest.status.in_(OPEN_STATUSES),
+        TestingRequest.due_date.between(now, thirty_days_fwd),
+    ).scalar() or 0
+
+    fail_count = db.query(func.count(TestingRequest.id)).filter(
+        *base_cal,
+        TestingRequest.status == 'rejected',
+        TestingRequest.cts >= ninety_days_ago,
+    ).scalar() or 0
+
+    open_workflows = db.query(func.count(TestingRequest.id)).filter(
+        *base_cal,
+        TestingRequest.status.in_(OPEN_STATUSES),
+    ).scalar() or 0
+
+    total_rt = db.query(func.count(TestingRequest.id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond,
+        TestingRequest.request_category == RequestCategory.test,
+        TestingRequest.cts >= ninety_days_ago,
+        TestingRequest.is_schedule_template.is_(False),
+    ).scalar() or 0
+
+    completed_rt = db.query(func.count(TestingRequest.id)).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond,
+        TestingRequest.request_category == RequestCategory.test,
+        TestingRequest.status.in_(CLOSED_STATUSES),
+        TestingRequest.cts >= ninety_days_ago,
+        TestingRequest.is_schedule_template.is_(False),
+    ).scalar() or 0
+
+    rt_compliance = int((completed_rt / total_rt * 100)) if total_rt > 0 else 0
+
+    return {
+        'total_relay_assets':     total_assets,
+        'calibration_compliance': cal_compliance,
+        'overdue_calibrations':   overdue_cal,
+        'expiring_soon':          expiring_soon,
+        'fail_count':             fail_count,
+        'open_cal_workflows':     open_workflows,
+        'relay_test_compliance':  rt_compliance,
+    }
+
+
+def _cal_overdue_escalations(db, svc, dept_cond, now, limit=15):
+    """Return overdue calibration/test requests with escalation level."""
+    from models import TestingRequest
+    try:
+        cal_cat = RequestCategory.calibration
+        extra = [TestingRequest.request_category == cal_cat]
+    except AttributeError:
+        extra = []
+
+    rows = db.query(TestingRequest).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond,
+        TestingRequest.status.in_(OPEN_STATUSES),
+        TestingRequest.due_date < now,
+        TestingRequest.is_schedule_template.is_(False),
+        *extra,
+    ).order_by(TestingRequest.due_date.asc()).limit(limit).all()
+
+    result = []
+    for r in rows:
+        days = (now.date() - r.due_date.date()).days if r.due_date else 0
+        esc = 'T+30 RED' if days >= 30 else ('T+7 ORANGE' if days >= 7 else 'T+0 YELLOW')
+        result.append({
+            'id':          str(r.id),
+            'ueic':        r.equipment.ueic if r.equipment else '',
+            'equipment':   r.equipment.manufacturer or r.equipment.ueic if r.equipment else '',
+            'substation':  r.department.name if r.department else '',
+            'days_overdue': days,
+            'escalation':  esc,
+            'due_date':    r.due_date.strftime('%d-%b-%Y') if r.due_date else None,
+        })
+    return result
+
+
+def _cal_expiring_soon(db, svc, dept_cond, now, limit=15):
+    """Return calibrations/tests expiring in next 30 days."""
+    from models import TestingRequest
+    from datetime import timedelta
+    thirty_days_fwd = now + timedelta(days=30)
+    try:
+        cal_cat = RequestCategory.calibration
+        extra = [TestingRequest.request_category == cal_cat]
+    except AttributeError:
+        extra = []
+
+    rows = db.query(TestingRequest).filter(
+        TestingRequest.organization_id == svc.org_id,
+        dept_cond,
+        TestingRequest.status.in_(OPEN_STATUSES),
+        TestingRequest.due_date.between(now, thirty_days_fwd),
+        TestingRequest.is_schedule_template.is_(False),
+        *extra,
+    ).order_by(TestingRequest.due_date.asc()).limit(limit).all()
+
+    return [
+        {
+            'id':            str(r.id),
+            'ueic':          r.equipment.ueic if r.equipment else '',
+            'equipment':     r.equipment.manufacturer or r.equipment.ueic if r.equipment else '',
+            'substation':    r.department.name if r.department else '',
+            'due_date':      r.due_date.strftime('%d-%b-%Y') if r.due_date else None,
+            'days_remaining': (r.due_date.date() - now.date()).days if r.due_date else 0,
+        }
+        for r in rows
+    ]
+
+
+def _cal_fail_trend(db, svc, dept_cond, now):
+    """6-month monthly pass/fail trend."""
+    from models import TestingRequest
+    from datetime import timedelta
+    months = []
+    for i in range(5, -1, -1):
+        month_end   = now - timedelta(days=30 * i)
+        month_start = month_end - timedelta(days=30)
+        base = db.query(TestingRequest).filter(
+            TestingRequest.organization_id == svc.org_id,
+            dept_cond,
+            TestingRequest.cts.between(month_start, month_end),
+            TestingRequest.is_schedule_template.is_(False),
+        )
+        passed = base.filter(TestingRequest.status.in_(CLOSED_STATUSES)).count()
+        failed = base.filter(TestingRequest.status == 'rejected').count()
+        months.append({
+            'month': month_start.strftime('%b'),
+            'pass':  passed,
+            'fail':  failed,
+            'total': base.count(),
+        })
+    return months
+
+
+# ── EE RT Dashboard ───────────────────────────────────────────────────────────
+
+@router.get("/ee-rt")
+def get_ee_rt_dashboard(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """EE RT Dashboard — Department-level relay testing & calibration oversight."""
+    from models import TestingRequest, OrgDepartment
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+
+    svc = _svc(db, current_user, org_id, dept_id)
+    now             = datetime.now(timezone.utc)
+    ninety_days_ago = now - timedelta(days=90)
+    thirty_days_fwd = now + timedelta(days=30)
+    dept_cond       = (TestingRequest.department_id.in_(svc.dept_ids)) if svc.dept_ids else True
+
+    kpis = _cal_kpis(db, svc, dept_cond, now, ninety_days_ago, thirty_days_fwd)
+
+    dept_ids_list = list(svc.dept_ids) if svc.dept_ids else []
+    substation_compliance = []
+    if dept_ids_list:
+        for did in dept_ids_list[:20]:
+            dept = db.query(OrgDepartment).filter(OrgDepartment.id == did).first()
+            if not dept:
+                continue
+            total_d = db.query(func.count(TestingRequest.id)).filter(
+                TestingRequest.organization_id == svc.org_id,
+                TestingRequest.department_id == did,
+                TestingRequest.cts >= ninety_days_ago,
+                TestingRequest.is_schedule_template.is_(False),
+            ).scalar() or 0
+            completed_d = db.query(func.count(TestingRequest.id)).filter(
+                TestingRequest.organization_id == svc.org_id,
+                TestingRequest.department_id == did,
+                TestingRequest.status.in_(CLOSED_STATUSES),
+                TestingRequest.cts >= ninety_days_ago,
+                TestingRequest.is_schedule_template.is_(False),
+            ).scalar() or 0
+            overdue_d = db.query(func.count(TestingRequest.id)).filter(
+                TestingRequest.organization_id == svc.org_id,
+                TestingRequest.department_id == did,
+                TestingRequest.status.in_(OPEN_STATUSES),
+                TestingRequest.due_date < now,
+                TestingRequest.is_schedule_template.is_(False),
+            ).scalar() or 0
+            compliance = int((completed_d / total_d * 100)) if total_d > 0 else 0
+            substation_compliance.append({
+                'name':       dept.name,
+                'compliance': compliance,
+                'overdue':    overdue_d,
+                'total':      total_d,
+            })
+    else:
+        substation_compliance = [{
+            'name':       'All Substations',
+            'compliance': kpis['calibration_compliance'],
+            'overdue':    kpis['overdue_calibrations'],
+            'total':      0,
+        }]
+
+    return {
+        'kpis':                    kpis,
+        'substation_compliance':   substation_compliance,
+        'overdue_cal_escalations': _cal_overdue_escalations(db, svc, dept_cond, now),
+        'expiring_cal_list':       _cal_expiring_soon(db, svc, dept_cond, now),
+        'fail_trend':              _cal_fail_trend(db, svc, dept_cond, now),
+    }
+
+
+# ── SEE RT Dashboard ──────────────────────────────────────────────────────────
+
+@router.get("/see-rt")
+def get_see_rt_dashboard(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """SEE RT Dashboard — Circle-level relay testing & calibration supervision."""
+    from models import TestingRequest, OrgDepartment
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+
+    svc = _svc(db, current_user, org_id, dept_id)
+    now             = datetime.now(timezone.utc)
+    ninety_days_ago = now - timedelta(days=90)
+    thirty_days_fwd = now + timedelta(days=30)
+    dept_cond       = (TestingRequest.department_id.in_(svc.dept_ids)) if svc.dept_ids else True
+
+    base_kpis = _cal_kpis(db, svc, dept_cond, now, ninety_days_ago, thirty_days_fwd)
+    kpis = {**base_kpis, 'zone_cal_compliance': base_kpis['calibration_compliance']}
+
+    all_depts = db.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == svc.org_id,
+    ).limit(30).all()
+
+    dept_rt_breakdown = []
+    for dept in all_depts:
+        if svc.dept_ids and dept.id not in svc.dept_ids:
+            continue
+        total_d = db.query(func.count(TestingRequest.id)).filter(
+            TestingRequest.organization_id == svc.org_id,
+            TestingRequest.department_id == dept.id,
+            TestingRequest.cts >= ninety_days_ago,
+            TestingRequest.is_schedule_template.is_(False),
+        ).scalar() or 0
+        completed_d = db.query(func.count(TestingRequest.id)).filter(
+            TestingRequest.organization_id == svc.org_id,
+            TestingRequest.department_id == dept.id,
+            TestingRequest.status.in_(CLOSED_STATUSES),
+            TestingRequest.cts >= ninety_days_ago,
+            TestingRequest.is_schedule_template.is_(False),
+        ).scalar() or 0
+        overdue_d = db.query(func.count(TestingRequest.id)).filter(
+            TestingRequest.organization_id == svc.org_id,
+            TestingRequest.department_id == dept.id,
+            TestingRequest.status.in_(OPEN_STATUSES),
+            TestingRequest.due_date < now,
+            TestingRequest.is_schedule_template.is_(False),
+        ).scalar() or 0
+        compliance = int((completed_d / total_d * 100)) if total_d > 0 else 0
+        dept_rt_breakdown.append({
+            'name':       dept.name,
+            'compliance': compliance,
+            'overdue':    overdue_d,
+            'total':      total_d,
+        })
+
+    return {
+        'kpis':                    kpis,
+        'dept_rt_breakdown':       dept_rt_breakdown,
+        'overdue_cal_escalations': _cal_overdue_escalations(db, svc, dept_cond, now),
+        'expiring_cal_list':       _cal_expiring_soon(db, svc, dept_cond, now),
+        'fail_trend':              _cal_fail_trend(db, svc, dept_cond, now),
+    }
+
+
+# ── CEE RT & R&D Dashboard ────────────────────────────────────────────────────
+
+@router.get("/cee-rt-rd")
+def get_cee_rt_rd_dashboard(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """CEE RT & R&D Dashboard — Zone-level calibration governance & R&D executive view."""
+    from models import TestingRequest, OrgDepartment
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+
+    svc = _svc(db, current_user, org_id, dept_id)
+    now             = datetime.now(timezone.utc)
+    ninety_days_ago = now - timedelta(days=90)
+    thirty_days_fwd = now + timedelta(days=30)
+    dept_cond       = True   # Zone-wide — no dept scoping for CEE
+
+    base_kpis = _cal_kpis(db, svc, dept_cond, now, ninety_days_ago, thirty_days_fwd)
+    kpis = {**base_kpis, 'zone_cal_compliance': base_kpis['calibration_compliance']}
+
+    # Zone breakdown — all departments (circles / substations)
+    all_depts = db.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == svc.org_id,
+    ).limit(20).all()
+
+    zone_breakdown = []
+    for dept in all_depts:
+        from utils.common_service import get_dept_subtree_ids
+        subtree = get_dept_subtree_ids(db, dept.id)
+        d_cond = TestingRequest.department_id.in_(subtree) if subtree else True
+
+        total_z = db.query(func.count(TestingRequest.id)).filter(
+            TestingRequest.organization_id == svc.org_id,
+            d_cond,
+            TestingRequest.cts >= ninety_days_ago,
+            TestingRequest.is_schedule_template.is_(False),
+        ).scalar() or 0
+
+        completed_z = db.query(func.count(TestingRequest.id)).filter(
+            TestingRequest.organization_id == svc.org_id,
+            d_cond,
+            TestingRequest.status.in_(CLOSED_STATUSES),
+            TestingRequest.cts >= ninety_days_ago,
+            TestingRequest.is_schedule_template.is_(False),
+        ).scalar() or 0
+
+        overdue_z = db.query(func.count(TestingRequest.id)).filter(
+            TestingRequest.organization_id == svc.org_id,
+            d_cond,
+            TestingRequest.status.in_(OPEN_STATUSES),
+            TestingRequest.due_date < now,
+            TestingRequest.is_schedule_template.is_(False),
+        ).scalar() or 0
+
+        compliance = int((completed_z / total_z * 100)) if total_z > 0 else 0
+        zone_breakdown.append({
+            'name':       dept.name,
+            'compliance': compliance,
+            'overdue':    overdue_z,
+            'total':      total_z,
+        })
+
+    return {
+        'kpis':                    kpis,
+        'zone_breakdown':          zone_breakdown,
+        'overdue_cal_escalations': _cal_overdue_escalations(db, svc, dept_cond, now),
+        'expiring_cal_list':       _cal_expiring_soon(db, svc, dept_cond, now),
+        'fail_trend':              _cal_fail_trend(db, svc, dept_cond, now),
+    }

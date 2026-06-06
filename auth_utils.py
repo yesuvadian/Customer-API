@@ -274,8 +274,10 @@ def login_user(db: Session, email: str, password: str):
             db.flush()
 
         # Step 4: Account locked? Show remaining time
-        if security.login_locked_until and security.login_locked_until > now:
-            remaining = security.login_locked_until - now
+        # Use _make_aware to handle naive datetimes stored by older code
+        locked_until = UTCDateTimeMixin._make_aware(security.login_locked_until)
+        if locked_until and locked_until > now:
+            remaining = locked_until - now
             remaining_minutes = int(remaining.total_seconds() // 60)
 
             raise HTTPException(
@@ -401,7 +403,9 @@ def login_user(db: Session, email: str, password: str):
         raise
 
     except Exception as e:
+        import traceback
         print(f"Login error: {e}")
+        traceback.print_exc()          # full stack trace in server log
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred during login."
