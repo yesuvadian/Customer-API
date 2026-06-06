@@ -426,23 +426,6 @@ USER_DEFS = [
     ("taqc.inspector@utility.local",  "Deepa",     "Menon",         "9900001011", "BLR_CIRCLE",  "TA&QC Inspector"),
     ("procurement@utility.local",     "Ramesh",    "Iyer",          "9900001012", "BLR_CIRCLE",  "Procurement Officer"),
     ("tw.coordinator@utility.local",  "Kiran",     "Sharma",        "9900001013", "BLR_CIRCLE",  "Test & Work Coordinator"),
-
-    # ── Legacy users from old seed — reassigned to KPTCL roles ───────────────
-    ("originator@utility.com",          "KPTCL",     "Originator",    "9900002001", "BLR_CIRCLE",  "Asset Data Officer"),
-    ("testassigner@utility.com",        "Test",      "Assigner",      "9900002002", "BLR_CIRCLE",  "Test & Work Coordinator"),
-    ("depthead@utility.com",            "Dept",      "Head",          "9900002003", "BLR_CIRCLE",  "EE_TLSS"),
-    ("purchaser@utility.com",           "KPTCL",     "Purchaser",     "9900002004", "BLR_CIRCLE",  "Procurement Officer"),
-    ("docviewer@utility.com",           "Doc",       "Viewer",        "9900002005", "BLR_CIRCLE",  "TA&QC Inspector"),
-    ("aee.maintenance@utility.com",     "AEE",       "Maintenance",   "9900002006", "RT_NORTH",    "AEE_MAINTENANCE"),
-    ("ee.tlss@utility.com",             "EE",        "TLSS",          "9900002007", "BLR_CIRCLE",  "EE_TLSS"),
-    ("see.wm@utility.com",              "SEE",       "WM",            "9900002008", "BLR_CIRCLE",  "SEE_WM"),
-    ("ee.rt@utility.com",               "EE",        "RT",            "9900002009", "RT_EAST",     "EE_RT"),
-    ("see.rt@utility.com",              "SEE",       "RT",            "9900002010", "BLR_CIRCLE",  "SEE_RT"),
-    ("see.rt.bangalore@utility.com",    "SEE RT",    "Bangalore",     "9900002011", "BLR_CIRCLE",  "SEE_RT"),
-    ("see.rt.hubli@utility.com",        "SEE RT",    "Hubli",         "9900002012", "BLR_CIRCLE",  "SEE_RT"),
-    ("see.rt.mysore@utility.com",       "SEE RT",    "Mysore",        "9900002013", "BLR_CIRCLE",  "SEE_RT"),
-    ("see.rt.gulbarga@utility.com",     "SEE RT",    "Gulbarga",      "9900002014", "BLR_CIRCLE",  "SEE_RT"),
-    ("cee.zone@utility.com",            "CEE",       "Zone",          "9900002015", "BLR_CIRCLE",  "CEE_TRANSMISSION_ZONE"),
 ]
 
 
