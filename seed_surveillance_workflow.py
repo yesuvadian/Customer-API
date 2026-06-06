@@ -300,7 +300,7 @@ def seed_surveillance_role_mappings(db, org_id: uuid.UUID) -> int:
 
     # Get org roles
     org_roles = db.query(OrgRole).filter_by(organization_id=org_id).all()
-    role_name_map = {r.role_name: r.id for r in org_roles}
+    role_name_map = {r.name: r.id for r in org_roles}
 
     inserted = 0
 

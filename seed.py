@@ -12817,6 +12817,18 @@ def seed_dept_filter_users(session, org=None):
     for slug, dept in dept_map.items():
         print(f"  Div [{slug:6s}]: {dept.name}  ({dept.id})")
 
+    # Seed RT substations missing from KPTCL_Substation_Mapping.xlsx
+    # so equipment_seed.xlsx rows for these substations resolve to a dept
+    _rt_substations = [
+        ("220kV EDC",             "RT_EDC",       div_east.id),
+        ("400kV DHP",             "RT_DHP",       div_east.id),
+        ("220kV Kanakapura",      "RT_KANAKAPURA", div_south.id),
+        ("220kV Manyatha Tech Park", "RT_MANYATHA", div_north.id),
+    ]
+    for sub_name, sub_code, parent_id in _rt_substations:
+        _dft_get_or_create_dept(session, oid, name=sub_name, code=sub_code, parent_id=parent_id)
+    session.flush()
+
     # 3. Roles  (org-scoped, shared across all 3 divisions)
     print("\n[3] Roles")
     role_map: dict = {}
