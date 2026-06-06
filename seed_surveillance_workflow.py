@@ -336,13 +336,13 @@ def seed_surveillance_role_mappings(db, org_id: uuid.UUID) -> int:
                 stage_id=stage_id, role_id=role_id
             ).first()
             if existing:
-                if not existing.can_be_assigned:
-                    existing.can_be_assigned = True
+                if not existing.can_assign:
+                    existing.can_assign = True
             else:
                 db.add(RepairStageRole(
                     stage_id=stage_id,
                     role_id=role_id,
-                    can_be_assigned=True,
+                    can_assign=True,
                 ))
                 inserted += 1
 
