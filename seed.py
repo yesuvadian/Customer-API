@@ -1126,7 +1126,6 @@ def seed_roles(session):
     # 🔐 SYSTEM ROLES
     # =========================
     {"name": "ADMIN", "description": "Full access to all modules"},
-    {"name": "VIEWER", "description": "Read-only access"},
     {"name": "OPERATOR", "description": "Can scan and submit inventory"},
     {"name": "AUDITOR", "description": "Can view scan history and audit trails"},
 
@@ -1189,29 +1188,11 @@ def seed_roles(session):
     return role_ids
 
 def assign_viewer_role_to_new_users(session, new_user_ids, role_ids):
-    """Assign Viewer role to new users who don't have ANY role yet.
-    Rule: Each user can only belong to ONE role.
-    """
-    viewer_role_id = role_ids.get("Viewer")
-    if not viewer_role_id:
-        print("[ERROR] Viewer role not found")
+    """No-op — seed_users() returns [] so new_user_ids is always empty.
+    Users are assigned roles via seed_seacms_roles_users (OrgUserRole)."""
+    if not new_user_ids:
         return
-
-    for user_id in new_user_ids:
-        # Skip if user already has ANY role (single-role rule)
-        has_any_role = session.query(UserRole).filter(
-            UserRole.user_id == user_id
-        ).first()
-        if has_any_role:
-            continue
-
-        session.add(UserRole(
-            user_id=user_id,
-            role_id=viewer_role_id
-        ))
-
-    session.commit()
-    print("[OK] Viewer (Read-only) role assigned to new users without any role.")
+    print(f"[SKIP] assign_viewer_role_to_new_users: no new users to assign.")
 
 def seed_plans(session):
     plans_data = [
@@ -1740,12 +1721,6 @@ def seed_privileges(session, role_ids, module_ids):
                 "can_delete": True, "can_search": True,
                 "can_import": True, "can_export": True
             }
-            for module in module_names
-        ],
-
-        # VIEWER — only view
-        *[
-            { "role": "Viewer", "module": module, "can_view": True }
             for module in module_names
         ],
 
