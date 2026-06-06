@@ -11301,19 +11301,8 @@ def run_seed():
         # Proper permissions are already set via role templates during org role provisioning
         # seed_org_role_permissions_for_modules(session, module_ids)
 
-        # All notification defaults — event catalogue, variables, templates,
-        # schedule rules, routing rules (idempotent, single call)
-        print("\n--- Notification Defaults Seeding ---")
-        try:
-            _nc = seed_notification_defaults(session)
-            print(f"[OK] Event catalogue  : {_nc['event_catalogue']} inserted (0 = already seeded)")
-            print(f"[OK] Variables        : {_nc['variables']} inserted (0 = already seeded)")
-            print(f"[OK] Templates        : {_nc['templates']} inserted (0 = already seeded)")
-            print(f"[OK] Schedule rules   : {_nc['schedule_rules']} inserted (0 = already seeded)")
-            print(f"[OK] Routing rules    : {_nc['routing_rules']} inserted (0 = already seeded)")
-        except Exception as _e:
-            import traceback
-            print(f"[WARN] Notification defaults seed failed (non-fatal): {_e}")
+        # Notification defaults moved after seed_seacms_roles_users so OrgRole
+        # names are available for _VALID_ROLES validation in event catalogue
             traceback.print_exc()
 
         # Repair Workflow — stages, templates, transitions only (roles deferred)
@@ -11421,6 +11410,20 @@ def run_seed():
         # Zoho + Notifications — after seacms so roles and users exist
         seed_zoho_import_mapping(session, kptcl_org)
         seed_notifications_module_and_permissions(session)
+
+        # Notification defaults — after seacms so OrgRole names pass _VALID_ROLES check
+        print("\n--- Notification Defaults Seeding ---")
+        try:
+            _nc = seed_notification_defaults(session)
+            print(f"[OK] Event catalogue  : {_nc['event_catalogue']} inserted (0 = already seeded)")
+            print(f"[OK] Variables        : {_nc['variables']} inserted (0 = already seeded)")
+            print(f"[OK] Templates        : {_nc['templates']} inserted (0 = already seeded)")
+            print(f"[OK] Schedule rules   : {_nc['schedule_rules']} inserted (0 = already seeded)")
+            print(f"[OK] Routing rules    : {_nc['routing_rules']} inserted (0 = already seeded)")
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Notification defaults seed failed (non-fatal): {_e}")
+            traceback.print_exc()
 
         # ── All workflow role mappings — after seed_seacms_roles_users ───────────
         # OrgRoles (EE_TLSS, AEE_MAINTENANCE, etc.) must exist before stage→role
