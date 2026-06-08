@@ -11,6 +11,193 @@ from utils.common_service import UTCDateTimeMixin
 logger = logging.getLogger(__name__)
 
 
+def _resolve_baseline_result(db, request_id, template_key, current_session, tpl_data):
+    """
+    Resolve the baseline TestResult for cross-session comparison.
+
+    Reads baseline.strategy from the first enabled cross_session_evaluation field
+    in the template. Strategies:
+      named_session    — fetch by session_name == baseline.session_name
+      previous_session — fetch session_number == current - 1
+      first_session    — fetch session_number == 1
+
+    Returns None when:
+      - No cross_session_evaluation fields found
+      - Current session IS the baseline (skip comparison)
+      - No prior result exists yet
+    """
+    from models import TestResult, TestSession
+
+    # Find the first baseline config from template fields
+    baseline_cfg: dict = {}
+    for sec in tpl_data.get("sections", []):
+        for fld in sec.get("fields", []):
+            cs = fld.get("cross_session_evaluation") or {}
+            if cs.get("enabled") and cs.get("baseline"):
+                baseline_cfg = cs["baseline"]
+                break
+        if baseline_cfg:
+            break
+
+    if not baseline_cfg:
+        return None
+
+    strategy = baseline_cfg.get("strategy", "named_session")
+
+    if strategy == "named_session":
+        name = baseline_cfg.get("session_name", "")
+        if not name or current_session.session_name == name:
+            return None
+        return (
+            db.query(TestResult)
+            .join(TestSession, TestResult.test_session_id == TestSession.id)
+            .filter(
+                TestResult.testing_request_id == request_id,
+                TestResult.template_key == template_key,
+                TestSession.session_name == name,
+            )
+            .first()
+        )
+
+    elif strategy == "previous_session":
+        if not current_session.session_number or current_session.session_number <= 1:
+            return None
+        return (
+            db.query(TestResult)
+            .join(TestSession, TestResult.test_session_id == TestSession.id)
+            .filter(
+                TestResult.testing_request_id == request_id,
+                TestResult.template_key == template_key,
+                TestSession.session_number == current_session.session_number - 1,
+            )
+            .first()
+        )
+
+    elif strategy == "first_session":
+        if current_session.session_number == 1:
+            return None
+        return (
+            db.query(TestResult)
+            .join(TestSession, TestResult.test_session_id == TestSession.id)
+            .filter(
+                TestResult.testing_request_id == request_id,
+                TestResult.template_key == template_key,
+                TestSession.session_number == 1,
+            )
+            .first()
+        )
+
+    return None
+
+
+def _build_threshold_config_html(ev: dict) -> str:
+    """
+    Build an HTML table from evaluation result fields for use as
+    {{alert.thresholdconfig}} in eval_alert / eval_critical email templates.
+
+    Renders only ALERT or CRITICAL fields. Handles two field types:
+
+    Per-session fields (type=number/table):
+      Parameter | Measured Value | Status | Normal Range | Alert Range | Critical Range
+
+    Cross-session deviation fields (type=table_aggregate/table_row):
+      Parameter | Baseline | Current | Deviation | Status
+      (rendered in a separate section with a header)
+
+    Falls back to a plain text summary if no fields are present.
+    """
+    all_fields = [
+        f for f in (ev.get("fields") or [])
+        if f.get("status") in ("ALERT", "CRITICAL")
+    ]
+    if not all_fields:
+        return (
+            f"<p>Overall result: <strong>{ev.get('overall', '')}</strong>. "
+            f"{ev.get('summary', '')}</p>"
+        )
+
+    # Discriminate by source marker stamped on every cross-session field
+    per_session   = [f for f in all_fields if f.get("source") != "cross_session"]
+    cross_session = [f for f in all_fields if f.get("source") == "cross_session"]
+
+    TD  = "style='padding:5px 8px;border:1px solid #ddd;font-size:12px'"
+    TH  = "style='padding:5px 8px;border:1px solid #ddd;background:#1E3C72;color:#fff;font-size:12px;text-align:left'"
+    TH2 = "style='padding:5px 8px;border:1px solid #ddd;background:#1a3a2a;color:#a5d6a7;font-size:12px;text-align:left'"
+
+    def _fmt(val) -> str:
+        return str(round(val, 4)) if isinstance(val, float) else (str(val) if val is not None else "—")
+
+    def _range(lo, hi) -> str:
+        if lo is not None and hi is not None:
+            return f"{lo} – {hi}"
+        if lo is not None:
+            return f"≥ {lo}"
+        if hi is not None:
+            return f"≤ {hi}"
+        return "—"
+
+    html = ""
+
+    # ── Per-session threshold table ────────────────────────────────────────────
+    if per_session:
+        rows = ""
+        for f in per_session:
+            t = f.get("thresholds") or {}
+            status = f.get("status", "")
+            sc = "#d32f2f" if status == "CRITICAL" else "#f57c00"
+            unit = f.get("unit") or ""
+            rows += (
+                f"<tr>"
+                f"<td {TD}>{f.get('label', f.get('key', ''))}</td>"
+                f"<td {TD}><strong>{_fmt(f.get('value'))} {unit}</strong></td>"
+                f"<td {TD} style='color:{sc};font-weight:bold'>{status}</td>"
+                f"<td {TD}>{_range(t.get('normal_min'), t.get('normal_max'))}</td>"
+                f"<td {TD}>{_range(t.get('alert_min'), t.get('alert_max'))}</td>"
+                f"<td {TD}>{_range(t.get('critical_below'), t.get('critical_above'))}</td>"
+                f"</tr>"
+            )
+        html += (
+            f"<table cellspacing='0' style='border-collapse:collapse;width:100%;margin-top:8px'>"
+            f"<tr>"
+            f"<th {TH}>Parameter</th><th {TH}>Measured Value</th>"
+            f"<th {TH}>Status</th><th {TH}>Normal Range</th>"
+            f"<th {TH}>Alert Range</th><th {TH}>Critical Range</th>"
+            f"</tr>{rows}</table>"
+        )
+
+    # ── Cross-session deviation table ──────────────────────────────────────────
+    if cross_session:
+        if html:
+            html += "<br/>"
+        rows = ""
+        for f in cross_session:
+            status = f.get("status", "")
+            sc  = "#d32f2f" if status == "CRITICAL" else "#f57c00"
+            dev = _fmt(f.get("deviation"))
+            dev_type = "%" if f.get("deviation_type") == "relative_percent" else ""
+            sign = "+" if isinstance(f.get("deviation"), (int, float)) and f.get("deviation", 0) > 0 else ""
+            rows += (
+                f"<tr>"
+                f"<td {TD}>{f.get('label', f.get('key', ''))}</td>"
+                f"<td {TD}>{_fmt(f.get('baseline_value'))}</td>"
+                f"<td {TD}>{_fmt(f.get('current_value'))}</td>"
+                f"<td {TD}><strong>{sign}{dev}{dev_type}</strong></td>"
+                f"<td {TD} style='color:{sc};font-weight:bold'>{status}</td>"
+                f"</tr>"
+            )
+        html += (
+            f"<p style='margin:8px 0 4px;font-size:12px;color:#555'>"
+            f"<strong>Cross-Session Comparison (vs FACTORY baseline)</strong></p>"
+            f"<table cellspacing='0' style='border-collapse:collapse;width:100%;margin-top:4px'>"
+            f"<tr>"
+            f"<th {TH2}>Parameter</th><th {TH2}>Baseline</th>"
+            f"<th {TH2}>Current</th><th {TH2}>Deviation</th><th {TH2}>Status</th>"
+            f"</tr>{rows}</table>"
+        )
+
+    return html
+
+
 def _deduplicated_overall_sections(main_sections: list, overall_sections: list) -> list:
     """
     Return only those sections/fields from overall_sections that don't already
@@ -45,6 +232,44 @@ class TestingService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Testing request not found")
         return request
 
+    def _user_label(self, user_id) -> str:
+        """Resolve a user's friendly display name for notification context."""
+        from models import User
+        if not user_id:
+            return "System"
+        u = self.db.query(User).filter(User.id == user_id).first()
+        if not u:
+            return str(user_id)
+        name = " ".join(filter(None, [u.firstname, u.lastname])).strip()
+        return name or u.email or str(user_id)
+
+    def _fire_status_changed(self, request, status_from: str, status_to: str, user_id) -> None:
+        """Emit the status_changed notification event for a lifecycle transition.
+        Fire-and-forget — never blocks the transaction."""
+        try:
+            from services.notification_service import NotificationService
+            NotificationService(self.db).fire(
+                event_type="status_changed",
+                context={
+                    "request.number": request.request_number or str(request.id),
+                    "request.status": status_to,
+                    "request.title":  getattr(request, "title", "") or "",
+                    "status_from":    status_from,
+                    "status_to":      status_to,
+                    "changed_by":     self._user_label(user_id),
+                },
+                organization_id=request.organization_id,
+                department_id=getattr(request, "department_id", None),
+                source_id=request.id,
+                source_type="testing_request",
+                severity="info",
+                workflow_type="testing_request",
+                status_from=status_from,
+                status_to=status_to,
+            )
+        except Exception as _e:
+            logger.warning(f"status_changed notification failed: {_e}")
+
     def accept_assignment(self, request_id: UUID, tester_id: UUID) -> TestingRequest:
         request = self._get_request(request_id)
         if request.status != TestingRequestStatus.assigned:
@@ -62,6 +287,7 @@ class TestingService:
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
+        self._fire_status_changed(request, "assigned", "accepted", tester_id)
         return request
 
     def start_testing(self, request_id: UUID, tester_id: UUID) -> TestingRequest:
@@ -80,6 +306,7 @@ class TestingService:
         request.modified_by = tester_id
         self.db.commit()
         self.db.refresh(request)
+        self._fire_status_changed(request, "accepted", "in_progress", tester_id)
         return request
 
     # NOTE: Old upload_test_result (multipart form) removed.
@@ -95,6 +322,7 @@ class TestingService:
 
     def submit_test_results(self, request_id: UUID, tester_id: UUID, replacement_products=None) -> TestingRequest:
         request = self._get_request(request_id)
+        _prev_status = request.status.value
         if request.status not in (TestingRequestStatus.in_progress, TestingRequestStatus.test_submitted):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -168,6 +396,10 @@ class TestingService:
         self.db.commit()
         self.db.refresh(request)
 
+        # Notify on the lifecycle status change (e.g. in_progress → under_approval)
+        if request.status.value != _prev_status:
+            self._fire_status_changed(request, _prev_status, request.status.value, tester_id)
+
         # ── Surveillance tracking: update if this is a surveillance test ──────
         if request.surveillance_workflow_id:
             try:
@@ -186,24 +418,6 @@ class TestingService:
                 )
             except Exception as _surv:
                 logger.warning("[TestingService] Surveillance tracking update failed: %s", _surv)
-
-        # ── Notification: test submitted → emit event for async processing ────
-        try:
-            from services.notification_event_emitter import emit_test_submitted_event
-            emit_test_submitted_event(
-                db=self.db,
-                organization_id=request.organization_id,
-                request_id=request.id,
-                request_number=request.request_number,
-                tester_name=request.tester.full_name if request.tester else "Unknown",
-                equipment_name=request.equipment_name or "Unknown Equipment",
-                equipment_type=request.equipment_type or "",
-                substation_name=request.substation.name if request.substation else "Unknown",
-                test_category=request.request_category or "test",
-                scheduled_date=request.scheduled_start_date.strftime("%Y-%m-%d") if request.scheduled_start_date else "",
-            )
-        except Exception as _n:
-            logger.warning(f"test_submitted event emission failed: {_n}")
 
         return request
 
@@ -445,7 +659,7 @@ class TestingService:
         # ── Auto-evaluation ──────────────────────────────────────────────────
         try:
             from services.evaluation_service import EvaluationService
-            ev = EvaluationService.run(template_key, test_data, self.db)
+            ev = EvaluationService.run(template_key, test_data, self.db, org_id=request.organization_id)
             result.evaluation_result = ev
 
             # CRITICAL → override overall_result + pre-fill remedial recommendation
@@ -467,27 +681,80 @@ class TestingService:
             elif ev["overall"] == "ALERT":
                 revised = EvaluationService.get_min_revised_interval(ev)
                 if revised is not None:
-                    # Tag evaluation_result with revised interval for scheduler
                     ev["revised_interval_days"] = revised
                     result.evaluation_result = ev
 
+            # ── Cross-session comparison (generic — driven by enable_cross_session flag) ──
+            try:
+                if test_session_id:
+                    from models import TestSession as _TS
+                    _session = self.db.query(_TS).filter(_TS.id == test_session_id).first()
+                    if _session:
+                        _tpl_data = EvaluationService.get_template_data(
+                            template_key, self.db, org_id=request.organization_id
+                        )
+                        if _tpl_data and _tpl_data.get("enable_cross_session"):
+                            _baseline_result = _resolve_baseline_result(
+                                self.db, request_id, template_key, _session, _tpl_data
+                            )
+                            if _baseline_result and _baseline_result.test_data:
+                                _cross_ev = EvaluationService.evaluate_cross_session(
+                                    _tpl_data,
+                                    _baseline_result.test_data,
+                                    test_data,
+                                )
+                                if _cross_ev["fields"]:
+                                    ev["fields"].extend(_cross_ev["fields"])
+                                    ev["cross_session_comparison"] = _cross_ev
+                                    from services.evaluation_service import _STATUS_RANK as _sr
+                                    if _sr.get(_cross_ev["overall"], 0) > _sr.get(ev["overall"], 0):
+                                        ev["overall"] = _cross_ev["overall"]
+                                    # Sync overall_result with escalated severity
+                                    if ev["overall"] == "CRITICAL" and result.overall_result != "fail":
+                                        result.overall_result = "fail"
+                                    elif ev["overall"] == "ALERT" and result.overall_result not in ("fail", "conditional"):
+                                        result.overall_result = "conditional"
+                                    result.evaluation_result = ev
+            except Exception as _cs_err:
+                logger.warning(f"Cross-session comparison failed: {_cs_err}")
+
             # ── Notification hooks (fire-and-forget; never block save) ────────
             try:
-                from services.notification_event_emitter import emit_test_result_event
+                from services.notification_service import NotificationService
                 overall_threshold = ev.get("overall", "NORMAL")
                 if overall_threshold in ("ALERT", "CRITICAL"):
-                    emit_test_result_event(
-                        db=self.db,
+                    _event_map = {"ALERT": "eval_alert", "CRITICAL": "eval_critical"}
+                    _tester_name = getattr(getattr(request, "tester", None), "full_name", None) or "Unknown"
+                    _eq_ueic = (
+                        getattr(getattr(request, "equipment", None), "ueic", "") or
+                        getattr(request, "equipment_name", "") or ""
+                    )
+                    NotificationService(self.db).fire(
+                        event_type=_event_map[overall_threshold],
+                        context={
+                            "request.number":        request.request_number or "",
+                            "equipment.ueic":        _eq_ueic,
+                            "eval.test_type":        result.test_name or test_name or template_key or "",
+                            "eval.overall":          overall_threshold,
+                            "result_summary":        ev.get("summary") or ev.get("finding") or "",
+                            "result_threshold":      overall_threshold,
+                            "tester_name":           _tester_name,
+                            "eval.evaluated_at":     str(result.tested_at or result.cts or "")[:19],
+                            "alert.thresholdconfig": _build_threshold_config_html(ev),
+                            "revised_interval":      (
+                                f"{ev['revised_interval_days']} days"
+                                if ev.get("revised_interval_days") is not None else "—"
+                            ),
+                        },
                         organization_id=request.organization_id,
-                        request_id=request.id,
-                        request_number=request.request_number,
-                        equipment_name=request.equipment_name or "Unknown Equipment",
-                        equipment_type=request.equipment_type or "",
-                        test_category=request.request_category or "test",
-                        test_type_name=template_key or "Unknown Test",
-                        result_threshold=overall_threshold,
-                        tester_name=request.tester.full_name if request.tester else "Unknown",
-                        additional_payload={"evaluation": ev},
+                        department_id=getattr(request, "department_id", None),
+                        source_id=result.id,
+                        source_type="test_result",
+                        severity="critical" if overall_threshold == "CRITICAL" else "alert",
+                        workflow_type="testing_request",
+                        equipment_type=getattr(getattr(request, "equipment_type", None), "name", None),
+                        test_type=(request.request_category.value if request.request_category else None),
+                        activity_type=result.test_name,
                     )
             except Exception as _notif_err:
                 logger.warning(f"Notification event emission failed: {_notif_err}")

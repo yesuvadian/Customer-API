@@ -20,6 +20,7 @@ from models import (
     TestSession,
     TestSessionReading,
     TestSessionReadingImage,
+    OrgTestTemplate,
     User,
 )
 from utils.common_service import UTCDateTimeMixin
@@ -381,16 +382,33 @@ class TestSessionService(UTCDateTimeMixin):
         interval_days = testing_request.session_interval_days or 1
         start_date = testing_request.scheduled_start_date or self._utc_now()
 
+        # Resolve session_types from template for meaningful session names
+        # e.g. ["FACTORY", "SITE_RECEIPT", "ON_BED", "PRE_COMMISSIONING", "MAINTENANCE"]
+        _session_types: list = []
+        if testing_request.test_type_id:
+            _tpl = (
+                self.db.query(OrgTestTemplate)
+                .filter(OrgTestTemplate.test_type_id == testing_request.test_type_id)
+                .order_by(OrgTestTemplate.version.desc())
+                .first()
+            )
+            if _tpl:
+                _session_types = (_tpl.template_data or {}).get("session_types", [])
+
         sessions = []
         for session_num in range(1, total_sessions + 1):
             # Calculate session date
             session_date = start_date + timedelta(days=(session_num - 1) * interval_days)
 
-            session_name = f"Session {session_num}"
-            if session_num == 1:
+            # Use session_type name if available at this position, else generic fallback
+            if session_num <= len(_session_types):
+                session_name = _session_types[session_num - 1]
+            elif session_num == 1:
                 session_name = "Initial Session"
             elif session_num == total_sessions:
                 session_name = "Final Session"
+            else:
+                session_name = f"Session {session_num}"
 
             session = self.create_session(
                 testing_request_id=testing_request_id,

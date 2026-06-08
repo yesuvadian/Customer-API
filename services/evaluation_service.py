@@ -469,16 +469,38 @@ class EvaluationService:
     # ─── DB-aware helpers ─────────────────────────────────────────────────────
 
     @staticmethod
-    def get_template_data(template_key: str, db: Session) -> Optional[dict]:
+    def get_template_data(
+        template_key: str, db: Session, org_id=None
+    ) -> Optional[dict]:
         """
         Resolve template_data from OrgTestTemplate (DB-first) or
         static test_templates.py dict.
+
+        Resolution order:
+          1. Org-specific row matching org_id (when provided)
+          2. Global row (org_id IS NULL)
+          3. Static test_templates.py dict
         """
         from models import OrgTestTemplate
+        if org_id:
+            row = (
+                db.query(OrgTestTemplate)
+                .filter(
+                    OrgTestTemplate.template_key == template_key,
+                    OrgTestTemplate.org_id == org_id,
+                )
+                .first()
+            )
+            if row:
+                return row.template_data or {}
+
+        # Global fallback
         row = (
             db.query(OrgTestTemplate)
-            .filter(OrgTestTemplate.template_key == template_key)
-            .order_by(OrgTestTemplate.org_id.nullslast())   # org-specific before global
+            .filter(
+                OrgTestTemplate.template_key == template_key,
+                OrgTestTemplate.org_id.is_(None),
+            )
             .first()
         )
         if row:
@@ -491,10 +513,239 @@ class EvaluationService:
         except ImportError:
             return {}
 
+    # ─── Cross-session comparison ─────────────────────────────────────────────
+
     @staticmethod
-    def run(template_key: str, test_data: dict, db: Session) -> dict:
+    def evaluate_cross_session(
+        template_data: dict,
+        baseline_data: dict,
+        current_data: dict,
+    ) -> dict:
+        """
+        Compare current_data against baseline_data for every field that has
+        cross_session_evaluation.enabled = true.
+
+        Returns the same shape as evaluate_test_data():
+            {
+                "overall": "NORMAL" | "ALERT" | "CRITICAL",
+                "evaluated_at": "<ISO-8601>",
+                "fields": [
+                    {
+                        "key": ..., "label": ..., "type": ...,
+                        "baseline_value": ..., "current_value": ...,
+                        "deviation": ..., "status": ...,
+                        "config": { aggregate_type, deviation_type, ... }
+                    }
+                ]
+            }
+
+        Supports:
+          - NUMBER fields  — compute deviation, classify via _classify_number()
+          - TABLE fields   — per-column, two modes:
+              aggregate_type set  → collapse rows to scalar, then compare
+              match_by_column set → row-by-row comparison
+        """
+        field_results: list[dict] = []
+        overall_rank = 0
+
+        for section in template_data.get("sections", []):
+            for field in section.get("fields", []):
+                cs_ev = field.get("cross_session_evaluation")
+                if not cs_ev or not cs_ev.get("enabled"):
+                    continue
+
+                field_type = field.get("type", "text")
+                results: list[dict] = []
+
+                if field_type == "number":
+                    r = EvaluationService._cross_eval_number(field, cs_ev, baseline_data, current_data)
+                    if r:
+                        results = [r]
+                elif field_type == "table":
+                    results = EvaluationService._cross_eval_table(field, cs_ev, baseline_data, current_data)
+
+                for r in results:
+                    rank = _STATUS_RANK.get(r.get("status"), 0)
+                    if rank > overall_rank:
+                        overall_rank = rank
+                    field_results.append(r)
+
+        overall_labels = [NORMAL, ALERT, CRITICAL]
+        return {
+            "overall": overall_labels[overall_rank],
+            "evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "fields": field_results,
+        }
+
+    @staticmethod
+    def _cross_eval_number(
+        field: dict, cs_ev: dict, baseline_data: dict, current_data: dict
+    ) -> Optional[dict]:
+        """Cross-session comparison for a single number field."""
+        key = field.get("key")
+        b_raw = baseline_data.get(key)
+        c_raw = current_data.get(key)
+        if b_raw is None or c_raw is None:
+            return None
+        try:
+            b_val = float(b_raw)
+            c_val = float(c_raw)
+        except (ValueError, TypeError):
+            return None
+
+        deviation = EvaluationService._compute_deviation(b_val, c_val, cs_ev.get("deviation_type", "absolute"))
+        if deviation is None:
+            return None
+
+        status = EvaluationService._classify_number(deviation, cs_ev)
+        return {
+            "key": key,
+            "label": field.get("label", key),
+            "type": "number",
+            "source": "cross_session",          # marker for _build_threshold_config_html
+            "baseline_value": b_val,
+            "current_value": c_val,
+            "deviation": round(deviation, 6),
+            "deviation_type": cs_ev.get("deviation_type", "absolute"),
+            "status": status,
+        }
+
+    @staticmethod
+    def _cross_eval_table(
+        field: dict, cs_ev: dict, baseline_data: dict, current_data: dict
+    ) -> list[dict]:
+        """Cross-session comparison for a table field."""
+        key = field.get("key")
+        baseline_rows = baseline_data.get(key)
+        current_rows  = current_data.get(key)
+        if not isinstance(baseline_rows, list) or not isinstance(current_rows, list):
+            return []
+
+        col_comparisons: dict = cs_ev.get("column_comparisons") or {}
+        match_col: Optional[str] = cs_ev.get("match_by_column")
+        results: list[dict] = []
+
+        for col_key, col_cfg in col_comparisons.items():
+            agg_type = col_cfg.get("aggregate_type")
+            dev_type = col_cfg.get("deviation_type", "absolute")
+
+            if agg_type:
+                # ── Aggregate both sessions then compare ──────────────────────
+                b_agg = EvaluationService._aggregate_column(baseline_rows, col_key, agg_type)
+                c_agg = EvaluationService._aggregate_column(current_rows,  col_key, agg_type)
+                if b_agg is None or c_agg is None:
+                    continue
+                deviation = EvaluationService._compute_deviation(b_agg, c_agg, dev_type)
+                if deviation is None:
+                    continue
+                status = EvaluationService._classify_number(deviation, col_cfg)
+                results.append({
+                    "key": f"{key}.{col_key}",
+                    "label": f"{field.get('label', key)} — {col_key} ({agg_type})",
+                    "type": "table_aggregate",
+                    "source": "cross_session",      # marker for _build_threshold_config_html
+                    "aggregate_type": agg_type,
+                    "baseline_value": round(b_agg, 6),
+                    "current_value": round(c_agg, 6),
+                    "deviation": round(deviation, 6),
+                    "deviation_type": dev_type,
+                    "status": status,
+                })
+
+            elif match_col:
+                # ── Row-by-row matched by match_col ──────────────────────────
+                baseline_idx = {str(r.get(match_col)): r for r in baseline_rows}
+                for c_row in current_rows:
+                    row_id = str(c_row.get(match_col))
+                    b_row  = baseline_idx.get(row_id)
+                    if not b_row:
+                        continue
+                    b_raw = b_row.get(col_key)
+                    c_raw = c_row.get(col_key)
+                    if b_raw is None or c_raw is None:
+                        continue
+                    try:
+                        b_val = float(b_raw)
+                        c_val = float(c_raw)
+                    except (ValueError, TypeError):
+                        continue
+                    deviation = EvaluationService._compute_deviation(b_val, c_val, dev_type)
+                    if deviation is None:
+                        continue
+                    status = EvaluationService._classify_number(deviation, col_cfg)
+                    results.append({
+                        "key": f"{key}.{col_key}",
+                        "label": f"{field.get('label', key)} [{row_id}] — {col_key}",
+                        "type": "table_row",
+                        "source": "cross_session",  # marker for _build_threshold_config_html
+                        "row_id": row_id,
+                        "baseline_value": b_val,
+                        "current_value": c_val,
+                        "deviation": round(deviation, 6),
+                        "deviation_type": dev_type,
+                        "status": status,
+                    })
+
+            else:
+                # aggregate_type is None/empty AND match_by_column not set — skip with warning
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "cross_session_evaluation: column '%s' on field '%s' has "
+                    "aggregate_type=None but no match_by_column is set — skipping.",
+                    col_key, key,
+                )
+
+        return results
+
+    @staticmethod
+    def _aggregate_column(rows: list, col_key: str, agg_type: str) -> Optional[float]:
+        """Aggregate a column from table rows.
+        Accepts: avg / average / sum / multiply / count / max / min
+        ("average" accepted as alias for "avg" for compatibility with table_evaluation.)
+        """
+        values = []
+        for row in rows:
+            v = row.get(col_key)
+            if v is None:
+                continue
+            try:
+                values.append(float(v))
+            except (ValueError, TypeError):
+                pass
+        if not values:
+            return None
+        _t = (agg_type or "").lower()
+        if _t in ("avg", "average"):
+            return sum(values) / len(values)
+        if _t == "sum":
+            return sum(values)
+        if _t == "multiply":
+            result = 1.0
+            for v in values:
+                result *= v
+            return result
+        if _t == "count":
+            return float(len(values))
+        if _t == "max":
+            return max(values)
+        if _t == "min":
+            return min(values)
+        return None
+
+    @staticmethod
+    def _compute_deviation(baseline: float, current: float, deviation_type: str) -> Optional[float]:
+        """Compute deviation between baseline and current values."""
+        if deviation_type == "relative_percent":
+            if baseline == 0:
+                return None
+            return ((current - baseline) / abs(baseline)) * 100.0
+        # default: absolute
+        return current - baseline
+
+    @staticmethod
+    def run(template_key: str, test_data: dict, db: Session, org_id=None) -> dict:
         """Convenience: resolve template then evaluate."""
-        tpl = EvaluationService.get_template_data(template_key, db)
+        tpl = EvaluationService.get_template_data(template_key, db, org_id=org_id)
         if not tpl:
             return {"overall": NORMAL, "evaluated_at": datetime.now(timezone.utc).isoformat(), "fields": []}
         return EvaluationService.evaluate_test_data(tpl, test_data)

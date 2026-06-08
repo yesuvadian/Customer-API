@@ -16,7 +16,7 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy import and_
 from sqlalchemy.orm import Session, joinedload
 
@@ -29,6 +29,8 @@ from models import (
     TestingRequest,
     User,
 )
+from fastapi.responses import FileResponse
+from schemas import RepairSaveDataRequest, RepairAdvanceRequest, RepairSubmitRequest
 from services.repair_workflow_service import RepairWorkflowService
 from services.surveillance_template_service import SurveillanceTemplateService
 from utils.common_service import get_user_dept_scope
@@ -46,19 +48,23 @@ logger = logging.getLogger(__name__)
 # Helper Functions
 # =============================================================================
 
-def _check_workflow_access(db: Session, workflow_id: UUID, user: User) -> RepairWorkflow:
+def _check_workflow_access(
+    db: Session,
+    workflow_id: UUID,
+    user: User
+) -> RepairWorkflow:
     """
     Verify user has access to this surveillance workflow.
 
-    Enforces organization/department scoping based on user role.
+    Surveillance workflows follow the same visibility model as repair workflows:
+    organization-level access only.
     """
-    from utils.common_service import get_user_dept_scope
 
     workflow = (
         db.query(RepairWorkflow)
         .filter(
             RepairWorkflow.id == workflow_id,
-            RepairWorkflow.workflow_type == 'surveillance'
+            RepairWorkflow.workflow_type == "surveillance"
         )
         .first()
     )
@@ -66,17 +72,12 @@ def _check_workflow_access(db: Session, workflow_id: UUID, user: User) -> Repair
     if not workflow:
         raise HTTPException(404, "Surveillance workflow not found")
 
-    # Check organization match
+    # Organization scope only
     if workflow.organization_id != user.organization_id:
-        raise HTTPException(403, "Access denied: Different organization")
-
-    # Check department scope (if user is not org admin)
-    is_org_admin, user_dept_id = get_user_dept_scope(db, user.id, None)
-
-    if not is_org_admin and user_dept_id:
-        workflow_dept_id = workflow.equipment.department_id if workflow.equipment else None
-        if workflow_dept_id and workflow_dept_id != user_dept_id:
-            raise HTTPException(403, "Access denied: Different department")
+        raise HTTPException(
+            403,
+            "Access denied: Different organization"
+        )
 
     return workflow
 
@@ -101,7 +102,10 @@ def _serialize_workflow(wf: RepairWorkflow, current_stage: Optional[RepairStageI
             'quarter_number': current_stage.quarter_number if current_stage else None,
             'status': current_stage.status if current_stage else None,
         } if current_stage else None,
-        'progress': wf.progress or 0,
+        # Progress based on current stage sequence (Q1=20%, Q2=40%, Q3=60%, Q4=80%, Final=100%)
+        'progress': int(current_stage.stage.sequence / 5 * 100)
+        if current_stage and current_stage.stage
+        else (wf.progress or 0),
         'created_at': wf.created_at.isoformat() if wf.created_at else None,
     }
 
@@ -137,63 +141,62 @@ def list_surveillance_workflows(
     user: User = Depends(get_current_user),
 ):
     """
-    List surveillance workflows for current user's organization/department.
+    List surveillance workflows.
 
-    Automatically scoped by:
-    - Organization (always filtered by user.organization_id)
-    - Department (filtered if user is not org admin)
+    Scoped by organization only (same behavior as repair workflows).
 
     Query params:
     - status: active, completed, on_hold, cancelled
     - quarter: 1-4 (filter by current quarter stage)
     - skip/limit: Pagination
     """
-    # Get user's department scope
-    is_org_admin, user_dept_id = get_user_dept_scope(db, user.id, None)
 
     # Base query with eager loading (avoid N+1)
     query = db.query(RepairWorkflow).options(
         joinedload(RepairWorkflow.equipment),
-        joinedload(RepairWorkflow.current_stage_instance).joinedload(RepairStageInstance.stage)
+        joinedload(
+            RepairWorkflow.current_stage_instance
+        ).joinedload(RepairStageInstance.stage)
     ).filter(
-        RepairWorkflow.workflow_type == 'surveillance',
-        RepairWorkflow.organization_id == user.organization_id,  # Org filter
+        RepairWorkflow.workflow_type == "surveillance",
+        RepairWorkflow.organization_id == user.organization_id,
     )
 
-    # Department filter (if not org admin)
-    # Note: RepairWorkflow doesn't have department_id, department info comes from Equipment
-    if not is_org_admin and user_dept_id:
-        query = query.join(Equipment, Equipment.id == RepairWorkflow.equipment_id).filter(
-            Equipment.department_id == user_dept_id
-        )
-
-    # Apply optional filters
+    # Optional status filter
     if status:
         query = query.filter(RepairWorkflow.status == status)
 
+    # Optional quarter filter
     if quarter:
         query = query.join(
             RepairStageInstance,
-            RepairStageInstance.id == RepairWorkflow.current_stage_instance_id
-        ).filter(RepairStageInstance.quarter_number == quarter)
+            RepairStageInstance.id == RepairWorkflow.current_stage_instance_id,
+        ).filter(
+            RepairStageInstance.quarter_number == quarter
+        )
 
-    # Get total count before pagination
+    # Total before pagination
     total = query.count()
 
-    # Apply pagination
-    workflows = query.order_by(RepairWorkflow.created_at.desc()).offset(skip).limit(limit).all()
+    # Pagination
+    workflows = (
+        query.order_by(RepairWorkflow.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
-    # Serialize results
+    # Serialize
     items = [
         _serialize_workflow(wf, wf.current_stage_instance)
         for wf in workflows
     ]
 
     return {
-        'total': total,
-        'skip': skip,
-        'limit': limit,
-        'items': items,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "items": items,
     }
 
 
@@ -554,3 +557,191 @@ def get_progress(
         return RepairWorkflowService(db).get_progress(workflow_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@router.get("/{workflow_id}/available-transitions")
+def available_transitions(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Returns the set of actions the calling user can take on this workflow right now.
+    Response: {can_assign, can_submit, can_approve, can_reject, can_cancel}
+
+    Surveillance override: can_submit is blocked until ALL test tickets for
+    the current quarter are in a done status (test_submitted / under_approval /
+    approved / completed). Officers cannot submit the quarterly review form
+    while testers still have open tickets.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        result = RepairWorkflowService(db).get_available_transitions(workflow_id, user.id)
+
+        # Surveillance-specific gate: block submit until all quarter tickets done
+        if result.get('can_submit'):
+            workflow = db.query(RepairWorkflow).filter(
+                RepairWorkflow.id == workflow_id
+            ).first()
+            current_instance = (
+                db.query(RepairStageInstance)
+                .filter(RepairStageInstance.id == workflow.current_stage_instance_id)
+                .first()
+            ) if workflow and workflow.current_stage_instance_id else None
+
+            quarter_number = current_instance.quarter_number if current_instance else None
+
+            if quarter_number:
+                _DONE_STATUSES = (
+                    'test_submitted', 'under_approval', 'approved', 'completed'
+                )
+                tickets = (
+                    db.query(TestingRequest)
+                    .filter(
+                        TestingRequest.surveillance_workflow_id == workflow_id,
+                        TestingRequest.surveillance_quarter == quarter_number,
+                    )
+                    .all()
+                )
+                total = len(tickets)
+                done = sum(1 for t in tickets if t.status in _DONE_STATUSES)
+                pending = total - done
+
+                if total == 0 or pending > 0:
+                    result['can_submit'] = False
+                    result['submit_blocked_reason'] = (
+                        f'{pending} of {total} Q{quarter_number} test(s) still pending '
+                        f'— complete all tests before submitting'
+                        if total > 0
+                        else f'No Q{quarter_number} test tickets created yet'
+                    )
+
+        return result
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/save")
+def save_stage(
+    workflow_id: UUID,
+    stage_id: UUID,
+    payload: RepairSaveDataRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Save (draft) form data for the current surveillance stage.
+    Reviewing Officer fills quarterly review or final evaluation form.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).save_stage_data(
+            workflow_id, stage_id, payload.form_data, user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/submit")
+def submit_stage(
+    workflow_id: UUID,
+    stage_id: UUID,
+    payload: RepairSubmitRequest = RepairSubmitRequest(),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Submit the completed stage form. Transitions stage: assigned → submitted.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).submit_stage(
+            workflow_id, stage_id, payload.remarks, user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{workflow_id}/advance")
+def advance_stage(
+    workflow_id: UUID,
+    payload: RepairAdvanceRequest = RepairAdvanceRequest(),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Approve current stage and advance to next quarter (Q1→Q2→Q3→Q4→Final Evaluation).
+    Stage must be submitted. Requires can_approve on this stage.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).advance_stage(workflow_id, payload.remarks, user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/{workflow_id}/stages/{stage_id}/eligible-users")
+def get_eligible_users(
+    workflow_id: UUID,
+    stage_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Returns users whose org role is authorised (can_edit) for this stage.
+    Used to populate the assign dialog.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).get_eligible_users(workflow_id, stage_id, user)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/assign")
+def assign_stage(
+    workflow_id: UUID,
+    stage_id: UUID,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Assign a user to the current surveillance stage.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).assign_stage(
+            workflow_id, stage_id, payload.get("user_id"), user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{workflow_id}/stages/{stage_id}/upload")
+async def upload_stage_file(
+    workflow_id: UUID,
+    stage_id: UUID,
+    field_key: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Upload a file for a specific field in a surveillance stage form.
+    Stores the file and patches form_data[field_key] with the document reference.
+    """
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        file_bytes = await file.read()
+        return RepairWorkflowService(db).upload_stage_file(
+            workflow_id=workflow_id,
+            stage_id=stage_id,
+            field_key=field_key,
+            file_name=file.filename,
+            file_bytes=file_bytes,
+            mime_type=file.content_type,
+            user_id=user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))

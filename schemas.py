@@ -571,7 +571,7 @@ class UserRegistor(BaseModel):
     
 class UserResponse(BaseModel):
     id: UUID
-    email: EmailStr
+    email: str
 
     firstname: Optional[str] = None
     lastname: Optional[str] = None
@@ -1094,6 +1094,7 @@ class TestingRequestResponse(BaseModel):
     total_sessions_planned: Optional[int] = None
     session_interval_days: Optional[int] = None
     session_count: int = 0  # Computed field
+    session_types: Optional[list] = None  # From template e.g. ["FACTORY","SITE_RECEIPT","ON_BED"]
 
     # Lifecycle flags — stamped at creation from template flags
     is_cumulative: Optional[bool] = False
@@ -1284,6 +1285,10 @@ class TestResultStructuredResponse(BaseModel):
     images: List[TestResultImageResponse] = []
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    # Template column definitions per table field — used by Flutter approval/review
+    # screens to render table data with correct column order and labels.
+    # { "dfr_measurements": [{key, label, type}, ...], "analysis_results": [...] }
+    table_columns: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -2236,6 +2241,33 @@ class ApproverTesterSelection(BaseModel):
         from_attributes = True
 
 
+class BatchApproverTesterSelection(BaseModel):
+    """Request body for batch-approving multiple testing requests to one tester"""
+    request_ids: List[UUID]
+    tester_role_id: UUID
+    tester_id: UUID
+    comment: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BatchApprovalResult(BaseModel):
+    """Per-request outcome inside a batch approval response"""
+    request_id: str
+    request_number: Optional[str] = None
+    success: bool
+    message: str
+
+
+class BatchApprovalResponse(BaseModel):
+    """Response from batch approve-and-assign"""
+    total: int
+    succeeded: int
+    failed: int
+    results: List[BatchApprovalResult]
+
+
 class RejectionRequest(BaseModel):
     """Request body for rejecting a testing request"""
     rejection_comment: str  # Required rejection reason
@@ -2268,7 +2300,7 @@ class EquipmentCreate(BaseModel):
     organization_id: Optional[UUID] = None
     department_id: UUID
     equipment_type_id: int
-    voltage_class: Optional[str] = None
+    voltage_class: str  # Required — used for UEIC generation and test threshold lookups
     bay_number: Optional[str] = None
     nameplate_data: Optional[dict] = None
     commissioned_date: Optional[datetime] = None
@@ -2284,6 +2316,7 @@ class EquipmentCreate(BaseModel):
     pt_ratio: Optional[str] = None
     vector_group: Optional[str] = None
     impedance_pct: Optional[float] = None
+    precommission_request_id: Optional[UUID] = None   # optional PCR link on registration
 
 
 class EquipmentUpdate(BaseModel):

@@ -25,12 +25,14 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
+from dateutil.relativedelta import relativedelta
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from models import (
     RepairSurveillanceTest,
     RepairWorkflow,
+    TestRequestSchedule,
     TestingRequest,
 )
 from services.surveillance_config_service import SurveillanceConfigService
@@ -86,7 +88,7 @@ class SurveillanceTemplateService:
             is_abnormal = SurveillanceConfigService.is_result_abnormal(
                 db, tr.form_data.get('result_status') if tr.form_data else None,
                 organization_id=workflow.organization_id,
-                department_id=workflow.department_id
+                department_id=workflow.equipment.department_id if workflow.equipment else None,
             ) if tr.form_data else False
 
             if tr.status == 'completed':
@@ -109,7 +111,7 @@ class SurveillanceTemplateService:
         # Pre-populated form data
         return {
             'quarter_number': quarter_number,
-            'date_range': f'Q{quarter_number} ({workflow.start_date.strftime("%b %Y") if workflow.start_date else "N/A"})',
+            'date_range': f'Q{quarter_number} ({workflow.started_at.strftime("%b %Y") if workflow.started_at else "N/A"})',
             'parent_repair_workflow': str(workflow.parent_workflow_id) if workflow.parent_workflow_id else 'N/A',
             'equipment_name': workflow.equipment.name if workflow.equipment else 'N/A',
             'test_summary_table': test_summary_rows,
@@ -159,14 +161,14 @@ class SurveillanceTemplateService:
             total_tests=len(completed_tests),
             abnormal_tests=len(abnormal_tests),
             organization_id=workflow.organization_id,
-            department_id=workflow.department_id
+            department_id=workflow.equipment.department_id if workflow.equipment else None,
         )
 
-        # Calculate surveillance duration
+        # Calculate surveillance duration from started_at / completed_at
         surveillance_duration = '24 months'
-        if workflow.start_date and workflow.end_date:
-            months = (workflow.end_date.year - workflow.start_date.year) * 12 + \
-                     (workflow.end_date.month - workflow.start_date.month)
+        if workflow.started_at and workflow.completed_at:
+            months = (workflow.completed_at.year - workflow.started_at.year) * 12 + \
+                     (workflow.completed_at.month - workflow.started_at.month)
             surveillance_duration = f'{months} months'
 
         # Build quarterly breakdown
@@ -191,8 +193,8 @@ class SurveillanceTemplateService:
         # Pre-populated form data
         return {
             'surveillance_duration': surveillance_duration,
-            'start_date': workflow.start_date.isoformat() if workflow.start_date else None,
-            'end_date': workflow.end_date.isoformat() if workflow.end_date else None,
+            'start_date': workflow.started_at.isoformat() if workflow.started_at else None,
+            'end_date': workflow.completed_at.isoformat() if workflow.completed_at else None,
             'parent_repair_workflow': str(workflow.parent_workflow_id) if workflow.parent_workflow_id else 'N/A',
             'equipment_name': workflow.equipment.name if workflow.equipment else 'N/A',
             'vendor_name': workflow.vendor_name if hasattr(workflow, 'vendor_name') else 'N/A',
@@ -298,26 +300,93 @@ class SurveillanceTemplateService:
         Returns:
             dict with summary stats
         """
-        tests = (
-            db.query(RepairSurveillanceTest)
+        # Get workflow start date to calculate quarter date range
+        workflow = db.query(RepairWorkflow).filter(
+            RepairWorkflow.id == workflow_id
+        ).first()
+
+        quarter_months = 6  # Each quarter = 6 months (24-month / 4 quarters)
+        quarter_start = (workflow.started_at + relativedelta(months=(quarter_number - 1) * quarter_months)) if workflow else None
+        quarter_end = (workflow.started_at + relativedelta(months=quarter_number * quarter_months)) if workflow else None
+
+        # Schedules with next_run_date in this quarter's range (tickets not yet created)
+        schedule_count = 0
+        if quarter_start and quarter_end:
+            schedule_count = (
+                db.query(TestRequestSchedule)
+                .filter(
+                    TestRequestSchedule.surveillance_workflow_id == workflow_id,
+                    TestRequestSchedule.is_active == True,
+                    TestRequestSchedule.next_run_date >= quarter_start,
+                    TestRequestSchedule.next_run_date < quarter_end,
+                )
+                .count()
+            )
+
+        # TestingRequest tickets already created for this quarter
+        _DONE_STATUSES = ('test_submitted', 'under_approval', 'approved', 'completed')
+
+        # Surveillance tickets start at 'submitted' (no draft stage).
+        # 10 statuses, steps 0-9, each step = 100/9 ≈ 11%.
+        _STATUS_STEP = {
+            'submitted': 0, 'pending_approval': 1, 'assigned': 2,
+            'accepted': 3, 'scheduled': 4, 'in_progress': 5,
+            'test_submitted': 6, 'under_approval': 7,
+            'approved': 8, 'completed': 9,
+            # non-forward states
+            'rejected': 0, 'closed': 9, 'under_review': 6,
+            'finance_pending': 2, 'outcome_active': 9, 'commissioned': 9,
+        }
+        _STATUS_MAX_STEP = 9  # completed = step 9 = 100%
+
+        tickets = (
+            db.query(TestingRequest)
             .filter(
                 and_(
-                    RepairSurveillanceTest.surveillance_workflow_id == workflow_id,
-                    RepairSurveillanceTest.quarter_number == quarter_number
+                    TestingRequest.surveillance_workflow_id == workflow_id,
+                    TestingRequest.surveillance_quarter == quarter_number,
                 )
             )
             .all()
         )
+        ticket_count = len(tickets)
+        completed = [t for t in tickets if t.status in _DONE_STATUSES]
+        # Tickets created but tester hasn't submitted results yet
+        pending_tickets = [t for t in tickets if t.status not in _DONE_STATUSES]
+        abnormal = [t for t in tickets if t.form_data and t.form_data.get('result_status') == 'abnormal']
 
-        completed = [t for t in tests if t.test_status == 'completed']
-        abnormal = [t for t in tests if t.is_abnormal]
+        # total = whichever is larger:
+        # - schedule_count: before tickets created (next_run_date still in Q range)
+        # - ticket_count: after tickets created (next_run_date advanced to next quarter)
+        total_tests = max(ticket_count, schedule_count)
 
+        # Quarter progress = average of each ticket's individual status progress.
+        # e.g. [assigned=22%, in_progress=56%, submitted=0%] → avg 26%
+        if tickets:
+            def _ticket_progress(t) -> float:
+                raw = t.status.value if hasattr(t.status, 'value') else (t.status or 'submitted')
+                step = _STATUS_STEP.get(raw, 0)
+                return round(step / _STATUS_MAX_STEP * 100, 1)
+
+            progress_percent = round(
+                sum(_ticket_progress(t) for t in tickets) / len(tickets), 1
+            )
+        else:
+            progress_percent = 0.0
+
+        # schedule_count > 0 means no tickets yet — truly "scheduled" (future)
+        # pending_tickets > 0 means tickets exist but tester hasn't submitted results
+        # These are mutually exclusive: when tickets are created, next_run_date advances
+        # so schedule_count drops to 0 for this quarter.
         return {
-            'total_tests': len(tests),
+            'total_tests': total_tests,
             'completed_tests': len(completed),
+            'scheduled_tests': schedule_count,        # no ticket yet (amber badge)
+            'pending_tickets': len(pending_tickets),  # ticket open, awaiting tester (blue badge)
             'abnormal_tests': len(abnormal),
             'abnormal_rate': (len(abnormal) / len(completed) * 100) if completed else 0,
-            'pending_tests': len(tests) - len(completed),
+            'pending_tests': total_tests - len(completed),
+            'progress_percent': progress_percent,     # weighted avg progress across all tickets
         }
 
     @staticmethod
@@ -342,31 +411,70 @@ class SurveillanceTemplateService:
         if not workflow:
             return {}
 
-        all_tests = (
-            db.query(RepairSurveillanceTest)
-            .filter(RepairSurveillanceTest.surveillance_workflow_id == workflow_id)
+        # total_tests = calculated from each schedule's start_date → end_date + frequency
+        # This is fully derived from table data with no hardcoding
+        schedules = (
+            db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.surveillance_workflow_id == workflow_id,
+                TestRequestSchedule.is_active == True,
+            )
             .all()
         )
+        total_planned = 0
+        for sched in schedules:
+            if sched.start_date and sched.end_date:
+                months_total = (
+                    (sched.end_date.year - sched.start_date.year) * 12
+                    + (sched.end_date.month - sched.start_date.month)
+                )
+                interval_months = 6  # semi_annual default
+                if hasattr(sched, 'frequency') and sched.frequency:
+                    freq_map = {
+                        'semi_annual': 6,
+                        'quarterly': 3,
+                        'yearly': 12,
+                        'monthly': 1,
+                    }
+                    interval_months = freq_map.get(sched.frequency.value, 6)
+                import math
+                total_planned += max(math.ceil(months_total / interval_months), 1)
+            else:
+                total_planned += 4  # fallback if dates not set
 
-        completed = [t for t in all_tests if t.test_status == 'completed']
-        abnormal = [t for t in all_tests if t.is_abnormal]
+        # completed/abnormal = from actual TestingRequest tickets with results
+        _DONE_STATUSES = ('test_submitted', 'under_approval', 'approved', 'completed')
+        all_tickets = (
+            db.query(TestingRequest)
+            .filter(TestingRequest.surveillance_workflow_id == workflow_id)
+            .all()
+        )
+        completed = [t for t in all_tickets if t.status in _DONE_STATUSES]
+        abnormal = [t for t in all_tickets if t.form_data and t.form_data.get('result_status') == 'abnormal']
 
+        dept_id = (
+            workflow.equipment.department_id
+            if workflow.equipment
+            else None
+        )
+        # Only calculate quality rating when tests have been completed
         quality_rating = SurveillanceConfigService.calculate_quality_rating(
             db,
             total_tests=len(completed),
             abnormal_tests=len(abnormal),
             organization_id=workflow.organization_id,
-            department_id=workflow.department_id
-        )
+            department_id=dept_id,
+        ) if completed else 'N/A'
 
         return {
             'workflow_id': str(workflow_id),
             'status': workflow.status,
-            'total_tests': len(all_tests),
+            'total_tests': total_planned,
+            'scheduled_tests': total_planned - len(completed),
             'completed_tests': len(completed),
             'abnormal_tests': len(abnormal),
             'abnormal_rate': (len(abnormal) / len(completed) * 100) if completed else 0,
             'quality_rating': quality_rating,
-            'start_date': workflow.start_date.isoformat() if workflow.start_date else None,
-            'end_date': workflow.end_date.isoformat() if workflow.end_date else None,
+            'start_date': workflow.started_at.isoformat() if workflow.started_at else None,
+            'end_date': workflow.completed_at.isoformat() if workflow.completed_at else None,
         }

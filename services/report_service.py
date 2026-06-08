@@ -252,6 +252,23 @@ class ReportService:
 
         table = self._detail_table(data, styles)
         elements.append(table)
+
+        # Bushing details (identity) — from the linked equipment nameplate register
+        nd = (request.equipment.nameplate_data or {}) if request.equipment else {}
+        bushings = nd.get("bushing_details")
+        if isinstance(bushings, list) and bushings:
+            elements.append(Spacer(1, 2 * mm))
+            elements.extend(self._build_list_table(
+                "Bushing Details",
+                bushings,
+                [
+                    {"key": "winding",   "label": "Winding / Level"},
+                    {"key": "phase",     "label": "Phase"},
+                    {"key": "make",      "label": "Make"},
+                    {"key": "serial_no", "label": "Sl. No."},
+                    {"key": "yo_mfg",    "label": "Y.O. Mfg."},
+                ],
+            ))
         return elements
 
     # ───────────────────────────────────────────────────
@@ -329,6 +346,84 @@ class ReportService:
                 self._build_test_data_table(styles, test_data, result.template_key)
             )
 
+        # Cross-session comparison results (calculated deviations vs baseline session)
+        ev = result.evaluation_result or {}
+        cross_ev = ev.get("cross_session_comparison") or {}
+        cross_fields = [
+            f for f in cross_ev.get("fields", [])
+            if f.get("status") in ("ALERT", "CRITICAL", "NORMAL")
+        ]
+        if cross_fields:
+            elements.extend(self._build_cross_session_section(styles, cross_ev, cross_fields))
+
+        return elements
+
+    # ───────────────────────────────────────────────────
+    # Cross-Session Comparison Section
+    # ───────────────────────────────────────────────────
+    def _build_cross_session_section(self, styles, cross_ev: dict, fields: list):
+        """Render cross-session deviation table below the form data for each result section."""
+        elements = []
+        overall = cross_ev.get("overall", "NORMAL")
+        color_map = {"CRITICAL": "#d32f2f", "ALERT": "#f57c00", "NORMAL": "#1a7340"}
+        hdr_color = colors.HexColor(color_map.get(overall, "#1E3C72"))
+
+        elements.append(Spacer(1, 3 * mm))
+        elements.append(Paragraph(
+            f"<b>Cross-Session Comparison vs Baseline  [{overall}]</b>",
+            ParagraphStyle("CSHdr", fontSize=9, textColor=hdr_color,
+                           spaceBefore=2 * mm, spaceAfter=1 * mm),
+        ))
+
+        lbl_style = ParagraphStyle("CSth",  fontSize=8, textColor=colors.white,
+                                   fontName="Helvetica-Bold", leading=10)
+        val_style = ParagraphStyle("CStd",  fontSize=8, textColor=colors.black, leading=10)
+
+        STATUS_COLOR = {"CRITICAL": "#d32f2f", "ALERT": "#f57c00", "NORMAL": "#1a7340"}
+
+        header = [
+            Paragraph("Parameter",       lbl_style),
+            Paragraph("Baseline",        lbl_style),
+            Paragraph("Current",         lbl_style),
+            Paragraph("Deviation",       lbl_style),
+            Paragraph("Status",          lbl_style),
+        ]
+        rows = [header]
+
+        for f in fields:
+            dev       = f.get("deviation")
+            dev_type  = f.get("deviation_type", "absolute")
+            dev_unit  = "%" if dev_type == "relative_percent" else ""
+            sign      = "+" if isinstance(dev, (int, float)) and dev > 0 else ""
+            dev_str   = f"{sign}{round(dev, 4)}{dev_unit}" if dev is not None else "—"
+            status    = f.get("status", "NORMAL")
+            sc        = colors.HexColor(STATUS_COLOR.get(status, "#333333"))
+
+            rows.append([
+                Paragraph(self._pdf_safe(f.get("label", f.get("key", ""))), val_style),
+                Paragraph(self._pdf_safe(str(f.get("baseline_value", "—"))), val_style),
+                Paragraph(self._pdf_safe(str(f.get("current_value",  "—"))), val_style),
+                Paragraph(self._pdf_safe(dev_str), val_style),
+                Paragraph(status, ParagraphStyle("CSst", fontSize=8,
+                          textColor=sc, fontName="Helvetica-Bold", leading=10)),
+            ])
+
+        page_w = A4[0] - 30 * mm
+        col_ws = [page_w * 0.40, page_w * 0.15, page_w * 0.15, page_w * 0.15, page_w * 0.15]
+        tbl = Table(rows, colWidths=col_ws, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), hdr_color),
+            ("FONTSIZE",      (0, 0), (-1, -1), 8),
+            ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f8ff")]),
+            ("BOX",           (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ("INNERGRID",     (0, 0), (-1, -1), 0.25, colors.HexColor("#DDDDDD")),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(tbl)
+        elements.append(Spacer(1, 2 * mm))
         return elements
 
     # ───────────────────────────────────────────────────
@@ -490,10 +585,13 @@ class ReportService:
         if not col_keys:
             return elements
 
-        # Build header row — pre-wrap long labels so pdfx doesn't clip them
+        # Build header row — pre-wrap long labels so pdfx doesn't clip them.
+        # wordWrap="CJK" lets any long/unbreakable token wrap inside narrow
+        # columns, preventing reportlab "flowable too large" crashes.
         lbl_style = ParagraphStyle("tblHdr", fontSize=8, textColor=colors.white,
-                                   fontName="Helvetica-Bold", leading=10)
-        val_style = ParagraphStyle("tblVal", fontSize=8, textColor=colors.black, leading=10)
+                                   fontName="Helvetica-Bold", leading=10, wordWrap="CJK")
+        val_style = ParagraphStyle("tblVal", fontSize=8, textColor=colors.black,
+                                   leading=10, wordWrap="CJK")
 
         def _wrap_label(text: str, width: int = 12) -> str:
             return '<br/>'.join(textwrap.wrap(text, width=width)) or text
@@ -511,13 +609,16 @@ class ReportService:
                 row.append(Paragraph(val, val_style))
             table_data.append(row)
 
-        # Calculate column widths — short labels get narrower columns
+        # Calculate column widths — weighted by label length, but with a minimum
+        # width per column so a short-label column can still hold its data and
+        # never collapses to a near-zero width (which crashes reportlab).
         page_width = A4[0] - 30 * mm
         num_cols = len(col_keys)
-        # Assign weight by label length (min 1) so long labels get more space
         weights = [max(1, len(lbl)) for lbl in col_labels]
-        total_weight = sum(weights)
-        col_widths = [page_width * w / total_weight for w in weights]
+        total_weight = sum(weights) or 1
+        min_w = min(28.0, page_width / num_cols)         # never below 28pt (or even split)
+        remaining = max(0.0, page_width - min_w * num_cols)
+        col_widths = [min_w + remaining * (w / total_weight) for w in weights]
 
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([

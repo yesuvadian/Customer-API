@@ -321,7 +321,32 @@ class ApprovalService:
         if request:
             try:
                 from services.notification_service import NotificationService
-                NotificationService(self.db).notify_recommendation_approved(request, rec)
+                ns = NotificationService(self.db)
+                if request.request_category == RequestCategory.failure_registry:
+                    # Specific fr_approved event for failure registry
+                    equipment_label = (
+                        request.equipment.ueic if getattr(request, "equipment", None)
+                        else (request.equipment_type.name if getattr(request, "equipment_type", None) else "Equipment")
+                    )
+                    approver = self.db.query(User).filter(User.id == approver_id).first()
+                    ns.fire(
+                        event_type="fr_approved",
+                        context={
+                            "fr_number":   request.request_number,
+                            "equipment":   equipment_label,
+                            "approved_by": approver.email if approver else str(approver_id),
+                            "next_action": rec.next_action.value if rec.next_action else "—",
+                        },
+                        organization_id=request.organization_id,
+                        department_id=getattr(request, "department_id", None),
+                        source_id=request.id,
+                        source_type="testing_request",
+                        severity="info",
+                        workflow_type="failure_registry",
+                        test_type="failure_registry",
+                    )
+                else:
+                    ns.notify_recommendation_approved(request, rec)
             except Exception as _n:
                 print(f"[WARN] recommendation_approved notification failed: {_n}")
 

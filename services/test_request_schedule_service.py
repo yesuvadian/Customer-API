@@ -363,6 +363,41 @@ class TestRequestScheduleService(UTCDateTimeMixin):
              if now.date() < trigger_date.date():
                 return False
 
+            # ── Cross-path dedup ─────────────────────────────────────────────
+            # Multiple paths can create a follow-up for the same equipment+test
+            # (threshold-alert followup on save AND recommendation dispatch on
+            # approval). Guard here — the single chokepoint for ALL generated
+            # tickets — so only ONE open ticket exists per equipment+test_type.
+            if schedule.equipment_id and schedule.test_type_id:
+                from models import TestingRequestStatus as _TRS
+                _open = [
+                    _TRS.draft, _TRS.submitted, _TRS.assigned, _TRS.accepted,
+                    _TRS.in_progress, _TRS.test_submitted, _TRS.under_approval,
+                    _TRS.under_review,
+                ]
+                _dup = (
+                    db.query(TestingRequest)
+                    .filter(
+                        TestingRequest.equipment_id == schedule.equipment_id,
+                        TestingRequest.test_type_id == schedule.test_type_id,
+                        TestingRequest.status.in_(_open),
+                        TestingRequest.is_schedule_template.is_(False),
+                        # Only consider already-generated follow-up tickets — NOT
+                        # the manually-created test that triggered this. The
+                        # original test has source_schedule_id = NULL, so it
+                        # won't block its own follow-up.
+                        TestingRequest.source_schedule_id.isnot(None),
+                    )
+                    .first()
+                )
+                if _dup:
+                    logger.info(
+                        "[ScheduleService] Skipping ticket — open request %s already "
+                        "exists for equipment %s test_type %s",
+                        _dup.request_number, schedule.equipment_id, schedule.test_type_id,
+                    )
+                    return False
+
             existing_generated = (
                 db.query(TestingRequest)
                 .filter(
@@ -376,6 +411,21 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             )
 
             if existing_generated:
+                # Patch missing surveillance linkage on existing ticket
+                if (
+                    schedule.surveillance_workflow_id
+                    and not existing_generated.surveillance_workflow_id
+                ):
+                    from utils.surveillance_utils import calculate_surveillance_quarter
+                    existing_generated.surveillance_workflow_id = schedule.surveillance_workflow_id
+                    existing_generated.surveillance_quarter = calculate_surveillance_quarter(
+                        db, schedule.surveillance_workflow_id, now
+                    )
+                    db.commit()
+                    logger.info(
+                        "[ScheduleService] Patched surveillance linkage on existing ticket %s",
+                        existing_generated.id,
+                    )
                 return True
 
             # Check if schedule has ended (for surveillance workflows with end_date)
@@ -841,6 +891,92 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 )
 
         return query.all()
+
+    # ============================================================
+    # LIST EQUIPMENT WITH SCHEDULES
+    # ============================================================
+
+    def list_equipment_with_schedules(
+        self,
+        organization_id: Optional[UUID] = None,
+        request_category: Optional[str] = None,
+    ):
+        """
+        Returns list of equipment that have operational schedules.
+        Includes schedule counts per equipment.
+        """
+        from models import Equipment, CategoryMaster
+        from sqlalchemy import func, case
+
+        # Build query to group schedules by equipment
+        query = (
+            self.db.query(
+                Equipment.id.label('equipment_id'),
+                Equipment.ueic,
+                CategoryMaster.name.label('equipment_type_name'),
+                Equipment.nameplate_data['substation_name'].astext.label('location'),
+                func.count(TestRequestSchedule.id).label('schedule_count'),
+                func.sum(
+                    case((TestRequestSchedule.is_active == True, 1), else_=0)
+                ).label('active_count'),
+                func.sum(
+                    case((TestRequestSchedule.paused_at.isnot(None), 1), else_=0)
+                ).label('paused_count'),
+            )
+            .join(
+                TestRequestSchedule,
+                TestRequestSchedule.equipment_id == Equipment.id
+            )
+            .outerjoin(
+                CategoryMaster,
+                CategoryMaster.id == Equipment.equipment_type_id
+            )
+            .filter(
+                TestRequestSchedule.is_deleted == False,
+            )
+            .group_by(
+                Equipment.id,
+                Equipment.ueic,
+                CategoryMaster.name,
+                Equipment.nameplate_data['substation_name'].astext,
+            )
+        )
+
+        if organization_id:
+            query = query.filter(Equipment.organization_id == organization_id)
+
+        if request_category:
+            try:
+                cat_enum = RequestCategory(request_category)
+            except ValueError:
+                cat_enum = None
+            if cat_enum == RequestCategory.test:
+                query = query.filter(
+                    or_(
+                        TestRequestSchedule.request_category == RequestCategory.test,
+                        TestRequestSchedule.request_category.is_(None),
+                    )
+                )
+            elif cat_enum is not None:
+                query = query.filter(
+                    TestRequestSchedule.request_category == cat_enum
+                )
+
+        results = query.all()
+
+        # Convert to dict
+        return [
+            {
+                'equipment_id': str(row.equipment_id),
+                'ueic': row.ueic or '',
+                'equipment_type_name': row.equipment_type_name or '',
+                'location': row.location or '',
+                'schedule_count': row.schedule_count or 0,
+                'active_count': row.active_count or 0,
+                'paused_count': row.paused_count or 0,
+            }
+            for row in results
+        ]
 
     # ============================================================
     # GET MASTER SCHEDULE

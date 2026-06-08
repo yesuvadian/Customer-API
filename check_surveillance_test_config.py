@@ -2,7 +2,7 @@
 Check surveillance test configuration.
 """
 from database import VendorSessionLocal
-from models import SurveillanceTestConfig, CategoryDetails, EquipmentType
+from models import SurveillanceTestConfig, CategoryDetails, CategoryMaster
 
 db = VendorSessionLocal()
 
@@ -24,8 +24,8 @@ try:
 
         for config in configs:
             # Get equipment type name
-            eq_type = db.query(EquipmentType).filter(
-                EquipmentType.id == config.equipment_type_id
+            eq_type = db.query(CategoryMaster).filter(
+                CategoryMaster.id == config.equipment_type_id
             ).first()
 
             # Get test type name

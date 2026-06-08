@@ -54,6 +54,34 @@ class TestingRequestService:
             for r in data.get("rules", [])
         )
 
+    def _resolve_is_multi_session(self, test_type_id) -> tuple:
+        """
+        Return (is_multi_session, total_sessions_planned, session_interval_days)
+        from template's supports_multi_session / typical_total_sessions /
+        typical_session_interval_days. Same pattern as _resolve_is_cumulative().
+        """
+        if not test_type_id:
+            return False, None, None
+        tpl = (
+            self.db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.test_type_id == test_type_id)
+            .order_by(OrgTestTemplate.version.desc())
+            .first()
+        )
+        if not tpl:
+            return False, None, None
+        data = tpl.template_data or {}
+        if data.get("supports_multi_session") or data.get("multi_session"):
+            session_types = data.get("session_types") or []
+            # Derive total from session_types length; fall back to explicit value
+            total = len(session_types) if session_types else data.get("typical_total_sessions")
+            return (
+                True,
+                total,
+                data.get("typical_session_interval_days"),
+            )
+        return False, None, None
+
     def _resolve_is_calibration(self, test_type_id) -> bool:
         """
         Return True if the template has enable_calibration=true OR a DATE_ADD rule.
@@ -82,6 +110,11 @@ class TestingRequestService:
         test_type_id = data.get("test_type_id")
         is_cumulative = self._resolve_is_cumulative(test_type_id)
         is_calibration = self._resolve_is_calibration(test_type_id)
+        _tpl_multi, _tpl_sessions, _tpl_interval = self._resolve_is_multi_session(test_type_id)
+        # Template-derived values; explicit payload values override if provided
+        _is_multi = data.get("is_multi_session") or _tpl_multi
+        _total    = data.get("total_sessions_planned") or _tpl_sessions
+        _interval = data.get("session_interval_days") or _tpl_interval
         request = TestingRequest(
             request_number=request_number,
             title=data["title"],
@@ -111,13 +144,15 @@ class TestingRequestService:
             status=TestingRequestStatus.draft,
             originator_id=originator_id,
             created_by=originator_id,
-            is_multi_session=data.get("is_multi_session", False),
-            total_sessions_planned=data.get("total_sessions_planned"),
-            session_interval_days=data.get("session_interval_days"),
+            is_multi_session=bool(_is_multi),
+            total_sessions_planned=_total,
+            session_interval_days=_interval,
             is_cumulative=is_cumulative,
             is_calibration=is_calibration,
             is_schedule_template=data.get("is_schedule_template", False),
             source_schedule_id=data.get("source_schedule_id"),
+            surveillance_workflow_id=data.get("surveillance_workflow_id"),
+            surveillance_quarter=data.get("surveillance_quarter"),
         )
         self.db.add(request)
         self.db.commit()
@@ -217,6 +252,16 @@ class TestingRequestService:
         self.db.commit()
         return {"message": "Testing request deleted successfully"}
 
+    def _user_label(self, user_id) -> str:
+        """Resolve a user's friendly display name for notification context."""
+        if not user_id:
+            return "System"
+        u = self.db.query(User).filter(User.id == user_id).first()
+        if not u:
+            return str(user_id)
+        name = " ".join(filter(None, [u.firstname, u.lastname])).strip()
+        return name or u.email or str(user_id)
+
     def submit_request(self, request_id: UUID, modified_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
         if request.is_schedule_template:
@@ -242,9 +287,28 @@ class TestingRequestService:
         # Trigger notification
         try:
             from services.notification_service import NotificationService
-            NotificationService(self.db).notify_request_submitted(request)
+            ns = NotificationService(self.db)
+            ns.notify_request_submitted(request)
+            ns.fire(
+                event_type="status_changed",
+                context={
+                    "request.number": request.request_number or str(request.id),
+                    "request.status": request.status.value,
+                    "request.title":  getattr(request, "title", "") or "",
+                    "status_from":    "draft",
+                    "status_to":      request.status.value,
+                    "changed_by":     self._user_label(modified_by),
+                },
+                organization_id=request.organization_id,
+                department_id=getattr(request, "department_id", None),
+                source_id=request.id,
+                source_type="testing_request",
+                severity="info",
+                workflow_type="testing_request",
+                status_from="draft",
+                status_to=request.status.value,
+            )
         except Exception as e:
-            # Log but don't fail the request
             import logging
             logging.getLogger(__name__).error(f"Notification failed: {e}")
 
@@ -276,9 +340,28 @@ class TestingRequestService:
         # Trigger notification
         try:
             from services.notification_service import NotificationService
-            NotificationService(self.db).notify_tester_assigned(request)
+            ns = NotificationService(self.db)
+            ns.notify_tester_assigned(request)
+            ns.fire(
+                event_type="status_changed",
+                context={
+                    "request.number": request.request_number or str(request.id),
+                    "request.status": request.status.value,
+                    "request.title":  getattr(request, "title", "") or "",
+                    "status_from":    "submitted",
+                    "status_to":      "assigned",
+                    "changed_by":     self._user_label(assigned_by),
+                },
+                organization_id=request.organization_id,
+                department_id=getattr(request, "department_id", None),
+                source_id=request.id,
+                source_type="testing_request",
+                severity="info",
+                workflow_type="testing_request",
+                status_from="submitted",
+                status_to="assigned",
+            )
         except Exception as e:
-            # Log but don't fail the assignment
             import logging
             logging.getLogger(__name__).error(f"Notification failed: {e}")
         return request

@@ -1,31 +1,49 @@
 [
   {
     "stage_code": "OBSERVATION_REPORTING",
-    "roles":           ["TA&QC Inspector"],
-    "assign_also":     ["TA&QC Inspector"],
+    "roles": [
+      "TA&QC Inspector"
+    ],
+    "assign_also": [
+      "TA&QC Inspector"
+    ],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "OBSERVATION_ASSIGNMENT",
-    "roles":           ["Transformer Repair Coordinator"],
-    "assign_also":     ["Transformer Repair Coordinator"],
+    "roles": [
+      "Transformer Repair Coordinator"
+    ],
+    "assign_also": [
+      "Transformer Repair Coordinator"
+    ],
     "assignment_role": null
   },
   {
     "stage_code": "COMPLIANCE_SUBMISSION",
-    "roles":           ["Maintenance Officer"],
+    "roles": [
+      "AEE_MAINTENANCE"
+    ],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "COMPLIANCE_REVIEW",
-    "roles":           ["TA&QC Inspector"],
-    "assign_also":     ["TA&QC Inspector"],
+    "roles": [
+      "TA&QC Inspector"
+    ],
+    "assign_also": [
+      "TA&QC Inspector"
+    ],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "OBSERVATION_CLOSURE",
-    "roles":           ["TA&QC Inspector"],
-    "assign_also":     ["TA&QC Inspector"],
+    "roles": [
+      "TA&QC Inspector"
+    ],
+    "assign_also": [
+      "TA&QC Inspector"
+    ],
     "assignment_role": "Transformer Repair Coordinator"
   }
 ]

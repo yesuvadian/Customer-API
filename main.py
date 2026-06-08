@@ -95,6 +95,7 @@ from routers import (
 )
 from routers import cumulative  # Cumulative / Overhaul lifecycle module
 from routers import calibration as calibration_router  # Calibration lifecycle module
+from routers import precommission as precommission_router  # Pre-Commission QAP module
 
 # Organization Multi-Tenancy
 from routers import organizations, org_departments, org_users, org_roles
@@ -109,6 +110,7 @@ from routers import admin_notification_events as admin_notification_events_route
 
 # Dashboard KPIs
 from routers import dashboard_kpi
+from routers import dashboard_role_kpi
 
 # Reporting Suite
 from routers import reporting as reporting_router
@@ -187,6 +189,8 @@ scheduler.add_job(
     trigger="interval",
     minutes=1,
     id="notification_pending_job",
+    max_instances=1,    # never run concurrently — prevents duplicate sends
+    coalesce=True,      # if missed fires pile up, run once not multiple times
 )
 
 
@@ -209,6 +213,8 @@ scheduler.add_job(
     trigger="interval",
     minutes=5,
     id="notification_retry_job",
+    max_instances=1,
+    coalesce=True,
 )
 
 
@@ -241,12 +247,16 @@ def _check_schedule_notifications():
     try:
         from models import (
             NotificationScheduleRule,
+            ScheduleFrequency,
             TestingRequest,
             TestingRequestStatus,
         )
         from services.notification_service import NotificationService
         nsvc = NotificationService(db)
         today = date.today()
+
+        # Cooldown days are now part of ScheduleFrequency.days — no separate dict needed.
+        # Use ScheduleFrequency.cooldown(freq_str, default=N) for safe lookup.
 
         # Load all active rules
         all_rules = (
@@ -331,6 +341,11 @@ def _check_schedule_notifications():
                 status_ok = bool(on_status and req_status_str == on_status)
                 return time_ok and status_ok
 
+            elif tt == "recurring":
+                # Pure frequency-based trigger — no date condition.
+                # The cadence is enforced entirely by the cooldown dedup check below.
+                return True
+
             return False
 
         def _evaluate_advanced(cond: dict, due, req_status_str: str) -> bool:
@@ -369,8 +384,27 @@ def _check_schedule_notifications():
                 return req_status_str == cond.get("on_status", "")
             return False
 
+        # ── Pass 1: digest notifications grouped by (org, department, rule) ──────
+        #
+        # Instead of firing one notification per request (which floods recipients
+        # with N emails for N overdue requests), we:
+        #   1. Evaluate every rule against every open request
+        #   2. Group matching requests by (org_id, department_id, event_type)
+        #   3. Fire ONE digest notification per group with an HTML table of all
+        #      matching requests — department_id scoping ensures each dept only
+        #      sees its own requests
+        #   4. Dedup at group level: skip the whole group if already sent today
+        #
+        from collections import defaultdict as _ddict
+        from models import NotificationLog
+        from datetime import datetime as _dt
+
+        # digest_groups[(org_id, dept_id, event_type, rule_key)] = [req, ...]
+        digest_groups: dict = _ddict(list)
+
         for req in requests:
             req_org = req.organization_id
+            req_dept = getattr(req, "department_id", None)
             req_status_str = (
                 req.status.value
                 if hasattr(req.status, "value")
@@ -385,16 +419,15 @@ def _check_schedule_notifications():
             except Exception:
                 due = None
 
-            # Category value
             req_cat = getattr(req.request_category, "value",
                               str(req.request_category or ""))
-            # Workflow type — derive the same way notification_service does
-            req_wf = nsvc._workflow_type(req) or ""
+            req_wf  = nsvc._workflow_type(req) or ""
 
-            # Merge global + org rules
-            effective: dict = dict(global_rules)
-            if req_org and req_org in org_rules:
-                effective.update(org_rules[req_org])
+            # Merge global + org rules (skip recurring — handled in pass 2)
+            effective: dict = {
+                k: v for k, v in {**global_rules, **(org_rules.get(req_org, {}))}.items()
+                if v.trigger_type != "recurring"
+            }
 
             for key, rule in effective.items():
                 event_type = key[0]
@@ -404,44 +437,213 @@ def _check_schedule_notifications():
                         if req_cat not in rule.applicable_categories:
                             continue
 
+                    # ── Equipment type filter ──────────────────────────────
+                    eq_types = list(getattr(rule, "applicable_equipment_types", None) or [])
+                    if eq_types:
+                        _eq_obj = getattr(req, "equipment_type", None)
+                        req_eq_type = (_eq_obj.name if _eq_obj else "") or ""
+                        if req_eq_type not in eq_types:
+                            continue
+
+                    # ── Activity type filter (advanced_conditions) ─────────
+                    adv_pre = getattr(rule, "advanced_conditions", None)
+                    if adv_pre and isinstance(adv_pre, dict):
+                        act_types = adv_pre.get("activity_types") or []
+                        if act_types:
+                            _tt_obj = getattr(req, "test_type", None)
+                            req_activity = (_tt_obj.name if _tt_obj else "") or ""
+                            if req_activity not in act_types:
+                                continue
+
                     # ── Workflow type filter ───────────────────────────────
                     wf_types = list(getattr(rule, "applicable_workflow_types", None) or [])
                     if wf_types and req_wf and req_wf not in wf_types:
                         continue
 
-                    # ── Evaluate trigger ───────────────────────────────────
+                    # ── Evaluate trigger condition ─────────────────────────
                     adv = getattr(rule, "advanced_conditions", None)
-                    if adv:
+                    if adv and set(adv.keys()) - {"activity_types"}:
                         matches = _evaluate_advanced(adv, due, req_status_str)
                     else:
                         matches = _evaluate_simple(rule, due, req_status_str)
 
                     if matches:
-                        # Dedup: skip if already fired for this TR+event today
-                        from models import NotificationLog
-                        from datetime import datetime as _dt
+                        group_key = (req_org, req_dept, event_type, key)
+                        digest_groups[group_key].append((req, due, rule))
+
+                except Exception as _e:
+                    logger.warning(
+                        f"[Notif] Rule {event_type} eval failed for req {req.id}: {_e}"
+                    )
+
+        # ── Fire one digest per (org, department, event_type) group ───────────
+        for (req_org, req_dept, event_type, rule_key), group in digest_groups.items():
+            try:
+                rule      = group[0][2]
+                rule_freq = getattr(rule, "frequency", None)
+                freq_str  = (
+                    rule_freq.value
+                    if rule_freq and hasattr(rule_freq, "value")
+                    else (rule_freq or None)
+                )
+                cooldown_days = ScheduleFrequency.cooldown(freq_str, default=1)
+                cutoff_dt = _dt.combine(
+                    today - timedelta(days=cooldown_days - 1),
+                    _dt.min.time()
+                )
+
+                # ── Dedup: skip if already sent for this org+dept+event today ─
+                already = (
+                    db.query(NotificationLog.id)
+                    .filter(
+                        NotificationLog.organization_id == req_org,
+                        NotificationLog.event_type      == event_type,
+                        NotificationLog.cts             >= cutoff_dt,
+                        NotificationLog.source_id.in_(
+                            [r.id for r, _, _ in group]
+                        ),
+                    )
+                    .first()
+                )
+                if already:
+                    continue
+
+                # ── Build digest table ─────────────────────────────────────
+                # Columns driven by rule.digest_columns (configured in the
+                # Notification Center UI). Falls back to DEFAULT_DIGEST_COLUMNS
+                # when NULL.
+                table_html = NotificationService.build_digest_table(
+                    group, today,
+                    columns=getattr(rule, "digest_columns", None),
+                )
+
+                # ── Representative values for subject line ──────────────────
+                first_req, first_due, _ = group[0]
+                first_eq = (
+                    getattr(getattr(first_req, "equipment", None), "ueic", "")
+                    or getattr(getattr(first_req, "equipment_type", None), "name", "")
+                    or "Equipment"
+                )
+                dept_name = getattr(getattr(first_req, "department", None), "name", "") or ""
+
+                nsvc.fire(
+                    event_type=event_type,
+                    context={
+                        # Digest-level variables
+                        "digest_table":    table_html,
+                        "digest_count":    str(len(group)),
+                        "dept.name":       dept_name,
+                        # Per-request fallbacks (used by SMS / inapp templates)
+                        "equipment":       first_eq,
+                        "equipment.ueic":  first_eq,
+                        "request.number":  first_req.request_number or "",
+                        "request.due_date": str(first_due or ""),
+                        "due_date":        str(first_due or ""),
+                        "days_remaining":  str(max((first_due - today).days, 0)) if first_due and first_due >= today else "0",
+                        "days_overdue":    str(max((today - first_due).days, 0)) if first_due and first_due < today else "0",
+                    },
+                    organization_id=req_org,
+                    department_id=req_dept,
+                    source_id=first_req.id,
+                    source_type="testing_request",
+                    severity=rule.severity,
+                    workflow_type=nsvc._workflow_type(first_req),
+                    equipment_type=nsvc._equipment_type(first_req),
+                    test_type=nsvc._test_type(first_req),
+                )
+                fired_total += len(group)
+
+            except Exception as _e:
+                logger.warning(
+                    f"[Notif] Digest fire failed for {event_type} "
+                    f"org={req_org} dept={req_dept}: {_e}"
+                )
+
+        # ── Pass 2: aggregate notifications (recurring trigger type) ──────────
+        #
+        # Each recurring rule fires ONE notification per org covering ALL matching
+        # open requests — instead of one notification per request.  This is the
+        # correct model for digest-style rules ("Weekly Open Tests Summary", etc.).
+        #
+        recurring_rules = [r for r in all_rules if r.trigger_type == "recurring"]
+
+        if recurring_rules:
+            from collections import defaultdict as _ddict
+            from models import NotificationLog
+            from datetime import datetime as _dt
+
+            # Group open requests by org_id for fast lookup
+            by_org: dict = _ddict(list)
+            for req in requests:
+                by_org[req.organization_id].append(req)
+
+            for rule in recurring_rules:
+                event_type = rule.event_type
+                rule_freq  = getattr(rule, "frequency", None)
+                freq_str   = (
+                    rule_freq.value
+                    if rule_freq and hasattr(rule_freq, "value")
+                    else (rule_freq or None)
+                )
+                # Recurring rules default to weekly if no frequency set
+                cooldown_days = ScheduleFrequency.cooldown(freq_str, default=7)
+                cutoff_dt = _dt.combine(
+                    today - timedelta(days=cooldown_days - 1),
+                    _dt.min.time()
+                )
+
+                # Determine which orgs this rule applies to
+                if rule.organization_id:
+                    target_orgs = [rule.organization_id]
+                else:
+                    # Global rule: applies to every org that has open requests
+                    target_orgs = list(by_org.keys())
+
+                for org_id in target_orgs:
+                    org_reqs = by_org.get(org_id, [])
+                    if not org_reqs:
+                        continue
+
+                    # Apply category filter
+                    if rule.applicable_categories:
+                        filtered = [
+                            r for r in org_reqs
+                            if getattr(r.request_category, "value",
+                                       str(r.request_category or ""))
+                               in rule.applicable_categories
+                        ]
+                    else:
+                        filtered = org_reqs
+
+                    if not filtered:
+                        continue
+
+                    # Dedup at org level — source_id IS NULL for aggregate logs
+                    try:
                         already = (
                             db.query(NotificationLog.id)
                             .filter(
-                                NotificationLog.source_id == req.id,
+                                NotificationLog.organization_id == org_id,
                                 NotificationLog.event_type == event_type,
-                                NotificationLog.cts >= _dt.combine(today, _dt.min.time()),
+                                NotificationLog.source_id.is_(None),
+                                NotificationLog.cts >= cutoff_dt,
                             )
                             .first()
                         )
                         if already:
                             continue
-                        nsvc._fire_schedule_notification(
-                            req,
+
+                        nsvc.notify_aggregate_summary(
                             event_type=event_type,
+                            requests=filtered,
+                            organization_id=org_id,
                             severity=rule.severity,
                         )
                         fired_total += 1
-
-                except Exception as _e:
-                    logger.warning(
-                        f"[Notif] Rule {event_type} failed for req {req.id}: {_e}"
-                    )
+                    except Exception as _e:
+                        logger.warning(
+                            f"[Notif] Recurring rule {event_type} failed for org {org_id}: {_e}"
+                        )
 
         if fired_total:
             logger.info(f"[Notif] Schedule job total fired={fired_total}")
@@ -458,6 +660,109 @@ scheduler.add_job(
     hour=7,
     minute=0,
     id="schedule_notification_job",
+)
+
+
+# Monthly MIS Report (runs on the 1st of each month at 06:00 UTC)
+# Collects per-org stats for the previous calendar month and fires
+# notify_monthly_mis_report() → sends to Senior Management / Supervisory roles.
+def _run_monthly_mis_report():
+    """
+    On the 1st of each month, count:
+      - tests completed in the previous month
+      - currently overdue open requests
+      - eval_critical events triggered in the previous month
+    Then fire notify_monthly_mis_report() per active organisation.
+    """
+    from datetime import date, datetime, timezone as _tz
+    db = SessionLocal()
+    try:
+        from models import (
+            TestingRequest,
+            TestingRequestStatus,
+            NotificationLog,
+            Organization,
+        )
+        from services.notification_service import NotificationService
+
+        today = date.today()
+        # Only fire on the 1st; guard against accidental double-runs
+        if today.day != 1:
+            logger.debug("[Notif] Monthly MIS job skipped — not the 1st of the month")
+            return
+
+        # Stats window = previous calendar month
+        this_month_start = datetime(today.year, today.month, 1, tzinfo=_tz.utc)
+        # Previous month end = this month start (exclusive upper bound)
+        prev_month_end   = this_month_start
+        # Previous month start = go back 28–31 days and land on the 1st
+        import calendar as _cal
+        prev_year  = today.year if today.month > 1 else today.year - 1
+        prev_month = today.month - 1 if today.month > 1 else 12
+        prev_month_start = datetime(prev_year, prev_month, 1, tzinfo=_tz.utc)
+        report_month = prev_month_start.strftime("%B %Y")
+
+        open_statuses = [
+            TestingRequestStatus.submitted,
+            TestingRequestStatus.assigned,
+            TestingRequestStatus.accepted,
+            TestingRequestStatus.in_progress,
+        ]
+
+        orgs = db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        fired = 0
+
+        for org in orgs:
+            try:
+                tests_completed = db.query(TestingRequest).filter(
+                    TestingRequest.organization_id == org.id,
+                    TestingRequest.status == TestingRequestStatus.completed,
+                    TestingRequest.completed_at >= prev_month_start,
+                    TestingRequest.completed_at <  prev_month_end,
+                ).count()
+
+                overdue_count = db.query(TestingRequest).filter(
+                    TestingRequest.organization_id == org.id,
+                    TestingRequest.status.in_(open_statuses),
+                    TestingRequest.due_date < datetime(today.year, today.month, today.day,
+                                                       tzinfo=_tz.utc),
+                ).count()
+
+                critical_count = db.query(NotificationLog).filter(
+                    NotificationLog.organization_id == org.id,
+                    NotificationLog.event_type == "eval_critical",
+                    NotificationLog.cts >= prev_month_start,
+                    NotificationLog.cts <  prev_month_end,
+                ).count()
+
+                nsvc = NotificationService(db)
+                nsvc.notify_monthly_mis_report(
+                    report_month=report_month,
+                    tests_completed=tests_completed,
+                    critical_count=critical_count,
+                    overdue_count=overdue_count,
+                    organization_id=org.id,
+                )
+                fired += 1
+            except Exception as _oe:
+                logger.warning(f"[Notif] MIS report failed for org {org.id}: {_oe}")
+
+        if fired:
+            logger.info(f"[Notif] Monthly MIS report fired for {fired} org(s) — {report_month}")
+
+    except Exception as e:
+        logger.error(f"[Notif] Monthly MIS report job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _run_monthly_mis_report,
+    trigger="cron",
+    day=1,
+    hour=6,
+    minute=0,
+    id="monthly_mis_report_job",
 )
 
 
@@ -704,6 +1009,7 @@ app.include_router(annual_audits.router)       # Annual Audit observations
 app.include_router(test_register.router)       # NEW: Test Register catalogue
 app.include_router(cumulative.router)          # Cumulative / Overhaul lifecycle
 app.include_router(calibration_router.router)  # Calibration lifecycle
+app.include_router(precommission_router.router)  # Pre-Commission QAP
 
 # Equipment Asset Register
 app.include_router(equipment.router)
@@ -715,6 +1021,7 @@ app.include_router(admin_notification_events_router.router)
 
 # Dashboard KPIs
 app.include_router(dashboard_kpi.router)
+app.include_router(dashboard_role_kpi.router)
 
 # Reporting Suite
 app.include_router(reporting_router.router)
@@ -758,19 +1065,65 @@ async def startup_event():
     import surveillance_hooks  # noqa: F401
     logger.info("[Hooks] Workflow lifecycle hooks registered")
 
-    # Seed default notification templates + variables (idempotent)
+    # Seed pre-commission QAP workflow stages + org role mappings (idempotent)
     try:
         _db = SessionLocal()
-        from services.notification_service import seed_default_templates, seed_default_variables
-        seeded_t = seed_default_templates(_db)
-        seeded_v = seed_default_variables(_db)
-        if seeded_t:
-            logger.info(f"[Notif] Seeded {seeded_t} default notification template(s) on startup")
-        if seeded_v:
-            logger.info(f"[Notif] Seeded {seeded_v} default notification variable(s) on startup")
+        from seed_precommission_workflow import (
+            seed_precommission_stages,
+            seed_precommission_role_mappings,
+        )
+        from models import Organization
+        seed_precommission_stages(_db)
+        # Seed role mappings only for orgs that have the required OrgRoles
+        from models import OrgRole
+        _orgs = _db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        seeded = 0
+        for _org in _orgs:
+            has_roles = _db.query(OrgRole).filter_by(
+                organization_id=_org.id, name="EE_TLSS"
+            ).first()
+            if not has_roles:
+                continue
+            try:
+                seed_precommission_role_mappings(_db, _org.id)
+                seeded += 1
+            except Exception as _re:
+                logger.warning(f"[Seed] PCR role mapping failed for org {_org.id}: {_re}")
         _db.close()
+        logger.info(f"[Seed] Pre-commission QAP workflow staged + role mappings seeded for {seeded} org(s)")
     except Exception as _e:
-        logger.warning(f"[Notif] Seed failed on startup (non-fatal): {_e}")
+        logger.warning(f"[Seed] Pre-commission seed failed on startup (non-fatal): {_e}")
+
+    # Seed DFR + Tan-Delta/IDAX templates — idempotent upsert on every restart
+    try:
+        _db = SessionLocal()
+        from seed import seed_dfr_template, seed_tan_delta_templates
+        seed_dfr_template(_db)
+        seed_tan_delta_templates(_db)
+        _db.close()
+        logger.info("[Seed] DFR + Tan-Delta/IDAX templates upserted on startup")
+    except Exception as _e:
+        logger.warning(f"[Seed] DFR/Tan-Delta template seed failed on startup (non-fatal): {_e}")
+
+    # Seed all notification defaults (event catalogue, variables, templates,
+    # schedule rules, routing rules) — idempotent, safe to run on every restart
+    try:
+        _db = SessionLocal()
+        from seed import seed_notification_defaults
+        _counts = seed_notification_defaults(_db)
+        _db.close()
+        _total = sum(_counts.values())
+        if _total:
+            logger.info(
+                f"[Notif] Seeded notification defaults on startup: "
+                f"events={_counts['event_catalogue']}, "
+                f"vars={_counts['variables']}, "
+                f"templates={_counts['templates']}, "
+                f"schedule_rules={_counts['schedule_rules']}, "
+                f"routing_rules={_counts['routing_rules']}"
+            )
+    except Exception as _e:
+        logger.warning(f"[Notif] Notification seed failed on startup (non-fatal): {_e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

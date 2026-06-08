@@ -1,26 +1,42 @@
 [
   {
     "stage_code": "CAL_REVIEW",
-    "roles":           ["Reviewing Officer", "Maintenance Officer"],
-    "assign_also":     ["Reviewing Officer"],
+    "roles": [
+      "EE_TLSS",
+      "AEE_MAINTENANCE"
+    ],
+    "assign_also": [
+      "EE_TLSS"
+    ],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "CAL_EXECUTION",
-    "roles":           ["Test Engineer", "Maintenance Officer"],
-    "assign_also":     [],
+    "roles": [
+      "AE_JE",
+      "AEE_MAINTENANCE"
+    ],
+    "assign_also": [],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "CAL_CERTIFICATE",
-    "roles":           ["Test Engineer", "Maintenance Officer"],
-    "assign_also":     [],
+    "roles": [
+      "AE_JE",
+      "AEE_MAINTENANCE"
+    ],
+    "assign_also": [],
     "assignment_role": "Transformer Repair Coordinator"
   },
   {
     "stage_code": "CAL_VERIFY",
-    "roles":           ["Reviewing Officer", "Senior Management Approver"],
-    "assign_also":     ["Reviewing Officer"],
+    "roles": [
+      "EE_TLSS",
+      "CEE_TRANSMISSION_ZONE"
+    ],
+    "assign_also": [
+      "EE_TLSS"
+    ],
     "assignment_role": "Transformer Repair Coordinator"
   }
 ]

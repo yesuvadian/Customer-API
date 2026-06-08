@@ -19,16 +19,18 @@ Key design points
 from __future__ import annotations
 
 import logging
+import time
 import traceback
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func as sa_func
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, func as sa_func
+from sqlalchemy.orm import Session, joinedload
 
 from models import (
     NotificationLog,
+    NotificationLogRecipient,
     NotificationRoutingRule,
     NotificationTemplate,
     NotificationVariable,
@@ -102,7 +104,7 @@ def _enrich_context_from_source(
                 return
             ctx.setdefault("tr.id",          str(tr.id))
             ctx.setdefault("tr.status",       str(tr.status.value) if tr.status else "")
-            ctx.setdefault("tr.submitted_at", str(tr.created_at)[:19] if tr.created_at else "")
+            ctx.setdefault("tr.submitted_at", str(tr.cts)[:19] if tr.cts else "")
             ctx.setdefault("tr.category",     str(tr.request_category.value) if tr.request_category else "")
             ctx.setdefault("request.number",  tr.request_number or str(tr.id)[:8])
             ctx.setdefault("request.status",  str(tr.status.value) if tr.status else "")
@@ -134,28 +136,97 @@ def _enrich_context_from_source(
                 if dept:
                     ctx.setdefault("dept.name", dept.name or "")
                     ctx.setdefault("dept.code", dept.code or "")
+            # Originator (submitted_by) context
+            if tr.originator_id:
+                from models import User as _User
+                orig = db.query(_User).filter(_User.id == tr.originator_id).first()
+                if orig:
+                    _orig_name = (
+                        f"{orig.firstname or ''} {orig.lastname or ''}".strip()
+                        or orig.email or str(orig.id)
+                    )
+                    ctx.setdefault("request.submitted_by", _orig_name)
+                    ctx.setdefault("originator",           _orig_name)
+                    ctx.setdefault("originator.email",     orig.email or "")
             # Equipment (asset register) context
             if tr.equipment_id:
-                from models import Equipment
-                eq = db.query(Equipment).filter(Equipment.id == tr.equipment_id).first()
+                from models import Equipment as _EqModel
+                from sqlalchemy.orm import joinedload as _jl
+                eq = (
+                    db.query(_EqModel)
+                    .options(_jl(_EqModel.department))
+                    .filter(_EqModel.id == tr.equipment_id)
+                    .first()
+                )
                 if eq:
                     ctx.setdefault("equipment.ueic", getattr(eq, "ueic", "") or "")
                     ctx.setdefault("equipment.name", getattr(eq, "name", "") or "")
+                    # Use the already-loaded relationship — avoids a second query
+                    _eq_dept = getattr(eq, "department", None)
+                    if _eq_dept:
+                        ctx.setdefault("equipment.department", _eq_dept.name or "")
 
         elif source_type == "test_result":
-            from models import TestResult, TestingRequest, OrgDepartment
+            from models import TestResult, TestingRequest, OrgDepartment, CategoryDetails, CategoryMaster
+            from sqlalchemy.orm import joinedload as _jl2
             tr_res = db.query(TestResult).filter(TestResult.id == source_id).first()
             if not tr_res:
                 return
-            ctx.setdefault("eval.overall",     tr_res.overall_result or "")
-            ctx.setdefault("eval.evaluated_at", str(tr_res.created_at)[:19] if tr_res.created_at else "")
+            ctx.setdefault("eval.overall",      tr_res.overall_result or "")
+            ctx.setdefault("eval.evaluated_at", str(tr_res.tested_at or tr_res.cts)[:19] if (tr_res.tested_at or tr_res.cts) else "")
+            # Tester who submitted the result
+            if getattr(tr_res, "tested_by", None):
+                from models import User as _User2
+                _tester = db.query(_User2).filter(_User2.id == tr_res.tested_by).first()
+                if _tester:
+                    _tname = f"{_tester.firstname or ''} {_tester.lastname or ''}".strip() or _tester.email or ""
+                    ctx.setdefault("request.assigned_to", _tname)
+                    ctx.setdefault("tester.name",         _tname)
+                    ctx.setdefault("tester.email",        _tester.email or "")
             if tr_res.testing_request_id:
                 tr = db.query(TestingRequest).filter(
                     TestingRequest.id == tr_res.testing_request_id
                 ).first()
                 if tr:
-                    ctx.setdefault("request.number", tr.request_number or str(tr.id)[:8])
-                    ctx.setdefault("tr.status",       tr.status or "")
+                    ctx.setdefault("request.number",   tr.request_number or str(tr.id)[:8])
+                    ctx.setdefault("tr.status",        str(tr.status.value) if tr.status else "")
+                    ctx.setdefault("request.status",   str(tr.status.value) if tr.status else "")
+                    ctx.setdefault("request.title",    tr.title or "")
+                    ctx.setdefault("request.priority", tr.priority or "normal")
+                    if tr.due_date:
+                        ctx.setdefault("request.due_date", str(tr.due_date)[:10])
+                    # Originator / submitted_by
+                    if tr.originator_id:
+                        from models import User as _User3
+                        _orig = db.query(_User3).filter(_User3.id == tr.originator_id).first()
+                        if _orig:
+                            _oname = f"{_orig.firstname or ''} {_orig.lastname or ''}".strip() or _orig.email or ""
+                            ctx.setdefault("request.submitted_by", _oname)
+                            ctx.setdefault("originator",           _oname)
+                            ctx.setdefault("originator.email",     _orig.email or "")
+                    # Assigned tester name (from TR if not already set from TestResult)
+                    if tr.assigned_tester_id and not ctx.get("request.assigned_to"):
+                        from models import User as _User4
+                        _at = db.query(_User4).filter(_User4.id == tr.assigned_tester_id).first()
+                        if _at:
+                            _atname = f"{_at.firstname or ''} {_at.lastname or ''}".strip() or _at.email or ""
+                            ctx.setdefault("request.assigned_to", _atname)
+                    # Test type display name
+                    if tr.test_type_id:
+                        cat = db.query(CategoryDetails).filter(
+                            CategoryDetails.id == tr.test_type_id
+                        ).first()
+                        if cat:
+                            ctx.setdefault("eval.test_type", cat.name or "")
+                            ctx.setdefault("tr.test_type",   cat.name or "")
+                    # Equipment type display name
+                    if tr.equipment_type_id:
+                        eq_type = db.query(CategoryMaster).filter(
+                            CategoryMaster.id == tr.equipment_type_id
+                        ).first()
+                        if eq_type:
+                            ctx.setdefault("equipment.type", eq_type.name or "")
+                    # Department
                     if tr.department_id:
                         dept = db.query(OrgDepartment).filter(
                             OrgDepartment.id == tr.department_id
@@ -163,16 +234,61 @@ def _enrich_context_from_source(
                         if dept:
                             ctx.setdefault("dept.name", dept.name or "")
                             ctx.setdefault("dept.code", dept.code or "")
+                    # Equipment (asset register)
+                    if tr.equipment_id:
+                        from models import Equipment as _EqModel2
+                        eq2 = (
+                            db.query(_EqModel2)
+                            .options(_jl2(_EqModel2.department))
+                            .filter(_EqModel2.id == tr.equipment_id)
+                            .first()
+                        )
+                        if eq2:
+                            ctx.setdefault("equipment.ueic", getattr(eq2, "ueic", "") or "")
+                            ctx.setdefault("equipment.name", getattr(eq2, "name", "") or "")
+                            _eq2_dept = getattr(eq2, "department", None)
+                            if _eq2_dept:
+                                ctx.setdefault("equipment.department", _eq2_dept.name or "")
+
+        elif source_type == "equipment":
+            from models import Equipment, OrgDepartment, CategoryMaster
+            eq = db.query(Equipment).filter(Equipment.id == source_id).first()
+            if eq:
+                ctx.setdefault("equipment.ueic",         getattr(eq, "ueic", "") or "")
+                ctx.setdefault("equipment.name",         getattr(eq, "name", "") or "")
+                ctx.setdefault("equipment.status",       str(getattr(eq, "status", "") or ""))
+                ctx.setdefault("equipment.manufacturer", getattr(eq, "manufacturer", "") or "")
+                # Resolve equipment type display name from CategoryMaster
+                eq_type_id = getattr(eq, "equipment_type_id", None)
+                if eq_type_id:
+                    cat = db.query(CategoryMaster).filter(CategoryMaster.id == eq_type_id).first()
+                    if cat:
+                        ctx.setdefault("equipment.type", cat.name or "")
+                # Resolve department name + code from OrgDepartment
+                dept_id = getattr(eq, "department_id", None)
+                if dept_id:
+                    dept = db.query(OrgDepartment).filter(OrgDepartment.id == dept_id).first()
+                    if dept:
+                        ctx.setdefault("equipment.department", dept.name or "")
+                        ctx.setdefault("dept.name",            dept.name or "")
+                        ctx.setdefault("dept.code",            dept.code or "")
+                        ctx.setdefault("department",           dept.name or "")
 
         elif source_type == "recommendation":
             from models import Recommendation
             rec = db.query(Recommendation).filter(Recommendation.id == source_id).first()
             if rec:
                 ctx.setdefault("recommendation.id",     str(rec.id))
-                ctx.setdefault("recommendation.status", rec.status or "")
+                ctx.setdefault("recommendation.status", rec.approval_status or "")
 
     except Exception as _exc:
-        logger.debug(f"[Notif] _enrich_context_from_source({source_type}): {_exc}")
+        logger.warning(f"[Notif] _enrich_context_from_source({source_type}): {_exc}")
+
+    # ── Fallback: always ensure equipment.department has a value ─────────────
+    # Must be outside the try/except so it runs even when an earlier step threw.
+    # Uses the TR's own department if the equipment's department wasn't resolved.
+    if source_type in ("testing_request", "test_result"):
+        ctx.setdefault("equipment.department", ctx.get("dept.name", "") or "")
 
 
 def _load_org_variables(db: Session, organization_id: Optional[UUID]) -> Dict[str, str]:
@@ -262,55 +378,68 @@ def _generate_attachment_bytes(
     return None
 
 
+# ── Variable alias cache (loaded from notification_variables.fallback_keys) ───
+
+_alias_cache:    Optional[Dict[str, List[str]]] = None
+_alias_cache_ts: float = 0.0
+_ALIAS_CACHE_TTL = 300  # seconds — refresh every 5 minutes
+
+
+def _load_alias_cache(db: Session) -> Dict[str, List[str]]:
+    """
+    Return var_key → [fallback_keys] mapping from DB, refreshed every 5 min.
+    System variables (is_system=True, org=NULL) only — org-custom vars resolve
+    directly from the fire() context by their var_key, no alias needed.
+    """
+    global _alias_cache, _alias_cache_ts
+    now_ts = time.monotonic()
+    if _alias_cache is not None and (now_ts - _alias_cache_ts) < _ALIAS_CACHE_TTL:
+        return _alias_cache
+
+    try:
+        rows = (
+            db.query(NotificationVariable)
+            .filter(
+                NotificationVariable.is_system.is_(True),
+                NotificationVariable.is_active.is_(True),
+                NotificationVariable.organization_id.is_(None),
+                NotificationVariable.fallback_keys.isnot(None),
+            )
+            .all()
+        )
+        cache: Dict[str, List[str]] = {}
+        for row in rows:
+            fb = list(row.fallback_keys or [])
+            if fb:                          # skip vars with no fallback (system.*)
+                cache[row.var_key] = fb
+        _alias_cache    = cache
+        _alias_cache_ts = now_ts
+        return cache
+    except Exception as exc:
+        logger.warning(f"[VariableResolver] alias cache load failed: {exc}")
+        return _alias_cache or {}   # serve stale cache on DB error
+
+
 # ── Variable context resolver ─────────────────────────────────────────────────
 
 class VariableResolver:
     """
     Augments the raw context dict passed to fire() with:
       • Dot-notation aliases  ({{equipment.ueic}} from legacy "equipment" key)
+        — fallback lists are stored in notification_variables.fallback_keys
+          and loaded via _load_alias_cache(); no hardcoded mapping in code.
       • System-injected vars  ({{system.date}}, {{system.time}}, {{system.app_name}})
-
-    The DB table `notification_variables` acts as the **registry** for the UI
-    variable-picker only — resolution always uses this class + the fire() context.
     """
 
-    # Maps dot-notation var_key → list of fallback raw-context keys (first match wins)
-    _ALIASES: Dict[str, List[str]] = {
-        "equipment.ueic":        ["equipment", "ueic", "old_ueic"],
-        "equipment.type":        ["equipment_type"],
-        "equipment.department":  ["department"],
-        "equipment.manufacturer":["manufacturer"],
-        "equipment.status":      ["equipment_status"],
-        "request.number":        ["request_number"],
-        "request.title":         ["request_title", "title"],
-        "request.status":        ["request_status"],
-        "request.priority":      ["request_priority", "priority"],
-        "request.due_date":      ["due_date"],
-        "request.submitted_by":  ["originator"],
-        "request.assigned_to":   ["tester", "assigned_tester"],
-        "eval.overall":          ["eval_overall", "overall"],
-        "eval.test_type":        ["test_name"],
-        "eval.evaluated_at":     ["tested_at", "evaluated_at"],
-        "report.ref":            ["report_ref", "request_number"],
-        "report.generated_on":   ["report_generated_on"],
-        "report.retriepdf":      ["report_pdf_url", "pdf_url"],
-        "report.retriexls":      ["report_xls_url", "xls_url"],
-        "org.name":              ["org_name"],
-        "org.id":                ["org_id"],
-        # Department / context variables — useful in subject line
-        # e.g. "Subject: [{{dept.name}}] Equipment replaced"
-        "dept.name":             ["currentdeptname", "department_name", "dept_name", "department"],
-        "dept.code":             ["dept_code", "department_code"],
-        "dept.level":            ["dept_level"],
-        "user.name":             ["user_name", "recipient_name"],
-        "user.email":            ["recipient_email", "user_email"],
-    }
-
     @staticmethod
-    def build_context(raw: Dict[str, Any]) -> Dict[str, Any]:
+    def build_context(raw: Dict[str, Any],
+                      db: Optional[Session] = None) -> Dict[str, Any]:
         """
         Return a flat dict that maps every supported var_key to its resolved value.
         Safe to call with any partial context — missing keys simply won't be resolved.
+
+        db: pass the active Session so fallback aliases are loaded from DB.
+            If None (e.g. unit tests), alias resolution is skipped gracefully.
         """
         now = datetime.now(timezone.utc)
         ctx: Dict[str, Any] = {k: (str(v) if v is not None else "") for k, v in raw.items()}
@@ -320,15 +449,143 @@ class VariableResolver:
         ctx.setdefault("system.time",     now.strftime("%H:%M UTC"))
         ctx.setdefault("system.app_name", "SEACMS")
 
-        # Resolve dot-notation aliases from legacy flat keys
-        for dot_key, sources in VariableResolver._ALIASES.items():
-            if dot_key not in ctx or not ctx[dot_key]:
-                for src in sources:
-                    if ctx.get(src):
-                        ctx[dot_key] = ctx[src]
-                        break
+        # Resolve dot-notation aliases from DB-backed fallback lists
+        if db is not None:
+            aliases = _load_alias_cache(db)
+            for dot_key, sources in aliases.items():
+                if not ctx.get(dot_key):
+                    for src in sources:
+                        if ctx.get(src):
+                            ctx[dot_key] = ctx[src]
+                            break
 
         return ctx
+
+
+# ── System-token recipient resolver ──────────────────────────────────────────
+
+def _resolve_token_user(
+    db: Session,
+    source_type: str,
+    source_id: UUID,
+    field_name: str,
+) -> "Optional[User]":
+    """
+    Load the User whose UUID is stored in ``field_name`` on the source record.
+
+    source_type → model mapping
+    ───────────────────────────
+    testing_request  → TestingRequest
+    equipment        → Equipment
+    recommendation   → Recommendation
+    (others)         → skipped — extend here as needed
+
+    Field-name overrides
+    ────────────────────
+    Different models use different field names for conceptually the same
+    "owner / creator" relationship.  ``_FIELD_OVERRIDES`` maps
+    (source_type, generic_field) → model_specific_field so callers can use
+    the generic token names (@owner → "created_by") while still resolving
+    correctly against models that use a different column name.
+
+    Returns None on any error so a missing token never blocks delivery.
+    """
+    # ── Per-(source_type, generic_token_field) → model_specific_field ────────────
+    #
+    # Different models store the same conceptual "person" under different column
+    # names.  Map the generic token field (from SYSTEM_RECIPIENT_TOKENS) to the
+    # actual column on each model so @tokens work correctly across all source types.
+    #
+    #  Model                  @assignee                @owner          @requester
+    #  ──────────────────     ──────────────────────   ─────────────   ──────────────────────
+    #  TestingRequest          assigned_tester_id*      originator_id†  originator_id†
+    #  Equipment               assigned_tester_id (n/a) created_by*     requested_by (n/a)
+    #  TestResult              tested_by†               created_by*     → parent TR originator†
+    #  Recommendation          assigned_tester_id (n/a) created_by*     submitted_by†
+    #  RepairWorkflow          work_award_by†           created_by*     created_by†
+    #  (surveillance_workflow) ─ same model as above ─
+    #
+    #  *  direct column exists on that model
+    #  †  override applied here or via special navigation logic below
+    #  n/a → getattr returns None → user skipped (no error)
+    #
+    _FIELD_OVERRIDES: dict = {
+        # TestingRequest uses originator_id for both owner and requester
+        ("testing_request",       "created_by"):         "originator_id",
+        ("testing_request",       "requested_by"):       "originator_id",
+        # TestResult: @assignee is the tester who submitted the result
+        ("test_result",           "assigned_tester_id"): "tested_by",
+        # Recommendation: @requester is the submitter
+        ("recommendation",        "requested_by"):       "submitted_by",
+        # RepairWorkflow: @assignee is the Work Award Officer; @requester same as creator
+        ("repair_workflow",       "assigned_tester_id"): "work_award_by",
+        ("repair_workflow",       "requested_by"):       "created_by",
+        # surveillance_workflow IDs point to RepairWorkflow rows — same overrides
+        ("surveillance_workflow", "assigned_tester_id"): "work_award_by",
+        ("surveillance_workflow", "requested_by"):       "created_by",
+    }
+    actual_field = _FIELD_OVERRIDES.get((source_type, field_name), field_name)
+
+    try:
+        if source_type == "testing_request":
+            from models import TestingRequest as _TR
+            record = db.query(_TR).filter(_TR.id == source_id).first()
+
+        elif source_type == "equipment":
+            from models import Equipment as _EQ
+            record = db.query(_EQ).filter(_EQ.id == source_id).first()
+
+        elif source_type == "recommendation":
+            from models import Recommendation as _REC
+            record = db.query(_REC).filter(_REC.id == source_id).first()
+
+        elif source_type == "test_result":
+            from models import TestResult as _TR2
+            record = db.query(_TR2).filter(_TR2.id == source_id).first()
+
+            # @requester on test_result → navigate to parent testing_request's originator
+            # (TestResult has no "requester" column of its own).
+            if record and field_name == "requested_by":
+                from models import TestingRequest as _TR_p
+                parent = (
+                    db.query(_TR_p)
+                    .filter(_TR_p.id == record.testing_request_id)
+                    .first()
+                )
+                user_id = getattr(parent, "originator_id", None) if parent else None
+                if not user_id:
+                    return None
+                return db.query(User).filter(User.id == user_id).first()
+
+        elif source_type in ("repair_workflow", "surveillance_workflow"):
+            # surveillance_workflow IDs are FKs into repair_workflows (same table).
+            from models import RepairWorkflow as _RW
+            record = db.query(_RW).filter(_RW.id == source_id).first()
+
+        else:
+            logger.debug(
+                f"[Notif] _resolve_token_user: unsupported source_type={source_type!r}"
+            )
+            return None
+
+        if not record:
+            return None
+
+        user_id = getattr(record, actual_field, None)
+        if not user_id:
+            logger.debug(
+                f"[Notif] _resolve_token_user: field {actual_field!r} is empty "
+                f"on {source_type}/{source_id}"
+            )
+            return None
+
+        return db.query(User).filter(User.id == user_id).first()
+
+    except Exception as exc:
+        logger.warning(
+            f"[Notif] _resolve_token_user({source_type!r}, {actual_field!r}): {exc}"
+        )
+        return None
 
 
 # ── Department ancestry helper ────────────────────────────────────────────────
@@ -353,28 +610,86 @@ def _ancestor_dept_ids(db: Session, department_id: UUID) -> set:
 
 # ── Recipient resolution ──────────────────────────────────────────────────────
 
+def _is_uuid_str(s: str) -> bool:
+    """Return True if s is a valid UUID string (any version)."""
+    try:
+        UUID(str(s))
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
 def _resolve_recipients_by_roles(
     db: Session,
     role_names: List[str],
     organization_id: Optional[UUID],
     department_id: Optional[UUID] = None,
+    source_type: Optional[str] = None,
+    source_id: Optional[UUID] = None,
 ) -> List[User]:
     """
-    Return unique active User objects that hold any of the given OrgRole names
-    within the given organisation, scoped by department when provided.
+    Return unique active User objects for the given recipient identifiers.
 
-    Department scoping rules (mirrors testing_request_service.get_user_scope):
+    Accepts three identifier formats in the same list (auto-detected):
+      • ``@token`` strings — system recipient tokens (e.g. ``"@assignee"``)
+                             resolved from the source record at fire()-time.
+                             Defined in ``services/notification_tokens.py``.
+      • UUID strings       — matched against OrgRole.id  (preferred)
+      • Name strings       — matched against OrgRole.name (legacy / backward compat)
+
+    System tokens are always resolved first and deduplicated against
+    the role-based results so a user is never notified twice.
+
+    Department scoping rules (applies to role-based recipients only):
       • OrgUserRole.department_id IS NULL  → org-wide user  → always included
       • OrgUserRole.department_id == source_dept    → same leaf dept → included
-      • OrgUserRole.department_id is an ANCESTOR of source_dept
-        (circle/zone level above the TR's division)           → included
+      • OrgUserRole.department_id is an ANCESTOR of source_dept → included
       • OrgUserRole.department_id is a sibling / different branch → excluded
-
-    This ensures North-division events don't spam South/Mysuru personnel,
-    but Circle EE and Zone SEE (who sit above the division) still receive them.
     """
-    if not role_names or not organization_id:
-        return []
+    from services.notification_tokens import SYSTEM_RECIPIENT_TOKENS
+
+    seen: set     = set()
+    users: List[User] = []
+
+    # ── 1. Resolve system tokens (@assignee, @owner, …) ──────────────────────
+    sys_tokens = [r for r in (role_names or []) if isinstance(r, str) and r.startswith("@")]
+    org_refs   = [r for r in (role_names or []) if not (isinstance(r, str) and r.startswith("@"))]
+
+    if sys_tokens and source_type and source_id:
+        for token in sys_tokens:
+            field_name = SYSTEM_RECIPIENT_TOKENS.get(token)
+            if not field_name:
+                logger.debug(f"[Notif] Unknown system recipient token: {token!r}")
+                continue
+            user = _resolve_token_user(db, source_type, source_id, field_name)
+            if user and user.id not in seen:
+                seen.add(user.id)
+                users.append(user)
+                logger.debug(
+                    f"[Notif] Token {token!r} → user={user.id} ({user.email})"
+                )
+    elif sys_tokens:
+        logger.debug(
+            f"[Notif] System tokens {sys_tokens} present but source_type/source_id "
+            f"not provided — tokens skipped"
+        )
+
+    # ── 2. Resolve org roles (existing logic) ─────────────────────────────────
+    if not org_refs or not organization_id:
+        return users   # may already contain system-token users
+
+    # Auto-detect whether the caller passed UUIDs or name strings.
+    uuid_ids  = [UUID(r) for r in org_refs if _is_uuid_str(r)]
+    name_strs = [r for r in org_refs if not _is_uuid_str(r)]
+
+    from sqlalchemy import or_ as _or_
+    role_filter = []
+    if uuid_ids:
+        role_filter.append(OrgRole.id.in_(uuid_ids))
+    if name_strs:
+        role_filter.append(OrgRole.name.in_(name_strs))
+    if not role_filter:
+        return users   # return any system-token users already collected
 
     # Build the full ancestor set once (includes source dept itself)
     ancestor_ids: set = set()
@@ -385,22 +700,25 @@ def _resolve_recipients_by_roles(
         db.query(OrgUserRole)
         .join(OrgRole, OrgUserRole.org_role_id == OrgRole.id)
         .join(User, OrgUserRole.user_id == User.id)
+        .options(joinedload(OrgUserRole.user))   # eager-load User — prevents N+1 queries
         .filter(
             OrgRole.organization_id == organization_id,
-            OrgRole.name.in_(role_names),
+            _or_(*role_filter),
             OrgRole.is_active.is_(True),
             OrgUserRole.is_active.is_(True),
         )
         .all()
     )
 
-    seen: set = set()
-    users: List[User] = []
+    logger.debug(
+        f"[Notif resolve_recipients] org_refs={org_refs} org={organization_id} "
+        f"dept={department_id} ancestor_ids={ancestor_ids} rows_count={len(rows)}"
+    )
+
     for row in rows:
         if department_id:
             row_dept = row.department_id
-            # Exclude users assigned to a dept that is NOT in the ancestor chain
-            # (i.e. a sibling division or unrelated branch).
+            # Exclude users assigned to a dept outside the ancestor chain.
             # Org-wide users (dept_id IS NULL) are always included.
             if row_dept is not None and row_dept not in ancestor_ids:
                 continue
@@ -556,130 +874,472 @@ class EmailDispatcher(ChannelDispatcher):
         return _wrap_email_html(body, subject=subject, org_name=org_name)
 
     def send(self, db: Session, log: "NotificationLog", subject: str, body: str) -> None:
-        to_email = log.recipient_email
-        if not to_email:
-            log.status = "skipped"
-            log.error_message = "No recipient email address"
-            return
+        """
+        Dispatch email for a batch NotificationLog.
+
+        Loads all 'pending' NotificationLogRecipient rows attached to this log,
+        resolves attachments and per-template CC/BCC addresses, then chooses:
+
+        • BCC mode  — all rendered bodies are identical → one email, all addresses in Bcc.
+        • Individual mode — bodies differ (personalised {{user.*}} vars) → one email per
+          recipient using their own rendered_subject / rendered_body.
+
+        The parent log.status is updated to reflect the overall outcome.
+        """
+        now = datetime.now(timezone.utc)
+
+        # ── Load pending recipients ───────────────────────────────────────────
+        pending = [
+            r for r in (log.recipients or [])
+            if r.delivery_status == "pending" and r.email
+        ]
+
+        # ── Resolve per-template CC / BCC addresses ───────────────────────────
+        # Done BEFORE the empty-pending check so that CC/BCC addresses can act
+        # as fallback primary recipients when no role-based recipients exist
+        # (e.g. equipment_retired fired without a routing rule).
+        cc_addrs:  List[str] = []
+        bcc_addrs: List[str] = []
+        tmpl_subject: str = subject
+        tmpl_body:    str = body
         try:
-            attachment_entries = log.attachment_urls or []
-            if attachment_entries:
-                # ── Build attachment list ──────────────────────────────────────
-                # Strategy:
-                #   1. If entry has "url" → fetch bytes from URL (legacy path).
-                #   2. If no URL but type=pdf/excel → generate in-memory from
-                #      log.source_type + log.source_id using the PDF/Excel service.
-                attachments: List[Dict] = []
+            tmpl_row = (
+                db.query(NotificationTemplate)
+                .filter(
+                    NotificationTemplate.event_type   == log.event_type,
+                    NotificationTemplate.channel      == "email",
+                    NotificationTemplate.is_active.is_(True),
+                    NotificationTemplate.org_channel_disabled.is_(False),
+                    or_(
+                        NotificationTemplate.organization_id == log.organization_id,
+                        NotificationTemplate.organization_id.is_(None),
+                    ),
+                )
+                .order_by(NotificationTemplate.organization_id.desc().nulls_last())
+                .first()
+            )
+            if tmpl_row:
+                cc_addrs  = list(tmpl_row.cc_emails  or [])
+                bcc_addrs = list(tmpl_row.bcc_emails or [])
+                # Resolve role-based CC
+                if tmpl_row.cc_roles:
+                    for role_user in _resolve_recipients_by_roles(
+                        db, list(tmpl_row.cc_roles), log.organization_id
+                    ):
+                        if role_user.email and role_user.email not in cc_addrs:
+                            cc_addrs.append(role_user.email)
+                # Resolve role-based BCC
+                if tmpl_row.bcc_roles:
+                    for role_user in _resolve_recipients_by_roles(
+                        db, list(tmpl_row.bcc_roles), log.organization_id
+                    ):
+                        if role_user.email and role_user.email not in bcc_addrs:
+                            bcc_addrs.append(role_user.email)
+        except Exception as _cc_exc:
+            logger.debug(f"[Notif] CC/BCC lookup failed for log={log.id}: {_cc_exc}")
+
+        # ── No role-based recipients ──────────────────────────────────────────
+        if not pending:
+            # If ALL recipients are already sent/skipped this is a re-pickup of a
+            # batch log whose status was never updated to 'sent' (scheduler bug).
+            # Mark it done and return — do NOT re-send to CC/BCC.
+            all_rcpt_statuses = {r.delivery_status for r in (log.recipients or [])}
+            if all_rcpt_statuses and all_rcpt_statuses <= {"sent", "skipped"}:
+                log.status  = "sent"
+                log.sent_at = now
+                logger.info(
+                    f"[Notif] Batch log {log.id} had all recipients already sent — "
+                    f"marking log as sent (was stuck at pending)"
+                )
+                return
+
+            # When the event has no routing rule and the template has no
+            # recipient_roles, pending will be empty.  If the admin set CC/BCC
+            # email addresses on the template, treat them as primary recipients
+            # so the notification still fires (e.g. equipment_retired).
+            fallback = list(dict.fromkeys(cc_addrs + bcc_addrs))  # deduplicated, order preserved
+            if fallback:
+                logger.info(
+                    f"[Notif] No role recipients for log={log.id} event={log.event_type!r} — "
+                    f"falling back to {len(fallback)} CC/BCC address(es) as primary To"
+                )
                 svc = EmailService()
-                for entry in attachment_entries:
-                    url      = entry.get("url", "")
-                    var_key  = entry.get("var_key", "")
-                    att_type = (entry.get("type") or "").lower().strip()
-
-                    content: Optional[bytes] = None
-                    filename: str = ""
-                    mime_type: str = "application/octet-stream"
-
-                    if url:
-                        # Path 1: fetch from URL
-                        content = svc._fetch_attachment(url)
-                        if not content:
-                            logger.warning(
-                                f"[Notif] Could not fetch attachment {url!r} for log {log.id}"
-                            )
-                            continue
-                        if att_type and att_type in self._MIME_MAP:
-                            mime_type = self._MIME_MAP[att_type]
-                            filename, _ = svc._guess_filename(url, var_key)
-                        else:
-                            filename, mime_type = svc._guess_filename(url, var_key)
-
-                    elif att_type in ("pdf", "excel", "xlsx"):
-                        # Path 2: generate in-memory from the triggering record.
-                        # Use source_type/source_id from the entry if present (set by
-                        # _dispatch_to_user), otherwise fall back to the log's own fields.
-                        _src_type = entry.get("source_type") or log.source_type
-                        _src_id   = entry.get("source_id")
-                        _src_uuid = UUID(_src_id) if _src_id else log.source_id
-                        content = _generate_attachment_bytes(
-                            db, _src_type, _src_uuid, att_type
+                attachments: List[Dict] = self._build_attachments(db, log)
+                try:
+                    if attachments:
+                        svc.send_multi_attachment_email_starttls_bcc(
+                            fallback, tmpl_subject, tmpl_body, attachments,
                         )
-                        if not content:
-                            logger.warning(
-                                f"[Notif] Could not generate {att_type} attachment for "
-                                f"source={log.source_type}/{log.source_id} log={log.id}"
-                            )
-                            continue
-                        mime_type = self._MIME_MAP.get(att_type, "application/octet-stream")
-                        ext = "pdf" if att_type == "pdf" else "xlsx"
-                        src_label = (log.source_type or "report").replace("_", "-")
-                        src_short = str(log.source_id)[:8] if log.source_id else "report"
-                        filename  = f"{src_label}-{src_short}.{ext}"
-
                     else:
-                        logger.debug(
-                            f"[Notif] Attachment entry has no url and no generatable type, "
-                            f"skipping: {entry}"
+                        svc.send_email_starttls_bcc(
+                            fallback, tmpl_subject, tmpl_body,
                         )
-                        continue
-
-                    attachments.append({
-                        "content":   content,
-                        "filename":  filename,
-                        "mime_type": mime_type,
-                    })
-
-                if attachments:
-                    svc.send_multi_attachment_email_starttls(to_email, subject, body, attachments)
-                else:
-                    logger.warning(
-                        f"[Notif] All attachments failed for log {log.id}; sending body only"
-                    )
-                    svc.send_email_starttls(to_email, subject, body)
+                    log.status  = "sent"
+                    log.sent_at = now
+                except Exception as exc:
+                    log.status        = "failed"
+                    log.error_message = str(exc)[:500]
+                    log.retry_count   = (log.retry_count or 0) + 1
+                    logger.warning(f"[Notif] CC/BCC fallback send failed: {exc}")
             else:
-                EmailService().send_email_starttls(to_email, subject, body)
+                log.status        = "skipped"
+                log.error_message = "No pending email recipients and no CC/BCC addresses"
+                log.sent_at       = now
+            return
 
-            log.status = "sent"
-            log.sent_at = datetime.now(timezone.utc)
-            log.error_message = None
+        # ── Resolve shared attachments (log-level, same for all recipients) ──
+        attachments: List[Dict] = self._build_attachments(db, log)
+
+        # ── Decide BCC vs individual ─────────────────────────────────────────
+        # If every pending recipient has the same rendered body and subject
+        # → send one BCC email.  If any differ → send individually.
+        rendered_bodies   = [r.rendered_body   or body    for r in pending]
+        rendered_subjects = [r.rendered_subject or subject for r in pending]
+        use_bcc = (len(set(rendered_bodies)) == 1 and len(set(rendered_subjects)) == 1)
+
+        svc = EmailService()
+        try:
+            if use_bcc:
+                emails    = [r.email for r in pending]
+                send_subj = rendered_subjects[0]
+                send_body = rendered_bodies[0]
+                logger.info(
+                    f"[Notif] BCC email → {len(emails)} recipient(s) "
+                    f"cc={len(cc_addrs)} bcc={len(bcc_addrs)} "
+                    f"log={log.id} event={log.event_type!r}"
+                )
+                if attachments:
+                    svc.send_multi_attachment_email_starttls_bcc(
+                        emails, send_subj, send_body, attachments,
+                        cc=cc_addrs or None, extra_bcc=bcc_addrs or None,
+                    )
+                else:
+                    svc.send_email_starttls_bcc(
+                        emails, send_subj, send_body,
+                        cc=cc_addrs or None, extra_bcc=bcc_addrs or None,
+                    )
+
+                for r in pending:
+                    r.delivery_status = "sent"
+                    r.sent_at         = now
+
+            else:
+                logger.info(
+                    f"[Notif] Individual email → {len(pending)} recipient(s) "
+                    f"cc={len(cc_addrs)} bcc={len(bcc_addrs)} "
+                    f"log={log.id} event={log.event_type!r}"
+                )
+                for r in pending:
+                    r_subj = r.rendered_subject or subject
+                    r_body = r.rendered_body    or body
+                    try:
+                        if attachments:
+                            svc.send_multi_attachment_email_starttls(
+                                r.email, r_subj, r_body, attachments,
+                                cc=cc_addrs or None, bcc=bcc_addrs or None,
+                            )
+                        else:
+                            svc.send_email_starttls(
+                                r.email, r_subj, r_body,
+                                cc=cc_addrs or None, bcc=bcc_addrs or None,
+                            )
+                        r.delivery_status = "sent"
+                        r.sent_at         = now
+                    except Exception as exc:
+                        r.delivery_status = "failed"
+                        r.error_message   = str(exc)[:500]
+                        logger.warning(f"[Notif] Individual email to {r.email} failed: {exc}")
+
+            # ── Update overall log status ─────────────────────────────────────
+            self._update_log_status_from_recipients(log, now)
+
         except Exception as exc:
-            log.status = "failed"
+            log.status      = "failed"
             log.error_message = str(exc)[:500]
-            log.retry_count += 1
-            if log.retry_count < log.max_retries:
-                log.next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=RETRY_DELAY_MINUTES)
-            logger.warning(f"[Notif] Email to {to_email} failed: {exc}")
+            log.retry_count  = (log.retry_count or 0) + 1
+            if log.retry_count < (log.max_retries or 3):
+                log.next_retry_at = now + timedelta(minutes=RETRY_DELAY_MINUTES)
+            for r in pending:
+                if r.delivery_status == "pending":
+                    r.delivery_status = "failed"
+                    r.error_message   = str(exc)[:500]
+            logger.warning(f"[Notif] Email batch failed log={log.id}: {exc}")
+
+    # ── Shared helpers ────────────────────────────────────────────────────────
+
+    def _build_attachments(self, db: Session, log: "NotificationLog") -> List[Dict]:
+        """Resolve log.attachment_urls → list of {content, filename, mime_type} dicts."""
+        attachment_entries = log.attachment_urls or []
+        if not attachment_entries:
+            return []
+
+        result: List[Dict] = []
+        svc = EmailService()
+        for entry in attachment_entries:
+            url      = entry.get("url", "")
+            var_key  = entry.get("var_key", "")
+            att_type = (entry.get("type") or "").lower().strip()
+
+            content: Optional[bytes] = None
+            filename: str = ""
+            mime_type: str = "application/octet-stream"
+
+            if url:
+                content = svc._fetch_attachment(url)
+                if not content:
+                    logger.warning(f"[Notif] Could not fetch attachment {url!r} for log {log.id}")
+                    continue
+                if att_type and att_type in self._MIME_MAP:
+                    mime_type = self._MIME_MAP[att_type]
+                    filename, _ = svc._guess_filename(url, var_key)
+                else:
+                    filename, mime_type = svc._guess_filename(url, var_key)
+            elif att_type in ("pdf", "excel", "xlsx"):
+                _src_type = entry.get("source_type") or log.source_type
+                _src_id   = entry.get("source_id")
+                _src_uuid = UUID(_src_id) if _src_id else log.source_id
+                content = _generate_attachment_bytes(db, _src_type, _src_uuid, att_type)
+                if not content:
+                    logger.warning(
+                        f"[Notif] Could not generate {att_type} for "
+                        f"source={log.source_type}/{log.source_id} log={log.id}"
+                    )
+                    continue
+                mime_type = self._MIME_MAP.get(att_type, "application/octet-stream")
+                ext       = "pdf" if att_type == "pdf" else "xlsx"
+                src_label = (log.source_type or "report").replace("_", "-")
+                src_short = str(log.source_id)[:8] if log.source_id else "report"
+                filename  = f"{src_label}-{src_short}.{ext}"
+            else:
+                logger.debug(f"[Notif] Skipping attachment with no url/type: {entry}")
+                continue
+
+            result.append({"content": content, "filename": filename, "mime_type": mime_type})
+
+        return result
+
+    @staticmethod
+    def _update_log_status_from_recipients(log: "NotificationLog", now: datetime) -> None:
+        """Set log.status based on the delivery_status of all its recipients."""
+        statuses = {r.delivery_status for r in (log.recipients or [])}
+        if not statuses or statuses <= {"skipped"}:
+            log.status = "skipped"
+        elif statuses <= {"sent", "skipped"}:
+            log.status = "sent"
+        elif "sent" in statuses:
+            log.status = "sent"   # partial success — log as sent overall
+        elif "failed" in statuses:
+            log.status = "failed"
+        else:
+            log.status = "skipped"
+        log.sent_at = now
 
 
 class SmsDispatcher(ChannelDispatcher):
     """
-    SMS channel — plain-text, 160-char guideline.
-    Swap the stub body with your real SMS gateway call (Twilio, AWS SNS, Infobip…).
+    SMS channel — supports three gateways selected by SMS_PROVIDER env var:
 
-    To add WhatsApp later:
+      SMS_PROVIDER=twilio   → Twilio REST API (no SDK required — uses requests)
+      SMS_PROVIDER=msg91    → MSG91 Transactional route (DLT-compliant, India)
+      SMS_PROVIDER=http     → Generic HTTP POST gateway (Exotel, TextLocal, etc.)
+      SMS_PROVIDER=none     → Disabled / not configured (default — logs + skips)
+
+    Phone number normalisation
+    --------------------------
+    • 10-digit bare number  → +91XXXXXXXXXX  (Indian mobile)
+    • Already starts with + → passed as-is  (E.164)
+    • 91XXXXXXXXXX (12 dig) → +91XXXXXXXXXX
+
+    Indian DLT compliance (MSG91)
+    ------------------------------
+    Indian regulations require every transactional SMS body to match a
+    government-approved template registered under DLT.  Set MSG91_TEMPLATE_ID
+    to your approved template ID.  If unset, the field is omitted (may cause
+    delivery failure on Indian numbers).
+
+    To add a new channel (e.g. WhatsApp):
         class WhatsAppDispatcher(ChannelDispatcher):
             channel = "whatsapp"
-            def send(self, db, log, subject, body):
-                <call WhatsApp Business API>
+            def send(self, db, log, subject, body): ...
         ChannelDispatcherRegistry.register(WhatsAppDispatcher())
     """
 
     channel = "sms"
 
+    # ── Config — read once at class load time ────────────────────────────────
+    _provider   = _os.getenv("SMS_PROVIDER",          "none").lower().strip()
+    _from       = _os.getenv("SMS_FROM_NUMBER",       "")
+    # Twilio (via plain HTTP — no twilio SDK needed)
+    _twilio_sid = _os.getenv("TWILIO_ACCOUNT_SID",   "")
+    _twilio_tok = _os.getenv("TWILIO_AUTH_TOKEN",     "")
+    # MSG91 (India — transactional / DLT route)
+    _msg91_key  = _os.getenv("MSG91_AUTH_KEY",        "")
+    _msg91_tmpl = _os.getenv("MSG91_TEMPLATE_ID",     "")   # DLT template ID (mandatory in IN)
+    _msg91_sndr = _os.getenv("MSG91_SENDER_ID",       "SEACMS")  # 6-char DLT sender ID
+    # Generic HTTP gateway
+    _http_url   = _os.getenv("SMS_HTTP_URL",          "")
+    _http_hdr   = _os.getenv("SMS_HTTP_AUTH_HEADER",  "Authorization")
+    _http_val   = _os.getenv("SMS_HTTP_AUTH_VALUE",   "")
+
+    # ── Public entry point ───────────────────────────────────────────────────
+
     def send(self, db: Session, log: "NotificationLog", subject: str, body: str) -> None:
-        phone = log.recipient_phone
-        if not phone:
-            log.status = "skipped"
-            log.error_message = "No phone number"
+        """
+        Iterate all 'pending' NotificationLogRecipient rows for this log and
+        dispatch an SMS to each phone number.
+        """
+        now = datetime.now(timezone.utc)
+
+        pending = [
+            r for r in (log.recipients or [])
+            if r.delivery_status == "pending" and r.phone
+        ]
+
+        if not pending:
+            log.status      = "skipped"
+            log.error_message = "No pending SMS recipients"
+            log.sent_at     = now
             return
-        # ── TODO: Replace stub with real SMS gateway ──────────────────────────
-        # Example (Twilio):
-        #   from twilio.rest import Client
-        #   Client(SID, TOKEN).messages.create(to=phone, from_=FROM_NUMBER, body=body)
-        # ─────────────────────────────────────────────────────────────────────
-        logger.info(f"[Notif] SMS stub — would send to {phone}: {body[:80]}…")
-        log.status = "skipped"   # ← change to "sent"/"failed" when gateway is wired
-        log.sent_at = datetime.now(timezone.utc)
+
+        if self._provider in ("none", ""):
+            log.status      = "skipped"
+            log.error_message = "SMS_PROVIDER not configured (set SMS_PROVIDER in .env)"
+            for r in pending:
+                r.delivery_status = "skipped"
+                r.error_message   = "SMS_PROVIDER not configured"
+            return
+
+        for r in pending:
+            phone    = self._normalise_phone(r.phone)
+            sms_body = self._truncate(r.rendered_body or body)
+            try:
+                if self._provider == "twilio":
+                    self._send_twilio(phone, sms_body)
+                elif self._provider == "msg91":
+                    self._send_msg91(phone, sms_body)
+                elif self._provider == "http":
+                    self._send_http(phone, sms_body)
+                else:
+                    r.delivery_status = "skipped"
+                    r.error_message   = f"Unknown SMS_PROVIDER={self._provider!r}"
+                    logger.warning(f"[Notif] Unknown SMS_PROVIDER={self._provider!r}")
+                    continue
+                r.delivery_status = "sent"
+                r.sent_at         = now
+                logger.info(f"[Notif] SMS sent to {phone} via {self._provider}")
+            except Exception as exc:
+                r.delivery_status = "failed"
+                r.error_message   = str(exc)[:500]
+                log.retry_count   = (log.retry_count or 0) + 1
+                if log.retry_count < (log.max_retries or 3):
+                    log.next_retry_at = now + timedelta(minutes=RETRY_DELAY_MINUTES)
+                logger.warning(f"[Notif] SMS to {phone} failed ({self._provider}): {exc}")
+
+        EmailDispatcher._update_log_status_from_recipients(log, now)
+
+    # ── Gateway implementations ──────────────────────────────────────────────
+    # Each method raises on failure; the caller (send) handles status updates.
+
+    def _send_twilio(self, phone: str, body: str) -> None:
+        """Twilio REST API — no SDK, pure HTTP POST with Basic auth."""
+        import requests as _req, base64 as _b64
+        if not self._twilio_sid or not self._twilio_tok:
+            raise RuntimeError("TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN missing in .env")
+        auth = _b64.b64encode(
+            f"{self._twilio_sid}:{self._twilio_tok}".encode()
+        ).decode()
+        url  = (
+            f"https://api.twilio.com/2010-04-01/Accounts"
+            f"/{self._twilio_sid}/Messages.json"
+        )
+        resp = _req.post(
+            url,
+            headers={"Authorization": f"Basic {auth}"},
+            data={"From": self._from, "To": phone, "Body": body},
+            timeout=15,
+        )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(f"Twilio HTTP {resp.status_code}: {resp.text[:200]}")
+
+    def _send_msg91(self, phone: str, body: str) -> None:
+        """
+        MSG91 transactional SMS — DLT-compliant (mandatory for Indian numbers).
+        Route 4 = Transactional (OTP / alerts); Route 1 = Promotional (blocked on DND).
+        """
+        import requests as _req
+        if not self._msg91_key:
+            raise RuntimeError("MSG91_AUTH_KEY missing in .env")
+        # MSG91 expects digits only (no leading +)
+        to = phone.lstrip("+")
+        sms_entry: Dict[str, Any] = {"message": body, "to": [to]}
+        if self._msg91_tmpl:
+            sms_entry["DLT_TE_ID"] = self._msg91_tmpl  # mandatory for Indian DLT
+        payload = {
+            "sender":  self._msg91_sndr,
+            "route":   "4",     # Transactional
+            "country": "91",
+            "sms":     [sms_entry],
+        }
+        resp = _req.post(
+            "https://api.msg91.com/api/v5/flow/",
+            headers={"authkey": self._msg91_key, "Content-Type": "application/json"},
+            json=payload,
+            timeout=15,
+        )
+        # MSG91 returns 200 for success; body contains {"type":"success"} or error detail
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+        if not (resp.status_code == 200 and data.get("type") != "error"):
+            raise RuntimeError(f"MSG91 {resp.status_code}: {resp.text[:200]}")
+
+    def _send_http(self, phone: str, body: str) -> None:
+        """
+        Generic HTTP POST gateway.
+        Posts JSON: {"to": "<phone>", "from": "<SMS_FROM_NUMBER>", "body": "<text>"}
+        Configure SMS_HTTP_URL + optional auth header via SMS_HTTP_AUTH_HEADER / VALUE.
+        """
+        import requests as _req
+        if not self._http_url:
+            raise RuntimeError("SMS_HTTP_URL missing in .env")
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if self._http_hdr and self._http_val:
+            headers[self._http_hdr] = self._http_val
+        resp = _req.post(
+            self._http_url,
+            headers=headers,
+            json={"to": phone, "from": self._from, "body": body},
+            timeout=15,
+        )
+        if resp.status_code not in (200, 201, 202):
+            raise RuntimeError(
+                f"HTTP gateway {resp.status_code}: {resp.text[:200]}"
+            )
+
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalise_phone(phone: str) -> str:
+        """
+        Normalise to E.164.
+        • 10-digit bare number  → +91XXXXXXXXXX  (Indian mobile)
+        • 91XXXXXXXXXX (12 dig) → +91XXXXXXXXXX
+        • Already E.164 (+...)  → unchanged
+        """
+        p = phone.strip().replace(" ", "").replace("-", "")
+        if p.startswith("+"):
+            return p
+        if len(p) == 10 and p.isdigit():
+            return "+91" + p
+        if len(p) == 12 and p.startswith("91") and p.isdigit():
+            return "+" + p
+        return p  # pass through; gateway will reject if malformed
+
+    @staticmethod
+    def _truncate(body: str, limit: int = 160) -> str:
+        """Truncate to single-segment SMS length (160 GSM7 chars)."""
+        return (body[:157] + "…") if len(body) > limit else body
 
 
 class InAppDispatcher(ChannelDispatcher):
@@ -744,6 +1404,8 @@ def _create_inapp(
     severity: Optional[str],
     source_id: Optional[UUID],
     source_type: Optional[str],
+    ueic: Optional[str] = None,
+    extra_data: Optional[dict] = None,
 ) -> UserNotification:
     notif = UserNotification(
         user_id=user_id,
@@ -754,6 +1416,8 @@ def _create_inapp(
         severity=severity,
         source_id=source_id,
         source_type=source_type,
+        ueic=ueic or None,
+        extra_data=extra_data or None,
     )
     db.add(notif)
     return notif
@@ -778,8 +1442,12 @@ def _should_digest(db: Session, event_type: str, organization_id: Optional[UUID]
 
 
 def _collapse_digest(db: Session, event_type: str, organization_id: Optional[UUID]) -> None:
-    """Mark pending logs in window as digested and send a single digest email per unique recipient."""
-    window_start = datetime.now(timezone.utc) - timedelta(minutes=DIGEST_WINDOW_MINUTES)
+    """
+    Mark pending logs in window as digested and send one digest email per unique
+    recipient address (collected from NotificationLogRecipient rows).
+    """
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(minutes=DIGEST_WINDOW_MINUTES)
     pending = (
         db.query(NotificationLog)
         .filter(
@@ -791,28 +1459,33 @@ def _collapse_digest(db: Session, event_type: str, organization_id: Optional[UUI
         .all()
     )
 
-    by_recipient: Dict[str, List[NotificationLog]] = {}
+    # Collect unique email addresses across all log recipients
+    by_email: Dict[str, List[NotificationLog]] = {}
     for log in pending:
-        key = log.recipient_email or str(log.recipient_id or "unknown")
-        by_recipient.setdefault(key, []).append(log)
+        for rcpt in (log.recipients or []):
+            if rcpt.email and rcpt.delivery_status == "pending":
+                by_email.setdefault(rcpt.email, []).append(log)
 
-    for email, logs in by_recipient.items():
-        # Send a single digest
-        subjects = [l.subject or "" for l in logs]
+    event_label = event_type.replace("_", " ").title()
+    for email, logs in by_email.items():
         digest_body = (
-            f"<h3>Digest: {len(logs)} {event_type.replace('_', ' ').title()} alerts</h3><ul>"
+            f"<h3>Digest: {len(logs)} {event_label} alert(s)</h3><ul>"
             + "".join(f"<li>{l.body or ''}</li>" for l in logs[:20])
             + ("</ul><p>…and more</p>" if len(logs) > 20 else "</ul>")
         )
-        digest_subject = f"[Digest] {len(logs)} × {event_type.replace('_', ' ').title()}"
+        digest_subject = f"[Digest] {len(logs)} × {event_label}"
         try:
             EmailService().send_email_starttls(email, digest_subject, digest_body)
         except Exception as exc:
             logger.warning(f"[Notif] Digest email to {email} failed: {exc}")
 
-        for log in logs:
-            log.status = "digested"
-            log.sent_at = datetime.now(timezone.utc)
+    for log in pending:
+        log.status  = "digested"
+        log.sent_at = now
+        for rcpt in (log.recipients or []):
+            if rcpt.delivery_status == "pending":
+                rcpt.delivery_status = "sent"
+                rcpt.sent_at         = now
 
     db.commit()
 
@@ -839,11 +1512,18 @@ def _resolve_routing(
     workflow_type: Optional[str] = None,
     equipment_type: Optional[str] = None,
     test_type: Optional[str] = None,
+    activity_type: Optional[str] = None,
     status_from: Optional[str] = None,
     status_to: Optional[str] = None,
+    require_followup: bool = False,
 ) -> Optional["NotificationRoutingRule"]:
     """
     Find the best-matching active routing rule for a fire() call.
+
+    When require_followup=True, only rules whose followup_action has
+    create_request=true are considered — used to find the ticket-creating rule
+    independently of the channel-routing rule (an org may have a notification-only
+    rule that wins channel selection while a separate rule carries the followup).
 
     Resolution order
     ────────────────
@@ -865,12 +1545,14 @@ def _resolve_routing(
         .filter(
             NotificationRoutingRule.event_type == event_type,
             NotificationRoutingRule.is_active.is_(True),
-            # load both global and org-specific rows
+            # load both global (org_id IS NULL) and org-specific rows.
+            # NOTE: SQL IN (NULL, ...) never matches NULL rows — must use OR + IS NULL.
             (
                 NotificationRoutingRule.organization_id.is_(None)
                 if organization_id is None
-                else NotificationRoutingRule.organization_id.in_(
-                    [None, organization_id]
+                else or_(
+                    NotificationRoutingRule.organization_id.is_(None),
+                    NotificationRoutingRule.organization_id == organization_id,
                 )
             ),
         )
@@ -883,6 +1565,10 @@ def _resolve_routing(
     )
 
     for rule in candidates:
+        if require_followup:
+            _fa = rule.followup_action or {}
+            if not _fa.get("create_request"):
+                continue
         if not _scope_matches(rule.applicable_workflow_types,  workflow_type):
             continue
         if not _scope_matches(rule.applicable_equipment_types, equipment_type):
@@ -893,9 +1579,190 @@ def _resolve_routing(
             continue
         if rule.applicable_status_to and rule.applicable_status_to != status_to:
             continue
+        # advanced_conditions.activity_types — empty/absent = all tests for this equipment
+        _adv_types = ((rule.advanced_conditions or {}).get("activity_types") or [])
+        if _adv_types and activity_type not in _adv_types:
+            continue
         return rule   # first match wins (already sorted: org > global, high priority first)
 
     return None   # no rule → permissive default (all channels fire)
+
+
+# ── Follow-up action executor ─────────────────────────────────────────────────
+
+def _execute_followup_action(
+    db: Session,
+    action: dict,
+    source_id: Optional[UUID],
+    source_type: Optional[str],
+    organization_id: Optional[UUID],
+    department_id: Optional[UUID],
+) -> None:
+    """
+    Auto-create a follow-up ticket when eval_alert / eval_critical fires
+    and the matched routing rule has a followup_action config.
+
+    Ticket details come from the routing rule's followup_action JSONB (defined
+    in the notification center), not from the linked Recommendation record.
+
+    action format (from NotificationRoutingRule.followup_action):
+    {
+        "create_request":     true,
+        "next_action":        "maintenance",   # test/maintenance/inspection/repair_cycle
+        "schedule_frequency": "yearly",
+        "schedule_start_date":"2026-01-01",
+        "schedule_end_date":  "2026-12-31",
+        "test_types":         [{"id": 5, "name": "BDV Test"}],
+        "summary":            "Follow-up after CRITICAL alert"
+    }
+    """
+    logger.info(f"[FollowupAction] action={action} source_type={source_type!r} source_id={source_id}")
+
+    if not action.get("create_request"):
+        logger.info("[FollowupAction] Skipping — create_request is not true")
+        return
+
+    next_action_str = (action.get("next_action") or "").lower()
+    if not next_action_str:
+        logger.info("[FollowupAction] Skipping — next_action is empty")
+        return
+
+    # ── Resolve the TestingRequest from the source ────────────────────────────
+    from models import (
+        TestingRequest, TestResult,
+        Recommendation, NextActionType, ScheduleFrequency, RequestCategory,
+    )
+    tr: Optional[TestingRequest] = None
+
+    if source_type == "test_result" and source_id:
+        result_row = db.query(TestResult).filter(TestResult.id == source_id).first()
+        logger.info(f"[FollowupAction] result_row={result_row} testing_request_id={getattr(result_row, 'testing_request_id', None)}")
+        if result_row and result_row.testing_request_id:
+            tr = db.query(TestingRequest).filter(
+                TestingRequest.id == result_row.testing_request_id
+            ).first()
+    elif source_type == "testing_request" and source_id:
+        tr = db.query(TestingRequest).filter(TestingRequest.id == source_id).first()
+
+    if not tr:
+        logger.warning(
+            f"[FollowupAction] Cannot resolve TestingRequest from "
+            f"source_type={source_type!r} source_id={source_id}"
+        )
+        return
+
+    logger.info(f"[FollowupAction] TR={tr.request_number} equipment_id={tr.equipment_id} title={tr.title!r}")
+
+    # ── Guard: skip if open follow-up already exists for this equipment ───────
+    followup_category = next_action_str
+
+    if tr.equipment_id:
+        # Open = any non-terminal status. Generated follow-up tickets start as
+        # 'draft' (then assigned/submitted), so the dedup MUST include draft —
+        # otherwise a second alert fire creates a duplicate ticket because the
+        # first (draft) follow-up isn't matched.
+        _open_statuses = [
+            "draft", "submitted", "assigned", "accepted", "in_progress",
+            "test_submitted", "under_approval", "under_review",
+        ]
+        existing = (
+            db.query(TestingRequest)
+            .filter(
+                TestingRequest.equipment_id     == tr.equipment_id,
+                TestingRequest.organization_id  == (organization_id or tr.organization_id),
+                TestingRequest.request_category == followup_category,
+                TestingRequest.status.in_(_open_statuses),
+                TestingRequest.is_schedule_template.is_(False),
+                # Don't count the triggering test request itself — otherwise an
+                # alert whose follow-up category matches the in-progress test
+                # (e.g. next_action="test") is blocked by the very test that
+                # fired it. Only pre-existing OTHER open follow-ups should skip.
+                TestingRequest.id != tr.id,
+            )
+            .first()
+        )
+        if existing:
+            logger.info(
+                f"[FollowupAction] Skipping — open {followup_category} request "
+                f"{existing.request_number} already exists for equipment {tr.equipment_id}"
+            )
+            return
+
+    # ── Build Recommendation from notification center followup_action config ──
+    try:
+        _next_action = NextActionType(next_action_str)
+    except ValueError:
+        logger.warning(f"[FollowupAction] Invalid next_action={next_action_str!r}")
+        return
+
+    _freq_str = action.get("schedule_frequency") or "yearly"
+    try:
+        _freq = ScheduleFrequency(_freq_str)
+    except ValueError:
+        _freq = ScheduleFrequency.yearly
+
+    _test_types = action.get("test_types") or []
+    logger.info(f"[FollowupAction] next_action={next_action_str!r} freq={_freq_str!r} test_types={_test_types} tr.test_type_id={tr.test_type_id}")
+
+    mock_rec = Recommendation(
+        testing_request_id  = tr.id,
+        organization_id     = organization_id or tr.organization_id,
+        next_action         = _next_action,
+        schedule_frequency  = _freq,
+        test_types          = _test_types,
+        summary             = action.get("summary") or f"Auto follow-up: {next_action_str}",
+        recommendation_type = "fail",
+        submitted_by        = tr.created_by,
+        created_by          = tr.created_by,
+        approval_status     = "approved",
+    )
+
+    # ── Dispatch via WorkflowDispatchService ──────────────────────────────────
+    from services.workflow_dispatch_service import WorkflowDispatchService
+    from models import RequestCategory as _RC
+
+    _rc_map = {
+        "test":        _RC.test,
+        "maintenance": _RC.maintenance,
+        "inspection":  _RC.inspection,
+    }
+    _category = _rc_map.get(next_action_str)
+    logger.info(f"[FollowupAction] _category={_category}")
+
+    svc = WorkflowDispatchService(db)
+
+    try:
+        if _category:
+            # force_immediate_ticket=True → _create_schedule creates the first
+            # ticket right away (single creation point). Do NOT also create the
+            # ticket here, or the same schedule would yield two tickets.
+            schedule_ids = svc._create_schedules_for_action(
+                tr, mock_rec,
+                approver_id=tr.created_by,
+                category=_category,
+                force_immediate_ticket=True,
+            )
+            db.commit()
+            logger.info(
+                f"[FollowupAction] Created {len(schedule_ids)} {next_action_str} "
+                f"schedule(s) for TR={tr.request_number}: {schedule_ids}"
+            )
+        elif next_action_str == "repair_cycle":
+            wf_id = svc._start_repair_workflow(tr, approver_id=tr.created_by)
+            db.commit()
+            logger.info(
+                f"[FollowupAction] Started repair workflow {wf_id} "
+                f"for TR={tr.request_number}"
+            )
+        else:
+            logger.warning(
+                f"[FollowupAction] Unhandled next_action={next_action_str!r} "
+                f"for TR={tr.request_number}"
+            )
+    except Exception as _exc:
+        import traceback as _tb
+        db.rollback()
+        logger.warning(f"[FollowupAction] Dispatch failed: {_exc}\n{_tb.format_exc()}")
 
 
 # ── Core dispatch ─────────────────────────────────────────────────────────────
@@ -938,6 +1805,7 @@ class NotificationService:
         workflow_type: Optional[str] = None,    # "direct_test"|"failure_register"|"taqc"|"multisession"|"schedule"
         equipment_type: Optional[str] = None,   # e.g. "Power Transformer", "CT"
         test_type: Optional[str] = None,        # "test"|"inspection"|"maintenance"|"life_cycle"
+        activity_type: Optional[str] = None,    # specific test name, e.g. "Short Circuit Test HV-IV"
         status_from: Optional[str] = None,      # e.g. "submitted"
         status_to: Optional[str] = None,        # e.g. "under_review"
     ) -> None:
@@ -965,7 +1833,7 @@ class NotificationService:
                 logger.debug(f"[Notif] No active templates for event_type={event_type!r}")
                 return
 
-            resolved_ctx = VariableResolver.build_context(context)
+            resolved_ctx = VariableResolver.build_context(context, db=self.db)
 
             # ── Auto-inject org context from DB ──────────────────────────────
             _org_name = "SEACMS"
@@ -1001,6 +1869,7 @@ class NotificationService:
                 workflow_type=workflow_type,
                 equipment_type=equipment_type,
                 test_type=test_type,
+                activity_type=activity_type,
                 status_from=status_from,
                 status_to=status_to,
             )
@@ -1013,12 +1882,13 @@ class NotificationService:
                 if routing and routing.recipient_roles_override
                 else None
             )
-            if routing:
-                logger.debug(
-                    f"[Notif] Routing rule {routing.id} matched for "
-                    f"event={event_type!r} workflow={workflow_type!r} "
-                    f"channels={allowed_channels}"
-                )
+            logger.info(
+                f"[Notif:fire] event={event_type!r} org={organization_id} "
+                f"workflow={workflow_type!r} source={source_type}/{source_id} "
+                f"→ rule={'NONE (permissive)' if not routing else routing.id} "
+                f"org_rule={routing.organization_id if routing else 'N/A'} "
+                f"channels={allowed_channels} override={roles_override}"
+            )
 
             for tmpl in templates:
                 # ── Channel filter from routing rule ─────────────────────────
@@ -1032,12 +1902,21 @@ class NotificationService:
                 # ── Recipient roles: routing override wins if set ─────────────
                 effective_roles = roles_override or list(tmpl.recipient_roles or [])
 
-                # ── Role-based recipients (dept-scoped) ──────────────────────
+                # ── Recipient resolution ─────────────────────────────────────
+                # Handles both @system-tokens (resolved from source record)
+                # and regular OrgRole UUIDs / name strings.
                 recipients = _resolve_recipients_by_roles(
                     self.db,
                     effective_roles,
                     organization_id,
                     department_id=department_id,
+                    source_type=source_type,
+                    source_id=source_id,
+                )
+                logger.debug(
+                    f"[Notif] fire event={event_type!r} "
+                    f"roles={effective_roles} override={roles_override} dept={department_id} "
+                    f"→ {len(recipients)} recipient(s)"
                 )
 
                 # ── Caller-supplied extra User objects (e.g. test-fire) ──────
@@ -1050,14 +1929,58 @@ class NotificationService:
 
                 dispatched_emails: set = {u.email for u in recipients if u.email}
 
+                # ── Create ONE batch NotificationLog for this template+channel ─
+                # Base context render (no user-specific vars yet) used as the
+                # "preview" body stored on the log row.
+                _base_subj = _render(tmpl.subject_template or "", resolved_ctx)
+                _base_body = _render(tmpl.body_template,            resolved_ctx)
+
+                # Resolve shared attachment URLs at log level (not per-user)
+                _resolved_att_urls: List[Dict] = []
+                if tmpl.channel == "email" and tmpl.attachment_vars and resolved_ctx:
+                    for av in (tmpl.attachment_vars or []):
+                        if isinstance(av, dict):
+                            var_key  = av.get("var_key", "")
+                            att_type = (av.get("type") or "").lower()
+                        else:
+                            var_key  = str(av)
+                            att_type = ""
+                        url = resolved_ctx.get(var_key, "")
+                        if url:
+                            entry: Dict[str, str] = {"url": url, "var_key": var_key}
+                            if att_type:
+                                entry["type"] = att_type
+                            _resolved_att_urls.append(entry)
+                        elif att_type in ("pdf", "excel", "xlsx") and source_type and source_id:
+                            _resolved_att_urls.append({
+                                "type":        att_type,
+                                "var_key":     var_key,
+                                "source_type": str(source_type),
+                                "source_id":   str(source_id),
+                            })
+
+                batch_log = NotificationLog(
+                    organization_id=organization_id,
+                    event_type=event_type,
+                    channel=tmpl.channel,
+                    subject=_base_subj,
+                    body=_base_body,
+                    status="pending",
+                    source_id=source_id,
+                    source_type=source_type,
+                    attachment_urls=_resolved_att_urls,
+                )
+                self.db.add(batch_log)
+                self.db.flush()   # get batch_log.id
+
+                # ── Create NotificationLogRecipient per user ──────────────────
                 for user in recipients:
-                    # ── Per-recipient context: personalise {{user.*}} vars ────
+                    # Per-user context
                     user_ctx = dict(resolved_ctx)
                     _fname = (user.firstname or "").strip()
                     _lname = (user.lastname or "").strip()
                     user_ctx["user.name"]  = f"{_fname} {_lname}".strip() or user.email or ""
                     user_ctx["user.email"] = user.email or ""
-                    # Inject dept context from the user's active role assignment
                     try:
                         from models import OrgDepartment
                         _uur = (
@@ -1079,43 +2002,98 @@ class NotificationService:
                     except Exception:
                         pass
 
-                    subject = _render(tmpl.subject_template or "", user_ctx)
-                    body    = _render(tmpl.body_template,            user_ctx)
+                    r_subj = _render(tmpl.subject_template or "", user_ctx)
+                    r_body = _render(tmpl.body_template,            user_ctx)
 
                     self._dispatch_to_user(
-                        tmpl=tmpl, user=user, subject=subject, body=body,
+                        batch_log=batch_log,
+                        tmpl=tmpl, user=user,
+                        subject=r_subj, body=r_body,
                         event_type=event_type, organization_id=organization_id,
                         source_id=source_id, source_type=source_type, severity=severity,
                         org_name=_org_name,
                         resolved_ctx=user_ctx,
                     )
 
-                # ── extra_recipient_emails (individual addresses on template) ─
+                # If inapp channel: mark batch log sent right away
+                if tmpl.channel == "inapp":
+                    batch_log.status  = "sent"
+                    batch_log.sent_at = datetime.now(timezone.utc)
+
+                # ── extra_recipient_emails → NotificationLogRecipient rows ────
                 if tmpl.channel == "email":
                     for addr in (tmpl.extra_recipient_emails or []):
                         if addr and addr not in dispatched_emails:
                             dispatched_emails.add(addr)
-                            log = NotificationLog(
-                                organization_id=organization_id,
-                                event_type=event_type,
-                                channel="email",
-                                recipient_email=addr,
-                                subject=subject,
-                                body=body,
-                                status="pending",
-                                source_id=source_id,
-                                source_type=source_type,
+                            # Render without user vars (no User object)
+                            e_subj = _render(tmpl.subject_template or "", resolved_ctx)
+                            e_body = _render(tmpl.body_template,            resolved_ctx)
+                            dispatcher = ChannelDispatcherRegistry.get("email")
+                            if dispatcher:
+                                e_body = dispatcher.prepare_body(
+                                    e_body, subject=e_subj, org_name=_org_name
+                                )
+                            extra_rcpt = NotificationLogRecipient(
+                                log_id=batch_log.id,
+                                user_id=None,
+                                email=addr,
+                                rendered_subject=e_subj,
+                                rendered_body=e_body,
+                                delivery_status="pending",
                             )
-                            self.db.add(log)
-                            try:
-                                self.db.flush()
-                            except Exception:
-                                pass
+                            self.db.add(extra_rcpt)
 
                 if not recipients and not (tmpl.extra_recipient_emails):
                     logger.debug(
                         f"[Notif] event={event_type!r} channel={tmpl.channel!r}: "
                         f"no recipients for roles {effective_roles}"
+                    )
+
+                try:
+                    self.db.commit()
+                except Exception as exc:
+                    logger.error(f"[Notif] DB commit failed after enqueue: {exc}")
+                    self.db.rollback()
+
+            # ── Follow-up action (eval_alert / eval_critical only) ───────────
+            # If the matched routing rule has a followup_action config, create
+            # the downstream ticket using WorkflowDispatchService — same logic
+            # as the recommendation wizard approval flow.
+            if event_type in ("eval_alert", "eval_critical"):
+                # The channel-routing rule may be a notification-only rule (no
+                # followup_action). Resolve the ticket-creating rule independently
+                # so a separate matching rule with a followup_action still fires.
+                followup_rule = routing if (
+                    routing and (routing.followup_action or {}).get("create_request")
+                ) else _resolve_routing(
+                    self.db, event_type, organization_id,
+                    workflow_type=workflow_type,
+                    equipment_type=equipment_type,
+                    test_type=test_type,
+                    activity_type=activity_type,
+                    status_from=status_from,
+                    status_to=status_to,
+                    require_followup=True,
+                )
+                if followup_rule and followup_rule.followup_action:
+                    try:
+                        _execute_followup_action(
+                            db=self.db,
+                            action=followup_rule.followup_action,
+                            source_id=source_id,
+                            source_type=source_type,
+                            organization_id=organization_id,
+                            department_id=department_id,
+                        )
+                    except Exception as _fa_exc:
+                        logger.warning(
+                            f"[Notif] followup_action failed for event={event_type!r}: {_fa_exc}"
+                        )
+                else:
+                    logger.info(
+                        f"[Notif] {event_type}: no routing rule with a followup_action "
+                        f"matched (org={organization_id}, equip_type={equipment_type!r}, "
+                        f"workflow={workflow_type!r}) — notification sent, no ticket created"
                     )
 
         except Exception as exc:
@@ -1124,9 +2102,10 @@ class NotificationService:
 
     def retry_failed(self) -> int:
         """
-        Retry all NotificationLog rows in status='failed' with retry_count < max_retries
-        whose next_retry_at <= now.  Called by APScheduler every 5 min.
-        Returns number of rows retried.
+        Retry all NotificationLog batch rows in status='failed' with
+        retry_count < max_retries whose next_retry_at <= now.
+        Only recipients still in 'failed' status are re-sent.
+        Called by APScheduler every 5 min.  Returns number of logs retried.
         """
         now = datetime.now(timezone.utc)
         due = (
@@ -1147,11 +2126,12 @@ class NotificationService:
             dispatcher = ChannelDispatcherRegistry.get(log.channel)
             if not dispatcher:
                 continue
-            # email needs recipient_email; sms needs recipient_phone
-            if log.channel == "email" and not log.recipient_email:
-                continue
-            if log.channel == "sms" and not log.recipient_phone:
-                continue
+            # Reset failed recipients to pending so the dispatcher retries them
+            for r in (log.recipients or []):
+                if r.delivery_status == "failed":
+                    r.delivery_status = "pending"
+                    r.error_message   = None
+            log.status = "pending"
             dispatcher.send(self.db, log, log.subject or "", log.body or "")
             count += 1
 
@@ -1273,13 +2253,29 @@ class NotificationService:
             request.equipment.ueic if request.equipment else
             (request.equipment_type.name if request.equipment_type else "Equipment")
         )
+        # Resolve originator display name
+        _orig = getattr(request, "originator", None)
+        if _orig:
+            _orig_name = (
+                f"{_orig.firstname or ''} {_orig.lastname or ''}".strip()
+                or _orig.email or ""
+            )
+        else:
+            _orig_name = ""
+        # Resolve category as plain string (request_category is an Enum)
+        _cat_raw = getattr(request, "request_category", "test")
+        _category = _cat_raw.value if hasattr(_cat_raw, "value") else str(_cat_raw)
         self.fire(
             event_type="request_submitted",
             context={
-                "equipment": equipment_label,
-                "request_number": getattr(request, "request_number", ""),
-                "originator": request.originator.email if request.originator else "",
-                "category": getattr(request, "request_category", "test"),
+                "equipment":           equipment_label,
+                "request_number":      getattr(request, "request_number", ""),
+                # dot-notation keys match template variables directly
+                "request.number":      getattr(request, "request_number", ""),
+                "request.priority":    getattr(request, "priority", "normal") or "normal",
+                "request.submitted_by": _orig_name,
+                "originator":          _orig_name,
+                "category":            _category,
             },
             organization_id=getattr(request, "organization_id", None),
             department_id=self._dept(request),
@@ -1290,6 +2286,31 @@ class NotificationService:
             equipment_type=self._equipment_type(request),
             test_type=self._test_type(request),
             status_to="submitted",
+        )
+
+    def notify_request_rejected(self, request, rejected_by: str, reason: str) -> None:
+        """Triggered when a testing request is rejected by an approver."""
+        equipment_label = (
+            request.equipment.ueic if request.equipment else
+            (request.equipment_type.name if request.equipment_type else "Equipment")
+        )
+        self.fire(
+            event_type="request_rejected",
+            context={
+                "equipment": equipment_label,
+                "request_number": getattr(request, "request_number", ""),
+                "rejected_by": rejected_by,
+                "reason": reason,
+            },
+            organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="alert",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="rejected",
         )
 
     def notify_tester_assigned(self, request) -> None:
@@ -1588,8 +2609,25 @@ class NotificationService:
         (SRS — Equipment Register: Retired).
         """
         ueic    = getattr(equipment, "ueic", "N/A")
-        eq_type = getattr(equipment, "equipment_type_name", "Equipment")
-        dept    = getattr(equipment, "department_name", "")
+        # equipment.equipment_type is a SQLAlchemy relationship (CategoryMaster object),
+        # not a plain string — resolve .name to avoid Python object repr in the subject.
+        _eq_type_rel = getattr(equipment, "equipment_type", None)
+        if _eq_type_rel and hasattr(_eq_type_rel, "name"):
+            eq_type = _eq_type_rel.name or "Equipment"
+        else:
+            eq_type = getattr(equipment, "equipment_type_name", "") or "Equipment"
+        # Equipment model has department_id, not department_name — look it up
+        dept = getattr(equipment, "department_name", "") or ""
+        if not dept:
+            _dept_id = getattr(equipment, "department_id", None)
+            if _dept_id:
+                try:
+                    from models import OrgDepartment as _OD
+                    _d = self.db.query(_OD).filter(_OD.id == _dept_id).first()
+                    if _d:
+                        dept = _d.name or ""
+                except Exception:
+                    pass
         self.fire(
             event_type="equipment_retired",
             context={
@@ -1685,6 +2723,268 @@ class NotificationService:
             severity="info",
         )
 
+    def notify_fr_rejected(
+        self,
+        request,
+        rejected_by: str,
+        rejection_reason: str,
+    ) -> None:
+        """
+        Fired when a Failure Register entry is rejected by a reviewer.
+        Notifies the submitter so they can revise and resubmit.
+
+        Args:
+            request:          The FailureRegister (or TestingRequest) ORM object.
+            rejected_by:      Display name or email of the user who rejected it.
+            rejection_reason: Free-text reason supplied by the reviewer.
+        """
+        equipment_label = (
+            request.equipment.ueic if getattr(request, "equipment", None)
+            else getattr(request, "equipment_type_name", "Equipment")
+        )
+        self.fire(
+            event_type="fr_rejected",
+            context={
+                "equipment":        equipment_label,
+                "request_number":   getattr(request, "request_number", ""),
+                "rejected_by":      rejected_by,
+                "rejection_reason": rejection_reason,
+            },
+            organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
+            source_id=getattr(request, "id", None),
+            source_type="testing_request",
+            severity="alert",
+            workflow_type="failure_registry",
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_to="rejected",
+        )
+
+    def notify_repair_stage_changed(
+        self,
+        equipment,
+        repair_stage: str,
+        previous_stage: str = "",
+        assigned_to: str = "",
+        organization_id=None,
+        department_id=None,
+    ) -> None:
+        """
+        Fired when a repair lifecycle workflow advances to a new stage.
+        Sends an in-app notification only (see routing rule — channels: ["inapp"]).
+
+        Args:
+            equipment:      The Equipment ORM object being repaired.
+            repair_stage:   The name of the newly activated stage.
+            previous_stage: The name of the stage that just completed (optional).
+            assigned_to:    Display name / email of the engineer assigned to this stage.
+            organization_id: Override org if not available on the equipment object.
+            department_id:  Override dept for recipient scoping.
+        """
+        ueic    = getattr(equipment, "ueic",                 "N/A")
+        eq_type = getattr(equipment, "equipment_type_name",  "Equipment")
+        dept    = getattr(equipment, "department_name",      "")
+        self.fire(
+            event_type="repair_stage_changed",
+            context={
+                "equipment":      ueic,
+                "equipment_type": eq_type,
+                "department":     dept,
+                "repair_stage":   repair_stage,
+                "previous_stage": previous_stage,
+                "assigned_to":    assigned_to,
+            },
+            organization_id=organization_id or getattr(equipment, "organization_id", None),
+            department_id=department_id,
+            source_id=getattr(equipment, "id", None),
+            source_type="equipment",
+            severity="info",
+            workflow_type="repair_lifecycle",
+            equipment_type=eq_type,
+        )
+
+    def notify_aggregate_summary(
+        self,
+        event_type: str,
+        requests: list,
+        organization_id,
+        severity: str = "info",
+    ) -> None:
+        """
+        Fired by the recurring scheduler job.
+
+        Sends ONE notification per recipient with an aggregate summary of all
+        matching TestingRequests — instead of one notification per request.
+
+        This is the correct delivery model for periodic digest-style rules
+        (e.g. "Weekly Open Tests Summary", "Monthly Overdue Tests Summary")
+        where firing one notification per open test would be noisy.
+
+        Context variables available in templates:
+          {{count}}          — total matching requests
+          {{overdue_count}}  — subset that are past due
+          {{items_table}}    — HTML <table> of first 50 requests (email)
+          {{items_plain}}    — plain-text bullet list (SMS / in-app)
+          {{report_date}}    — today's date string
+        """
+        from datetime import date as _date
+        today = _date.today()
+
+        if not requests:
+            return
+
+        overdue = [
+            r for r in requests
+            if getattr(r, "due_date", None) and (
+                (r.due_date.date() if hasattr(r.due_date, "date") else r.due_date) < today
+            )
+        ]
+
+        # Plain text for SMS / in-app (capped at 30 items)
+        items_plain = "\n".join(
+            "• " + getattr(r, "request_number", str(r.id))
+            + (f" — {r.equipment.ueic}" if getattr(r, "equipment", None) else "")
+            for r in requests[:30]
+        )
+
+        # HTML table for email (capped at 50 rows)
+        rows = []
+        for r in requests[:50]:
+            eq = (
+                r.equipment.ueic if getattr(r, "equipment", None) else
+                (r.equipment_type.name if getattr(r, "equipment_type", None) else "–")
+            )
+            due = (
+                str(r.due_date.date() if hasattr(r.due_date, "date") else r.due_date)
+                if getattr(r, "due_date", None) else "–"
+            )
+            st = r.status.value if hasattr(r.status, "value") else str(r.status or "–")
+            rows.append(
+                f"<tr><td>{getattr(r, 'request_number', '–')}</td>"
+                f"<td>{eq}</td><td>{st}</td><td>{due}</td></tr>"
+            )
+        items_html = (
+            "<table border='1' cellpadding='4' style='border-collapse:collapse;font-size:13px'>"
+            "<tr style='background:#f0f0f0'>"
+            "<th>Request #</th><th>Equipment</th><th>Status</th><th>Due Date</th>"
+            "</tr>"
+            + "".join(rows)
+            + "</table>"
+        )
+
+        self.fire(
+            event_type=event_type,
+            context={
+                "count":         str(len(requests)),
+                "overdue_count": str(len(overdue)),
+                "items_table":   items_html,
+                "items_plain":   items_plain,
+                "report_date":   str(today),
+            },
+            organization_id=organization_id,
+            source_id=None,       # no single source — aggregate across many TRs
+            source_type=None,
+            severity=severity,
+        )
+
+    # Default columns used when digest_columns is NULL on the schedule rule.
+    # Admins can override per-rule via the Notification Center UI.
+    DEFAULT_DIGEST_COLUMNS: list = [
+        {"field": "equipment",  "header": "Equipment"},
+        {"field": "department", "header": "Department"},
+        {"field": "due_date",   "header": "Due Date"},
+        {"field": "days",       "header": "Days"},
+        {"field": "request",    "header": "Request No."},
+        {"field": "status",     "header": "Status"},
+    ]
+
+    @staticmethod
+    def _resolve_digest_cell(field: str, r, due, today) -> str:
+        """Resolve a single cell value from a field name."""
+        if field == "equipment":
+            return (
+                getattr(getattr(r, "equipment", None), "ueic", "")
+                or getattr(getattr(r, "equipment_type", None), "name", "")
+                or ""
+            )
+        if field == "department":
+            return getattr(getattr(r, "department", None), "name", "") or ""
+        if field == "due_date":
+            return str(due or "")
+        if field == "days":
+            if due is None:
+                return ""
+            return (
+                str(max((today - due).days, 0)) if due < today
+                else str(max((due - today).days, 0))
+            )
+        if field == "request":
+            return r.request_number or str(r.id)[:8]
+        if field == "status":
+            return r.status.value if hasattr(r.status, "value") else str(r.status)
+        if field == "priority":
+            return getattr(r, "priority", "") or ""
+        if field == "category":
+            cat = getattr(r, "request_category", None)
+            return cat.value if cat and hasattr(cat, "value") else str(cat or "")
+        if field == "assigned_to":
+            tester = getattr(r, "assigned_tester", None)
+            if tester:
+                return (
+                    f"{getattr(tester, 'firstname', '') or ''} "
+                    f"{getattr(tester, 'lastname', '') or ''}".strip()
+                    or getattr(tester, "email", "") or ""
+                )
+            return ""
+        return ""
+
+    @staticmethod
+    def build_digest_table(group: list, today, columns: list = None) -> str:
+        """
+        Build the HTML table injected as {{digest_table}} in scheduled digest emails.
+
+        ``group``   — list of (TestingRequest, due_date, rule) tuples.
+        ``today``   — date.today() from the scheduler.
+        ``columns`` — list of {"field": ..., "header": ..., "style": ...} dicts.
+                      Pass rule.digest_columns to use per-rule config,
+                      or None to fall back to DEFAULT_DIGEST_COLUMNS.
+
+        Supported field values:
+            equipment, department, due_date, days, request,
+            status, priority, category, assigned_to
+        """
+        cols = columns or NotificationService.DEFAULT_DIGEST_COLUMNS
+
+        TD_base = "padding:6px 10px;border:1px solid #ddd;font-size:13px"
+        TH_base = "padding:6px 10px;border:1px solid #ddd;background:#1E3C72;color:#fff;font-size:13px;text-align:left"
+
+        # Header row
+        headers = "".join(
+            f"<th style='{TH_base};{col.get('style', '')}'>{col['header']}</th>"
+            for col in cols
+        )
+
+        # Data rows
+        rows_html = "".join(
+            "<tr>"
+            + "".join(
+                f"<td style='{TD_base};{col.get('style', '')}'>"
+                f"{NotificationService._resolve_digest_cell(col['field'], r, due, today)}"
+                f"</td>"
+                for col in cols
+            )
+            + "</tr>"
+            for r, due, _ in group
+        )
+
+        return (
+            f"<table cellspacing='0' style='border-collapse:collapse;width:100%'>"
+            f"<tr>{headers}</tr>"
+            f"{rows_html}"
+            f"</table>"
+        )
+
     def _fire_schedule_notification(self, request, event_type: str, severity: str) -> None:
         """
         Shared helper for all scheduler-fired notifications.
@@ -1727,24 +3027,28 @@ class NotificationService:
         self, event_type: str, organization_id: Optional[UUID]
     ) -> List[NotificationTemplate]:
         """
-        Prefer org-specific template; fall back to global (organization_id IS NULL).
-        Returns one template per channel.
+        Per-(channel, variant-name) slot resolution: org-specific wins over global.
+
+        Old behaviour (REMOVED):
+          All-or-nothing — if ANY org template existed the entire global set was
+          suppressed, causing unoverridden channels (e.g. sms / inapp) to silently
+          stop firing once an org touched a single channel.  If fire() was also
+          called without org_id the global set fired independently, producing
+          duplicate notifications.
+
+        New behaviour:
+          For each (channel, name) slot independently:
+            • Org template exists   → use org template; global for that slot ignored.
+            • No org template       → fall back to global template for that slot.
+
+          Examples:
+            Org overrides email only → email=org, sms=global, inapp=global  (no drops)
+            Org overrides all        → email=org, sms=org,    inapp=org     (no globals)
+            No org templates         → all channels from global              (no change)
         """
-        rows: List[NotificationTemplate] = []
-
-        if organization_id:
-            rows = (
-                self.db.query(NotificationTemplate)
-                .filter(
-                    NotificationTemplate.event_type == event_type,
-                    NotificationTemplate.organization_id == organization_id,
-                    NotificationTemplate.is_active.is_(True),
-                )
-                .all()
-            )
-
-        if not rows:
-            rows = (
+        if not organization_id:
+            # No org context — global defaults only.
+            return (
                 self.db.query(NotificationTemplate)
                 .filter(
                     NotificationTemplate.event_type == event_type,
@@ -1753,10 +3057,49 @@ class NotificationService:
                 )
                 .all()
             )
-        return rows
+
+        # Fetch org-specific AND global rows in one query.
+        # ORDER: within each (channel, name) slot, org row sorts before global row
+        # because organization_id DESC NULLS LAST puts non-NULL values first.
+        all_rows = (
+            self.db.query(NotificationTemplate)
+            .filter(
+                NotificationTemplate.event_type == event_type,
+                NotificationTemplate.is_active.is_(True),
+                or_(
+                    NotificationTemplate.organization_id == organization_id,
+                    NotificationTemplate.organization_id.is_(None),
+                ),
+            )
+            .order_by(
+                NotificationTemplate.channel,
+                NotificationTemplate.name,
+                NotificationTemplate.organization_id.desc().nulls_last(),
+            )
+            .all()
+        )
+
+        # Take the first row per (channel, name) slot — org-specific wins over global.
+        # If the winning (org) row is a disabled-marker (org_channel_disabled=True),
+        # mark the slot as seen (so the global row is skipped) but do NOT add it to
+        # results — the dispatcher must never fire a disabled channel.
+        seen: set = set()
+        result: List[NotificationTemplate] = []
+        for row in all_rows:
+            slot = (row.channel, row.name)
+            if slot not in seen:
+                seen.add(slot)
+                if getattr(row, 'org_channel_disabled', False):
+                    # Org explicitly disabled this channel — block global fallback
+                    # but don't dispatch anything for this slot.
+                    continue
+                result.append(row)
+
+        return result
 
     def _dispatch_to_user(
         self,
+        batch_log: "NotificationLog",
         tmpl: NotificationTemplate,
         user: User,
         subject: str,
@@ -1770,129 +3113,81 @@ class NotificationService:
         resolved_ctx: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        Enqueue a notification for one user on one channel using the
-        ChannelDispatcherRegistry factory.
+        Create a NotificationLogRecipient row under batch_log for one user.
 
         Channel behaviour
         -----------------
-        inapp  — written immediately to UserNotification (DB-only, instant).
-                 Log is marked 'sent' right away.
-        email  — body is wrapped in full HTML email template via EmailDispatcher.
-                 Log written as 'pending'; background scheduler sends.
-                 If tmpl.attachment_vars is set, URLs resolved from context are
-                 stored in log.attachment_urls for the dispatcher to fetch + attach.
-        sms    — plain-text body stored as-is.
-                 Log written as 'pending'; background scheduler sends.
-        <any>  — any future channel (e.g. whatsapp) registered in
-                 ChannelDispatcherRegistry is automatically picked up here
-                 without changes to this method.
-
-        attachment_vars format (per entry — supports both simple and typed):
-          Simple : "report.retriepdf"           — type auto-detected from URL/key
-          Typed  : {"var_key": "report.retriepdf", "type": "pdf"}
-                   Supported types: pdf | excel | xlsx | docx | json | csv | txt | zip
+        inapp  — UserNotification written immediately; recipient marked 'sent'.
+        email  — body wrapped in HTML; recipient stays 'pending' for scheduler.
+        sms    — plain body stored; recipient stays 'pending' for scheduler.
         """
+        now = datetime.now(timezone.utc)
         dispatcher = ChannelDispatcherRegistry.get(tmpl.channel)
 
-        # ── Channel-specific body transformation (e.g. full HTML wrap for email)
+        # ── Channel-specific body transformation (e.g. HTML wrapper for email)
         final_body = body
         if dispatcher:
             final_body = dispatcher.prepare_body(body, subject=subject, org_name=org_name)
 
-        # ── Resolve attachment_vars → attachment_urls (email channel only) ─────
-        # Strategy:
-        #   • If var_key resolves to a URL in context → store {url, type}  (legacy)
-        #   • If no URL but type=pdf/excel → store {type, source_type, source_id}
-        #     so the EmailDispatcher scheduler generates the file in-memory at send time.
-        resolved_attachment_urls: List[Dict] = []
-        if tmpl.channel == "email" and tmpl.attachment_vars and resolved_ctx:
-            for av in (tmpl.attachment_vars or []):
-                if isinstance(av, dict):
-                    var_key  = av.get("var_key", "")
-                    att_type = (av.get("type") or "").lower()
-                else:
-                    var_key  = str(av)
-                    att_type = ""
-                url = resolved_ctx.get(var_key, "")
-                if url:
-                    entry: Dict[str, str] = {"url": url, "var_key": var_key}
-                    if att_type:
-                        entry["type"] = att_type
-                    resolved_attachment_urls.append(entry)
-                elif att_type in ("pdf", "excel", "xlsx") and source_type and source_id:
-                    # No URL — schedule in-memory generation at send time
-                    resolved_attachment_urls.append({
-                        "type":        att_type,
-                        "var_key":     var_key,
-                        "source_type": str(source_type),
-                        "source_id":   str(source_id),
-                    })
-                else:
-                    logger.debug(
-                        f"[Notif] attachment_var {var_key!r} resolved to empty for "
-                        f"event={event_type!r} user={user.id}"
-                    )
+        # ── Determine initial delivery_status ────────────────────────────────
+        if tmpl.channel == "inapp":
+            initial_status = "sent"
+        elif tmpl.channel == "email" and not user.email:
+            initial_status = "skipped"
+        elif tmpl.channel == "sms" and not getattr(user, "phone_number", None):
+            initial_status = "skipped"
+        else:
+            initial_status = "pending"
 
-        log = NotificationLog(
-            organization_id=organization_id,
-            event_type=event_type,
-            channel=tmpl.channel,
-            recipient_id=user.id,
-            recipient_email=user.email if tmpl.channel == "email" else None,
-            recipient_phone=getattr(user, "phone_number", None) if tmpl.channel == "sms" else None,
-            subject=subject,
-            body=final_body,
-            status="pending",
-            source_id=source_id,
-            source_type=source_type,
-            attachment_urls=resolved_attachment_urls if resolved_attachment_urls else [],
+        rcpt = NotificationLogRecipient(
+            log_id=batch_log.id,
+            user_id=user.id,
+            email=user.email  if tmpl.channel == "email" else None,
+            phone=getattr(user, "phone_number", None) if tmpl.channel == "sms" else None,
+            rendered_subject=subject,
+            rendered_body=final_body,
+            delivery_status=initial_status,
+            sent_at=now if initial_status == "sent" else None,
+            error_message=(
+                "User has no email address" if (tmpl.channel == "email" and not user.email)
+                else "User has no phone number" if (tmpl.channel == "sms" and not getattr(user, "phone_number", None))
+                else None
+            ),
         )
-        self.db.add(log)
-        self.db.flush()  # get log.id
+        self.db.add(rcpt)
 
         if tmpl.channel == "inapp":
-            # Inapp: instant DB write, no network — do it synchronously
+            # Inapp: create UserNotification immediately (no network needed)
+            _ctx  = resolved_ctx or {}
+            _ueic = _ctx.get("equipment.ueic") or _ctx.get("equipment") or None
+            # For report-ready events pass structured data so Flutter can show a download button
+            _extra = None
+            if source_type == "report_definition":
+                _extra = {k: v for k, v in _ctx.items()
+                          if k in ("download_url", "format", "report_name", "report_period")}
             _create_inapp(
                 db=self.db,
                 user_id=user.id,
                 organization_id=organization_id,
                 event_type=event_type,
                 title=subject or event_type.replace("_", " ").title(),
-                body=body,          # in-app uses plain body (no HTML wrapper)
+                body=body,          # in-app uses plain (un-wrapped) body
                 severity=severity,
                 source_id=source_id,
                 source_type=source_type,
+                ueic=_ueic,
+                extra_data=_extra,
             )
-            log.status = "sent"
-            log.sent_at = datetime.now(timezone.utc)
-
-        elif tmpl.channel in ChannelDispatcherRegistry.channels():
-            # Async channels (email, sms, whatsapp, …): leave as 'pending'
-            # Validate contact info; skip immediately if missing
-            if tmpl.channel == "email" and not user.email:
-                log.status = "skipped"
-                log.error_message = "User has no email address"
-            elif tmpl.channel == "sms" and not getattr(user, "phone_number", None):
-                log.status = "skipped"
-                log.error_message = "User has no phone number"
-            # else: stays 'pending' — scheduler picks up and calls dispatcher.send()
-
-        try:
-            self.db.commit()
-        except Exception as exc:
-            logger.error(f"[Notif] DB commit failed after enqueue: {exc}")
-            self.db.rollback()
 
     # ── Background job: process pending email/sms logs ────────────────────────
 
     def process_pending_notifications(self) -> dict:
         """
         Called by APScheduler every minute.
-        Picks up NotificationLog rows with status='pending' for email/sms channels
-        and dispatches them.  Returns a summary dict.
+        Picks up NotificationLog batch rows with status='pending' for email/sms
+        channels and dispatches them to all their NotificationLogRecipient rows.
+        Returns a summary dict.
         """
-        from sqlalchemy import and_
-
         pending = (
             self.db.query(NotificationLog)
             .filter(
@@ -1900,18 +3195,50 @@ class NotificationService:
                 NotificationLog.channel.in_(["email", "sms"]),
             )
             .order_by(NotificationLog.cts.asc())
-            .limit(50)   # process in batches of 50
+            .limit(50)
+            .with_for_update(skip_locked=True)   # prevent concurrent workers sending the same row
             .all()
         )
+
+        # Immediately mark claimed rows as "processing" and flush so other
+        # workers see them as non-pending before we start slow SMTP calls.
+        for _log in pending:
+            _log.status = "processing"
+        try:
+            self.db.flush()
+        except Exception:
+            self.db.rollback()
+            return {"sent": 0, "failed": 0, "skipped": 0, "total": 0}
 
         sent = failed = skipped = 0
 
         for log in pending:
-            # ── Digest check (email only) ────────────────────────────────────
-            if log.channel == "email":
-                if not log.recipient_email:
-                    log.status = "skipped"
-                    log.error_message = "No email address on log row"
+            # ── Check if there are any pending recipients at all ─────────────
+            pending_rcpts = [
+                r for r in (log.recipients or [])
+                if r.delivery_status == "pending"
+            ]
+            if not pending_rcpts:
+                # Email channel: fall through to EmailDispatcher.send() —
+                # it has CC/BCC fallback logic that can send even when there
+                # are no NotificationLogRecipient rows (e.g. equipment_retired
+                # template with no recipient_roles but a CC email set).
+                if log.channel != "email":
+                    log.status    = "skipped"
+                    log.error_message = "No pending recipients"
+                    log.sent_at   = datetime.now(timezone.utc)
+                    skipped += 1
+                    continue
+                # Email with no recipient rows: skip per-recipient validations
+                # (has_emails check, digest) and go straight to dispatch.
+
+            # ── Digest check / per-recipient validation (has recipients) ─────
+            elif log.channel == "email":
+                has_emails = any(r.email for r in pending_rcpts)
+                if not has_emails:
+                    log.status    = "skipped"
+                    log.error_message = "No email addresses on recipients"
+                    log.sent_at   = datetime.now(timezone.utc)
                     skipped += 1
                     continue
                 if _should_digest(self.db, log.event_type, log.organization_id):
@@ -1920,18 +3247,15 @@ class NotificationService:
                     continue
 
             elif log.channel == "sms":
-                # Backfill phone from user record if missing on log row
-                if not log.recipient_phone and log.recipient_id:
-                    u = self.db.query(User).filter(User.id == log.recipient_id).first()
-                    if u:
-                        log.recipient_phone = getattr(u, "phone_number", None)
-                if not log.recipient_phone:
-                    log.status = "skipped"
-                    log.error_message = "No phone number found"
+                has_phones = any(r.phone for r in pending_rcpts)
+                if not has_phones:
+                    log.status    = "skipped"
+                    log.error_message = "No phone numbers on recipients"
+                    log.sent_at   = datetime.now(timezone.utc)
                     skipped += 1
                     continue
 
-            # ── Dispatch via registry (works for any registered channel) ─────
+            # ── Dispatch via registry ────────────────────────────────────────
             dispatcher = ChannelDispatcherRegistry.get(log.channel)
             if not dispatcher:
                 log.status = "skipped"
@@ -1945,8 +3269,27 @@ class NotificationService:
                 sent += 1
             elif log.status in ("skipped",):
                 skipped += 1
+            elif log.status == "processing":
+                # Dispatcher didn't update status — check recipients and resolve.
+                # All recipients sent/skipped → mark sent; otherwise failed.
+                _rcpt_statuses = {r.delivery_status for r in (log.recipients or [])}
+                if _rcpt_statuses and _rcpt_statuses <= {"sent", "skipped"}:
+                    log.status  = "sent"
+                    log.sent_at = datetime.now(timezone.utc)
+                    sent += 1
+                else:
+                    log.status = "failed"
+                    failed += 1
             else:
-                failed += 1
+                # Catch-all: inspect recipients directly instead of trusting
+                # whatever status the dispatcher left (could be stale).
+                _rcpt_statuses = {r.delivery_status for r in (log.recipients or [])}
+                if _rcpt_statuses and _rcpt_statuses <= {"sent", "skipped"}:
+                    log.status  = "sent"
+                    log.sent_at = datetime.now(timezone.utc)
+                    sent += 1
+                else:
+                    failed += 1
 
         try:
             self.db.commit()
@@ -1957,1022 +3300,38 @@ class NotificationService:
         return {"sent": sent, "failed": failed, "skipped": skipped, "total": len(pending)}
 
 
-# ── Global default template seeds ─────────────────────────────────────────────
+# ── Global default template seeds (DEPRECATED) ────────────────────────────────
+# All template data has been moved to seed.py::_seed_notification_templates().
+# This stub is kept for backward compatibility during rolling deploys.
 
-def _e(subject: str, body_html: str, roles: list) -> dict:
-    """Helper: email channel entry."""
-    return {"channel": "email", "subject_template": subject,
-            "body_template": body_html, "recipient_roles": roles,
-            "attachment_vars": []}
+DEFAULT_TEMPLATES: list = []
 
-def _ea(subject: str, body_html: str, roles: list, attachment_vars: list) -> dict:
-    """
-    Helper: email channel entry WITH attachment variables.
+# ── Variable registry seed (DEPRECATED) ──────────────────────────────────────
+# All variable data has been moved to seed.py::_seed_notification_variables().
+# This stub is kept for backward compatibility during rolling deploys.
 
-    attachment_vars — list of variable entries whose resolved values are file URLs
-    to attach to the outgoing email.  Each entry is either:
-      • a simple string  : "report.retriepdf"
-                           (MIME type auto-detected from URL / key convention)
-      • a typed dict     : {"var_key": "report.retriepdf", "type": "pdf"}
-                           Supported types: pdf | excel | xlsx | docx | json | csv
+DEFAULT_VARIABLES: list = []
 
-    Example:
-        _ea(
-            "Monthly MIS Report — {{report.ref}}",
-            body_html,
-            ["Supervisory Officer", "Senior Management Approver"],
-            [
-                {"var_key": "report.retriepdf",  "type": "pdf"},
-                {"var_key": "report.retriexls",  "type": "excel"},
-            ],
-        )
-    """
-    return {"channel": "email", "subject_template": subject,
-            "body_template": body_html, "recipient_roles": roles,
-            "attachment_vars": attachment_vars}
 
-def _s(body: str, roles: list) -> dict:
-    """Helper: SMS channel entry (160-char guideline)."""
-    return {"channel": "sms", "subject_template": "",
-            "body_template": body, "recipient_roles": roles}
-
-def _i(title: str, body: str, roles: list) -> dict:
-    """Helper: in-app channel entry."""
-    return {"channel": "inapp", "subject_template": title,
-            "body_template": body, "recipient_roles": roles}
-
-def _html(rows: list) -> str:
-    """
-    Build a compact HTML table from [(label, var_key), ...] pairs.
-    var_key is wrapped in {{double_braces}} so the render engine resolves it.
-    Example: _html([("Equipment", "equipment.ueic")]) →
-             <tr>…<td>{{equipment.ueic}}</td>…</tr>
-    """
-    trs = "".join(
-        "<tr>"
-        "<td style='padding:4px 8px;border:1px solid #ddd'><b>" + str(k) + "</b></td>"
-        "<td style='padding:4px 8px;border:1px solid #ddd'>{{" + str(v) + "}}</td>"
-        "</tr>"
-        for k, v in rows
+def seed_default_variables(db: Session) -> int:  # pragma: no cover
+    """Deprecated — seeding is now handled by seed.py::_seed_notification_variables()."""
+    import warnings
+    warnings.warn(
+        "seed_default_variables() is deprecated. "
+        "Use seed.py::_seed_notification_variables() instead.",
+        DeprecationWarning,
+        stacklevel=2,
     )
-    return (
-        "<table cellspacing='0' style='border-collapse:collapse;"
-        "font-size:13px;width:100%'>"
-        + trs
-        + "</table>"
+    return 0
+
+
+def seed_default_templates(db: Session) -> int:  # pragma: no cover
+    """Deprecated — seeding is now handled by seed.py::_seed_notification_templates()."""
+    import warnings
+    warnings.warn(
+        "seed_default_templates() is deprecated. "
+        "Use seed.py::_seed_notification_templates() instead.",
+        DeprecationWarning,
+        stacklevel=2,
     )
-
-
-# All 15 catalogue event types — 3 channels each (email + SMS + in-app).
-# subject_template / body_template use {{var_key}} syntax (double-brace).
-# Org admins can override any of these via the Flutter Template Config page.
-DEFAULT_TEMPLATES = []
-
-def _tmpl(event_type: str, *channel_dicts) -> None:
-    for d in channel_dicts:
-        DEFAULT_TEMPLATES.append({"event_type": event_type, **d})
-
-# ── Equipment ─────────────────────────────────────────────────────────────────
-_tmpl("equipment_replacement",
-    _e(
-        "[REPLACEMENT] {{equipment.type}} — {{old_ueic}} → {{new_ueic}}",
-        "<h3 style='color:#1E3C72'>Equipment Replacement Notification</h3>"
-        "<p>A replacement event has been recorded in SEACMS on {{system.date}}.</p>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Retired UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{old_ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>New UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{new_ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Substation / Bay</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{reason_type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{reason}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Replaced By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{replaced_by}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{replaced_on}}</td></tr>"
-        "</table>"
-        "<p>Log in to SEACMS Equipment Register to download the Replacement Report PDF.</p>",
-        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] {{equipment.type}} at {{equipment.department}} replaced."
-        " Old:{{old_ueic}} New:{{new_ueic}}. By {{replaced_by}} on {{replaced_on}}.",
-        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
-    ),
-    _i(
-        "Equipment replaced — {{old_ueic}} → {{new_ueic}}",
-        "{{equipment.type}} at {{equipment.department}} replaced by {{replaced_by}} on {{replaced_on}}."
-        " Reason: {{reason_type}}.",
-        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Reviewing Officer"],
-    ),
-)
-
-# ── Evaluation ────────────────────────────────────────────────────────────────
-_tmpl("eval_critical",
-    _ea(
-        "[CRITICAL] {{equipment.ueic}} — {{eval.test_type}} Threshold Exceeded",
-        "<h3 style='color:red'>Critical Test Result — Immediate Action Required</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.test_type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Evaluated At</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.evaluated_at}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Finding</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{result_summary}}</td></tr>"
-        "</table>"
-        "<p>The evaluation report is attached to this email.</p>",
-        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
-        [{"var_key": "report.retriepdf", "type": "pdf"}],
-    ),
-    _s(
-        "[KPTCL-SEACMS] CRITICAL: {{equipment.ueic}} — {{eval.test_type}}."
-        " Req:{{request.number}}. Login SEACMS for details.",
-        ["Reviewing Officer", "Maintenance Officer"],
-    ),
-    _i(
-        "CRITICAL — {{equipment.ueic}}",
-        "{{eval.test_type}} result CRITICAL for {{equipment.ueic}} ({{request.number}})."
-        " Evaluated: {{eval.evaluated_at}}.",
-        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
-    ),
-)
-
-_tmpl("eval_alert",
-    _e(
-        "[ALERT] {{equipment.ueic}} — {{eval.test_type}} Warning",
-        "<h3 style='color:orange'>Alert: Test Result Warning</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.test_type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Revised Interval</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{revised_interval}}</td></tr>"
-        "</table>"
-        "<p><a href='{{report.retriepdf}}'>Download PDF Report</a></p>",
-        ["Reviewing Officer", "Maintenance Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] ALERT: {{equipment.ueic}} — {{eval.test_type}}."
-        " Revised interval: {{revised_interval}}. Req:{{request.number}}.",
-        ["Reviewing Officer", "Maintenance Officer"],
-    ),
-    _i(
-        "Alert — {{equipment.ueic}}",
-        "{{eval.test_type}} threshold warning for {{equipment.ueic}}."
-        " Revised interval: {{revised_interval}}.",
-        ["Reviewing Officer", "Maintenance Officer"],
-    ),
-)
-
-# ── Test Workflow ─────────────────────────────────────────────────────────────
-_tmpl("request_submitted",
-    _e(
-        "New Test Request Submitted — {{request.number}}",
-        "<h3>New Test Request Awaiting Approval</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Category</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{category}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Priority</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.priority}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Submitted By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.submitted_by}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "</table>"
-        "<p>Log in to SEACMS to review and approve this request.</p>",
-        ["Reviewing Officer", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] New {{category}} request {{request.number}} submitted"
-        " by {{request.submitted_by}} for {{equipment.ueic}}. Login to approve.",
-        ["Reviewing Officer"],
-    ),
-    _i(
-        "New submission — {{request.number}}",
-        "{{equipment.ueic}} submitted for {{category}} by {{request.submitted_by}}. Priority: {{request.priority}}.",
-        ["Reviewing Officer", "Reviewing Officer"],
-    ),
-)
-
-_tmpl("tester_assigned",
-    _e(
-        "Test Request Assigned to You — {{request.number}}",
-        "<h3>You Have Been Assigned a Test Request</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Assigned To</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.assigned_to}}</td></tr>"
-        "</table>"
-        "<p>Please log in to SEACMS to accept or decline this assignment.</p>",
-        ["Test Engineer", "Maintenance Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] You are assigned test req {{request.number}}"
-        " for {{equipment.ueic}}. Due: {{request.due_date}}. Login SEACMS.",
-        ["Test Engineer"],
-    ),
-    _i(
-        "Assigned — {{request.number}}",
-        "You have been assigned {{request.number}} for {{equipment.ueic}}. Due: {{request.due_date}}.",
-        ["Test Engineer", "Maintenance Officer"],
-    ),
-)
-
-_tmpl("tester_declined",
-    _e(
-        "Tester Declined Assignment — {{request.number}}",
-        "<h3>Tester Declined — Reassignment Required</h3>"
-        "<p><b>Request:</b> {{request.number}}</p>"
-        "<p><b>Declined by:</b> {{tester_name}}</p>"
-        "<p><b>Reason:</b> {{reason}}</p>"
-        "<p>Please reassign this request in SEACMS.</p>",
-        ["Test & Work Coordinator", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] {{tester_name}} declined req {{request.number}}."
-        " Reason: {{reason}}. Please reassign.",
-        ["Test & Work Coordinator"],
-    ),
-    _i(
-        "Tester declined — {{request.number}}",
-        "{{tester_name}} declined {{request.number}}. Reason: {{reason}}.",
-        ["Test & Work Coordinator", "Reviewing Officer"],
-    ),
-)
-
-_tmpl("test_submitted",
-    _ea(
-        "Test Results Ready for Review — {{request.number}}",
-        "<h3>Test Results Submitted — Awaiting Your Review</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overall Result</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{eval.overall}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Submitted By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.submitted_by}}</td></tr>"
-        "</table>"
-        "<p>The test report is attached to this email.</p>"
-        "<p>Log in to SEACMS to approve or reject these results.</p>",
-        ["Reviewing Officer", "Reviewing Officer"],
-        [{"var_key": "report.retriepdf", "type": "pdf"}],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Results submitted for {{request.number}} ({{equipment.ueic}})."
-        " Result: {{eval.overall}}. Login SEACMS to review.",
-        ["Reviewing Officer"],
-    ),
-    _i(
-        "Results submitted — {{request.number}}",
-        "Test results for {{equipment.ueic}} ({{request.number}}) await review. Result: {{eval.overall}}.",
-        ["Reviewing Officer", "Reviewing Officer"],
-    ),
-)
-
-_tmpl("recommendation_approved",
-    _e(
-        "Recommendation Approved — {{request.number}}",
-        "<h3>Equipment Recommendation Approved</h3>"
-        "<p><b>Request:</b> {{request.number}}</p>"
-        "<p><b>Recommendation Type:</b> {{recommendation_type}}</p>"
-        "<p><b>Replacement Products:</b> {{product_count}}</p>"
-        "<p>Log in to SEACMS to proceed with procurement.</p>",
-        ["Asset Data Officer", "Maintenance Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Recommendation approved for {{request.number}}."
-        " Type: {{recommendation_type}}. Login SEACMS.",
-        ["Asset Data Officer"],
-    ),
-    _i(
-        "Recommendation approved — {{request.number}}",
-        "{{recommendation_type}} recommendation approved. {{product_count}} product(s) for procurement.",
-        ["Asset Data Officer", "Maintenance Officer"],
-    ),
-)
-
-_tmpl("recommendation_rejected",
-    _e(
-        "Recommendation Rejected — {{request.number}}",
-        "<h3>Recommendation Rejected — Action Required</h3>"
-        "<p><b>Request:</b> {{request.number}}</p>"
-        "<p><b>Reason:</b> {{reason}}</p>"
-        "<p>Please revise and resubmit your recommendation in SEACMS.</p>",
-        ["Test Engineer", "Asset Data Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Recommendation for {{request.number}} rejected."
-        " Reason: {{reason}}. Please revise.",
-        ["Test Engineer"],
-    ),
-    _i(
-        "Recommendation rejected — {{request.number}}",
-        "Recommendation rejected. Reason: {{reason}}.",
-        ["Test Engineer", "Asset Data Officer"],
-    ),
-)
-
-# ── Scheduling ────────────────────────────────────────────────────────────────
-_tmpl("due_reminder",
-    _e(
-        "Test Due in {{days_remaining}} Days — {{equipment.ueic}}",
-        "<h3>Upcoming Test Due — 15-Day Reminder</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Remaining</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_remaining}}</td></tr>"
-        "</table>"
-        "<p>Please ensure the test is scheduled and resources are allocated.</p>",
-        ["Maintenance Officer", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Test due in {{days_remaining}} days for {{equipment.ueic}}"
-        " ({{equipment.department}}). Due: {{request.due_date}}.",
-        ["Maintenance Officer"],
-    ),
-    _i(
-        "Test due in {{days_remaining}} days — {{equipment.ueic}}",
-        "Request {{request.number}} for {{equipment.ueic}} is due on {{request.due_date}}.",
-        ["Maintenance Officer", "Reviewing Officer"],
-    ),
-)
-
-_tmpl("due_reminder_final",
-    _e(
-        "FINAL REMINDER: Test Due in {{days_remaining}} Days — {{equipment.ueic}}",
-        "<h3 style='color:orange'>Final Reminder — Test Due in {{days_remaining}} Days</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-        "</table>"
-        "<p><b>Action required:</b> Test must be completed by {{request.due_date}}.</p>",
-        ["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] FINAL REMINDER: Test for {{equipment.ueic}} due {{request.due_date}}"
-        " ({{days_remaining}} days). Dept: {{equipment.department}}.",
-        ["Maintenance Officer", "Reviewing Officer"],
-    ),
-    _i(
-        "Final reminder — {{equipment.ueic}} due {{request.due_date}}",
-        "Only {{days_remaining}} days left. Request {{request.number}} must be completed by {{request.due_date}}.",
-        ["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
-    ),
-)
-
-_tmpl("overdue_alert",
-    _e(
-        "[OVERDUE] Test Not Completed — {{equipment.ueic}} ({{days_overdue}} days)",
-        "<h3 style='color:red'>Test Overdue — Immediate Action Required</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Was Due</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
-        "</table>"
-        "<p>Please take immediate action to complete or reschedule this test.</p>",
-        ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] OVERDUE: Test for {{equipment.ueic}} ({{equipment.department}})"
-        " is {{days_overdue}} days overdue. Req: {{request.number}}.",
-        ["Reviewing Officer", "Maintenance Officer"],
-    ),
-    _i(
-        "Overdue {{days_overdue}} days — {{equipment.ueic}}",
-        "Test {{request.number}} for {{equipment.ueic}} is overdue by {{days_overdue}} days (was due {{request.due_date}}).",
-        ["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
-    ),
-)
-
-_tmpl("overdue_escalation",
-    _e(
-        "[ESCALATION] Test {{days_overdue}} Days Overdue — {{equipment.ueic}}",
-        "<h3 style='color:darkred'>Escalation: Test Critically Overdue</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "</table>"
-        "<p>This has been escalated to zone/circle management.</p>",
-        ["Supervisory Officer", "Senior Management Approver"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] ESCALATION: {{equipment.ueic}} test {{days_overdue}}d overdue."
-        " Dept: {{equipment.department}}. Req: {{request.number}}.",
-        ["Supervisory Officer", "Senior Management Approver"],
-    ),
-    _i(
-        "Escalation — {{equipment.ueic}} {{days_overdue}}d overdue",
-        "Critical: {{request.number}} for {{equipment.ueic}} is {{days_overdue}} days overdue.",
-        ["Supervisory Officer", "Senior Management Approver"],
-    ),
-)
-
-# ── Procurement ───────────────────────────────────────────────────────────────
-_tmpl("procurement_pending",
-    _e(
-        "Procurement Request Raised — {{pr_number}}",
-        "<h3>New Procurement Request Awaiting Finance Approval</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>PR Number</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{pr_number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Title</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{title}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
-        "</table>"
-        "<p>Log in to SEACMS to approve or reject this procurement request.</p>",
-        ["Procurement Approver", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Procurement {{pr_number}} raised for {{request.number}}."
-        " Awaiting your finance approval. Login SEACMS.",
-        ["Procurement Approver"],
-    ),
-    _i(
-        "Procurement raised — {{pr_number}}",
-        "PR {{pr_number}} for test request {{request.number}} is awaiting finance approval.",
-        ["Procurement Approver", "Reviewing Officer"],
-    ),
-)
-
-_tmpl("procurement_decision",
-    _e(
-        "Procurement {{decision|upper}} — {{pr_number}}",
-        "<h3>Procurement Decision: {{decision|upper}}</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>PR Number</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{pr_number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Test Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Decision</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{decision}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Notes</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{notes}}</td></tr>"
-        "</table>",
-        ["Asset Data Officer", "Reviewing Officer", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Procurement {{pr_number}} {{decision}}."
-        " Req: {{request.number}}. Notes: {{notes}}.",
-        ["Asset Data Officer"],
-    ),
-    _i(
-        "Procurement {{decision}} — {{pr_number}}",
-        "PR {{pr_number}} ({{request.number}}) has been {{decision}} by Finance. Notes: {{notes}}.",
-        ["Asset Data Officer", "Reviewing Officer", "Reviewing Officer"],
-    ),
-)
-
-
-# ── Equipment Lifecycle ───────────────────────────────────────────────────────
-_tmpl("equipment_registered",
-    _e(
-        "[NEW EQUIPMENT] {{equipment.ueic}} Commissioned — {{equipment.type}}",
-        "<h3 style='color:#1E3C72'>New Equipment Registered in SEACMS</h3>"
-        "<p>A new equipment record has been created on {{system.date}}.</p>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Manufacturer</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.manufacturer}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Substation / Bay</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Commissioned By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{commissioned_by}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
-        "</table>"
-        "<p>Log in to SEACMS to review the equipment details and configure test schedules.</p>",
-        ["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] New equipment registered: {{equipment.ueic}} ({{equipment.type}})"
-        " at {{equipment.department}} on {{system.date}} by {{commissioned_by}}.",
-        ["Maintenance Officer", "Reviewing Officer"],
-    ),
-    _i(
-        "New equipment — {{equipment.ueic}}",
-        "{{equipment.type}} ({{equipment.ueic}}) commissioned at {{equipment.department}} by {{commissioned_by}}.",
-        ["Maintenance Officer", "Reviewing Officer", "Reviewing Officer"],
-    ),
-)
-
-_tmpl("equipment_retired",
-    _e(
-        "[RETIRED] {{equipment.ueic}} — {{equipment.type}} Decommissioned",
-        "<h3 style='color:#555'>Equipment Retired from Service</h3>"
-        "<p>The following equipment has been decommissioned on {{system.date}}.</p>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>UEIC</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Substation / Bay</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{reason}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Retired By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{retired_by}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
-        "</table>"
-        "<p>All pending test schedules for this equipment have been cancelled. Log in to SEACMS to confirm.</p>",
-        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Equipment {{equipment.ueic}} ({{equipment.type}}) at"
-        " {{equipment.department}} RETIRED on {{system.date}}. Reason: {{reason}}.",
-        ["Maintenance Officer", "Reviewing Officer"],
-    ),
-    _i(
-        "Equipment retired — {{equipment.ueic}}",
-        "{{equipment.type}} ({{equipment.ueic}}) at {{equipment.department}} has been decommissioned. Reason: {{reason}}.",
-        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Reviewing Officer"],
-    ),
-)
-
-# ── Remedial / Compliance ─────────────────────────────────────────────────────
-_tmpl("remedial_action_due",
-    _e(
-        "[ACTION REQUIRED] Remedial Compliance Not Uploaded — {{request.number}}",
-        "<h3 style='color:red'>Remedial Action Compliance Overdue</h3>"
-        "<p>The remedial action compliance document for the following request has not been uploaded by the due date.</p>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Compliance Due</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{compliance_due_date}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
-        "</table>"
-        "<p>Please upload the compliance proof immediately in SEACMS.</p>",
-        ["Field Officer", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Remedial compliance NOT uploaded for {{request.number}}"
-        " ({{equipment.ueic}}). Due: {{compliance_due_date}}. Upload in SEACMS.",
-        ["Field Officer", "Reviewing Officer"],
-    ),
-    _i(
-        "Remedial compliance overdue — {{request.number}}",
-        "Compliance for {{request.number}} ({{equipment.ueic}}) was due {{compliance_due_date}} and is now {{days_overdue}} day(s) overdue.",
-        ["Field Officer", "Reviewing Officer"],
-    ),
-)
-
-_tmpl("taqc_observation_overdue",
-    _e(
-        "[TAQC] Observation Compliance Not Uploaded — {{request.number}}",
-        "<h3 style='color:orange'>TA&amp;QC Observation Compliance Overdue</h3>"
-        "<p>The compliance document for a TA&amp;QC observation has not been uploaded by the target date.</p>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Target Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{compliance_due_date}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Overdue</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_overdue}}</td></tr>"
-        "</table>"
-        "<p>Please upload the compliance document in SEACMS immediately.</p>",
-        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] TA&QC compliance NOT uploaded. Req:{{request.number}}"
-        " ({{equipment.ueic}}). Target: {{compliance_due_date}}. Upload in SEACMS.",
-        ["Reviewing Officer", "Supervisory Officer"],
-    ),
-    _i(
-        "TA&QC compliance overdue — {{request.number}}",
-        "Observation compliance for {{request.number}} ({{equipment.ueic}}) is {{days_overdue}} day(s) past target {{compliance_due_date}}.",
-        ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
-    ),
-)
-
-# ── Maintenance ───────────────────────────────────────────────────────────────
-_tmpl("maintenance_due",
-    _e(
-        "Maintenance Due in {{days_remaining}} Days — {{equipment.ueic}}",
-        "<h3 style='color:#1E3C72'>Upcoming Maintenance Due — 15-Day Reminder</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Remaining</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_remaining}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-        "</table>"
-        "<p>Please ensure maintenance resources and outage window are scheduled.</p>",
-        ["Maintenance Officer", "Nodal Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Maintenance due in {{days_remaining}} days for {{equipment.ueic}}"
-        " at {{equipment.department}}. Due: {{request.due_date}}.",
-        ["Maintenance Officer", "Nodal Officer"],
-    ),
-    _i(
-        "Maintenance due in {{days_remaining}} days — {{equipment.ueic}}",
-        "Request {{request.number}} for {{equipment.ueic}} maintenance is due on {{request.due_date}}.",
-        ["Maintenance Officer", "Nodal Officer"],
-    ),
-)
-
-_tmpl("overhaul_recommended",
-    _e(
-        "[OVERHAUL] Operation Count Threshold Reached — {{equipment.ueic}}",
-        "<h3 style='color:darkorange'>Overhaul Recommendation — Operation Threshold Exceeded</h3>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Operations Count</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{operation_count}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Threshold</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{operation_threshold}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Recommendation Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
-        "</table>"
-        "<p>An overhaul is recommended. Please raise a maintenance request in SEACMS.</p>",
-        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] Overhaul needed: {{equipment.ueic}} ({{equipment.type}}) at"
-        " {{equipment.department}}. Operations: {{operation_count}}/{{operation_threshold}}.",
-        ["Maintenance Officer", "Reviewing Officer"],
-    ),
-    _i(
-        "Overhaul recommended — {{equipment.ueic}}",
-        "{{equipment.type}} ({{equipment.ueic}}) has reached {{operation_count}} operations (threshold: {{operation_threshold}}). Overhaul recommended.",
-        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
-    ),
-)
-
-# ── Design / Systemic Issues ──────────────────────────────────────────────────
-_tmpl("design_problem_alert",
-    _e(
-        "[DESIGN ALERT] Problem Detected on {{equipment.manufacturer}} {{equipment.type}}",
-        "<h3 style='color:darkred'>Design Problem Alert — All Affected Equipment</h3>"
-        "<p>A systemic design problem has been identified linked to a specific make/model.</p>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Manufacturer</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.manufacturer}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Problem Description</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{problem_description}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Affected Count</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{affected_count}} units</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Identified On</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
-        "</table>"
-        "<p>Inspect all {{equipment.type}} units of this make immediately. Log in to SEACMS for the affected equipment list.</p>",
-        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Reviewing Officer"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] DESIGN ALERT: {{equipment.manufacturer}} {{equipment.type}}."
-        " {{affected_count}} units affected. Problem: {{problem_description}}. Login SEACMS.",
-        ["Maintenance Officer", "Reviewing Officer"],
-    ),
-    _i(
-        "Design problem — {{equipment.manufacturer}} {{equipment.type}}",
-        "Systemic problem detected on {{equipment.manufacturer}} {{equipment.type}}: {{problem_description}}. {{affected_count}} unit(s) affected.",
-        ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Reviewing Officer"],
-    ),
-)
-
-# ── Repair Cycle ──────────────────────────────────────────────────────────────
-_tmpl("repair_delay",
-    _e(
-        "[REPAIR DELAY] Stage Timeline Exceeded — {{equipment.ueic}}",
-        "<h3 style='color:darkorange'>Transformer Repair Delay Alert</h3>"
-        "<p>A repair stage has exceeded its scheduled timeline.</p>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.type}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Repair Stage</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Stage Deadline</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{stage_deadline}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.department}}</td></tr>"
-        "</table>"
-        "<p>Please review and update the repair timeline in SEACMS.</p>",
-        ["Reviewing Officer", "Senior Management Approver", "CEE RT&R&D"],
-    ),
-    _s(
-        "[KPTCL-SEACMS] REPAIR DELAY: {{equipment.ueic}} stage '{{repair_stage}}'"
-        " is {{days_delayed}} days overdue (deadline: {{stage_deadline}}).",
-        ["Reviewing Officer", "Senior Management Approver"],
-    ),
-    _i(
-        "Repair delay — {{equipment.ueic}} ({{repair_stage}})",
-        "Repair stage '{{repair_stage}}' for {{equipment.ueic}} is {{days_delayed}} day(s) past deadline {{stage_deadline}}.",
-        ["Reviewing Officer", "Senior Management Approver", "CEE RT&R&D"],
-    ),
-)
-
-# ── Reports ───────────────────────────────────────────────────────────────────
-_tmpl("monthly_mis_report",
-    _ea(
-        "[MONTHLY MIS] SEACMS Monthly Report — {{report_month}}",
-        "<h3 style='color:#1E3C72'>Monthly MIS Report — {{report_month}}</h3>"
-        "<p>Your monthly equipment management report is ready for {{report_month}}.</p>"
-        "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Report Period</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report_month}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Generated On</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report.generated_on}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Tests Completed</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{tests_completed}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Critical Findings</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{critical_count}}</td></tr>"
-        "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Overdue Tests</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{overdue_count}}</td></tr>"
-        "</table>"
-        "<p>The PDF and Excel reports are attached to this email.</p>",
-        ["Supervisory Officer", "Senior Management Approver"],
-        [
-            {"var_key": "report.retriepdf", "type": "pdf"},
-            {"var_key": "report.retriexls", "type": "excel"},
-        ],
-    ),
-    _i(
-        "Monthly MIS Report — {{report_month}} ready",
-        "The SEACMS MIS report for {{report_month}} is available. Tests: {{tests_completed}}, Critical: {{critical_count}}, Overdue: {{overdue_count}}.",
-        ["Supervisory Officer", "Senior Management Approver"],
-    ),
-)
-
-# ── Variable registry seed ────────────────────────────────────────────────────
-
-DEFAULT_VARIABLES = [
-    # ── Reports ──────────────────────────────────────────────────────────────
-    {
-        "var_key": "report.retriexls", "label": "Report — Excel Download URL",
-        "group_name": "Reports", "resolver_key": "report.retriexls",
-        "description": "Signed URL for the Excel report attachment (.xlsx).",
-        "sample_value": "https://app.seacms.in/reports/REQ-001.xlsx",
-        "is_system": True,
-    },
-    {
-        "var_key": "report.retriepdf", "label": "Report — PDF Download URL",
-        "group_name": "Reports", "resolver_key": "report.retriepdf",
-        "description": "Signed URL for the PDF report attachment.",
-        "sample_value": "https://app.seacms.in/reports/REQ-001.pdf",
-        "is_system": True,
-    },
-    {
-        "var_key": "report.ref", "label": "Report Reference Number",
-        "group_name": "Reports", "resolver_key": "report.ref",
-        "description": "Auto-generated report reference number.",
-        "sample_value": "RPT-2025-001",
-        "is_system": True,
-    },
-    {
-        "var_key": "report.generated_on", "label": "Report Generated Date/Time",
-        "group_name": "Reports", "resolver_key": "report.generated_on",
-        "description": "Timestamp when the report was generated.",
-        "sample_value": "2025-01-15 10:30 UTC",
-        "is_system": True,
-    },
-    # ── Equipment ─────────────────────────────────────────────────────────────
-    {
-        "var_key": "equipment.ueic", "label": "Equipment UEIC",
-        "group_name": "Equipment", "resolver_key": "equipment",
-        "description": "Unique Equipment Identity Code of the subject equipment.",
-        "sample_value": "TX-001-2025",
-        "is_system": True,
-    },
-    {
-        "var_key": "equipment.type", "label": "Equipment Type",
-        "group_name": "Equipment", "resolver_key": "equipment_type",
-        "description": "Type/category of the equipment (e.g. Power Transformer).",
-        "sample_value": "Power Transformer",
-        "is_system": True,
-    },
-    {
-        "var_key": "equipment.department", "label": "Substation / Department",
-        "group_name": "Equipment", "resolver_key": "department",
-        "description": "Substation, bay, or department where the equipment is installed.",
-        "sample_value": "Relay Panel — Substation A",
-        "is_system": True,
-    },
-    {
-        "var_key": "equipment.status", "label": "Equipment Status",
-        "group_name": "Equipment", "resolver_key": "equipment_status",
-        "description": "Current operational status of the equipment.",
-        "sample_value": "active",
-        "is_system": True,
-    },
-    {
-        "var_key": "equipment.manufacturer", "label": "Manufacturer",
-        "group_name": "Equipment", "resolver_key": "manufacturer",
-        "description": "Manufacturer / OEM of the equipment.",
-        "sample_value": "ABB",
-        "is_system": True,
-    },
-    # ── Replacement event ──────────────────────────────────────────────────────
-    {
-        "var_key": "old_ueic", "label": "Retired UEIC",
-        "group_name": "Replacement", "resolver_key": "old_ueic",
-        "description": "UEIC of the retired (replaced) equipment.",
-        "sample_value": "TX-OLD-001",
-        "is_system": True,
-    },
-    {
-        "var_key": "new_ueic", "label": "New Replacement UEIC",
-        "group_name": "Replacement", "resolver_key": "new_ueic",
-        "description": "UEIC of the newly commissioned replacement equipment.",
-        "sample_value": "TX-NEW-002",
-        "is_system": True,
-    },
-    {
-        "var_key": "replaced_by", "label": "Replaced By (User)",
-        "group_name": "Replacement", "resolver_key": "replaced_by",
-        "description": "Name or email of the officer who recorded the replacement.",
-        "sample_value": "EE John (john@utility.com)",
-        "is_system": True,
-    },
-    {
-        "var_key": "replaced_on", "label": "Replacement Date",
-        "group_name": "Replacement", "resolver_key": "replaced_on",
-        "description": "Date on which the replacement event was recorded.",
-        "sample_value": "2025-01-15",
-        "is_system": True,
-    },
-    {
-        "var_key": "reason", "label": "Replacement / Rejection Reason",
-        "group_name": "Replacement", "resolver_key": "reason",
-        "description": "Free-text reason for the replacement or rejection action.",
-        "sample_value": "End of service life — IR below threshold",
-        "is_system": True,
-    },
-    # ── Test Request workflow ──────────────────────────────────────────────────
-    {
-        "var_key": "request.number", "label": "Test Request Number",
-        "group_name": "Test Request", "resolver_key": "request_number",
-        "description": "Auto-generated test request reference number.",
-        "sample_value": "REQ-2025-001",
-        "is_system": True,
-    },
-    {
-        "var_key": "request.title", "label": "Test Request Title",
-        "group_name": "Test Request", "resolver_key": "request_title",
-        "description": "Title/description of the test request.",
-        "sample_value": "IR Test — Power Transformer TX-001",
-        "is_system": True,
-    },
-    {
-        "var_key": "request.status", "label": "Request Status",
-        "group_name": "Test Request", "resolver_key": "request_status",
-        "description": "Current workflow status of the test request.",
-        "sample_value": "submitted",
-        "is_system": True,
-    },
-    {
-        "var_key": "request.priority", "label": "Priority",
-        "group_name": "Test Request", "resolver_key": "request_priority",
-        "description": "Priority level of the test request (high / medium / low).",
-        "sample_value": "high",
-        "is_system": True,
-    },
-    {
-        "var_key": "request.due_date", "label": "Due Date",
-        "group_name": "Test Request", "resolver_key": "due_date",
-        "description": "Scheduled due date for the test to be completed.",
-        "sample_value": "2025-03-31",
-        "is_system": True,
-    },
-    {
-        "var_key": "request.submitted_by", "label": "Submitted By",
-        "group_name": "Test Request", "resolver_key": "originator",
-        "description": "Email / name of the user who submitted the test request.",
-        "sample_value": "originator@utility.com",
-        "is_system": True,
-    },
-    {
-        "var_key": "request.assigned_to", "label": "Assigned To (Tester)",
-        "group_name": "Test Request", "resolver_key": "tester",
-        "description": "Email / name of the tester the request was assigned to.",
-        "sample_value": "tester@utility.com",
-        "is_system": True,
-    },
-    # ── Evaluation / test result ───────────────────────────────────────────────
-    {
-        "var_key": "eval.overall", "label": "Overall Result (NORMAL / ALERT / CRITICAL)",
-        "group_name": "Evaluation", "resolver_key": "eval_overall",
-        "description": "Composite evaluation outcome from test template thresholds.",
-        "sample_value": "CRITICAL",
-        "is_system": True,
-    },
-    {
-        "var_key": "eval.test_type", "label": "Test Type",
-        "group_name": "Evaluation", "resolver_key": "test_name",
-        "description": "Name of the test type (e.g. IR Test, PI Test).",
-        "sample_value": "IR Test",
-        "is_system": True,
-    },
-    {
-        "var_key": "eval.evaluated_at", "label": "Evaluation Date/Time",
-        "group_name": "Evaluation", "resolver_key": "tested_at",
-        "description": "Timestamp when the test evaluation was completed.",
-        "sample_value": "2025-01-15 09:00 UTC",
-        "is_system": True,
-    },
-    # ── Organisation ──────────────────────────────────────────────────────────
-    {
-        "var_key": "org.name", "label": "Organisation Name",
-        "group_name": "Organisation", "resolver_key": "org_name",
-        "description": "Name of the organisation as registered in SEACMS.",
-        "sample_value": "KPTCL",
-        "is_system": True,
-    },
-    {
-        "var_key": "org.id", "label": "Organisation ID",
-        "group_name": "Organisation", "resolver_key": "org_id",
-        "description": "UUID of the organisation.",
-        "sample_value": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-        "is_system": True,
-    },
-    # ── Department / Context ──────────────────────────────────────────────────
-    {
-        "var_key": "dept.name", "label": "Department Name",
-        "group_name": "Context", "resolver_key": "currentdeptname",
-        "description": "Name of the department associated with the event (e.g. North Division).",
-        "sample_value": "North Division",
-        "is_system": True,
-    },
-    {
-        "var_key": "dept.code", "label": "Department Code",
-        "group_name": "Context", "resolver_key": "dept_code",
-        "description": "Short code for the department.",
-        "sample_value": "NB-DIV",
-        "is_system": True,
-    },
-    {
-        "var_key": "user.name", "label": "Recipient Name",
-        "group_name": "Context", "resolver_key": "user_name",
-        "description": "Full name of the notification recipient (resolved at dispatch time).",
-        "sample_value": "Jane Smith",
-        "is_system": True,
-    },
-    {
-        "var_key": "user.email", "label": "Recipient Email",
-        "group_name": "Context", "resolver_key": "recipient_email",
-        "description": "Email address of the notification recipient.",
-        "sample_value": "jane.smith@utility.com",
-        "is_system": True,
-    },
-    # ── System ────────────────────────────────────────────────────────────────
-    {
-        "var_key": "system.date", "label": "Today's Date",
-        "group_name": "System", "resolver_key": "system.date",
-        "description": "Current date at the time the notification is rendered (YYYY-MM-DD).",
-        "sample_value": "2025-01-15",
-        "is_system": True,
-    },
-    {
-        "var_key": "system.time", "label": "Current Time (UTC)",
-        "group_name": "System", "resolver_key": "system.time",
-        "description": "Current time at the time the notification is rendered (HH:MM UTC).",
-        "sample_value": "10:30 UTC",
-        "is_system": True,
-    },
-    {
-        "var_key": "system.app_name", "label": "Application Name (SEACMS)",
-        "group_name": "System", "resolver_key": "system.app_name",
-        "description": "Name of the application — always resolves to 'SEACMS'.",
-        "sample_value": "SEACMS",
-        "is_system": True,
-    },
-]
-
-
-def seed_default_variables(db: Session) -> int:
-    """
-    Idempotent seed: insert global system variables (organization_id=NULL, is_system=True)
-    only if they don't already exist (matched by var_key + org=NULL).
-    Returns count of inserted rows.
-    """
-    inserted = 0
-    for v in DEFAULT_VARIABLES:
-        existing = (
-            db.query(NotificationVariable)
-            .filter(
-                NotificationVariable.var_key == v["var_key"],
-                NotificationVariable.organization_id.is_(None),
-            )
-            .first()
-        )
-        if not existing:
-            db.add(NotificationVariable(**v))
-            inserted += 1
-    if inserted:
-        db.commit()
-        logger.info(f"[Notif] Seeded {inserted} default notification variable(s).")
-    return inserted
-
-
-def seed_default_templates(db: Session) -> int:
-    """
-    Idempotent upsert: insert or update global default templates (organization_id=NULL).
-
-    On first run  → inserts all rows.
-    On re-run     → updates subject_template + body_template + recipient_roles
-                    so new DEFAULT_TEMPLATES content is always reflected in the DB.
-    Org-specific overrides (organization_id IS NOT NULL) are never touched.
-
-    Returns count of inserted rows (updates are not counted).
-    """
-    inserted = 0
-    for tpl in DEFAULT_TEMPLATES:
-        existing = (
-            db.query(NotificationTemplate)
-            .filter(
-                NotificationTemplate.event_type == tpl["event_type"],
-                NotificationTemplate.channel == tpl["channel"],
-                NotificationTemplate.organization_id.is_(None),
-            )
-            .first()
-        )
-        if existing:
-            # Refresh body/subject/roles/attachment_vars from DEFAULT_TEMPLATES
-            # (org-specific overrides are never touched)
-            existing.subject_template  = tpl.get("subject_template", existing.subject_template)
-            existing.body_template     = tpl["body_template"]
-            existing.recipient_roles   = tpl.get("recipient_roles", existing.recipient_roles)
-            existing.attachment_vars   = tpl.get("attachment_vars", existing.attachment_vars or [])
-        else:
-            db.add(NotificationTemplate(**tpl))
-            inserted += 1
-    db.commit()
-    logger.info(f"[Notif] Seeded/refreshed default notification templates ({inserted} new).")
-    return inserted
+    return 0

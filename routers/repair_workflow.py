@@ -2,7 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File, Form, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -509,3 +509,54 @@ def attribute_delay(
         raise
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+# =============================================================================
+# QAP Report  — PDF / HTML  (PRE_COMMISSION workflows only)
+# =============================================================================
+
+@router.get("/{workflow_id}/report/pdf")
+def download_qap_pdf(
+    workflow_id: UUID,
+    db:   Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Generate and download a PDF QAP report for a completed PRE_COMMISSION workflow.
+    Replicates the KPTCL Manufacturing Quality Plan table format.
+    """
+    try:
+        from services.precommission_report_service import PreCommissionReportService
+        pdf_bytes = PreCommissionReportService(db).generate_pdf(workflow_id)
+        # Build a meaningful filename
+        wf = db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+        filename = f"QAP_{(wf.workflow_number or str(workflow_id)).replace('/', '_')}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Report generation failed: {e}")
+
+
+@router.get("/{workflow_id}/report/html", response_class=HTMLResponse)
+def view_qap_html(
+    workflow_id: UUID,
+    db:   Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Generate and return an HTML QAP report for a PRE_COMMISSION workflow.
+    Suitable for in-app web view rendering.
+    """
+    try:
+        from services.precommission_report_service import PreCommissionReportService
+        html = PreCommissionReportService(db).generate_html(workflow_id)
+        return HTMLResponse(content=html)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Report generation failed: {e}")
