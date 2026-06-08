@@ -342,11 +342,25 @@ def login_user(db: Session, email: str, password: str):
                     "plan_description": plan_obj.plan_description,
                     "plan_limit": plan_obj.plan_limit,
                 }
+        # Create tokens
+        access_token = create_access_token({"sub": str(user.id)})
+        refresh_token = create_refresh_token(str(user.id))
+        # Create session record
+        session_record = UserSession(
+            user_id=user.id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            cts=now,
+            expires_at=now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        )
+
+        db.add(session_record)
+        db.commit()
 
         # Step 11: Build and return result
         result = {
-            "access_token": create_access_token({"sub": str(user.id)}),
-            "refresh_token": create_refresh_token(str(user.id)),
+            "access_token": access_token,
+            "refresh_token": refresh_token,
             "user": {
                 "id": str(user.id),
                 "email": user.email,

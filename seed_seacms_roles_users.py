@@ -488,36 +488,54 @@ def seed():
             # Resolve default_module_id
             dmid = module_map.get(rd["dashboard_path"])
 
+           # Special handling for System Administrator role
+            is_org_admin = (rd["name"] == "System Administrator")
+
             if existing:
                 existing.description = rd["description"]
                 existing.default_module_id = dmid
+                existing.is_org_admin = is_org_admin
+                existing.is_dept_admin = (rd["name"] in ("AEE_MAINTENANCE", "EE_TLSS"))
+                existing.is_active = True
                 existing.mts = datetime.now()
+
                 org_role_ids[rd["name"]] = existing.id
-                print(f"  [UPDATE] OrgRole: {rd['name']}")
+
+                print(
+                    f"  [UPDATE] OrgRole: {rd['name']} "
+                    f"(org_admin={existing.is_org_admin})"
+                )
+
             else:
                 nr = OrgRole(
                     id=uuid.uuid4(),
                     organization_id=kptcl.id,
                     name=rd["name"],
                     description=rd["description"],
-                    is_org_admin=False,
+                    is_org_admin=is_org_admin,
                     is_dept_admin=(rd["name"] in ("AEE_MAINTENANCE", "EE_TLSS")),
                     is_active=True,
                     default_module_id=dmid,
                     cts=datetime.now(),
                     mts=datetime.now(),
                 )
+
                 session.add(nr)
                 session.flush()
+
                 org_role_ids[rd["name"]] = nr.id
-                print(f"  [CREATE] OrgRole: {rd['name']}  (default_module={rd['dashboard_path']}  id={dmid})")
 
-            # ── Permissions ────────────────────────────────────────────
-            role_id = org_role_ids[rd["name"]]
-            _apply_perms(session, role_id, module_map, rd["permissions"])
+                print(
+                    f"  [CREATE] OrgRole: {rd['name']} "
+                    f"(org_admin={nr.is_org_admin})"
+                )
 
-        session.flush()
-        print(f"\n[OK] {len(ROLE_DEFS)} OrgRoles created/updated with permissions\n")
+                    # ── Permissions ────────────────────────────────────────────
+                role_id = org_role_ids[rd["name"]]
+                _apply_perms(session, role_id, module_map, rd["permissions"])
+
+                session.flush()
+                print(f"\n[OK] {len(ROLE_DEFS)} OrgRoles created/updated with permissions\n")
 
         # ── Create users ────────────────────────────────────────────────
         password_hash = get_password_hash("Kptcl@2026")
