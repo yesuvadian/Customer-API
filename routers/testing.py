@@ -93,6 +93,29 @@ def get_test_results(
 ):
     service = TestingService(db)
     results = service.get_test_results(request_id)
+
+    # Pre-resolve template column definitions once per unique template_key
+    _tpl_cache: dict = {}
+    def _get_table_columns(template_key: str) -> dict:
+        """Return {field_key: [{key, label, type}, ...]} for all table fields."""
+        if template_key not in _tpl_cache:
+            try:
+                from services.evaluation_service import EvaluationService
+                tpl = EvaluationService.get_template_data(template_key, db)
+                cols: dict = {}
+                for sec in (tpl or {}).get("sections", []):
+                    for fld in sec.get("fields", []):
+                        if fld.get("type") == "table" and fld.get("columns"):
+                            cols[fld["key"]] = [
+                                {"key": c["key"], "label": c.get("label", c["key"]), "type": c.get("type", "text")}
+                                for c in fld["columns"]
+                                if not c.get("hidden")
+                            ]
+                _tpl_cache[template_key] = cols
+            except Exception:
+                _tpl_cache[template_key] = {}
+        return _tpl_cache[template_key]
+
     # Build response with image metadata for each result
     response = []
     for r in results:
@@ -108,6 +131,7 @@ def get_test_results(
             )
             for img in (r.images or [])
         ]
+        table_cols = _get_table_columns(r.template_key) if r.template_key else {}
         resp = TestResultResponse(
             id=r.id,
             testing_request_id=r.testing_request_id,
@@ -132,6 +156,7 @@ def get_test_results(
             images=imgs,
             cts=r.cts,
             mts=r.mts,
+            table_columns=table_cols or None,
         )
         response.append(resp)
     return response

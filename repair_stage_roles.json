@@ -1,12 +1,81 @@
 [
-  {"stage_code": "FAILURE_REPORT",    "roles": ["Maintenance Officer", "Reviewing Officer", "Asset Data Officer"],      "assignment_role": "Transformer Repair Coordinator"},
-  {"stage_code": "COMMITTEE_REVIEW",  "roles": ["Senior Management Approver", "Reviewing Officer"],                     "assignment_role": "Transformer Repair Coordinator"},
-  {"stage_code": "VENDOR_ASSIGNMENT", "roles": ["Senior Management Approver"],                                           "assignment_role": "Transformer Repair Coordinator"},
-  {"stage_code": "LIFTING",           "roles": ["Reviewing Officer", "Maintenance Officer"],                             "assignment_role": "Transformer Repair Coordinator"},
-  {"stage_code": "JOINT_INSPECTION",  "roles": ["Reviewing Officer", "Test Engineer"],                                   "assignment_role": "Transformer Repair Coordinator"},
-  {"stage_code": "ESTIMATE",          "roles": ["Supervisory Officer", "Procurement Officer"],                           "assignment_role": "Transformer Repair Coordinator"},
-  {"stage_code": "QA",                "roles": ["Test Engineer"],                                                        "assignment_role": "Transformer Repair Coordinator"},
-  {"stage_code": "FINAL_INSPECTION",  "roles": ["Reviewing Officer", "Supervisory Officer"],                             "assignment_role": "Transformer Repair Coordinator"},
-  {"stage_code": "DISPATCH",          "roles": ["Reviewing Officer", "Maintenance Officer"],                             "assignment_role": "Transformer Repair Coordinator"},
-  {"stage_code": "COMMISSIONING",     "roles": ["Reviewing Officer", "Senior Management Approver"],                      "assignment_role": "Transformer Repair Coordinator"}
+  {
+    "stage_code": "FAILURE_REPORT",
+    "roles": [
+      "AEE_MAINTENANCE",
+      "EE_TLSS",
+      "Asset Data Officer"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "COMMITTEE_REVIEW",
+    "roles": [
+      "CEE_TRANSMISSION_ZONE",
+      "EE_TLSS"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "VENDOR_ASSIGNMENT",
+    "roles": [
+      "CEE_TRANSMISSION_ZONE"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "LIFTING",
+    "roles": [
+      "EE_TLSS",
+      "AEE_MAINTENANCE"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "JOINT_INSPECTION",
+    "roles": [
+      "EE_TLSS",
+      "AE_JE"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "ESTIMATE",
+    "roles": [
+      "SEE_WM",
+      "Procurement Officer"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "QA",
+    "roles": [
+      "AE_JE"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "FINAL_INSPECTION",
+    "roles": [
+      "EE_TLSS",
+      "SEE_WM"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "DISPATCH",
+    "roles": [
+      "EE_TLSS",
+      "AEE_MAINTENANCE"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  },
+  {
+    "stage_code": "COMMISSIONING",
+    "roles": [
+      "EE_TLSS",
+      "CEE_TRANSMISSION_ZONE"
+    ],
+    "assignment_role": "Transformer Repair Coordinator"
+  }
 ]

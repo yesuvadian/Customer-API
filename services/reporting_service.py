@@ -1,20 +1,16 @@
 """
 Reporting Service
 =================
-Generic report engine driven entirely from the database.
+Generic report engine: 14 SRS reports = 14 query_key values, not 14 code paths.
 
 Flow
 ----
   1.  Router calls ReportingService.generate(definition_id, params, format, user_id)
   2.  Service fetches the ReportDefinition row -> reads query_key
-  3.  _run_query() loads sql_template + org_alias from report_query_keys (5-min
-      cache), injects {org_clause}, binds :named params, executes -> list[dict]
+  3.  _run_query() dispatches to the matching SQL function -> list[dict]
   4.  _render_excel() or _render_pdf() converts to bytes (in-memory, no disk I/O)
   5.  Router returns Response(content=bytes, media_type=...)
   6.  ReportLog row is written for audit trail
-
-Adding a new report type requires only a new row in report_query_keys —
-no Python code change or deployment.
 
 All queries are org-scoped when org_id is provided.
 """
@@ -22,19 +18,14 @@ All queries are org-scoped when org_id is provided.
 from __future__ import annotations
 
 import io
-import logging
-import re
-import time
 from datetime import datetime, timezone, date
-from typing import Optional, Dict, Any
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from models import ReportDefinition, ReportLog
-
-logger = logging.getLogger(__name__)
 
 # ── Optional rendering deps ────────────────────────────────────────────────
 
@@ -58,49 +49,6 @@ except ImportError:
     _HAS_REPORTLAB = False
 
 
-# ── Query SQL cache (loaded from report_query_keys.sql_template) ──────────
-
-_sql_cache:    Optional[Dict[str, Dict[str, Any]]] = None
-_sql_cache_ts: float = 0.0
-_SQL_CACHE_TTL = 300  # seconds — refresh every 5 minutes
-
-
-def _load_sql_cache(db: Session) -> Dict[str, Dict[str, Any]]:
-    """
-    Return {query_key: {sql_template, org_alias}} from DB, refreshed every
-    5 minutes.  On DB error the stale cache is served so in-flight reports
-    are not disrupted.
-    """
-    global _sql_cache, _sql_cache_ts
-    now_ts = time.monotonic()
-    if _sql_cache is not None and (now_ts - _sql_cache_ts) < _SQL_CACHE_TTL:
-        return _sql_cache
-    try:
-        from models import ReportQueryKey
-        rows = (
-            db.query(ReportQueryKey)
-            .filter(
-                ReportQueryKey.is_active.is_(True),
-                ReportQueryKey.sql_template.isnot(None),
-            )
-            .all()
-        )
-        _sql_cache = {
-            r.key: {
-                "sql_template": r.sql_template,
-                "org_alias":    r.org_alias or "",
-            }
-            for r in rows
-        }
-        _sql_cache_ts = now_ts
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning(
-            f"[ReportingService] SQL cache refresh failed: {exc}"
-        )
-    return _sql_cache or {}
-
-
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _p(params: dict, key: str, default=None):
@@ -108,15 +56,19 @@ def _p(params: dict, key: str, default=None):
     return v if v not in (None, "", "null") else default
 
 
-# SQLAlchemy's text() regex uses a negative lookahead (?![:\w]) so it does NOT
-# recognise :param when immediately followed by ::type (PostgreSQL cast syntax).
-# The raw :param reaches psycopg2 which rejects the colon syntax entirely.
-# Fix: rewrite  :param::type  →  CAST(:param AS type)  at execution time.
-_CAST_PARAM_RE = re.compile(r':([A-Za-z_][A-Za-z0-9_]*)::([A-Za-z0-9]+)')
+def _date(val) -> Optional[date]:
+    if val is None:
+        return None
+    if isinstance(val, date):
+        return val
+    try:
+        return date.fromisoformat(str(val)[:10])
+    except Exception:
+        return None
 
-def _fix_cast_params(sql: str) -> str:
-    """Rewrite :param::pgtype → CAST(:param AS pgtype) so SQLAlchemy binds them."""
-    return _CAST_PARAM_RE.sub(r'CAST(:\1 AS \2)', sql)
+
+def _org_clause(org_id, alias: str = "tr") -> str:
+    return f" AND {alias}.organization_id = '{org_id}'" if org_id else ""
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -233,46 +185,13 @@ class ReportingService:
             log.row_count    = len(rows)
             log.completed_at = datetime.now(timezone.utc)
             defn.last_generated_at = datetime.now(timezone.utc)
-
-            # ── In-app notification for the requesting user ────────────────────
-            # Only for on-demand runs (user_id is set).  Scheduled runs already
-            # fire notifications via run_scheduled_reports → NotificationService.
-            if user_id:
-                try:
-                    from models import UserNotification
-                    fmt_label = output_format.upper()
-                    self.db.add(UserNotification(
-                        user_id         = user_id,
-                        organization_id = self.org_id,
-                        event_type      = "report_generated",
-                        title           = f"Report ready: {defn.name}",
-                        body            = f"{len(rows)} rows · {fmt_label}",
-                        severity        = "info",
-                        source_id       = log.id,
-                        source_type     = "report_log",
-                        extra_data      = {
-                            "report_name": defn.name,
-                            "format":      output_format,
-                            "row_count":   len(rows),
-                            "file_name":   filename,
-                        },
-                    ))
-                except Exception as notif_exc:
-                    logger.warning(f"[Reports] Bell notification failed: {notif_exc}")
-
             self.db.commit()
 
         except Exception as exc:
-            # The failed query may have left the DB connection in an aborted
-            # transaction.  Roll back first so the error-log commit succeeds.
-            self.db.rollback()
             log.status        = "failed"
             log.error_message = str(exc)
             log.completed_at  = datetime.now(timezone.utc)
-            try:
-                self.db.commit()
-            except Exception:
-                pass   # best-effort — don't mask the original error
+            self.db.commit()
             raise
 
         return raw, filename, content_type
@@ -280,66 +199,483 @@ class ReportingService:
     # ── Query dispatcher ───────────────────────────────────────────────────
 
     def _run_query(self, query_key: str, params: dict) -> list[dict]:
-        """
-        Load SQL from report_query_keys (DB-cached, 5-min TTL), inject org
-        clause, bind user parameters, and execute.
-
-        To add a new report type: insert a row into report_query_keys with
-        sql_template + org_alias.  No Python code change required.
-        """
-        cache = _load_sql_cache(self.db)
-        entry = cache.get(query_key)
-        if not entry:
-            raise ValueError(f"Unknown query_key: '{query_key}'")
-
-        sql_str   = entry["sql_template"]
-        org_alias = entry["org_alias"]
-
-        # Inject org-scoping clause
-        if self.org_id and org_alias:
-            org_clause = f"AND {org_alias}.organization_id = :org_id"
-        else:
-            org_clause = ""
-        sql_str = sql_str.replace("{org_clause}", org_clause)
-        sql_str = _fix_cast_params(sql_str)   # :param::pgtype → CAST(:param AS pgtype)
-
-        # Build bound-param dict — every supported parameter defaults to None
-        # so SQL NULL-guards (:p IS NULL OR ...) pass through silently when
-        # a caller doesn't supply that filter.
-        bound: Dict[str, Any] = {
-            "org_id":         str(self.org_id) if self.org_id else None,
-            # date range
-            "date_from":      None,
-            "date_to":        None,
-            # integer scalars
-            "year":           None,
-            "month":          None,
-            "months":         None,
-            "quarter":        None,
-            "period_days":    None,
-            # string filters
-            "status":         None,
-            "category":       None,
-            "severity":       None,
-            "outcome":        None,
-            "equipment_type": None,
-            "make":           None,
-            "voltage_class":  None,
-            # uuid filters
-            "workflow_id":    None,
-            "department_id":  None,
+        registry = {
+            "equipment_condition_summary":    self._q_equipment_condition,
+            "overdue_tests_report":           self._q_overdue_tests,
+            "active_alerts_report":           self._q_active_alerts,
+            "flagged_equipment_report":       self._q_flagged_equipment,
+            "repair_progress_report":         self._q_repair_progress,
+            "maintenance_overdue_report":     self._q_maintenance_overdue,
+            "procurement_pipeline_report":    self._q_procurement_pipeline,
+            "open_remediation_report":        self._q_open_remediation,
+            "testing_request_status_report":  self._q_testing_request_status,
+            "test_results_summary_report":    self._q_test_results_summary,
+            "recommendation_approval_report": self._q_recommendation_approval,
+            "compliance_status_report":       self._q_compliance_status,
+            "tester_performance_report":      self._q_tester_performance,
+            "monthly_kpi_report":             self._q_monthly_kpi,
         }
-        # Overlay with caller-supplied values (skip null-ish strings)
-        for k, v in params.items():
-            if v not in (None, "", "null"):
-                bound[k] = v
+        fn = registry.get(query_key)
+        if not fn:
+            raise ValueError(f"Unknown query_key: '{query_key}'")
+        return fn(params)
 
-        return self._exec(text(sql_str), bound)
+    # ── 14 Query Functions ─────────────────────────────────────────────────
+
+    def _q_equipment_condition(self, p: dict) -> list[dict]:
+        org = _org_clause(self.org_id, "e")
+        sql = text(f"""
+            SELECT
+                e.ueic,
+                d.name                              AS department,
+                cm.name                             AS equipment_type,
+                e.voltage_class,
+                e.status                            AS equipment_status,
+                e.manufacturer,
+                e.year_of_manufacture,
+                COALESCE(tr_latest.evaluation_result->>'overall', 'NOT_TESTED') AS condition,
+                tr_latest.tested_at                 AS last_tested_at,
+                tr_latest.test_name                 AS last_test_name
+            FROM   public.equipment e
+            LEFT JOIN public.org_departments  d  ON d.id  = e.department_id
+            LEFT JOIN public."CategoryMaster"  cm ON cm.id = e.equipment_type_id
+            LEFT JOIN LATERAL (
+                SELECT res.evaluation_result, res.tested_at, res.test_name
+                FROM   public.test_results res
+                JOIN   public.testing_requests req ON req.id = res.testing_request_id
+                WHERE  req.equipment_id = e.id AND res.evaluation_result IS NOT NULL
+                ORDER  BY res.tested_at DESC NULLS LAST
+                LIMIT  1
+            ) tr_latest ON true
+            WHERE  e.status != 'retired' {org}
+            ORDER  BY e.ueic
+        """)
+        return self._exec(sql)
+
+    def _q_overdue_tests(self, p: dict) -> list[dict]:
+        org   = _org_clause(self.org_id, "tr")
+        today = date.today()
+        df = _date(_p(p, "date_from"))
+        dt = _date(_p(p, "date_to"))
+        extra = ""
+        if df:
+            extra += f" AND tr.due_date >= '{df}'"
+        if dt:
+            extra += f" AND tr.due_date <= '{dt}'"
+        sql = text(f"""
+            SELECT
+                tr.request_number,
+                tr.title,
+                tr.zone,
+                tr.ce_circle,
+                tr.ee_subdivision,
+                tr.status,
+                tr.priority,
+                tr.due_date::date                         AS due_date,
+                ('{today}'::date - tr.due_date::date)     AS days_overdue,
+                e.ueic,
+                cm.name                                   AS equipment_type,
+                cd.name                                   AS test_type
+            FROM   public.testing_requests tr
+            LEFT JOIN public.equipment        e  ON e.id  = tr.equipment_id
+            LEFT JOIN public."CategoryMaster"  cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryDetails" cd ON cd.id = tr.test_type_id
+            WHERE  tr.request_category = 'test'
+              AND  tr.due_date IS NOT NULL
+              AND  tr.due_date < NOW()
+              AND  tr.status IN ('submitted','assigned','accepted','in_progress',
+                                 'test_submitted','under_approval')
+              {org} {extra}
+            ORDER  BY tr.due_date ASC
+        """)
+        return self._exec(sql)
+
+    def _q_active_alerts(self, p: dict) -> list[dict]:
+        org = _org_clause(self.org_id, "res")
+        sev = _p(p, "severity", "all")
+        sev_clause = (
+            f" AND res.evaluation_result->>'overall' = '{sev}'"
+            if sev in ("CRITICAL", "ALERT")
+            else " AND res.evaluation_result->>'overall' IN ('CRITICAL','ALERT')"
+        )
+        df = _date(_p(p, "date_from"))
+        dt = _date(_p(p, "date_to"))
+        extra = ""
+        if df:
+            extra += f" AND res.tested_at >= '{df}'"
+        if dt:
+            extra += f" AND res.tested_at <= '{dt}'"
+        sql = text(f"""
+            SELECT
+                tr.request_number,
+                e.ueic,
+                cm.name                                 AS equipment_type,
+                tr.zone,
+                tr.ee_subdivision,
+                res.test_name,
+                res.evaluation_result->>'overall'       AS severity,
+                res.tested_at,
+                u.email                                 AS tested_by
+            FROM   public.test_results res
+            JOIN   public.testing_requests  tr ON tr.id  = res.testing_request_id
+            LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public.users           u  ON u.id  = res.tested_by
+            WHERE  res.evaluation_result IS NOT NULL
+              {sev_clause} {org} {extra}
+            ORDER  BY res.tested_at DESC
+            LIMIT  500
+        """)
+        return self._exec(sql)
+
+    def _q_flagged_equipment(self, p: dict) -> list[dict]:
+        org = _org_clause(self.org_id, "res")
+        sql = text(f"""
+            SELECT DISTINCT ON (e.id)
+                e.ueic,
+                d.name                              AS substation,
+                cm.name                             AS equipment_type,
+                e.voltage_class,
+                res.evaluation_result->>'overall'   AS condition,
+                res.tested_at                       AS last_tested_at,
+                tr.zone,
+                tr.ee_subdivision
+            FROM   public.test_results res
+            JOIN   public.testing_requests  tr ON tr.id = res.testing_request_id
+            JOIN   public.equipment         e  ON e.id  = tr.equipment_id
+            LEFT JOIN public.org_departments d  ON d.id  = e.department_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+            WHERE  res.evaluation_result IS NOT NULL
+              AND  res.evaluation_result->>'overall' IN ('CRITICAL','ALERT')
+              {org}
+            ORDER  BY e.id, res.tested_at DESC
+        """)
+        return self._exec(sql)
+
+    def _q_repair_progress(self, p: dict) -> list[dict]:
+        org = _org_clause(self.org_id, "tr")
+        sql = text(f"""
+            SELECT
+                tr.request_number,
+                e.ueic,
+                cm.name                             AS equipment_type,
+                tr.title,
+                tr.status,
+                tr.total_sessions_planned,
+                tr.requested_date::date             AS requested_date,
+                tr.due_date::date                   AS due_date,
+                tr.zone,
+                tr.ee_subdivision,
+                COUNT(ts.id)                        AS sessions_completed
+            FROM   public.testing_requests tr
+            LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public.test_sessions   ts
+                   ON ts.testing_request_id = tr.id AND ts.status = 'completed'
+            WHERE  tr.request_category = 'repair_lifecycle'
+              AND  tr.status IN ('submitted','assigned','accepted','in_progress',
+                                 'test_submitted','under_approval')
+              {org}
+            GROUP  BY tr.id, e.ueic, cm.name
+            ORDER  BY tr.cts DESC
+        """)
+        return self._exec(sql)
+
+    def _q_maintenance_overdue(self, p: dict) -> list[dict]:
+        org   = _org_clause(self.org_id, "tr")
+        today = date.today()
+        sql = text(f"""
+            SELECT
+                tr.request_number,
+                tr.title,
+                tr.zone,
+                tr.ee_subdivision,
+                tr.status,
+                tr.due_date::date                         AS due_date,
+                ('{today}'::date - tr.due_date::date)     AS days_overdue,
+                e.ueic,
+                cm.name                                   AS equipment_type
+            FROM   public.testing_requests tr
+            LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            WHERE  tr.request_category = 'maintenance'
+              AND  tr.due_date IS NOT NULL
+              AND  tr.due_date < NOW()
+              AND  tr.status IN ('submitted','assigned','accepted','in_progress',
+                                 'test_submitted','under_approval')
+              {org}
+            ORDER  BY tr.due_date ASC
+        """)
+        return self._exec(sql)
+
+    def _q_procurement_pipeline(self, p: dict) -> list[dict]:
+        org = _org_clause(self.org_id, "pr")
+        st  = _p(p, "status", "all")
+        st_clause = f" AND pr.status = '{st}'" if st and st != "all" else ""
+        sql = text(f"""
+            SELECT
+                pr.procurement_number,
+                pr.title,
+                pr.status,
+                pr.estimated_cost,
+                pr.quantity,
+                pr.raised_at::date  AS raised_date,
+                tr.request_number   AS linked_request,
+                u.email             AS raised_by
+            FROM   public.procurement_requests pr
+            LEFT JOIN public.testing_requests tr ON tr.id = pr.testing_request_id
+            LEFT JOIN public.users            u  ON u.id  = pr.raised_by
+            WHERE  1=1 {org} {st_clause}
+            ORDER  BY pr.raised_at DESC
+        """)
+        return self._exec(sql)
+
+    def _q_open_remediation(self, p: dict) -> list[dict]:
+        org   = _org_clause(self.org_id, "rec")
+        today = date.today()
+        sql = text(f"""
+            SELECT
+                tr.request_number,
+                e.ueic,
+                cm.name                                 AS equipment_type,
+                rec.recommendation_type,
+                rec.approval_status,
+                rec.summary,
+                rec.cts::date                           AS raised_date,
+                ('{today}'::date - rec.cts::date)       AS days_open,
+                u.email                                 AS submitted_by,
+                tr.due_date::date                       AS due_date
+            FROM   public.recommendations rec
+            JOIN   public.testing_requests  tr ON tr.id  = rec.testing_request_id
+            LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public.users           u  ON u.id  = rec.submitted_by
+            WHERE  rec.approval_status = 'pending'
+              {org}
+            ORDER  BY rec.cts ASC
+        """)
+        return self._exec(sql)
+
+    def _q_testing_request_status(self, p: dict) -> list[dict]:
+        org = _org_clause(self.org_id, "tr")
+        clauses = ""
+        st  = _p(p, "status")
+        cat = _p(p, "category")
+        df  = _date(_p(p, "date_from"))
+        dt  = _date(_p(p, "date_to"))
+        if st  and st  != "all":
+            clauses += f" AND tr.status = '{st}'"
+        if cat and cat != "all":
+            clauses += f" AND tr.request_category = '{cat}'"
+        if df:
+            clauses += f" AND tr.cts >= '{df}'"
+        if dt:
+            clauses += f" AND tr.cts <= '{dt}'"
+        sql = text(f"""
+            SELECT
+                tr.request_number,
+                tr.title,
+                tr.request_category,
+                tr.status,
+                tr.priority,
+                tr.zone,
+                tr.ce_circle,
+                tr.ee_subdivision,
+                tr.cts::date        AS created_date,
+                tr.due_date::date   AS due_date,
+                tr.completed_at::date AS completed_date,
+                e.ueic,
+                cm.name             AS equipment_type,
+                cd.name             AS test_type,
+                u_o.email           AS originator,
+                u_t.email           AS assigned_tester
+            FROM   public.testing_requests tr
+            LEFT JOIN public.equipment        e     ON e.id    = tr.equipment_id
+            LEFT JOIN public."CategoryMaster"  cm    ON cm.id   = tr.equipment_type_id
+            LEFT JOIN public."CategoryDetails" cd    ON cd.id   = tr.test_type_id
+            LEFT JOIN public.users            u_o   ON u_o.id  = tr.originator_id
+            LEFT JOIN public.users            u_t   ON u_t.id  = tr.assigned_tester_id
+            WHERE  1=1 {org} {clauses}
+            ORDER  BY tr.cts DESC
+        """)
+        return self._exec(sql)
+
+    def _q_test_results_summary(self, p: dict) -> list[dict]:
+        org = _org_clause(self.org_id, "res")
+        sev = _p(p, "severity", "all")
+        df  = _date(_p(p, "date_from"))
+        dt  = _date(_p(p, "date_to"))
+        clauses = ""
+        if sev and sev != "all":
+            clauses += f" AND res.evaluation_result->>'overall' = '{sev}'"
+        if df:
+            clauses += f" AND res.tested_at >= '{df}'"
+        if dt:
+            clauses += f" AND res.tested_at <= '{dt}'"
+        sql = text(f"""
+            SELECT
+                tr.request_number,
+                e.ueic,
+                cm.name                                 AS equipment_type,
+                res.test_name,
+                res.template_key,
+                res.overall_result,
+                res.evaluation_result->>'overall'       AS evaluation_overall,
+                res.pass_fail,
+                res.tested_at,
+                u.email                                 AS tested_by,
+                tr.zone,
+                tr.ee_subdivision
+            FROM   public.test_results res
+            JOIN   public.testing_requests  tr ON tr.id  = res.testing_request_id
+            LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public.users           u  ON u.id  = res.tested_by
+            WHERE  1=1 {org} {clauses}
+            ORDER  BY res.tested_at DESC
+            LIMIT  1000
+        """)
+        return self._exec(sql)
+
+    def _q_recommendation_approval(self, p: dict) -> list[dict]:
+        org = _org_clause(self.org_id, "rec")
+        st  = _p(p, "status")
+        clauses = ""
+        if st and st != "all":
+            clauses += f" AND rec.approval_status = '{st}'"
+        sql = text(f"""
+            SELECT
+                tr.request_number,
+                e.ueic,
+                cm.name             AS equipment_type,
+                rec.recommendation_type,
+                rec.approval_status,
+                rec.summary,
+                rec.cts::date       AS submitted_date,
+                rec.approved_at::date AS approved_date,
+                rec.approval_notes,
+                u_s.email           AS submitted_by,
+                u_a.email           AS approved_by
+            FROM   public.recommendations rec
+            JOIN   public.testing_requests  tr  ON tr.id   = rec.testing_request_id
+            LEFT JOIN public.equipment       e   ON e.id   = tr.equipment_id
+            LEFT JOIN public."CategoryMaster" cm  ON cm.id  = tr.equipment_type_id
+            LEFT JOIN public.users           u_s ON u_s.id = rec.submitted_by
+            LEFT JOIN public.users           u_a ON u_a.id = rec.approved_by
+            WHERE  1=1 {org} {clauses}
+            ORDER  BY rec.cts DESC
+        """)
+        return self._exec(sql)
+
+    def _q_compliance_status(self, p: dict) -> list[dict]:
+        org         = _org_clause(self.org_id, "e")
+        period_days = int(_p(p, "period_days", 365))
+        sql = text(f"""
+            SELECT
+                d.name                              AS substation,
+                tr_agg.zone,
+                COUNT(DISTINCT e.id)                AS total_equipment,
+                COUNT(DISTINCT CASE
+                    WHEN latest_tr.completed_at >= NOW() - INTERVAL '{period_days} days'
+                    THEN e.id END)                  AS tested_in_period,
+                ROUND(
+                    100.0 * COUNT(DISTINCT CASE
+                        WHEN latest_tr.completed_at >= NOW() - INTERVAL '{period_days} days'
+                        THEN e.id END)
+                    / NULLIF(COUNT(DISTINCT e.id), 0), 1
+                )                                   AS compliance_pct,
+                COUNT(DISTINCT CASE
+                    WHEN latest_res.condition = 'CRITICAL' THEN e.id END) AS critical_count,
+                COUNT(DISTINCT CASE
+                    WHEN latest_res.condition = 'ALERT'    THEN e.id END) AS alert_count
+            FROM   public.equipment e
+            LEFT JOIN public.org_departments  d      ON d.id = e.department_id
+            LEFT JOIN public.testing_requests tr_agg ON tr_agg.equipment_id = e.id
+            LEFT JOIN LATERAL (
+                SELECT completed_at FROM public.testing_requests
+                WHERE  equipment_id = e.id AND status = 'completed'
+                ORDER  BY completed_at DESC LIMIT 1
+            ) latest_tr ON true
+            LEFT JOIN LATERAL (
+                SELECT res.evaluation_result->>'overall' AS condition
+                FROM   public.test_results res
+                JOIN   public.testing_requests req ON req.id = res.testing_request_id
+                WHERE  req.equipment_id = e.id AND res.evaluation_result IS NOT NULL
+                ORDER  BY res.tested_at DESC LIMIT 1
+            ) latest_res ON true
+            WHERE  e.status = 'active' {org}
+            GROUP  BY d.name, tr_agg.zone
+            ORDER  BY compliance_pct ASC NULLS FIRST
+        """)
+        return self._exec(sql)
+
+    def _q_tester_performance(self, p: dict) -> list[dict]:
+        org = _org_clause(self.org_id, "tr")
+        df  = _date(_p(p, "date_from"))
+        dt  = _date(_p(p, "date_to"))
+        clauses = ""
+        if df:
+            clauses += f" AND tr.cts >= '{df}'"
+        if dt:
+            clauses += f" AND tr.cts <= '{dt}'"
+        sql = text(f"""
+            SELECT
+                u.email                                 AS tester_email,
+                TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')) AS tester_name,
+                COUNT(tr.id)                            AS total_assigned,
+                COUNT(CASE WHEN tr.status='completed'   THEN 1 END) AS completed,
+                COUNT(CASE WHEN tr.status='in_progress' THEN 1 END) AS in_progress,
+                COUNT(CASE WHEN tr.status='rejected'    THEN 1 END) AS rejected,
+                ROUND(AVG(CASE
+                    WHEN tr.status='completed' AND tr.completed_at IS NOT NULL
+                         AND tr.assigned_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (tr.completed_at - tr.assigned_at)) / 86400.0
+                END), 1)                                AS avg_days_to_complete
+            FROM   public.testing_requests tr
+            JOIN   public.users u ON u.id = tr.assigned_tester_id
+            WHERE  tr.assigned_tester_id IS NOT NULL
+              {org} {clauses}
+            GROUP  BY u.id, u.email, u.firstname, u.lastname
+            ORDER  BY completed DESC
+        """)
+        return self._exec(sql)
+
+    def _q_monthly_kpi(self, p: dict) -> list[dict]:
+        org    = _org_clause(self.org_id, "tr")
+        months = int(_p(p, "months", 12))
+        sql = text(f"""
+            SELECT
+                TO_CHAR(DATE_TRUNC('month', tr.cts), 'YYYY-MM') AS month,
+                COUNT(tr.id)                                      AS requests_raised,
+                COUNT(CASE WHEN tr.status='completed' THEN 1 END) AS completed,
+                COUNT(CASE
+                    WHEN tr.status IN ('submitted','assigned','accepted','in_progress',
+                                       'test_submitted','under_approval')
+                         AND tr.due_date IS NOT NULL
+                         AND tr.due_date < NOW() THEN 1 END)      AS overdue,
+                COUNT(DISTINCT CASE
+                    WHEN res.evaluation_result->>'overall'='CRITICAL'
+                    THEN res.id END)                              AS critical_findings,
+                COUNT(DISTINCT CASE
+                    WHEN res.evaluation_result->>'overall'='ALERT'
+                    THEN res.id END)                              AS alert_findings,
+                COUNT(DISTINCT rec.id)                            AS recommendations_raised,
+                COUNT(DISTINCT CASE WHEN rec.approval_status='approved'
+                    THEN rec.id END)                              AS recommendations_approved
+            FROM   public.testing_requests tr
+            LEFT JOIN public.test_results    res ON res.testing_request_id = tr.id
+            LEFT JOIN public.recommendations rec ON rec.testing_request_id = tr.id
+            WHERE  tr.cts >= NOW() - INTERVAL '{months} months'
+              {org}
+            GROUP  BY DATE_TRUNC('month', tr.cts)
+            ORDER  BY month DESC
+        """)
+        return self._exec(sql)
 
     # ── Executor ───────────────────────────────────────────────────────────
 
-    def _exec(self, sql, params: dict = None) -> list[dict]:
-        result = self.db.execute(sql, params or {})
+    def _exec(self, sql) -> list[dict]:
+        result = self.db.execute(sql)
         keys   = list(result.keys())
         return [dict(zip(keys, row)) for row in result.fetchall()]
 
@@ -561,297 +897,25 @@ def run_scheduled_reports(db_factory) -> int:
                 continue
             try:
                 svc = ReportingService(db, defn.organization_id)
-
-                # "both" → generate Excel then PDF; otherwise normalise to excel
-                formats = (
-                    ["excel", "pdf"] if defn.output_format == "both"
-                    else [defn.output_format
-                          if defn.output_format in ("excel", "pdf")
-                          else "excel"]
-                )
-
-                # Collect all generated files so one email can carry all
-                # attachments (avoids two separate emails for "both" format).
-                generated_files: list[dict] = []   # [{content, filename, fmt, rel_path}]
-
-                for fmt in formats:
-                    raw, filename, _ = svc.generate(defn.id, {}, fmt)
-
-                    if defn.recipient_roles:
-                        rel_path = _save_report_file(filename, raw)
-                        generated_files.append(
-                            {"content": raw, "filename": filename,
-                             "fmt": fmt, "rel_path": rel_path}
-                        )
-
-                        # ── Email/SMS via full template system (optional) ───
-                        if defn.notification_event:
-                            try:
-                                from services.notification_service import NotificationService
-                                NotificationService(db).fire(
-                                    event_type    = defn.notification_event,
-                                    context       = {
-                                        "report_name":   defn.name,
-                                        "report_period": _period_label(defn.frequency, now),
-                                        "download_url":  f"/reports/download/{rel_path}",
-                                        "format":        fmt.upper(),
-                                    },
-                                    organization_id = defn.organization_id,
-                                    source_id       = defn.id,
-                                    source_type     = "report_definition",
-                                    severity        = "info",
-                                    roles_override  = defn.recipient_roles,
-                                )
-                            except Exception as notif_exc:
-                                logger.warning(
-                                    f"[Reports] Email/SMS for '{defn.name}': {notif_exc}"
-                                )
-
-                        # ── In-app bell notification (one per format) ──────
-                        try:
-                            _notify_recipients_inapp(
-                                db, defn, filename, fmt,
-                                rel_path, now,
-                            )
-                        except Exception as notif_exc:
-                            logger.warning(
-                                f"[Reports] In-app notif for '{defn.name}': {notif_exc}"
-                            )
-
-                # ── ONE email with all attachments ─────────────────────────
-                # Sent after all formats are generated so "both" arrives as a
-                # single message with Excel + PDF attached.
-                if generated_files:
-                    try:
-                        _email_report_to_recipients(db, defn, generated_files, now)
-                    except Exception as email_exc:
-                        logger.warning(
-                            f"[Reports] Email for '{defn.name}': {email_exc}"
-                        )
-
+                fmt = defn.output_format if defn.output_format in ("excel", "pdf") \
+                      else "excel"
+                svc.generate(defn.id, {}, fmt)
                 count += 1
-
             except Exception as exc:
-                logger.error(f"[Reports] Scheduled '{defn.name}' failed: {exc}")
+                print(f"[Reports] Scheduled '{defn.name}' failed: {exc}")
     finally:
         db.close()
     return count
 
 
-def _save_report_file(filename: str, raw: bytes) -> str:
-    """Save generated report to uploads/reports/ and return the filename."""
-    import os
-    folder = "uploads/reports"
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, filename)
-    with open(path, "wb") as fh:
-        fh.write(raw)
-    return filename
-
-
-_MIME = {
-    "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "pdf":   "application/pdf",
-}
-
-
-def _email_report_to_recipients(
-    db, defn: "ReportDefinition",
-    generated_files: "list[dict]",   # [{content, filename, fmt, rel_path}, ...]
-    now: datetime,
-) -> None:
-    """
-    Send all generated report files as attachments in ONE email to every active
-    user that holds one of the definition's recipient_roles.
-
-    ``generated_files`` is the list built in run_scheduled_reports — each entry
-    contains ``content`` (bytes), ``filename``, ``fmt`` ("excel"|"pdf"), and
-    ``rel_path``.  Passing multiple entries lets "both" format deliver a single
-    message with Excel + PDF attached rather than two separate emails.
-
-    Uses BCC so recipients cannot see each other's addresses.
-    Requires no notification_event template — works for any scheduled definition
-    that has recipient_roles set.
-    """
-    from models import OrgRole, OrgUserRole, User
-    from utils.email_service import EmailService
-
-    if not defn.recipient_roles or not generated_files:
-        return
-
-    # ── Resolve email addresses ────────────────────────────────────────────
-    emails: list[str] = []
-    seen_users: set = set()
-
-    for role_ref in defn.recipient_roles:
-        role_q = db.query(OrgRole).filter(
-            OrgRole.organization_id == defn.organization_id
-        )
-        try:
-            import uuid as _uuid
-            role = role_q.filter(OrgRole.id == _uuid.UUID(str(role_ref))).first()
-        except (ValueError, AttributeError):
-            role = role_q.filter(OrgRole.name == str(role_ref)).first()
-
-        if not role:
-            continue
-
-        rows = (
-            db.query(OrgUserRole)
-            .filter(
-                OrgUserRole.org_role_id == role.id,
-                OrgUserRole.is_active.is_(True),
-            )
-            .all()
-        )
-        for ur in rows:
-            if ur.user_id in seen_users:
-                continue
-            seen_users.add(ur.user_id)
-            user = db.query(User).filter(User.id == ur.user_id).first()
-            if user and user.email:
-                emails.append(user.email)
-
-    if not emails:
-        logger.info(f"[Reports] No email recipients found for '{defn.name}'")
-        return
-
-    # ── Build attachment list ──────────────────────────────────────────────
-    attachments = [
-        {
-            "content":   gf["content"],
-            "filename":  gf["filename"],
-            "mime_type": _MIME.get(gf["fmt"], "application/octet-stream"),
-        }
-        for gf in generated_files
-    ]
-
-    # ── Build email body ───────────────────────────────────────────────────
-    period     = _period_label(defn.frequency, now)
-    fmt_labels = " + ".join(sorted({gf["fmt"].upper() for gf in generated_files}))
-    file_list  = ", ".join(gf["filename"] for gf in generated_files)
-    subject    = f"[Report] {defn.name} — {period}"
-    body_html  = (
-        f"<h3 style='color:#1565C0'>{defn.name}</h3>"
-        f"<p>Your scheduled report for <strong>{period}</strong> is ready.</p>"
-        f"<p><strong>Format:</strong> {fmt_labels} &nbsp;|&nbsp; "
-        f"<strong>Attached:</strong> {file_list}</p>"
-        f"{'<p>' + defn.description + '</p>' if defn.description else ''}"
-        f"<hr style='border:none;border-top:1px solid #eee'/>"
-        f"<p style='color:#888;font-size:12px'>"
-        f"Generated automatically by CogniWatt SEACMS · {now.strftime('%d %b %Y %H:%M UTC')}"
-        f"</p>"
-    )
-
-    try:
-        EmailService().send_multi_attachment_email_starttls_bcc(
-            bcc_emails  = emails,
-            subject     = subject,
-            body_html   = body_html,
-            attachments = attachments,
-        )
-        logger.info(
-            f"[Reports] Emailed '{defn.name}' ({fmt_labels}) "
-            f"to {len(emails)} recipient(s) with {len(attachments)} attachment(s)"
-        )
-    except Exception as exc:
-        logger.warning(f"[Reports] Email delivery failed for '{defn.name}': {exc}")
-
-
-def _notify_recipients_inapp(
-    db, defn: "ReportDefinition",
-    filename: str, fmt: str,
-    rel_path: str, now: datetime,
-) -> None:
-    """
-    Write a UserNotification row for every active user who holds one of the
-    definition's recipient_roles.  Works without a notification_event template
-    — always fires for scheduled reports that have recipient_roles set.
-
-    recipient_roles is a JSON list of OrgRole UUIDs or role name strings.
-    """
-    from models import UserNotification, OrgRole, OrgUserRole
-
-    if not defn.recipient_roles:
-        return
-
-    period = _period_label(defn.frequency, now)
-    notified_users: set = set()
-
-    for role_ref in defn.recipient_roles:
-        # Accept both UUID strings and role name strings
-        role_q = db.query(OrgRole).filter(
-            OrgRole.organization_id == defn.organization_id
-        )
-        try:
-            import uuid as _uuid
-            role = role_q.filter(OrgRole.id == _uuid.UUID(str(role_ref))).first()
-        except (ValueError, AttributeError):
-            role = role_q.filter(OrgRole.name == str(role_ref)).first()
-
-        if not role:
-            continue
-
-        user_role_rows = (
-            db.query(OrgUserRole)
-            .filter(
-                OrgUserRole.org_role_id == role.id,
-                OrgUserRole.is_active.is_(True),
-            )
-            .all()
-        )
-        for ur in user_role_rows:
-            if ur.user_id in notified_users:
-                continue   # deduplicate when a user holds multiple matching roles
-            notified_users.add(ur.user_id)
-            db.add(UserNotification(
-                user_id         = ur.user_id,
-                organization_id = defn.organization_id,
-                event_type      = "scheduled_report_ready",
-                title           = f"Scheduled report ready: {defn.name}",
-                body            = f"{period}  ·  {fmt.upper()}",
-                severity        = "info",
-                source_id       = defn.id,
-                source_type     = "report_definition",
-                extra_data      = {
-                    "report_name":  defn.name,
-                    "format":       fmt,
-                    "download_url": f"/reports/download/{rel_path}",
-                    "period":       period,
-                    "file_name":    filename,
-                },
-            ))
-
-    if notified_users:
-        db.commit()
-
-
-def _period_label(frequency: str, now: datetime) -> str:
-    """Human-readable period label for the notification body."""
-    if frequency == "monthly":
-        return now.strftime("%B %Y")
-    if frequency == "quarterly":
-        q = (now.month - 1) // 3 + 1
-        return f"Q{q} {now.year}"
-    if frequency == "annual":
-        return str(now.year - 1)
-    if frequency == "weekly":
-        return f"Week ending {now.strftime('%d %b %Y')}"
-    return now.strftime("%d %b %Y")
-
-
 def _is_due(defn: ReportDefinition, now: datetime) -> bool:
     if defn.last_generated_at is None:
         return True
-    delta_days = (now - defn.last_generated_at).days
+    delta = (now - defn.last_generated_at).total_seconds()
     if defn.frequency == "daily":
-        return delta_days >= 1
+        return delta >= 86_400
     if defn.frequency == "weekly":
-        return delta_days >= 7
+        return delta >= 7 * 86_400
     if defn.frequency == "monthly":
-        return delta_days >= 28
-    if defn.frequency == "quarterly":
-        return delta_days >= 89
-    if defn.frequency == "annual":
-        return delta_days >= 364
+        return (now - defn.last_generated_at).days >= 28
     return False

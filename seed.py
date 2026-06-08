@@ -67,13 +67,28 @@ def run_migration_from_file(session, migration_file: str, migration_name: str) -
         with open(migration_file, encoding='latin-1') as fh:
             sql_content = fh.read()
 
-    # Split on semicolons, skip blank/comment-only chunks
+    # Split on semicolons, but respect dollar-quoted $$ blocks (PL/pgSQL functions)
     statements = []
-    for raw in sql_content.split(";"):
-        lines = [l.split("--")[0].strip() for l in raw.split("\n")]
-        clean = "\n".join(l for l in lines if l).strip()
-        if clean:
-            statements.append(clean)
+    current = []
+    in_dollar_quote = False
+    for line in sql_content.split("\n"):
+        # Track entry/exit of $$ dollar-quote blocks
+        stripped = line.strip()
+        dollar_count = stripped.count("$$")
+        if dollar_count % 2 != 0:          # odd number → toggle state
+            in_dollar_quote = not in_dollar_quote
+        current.append(line)
+        if not in_dollar_quote and stripped.endswith(";"):
+            chunk = "\n".join(current).strip().rstrip(";").strip()
+            # Strip single-line comments from non-dollar-quoted content
+            if chunk:
+                statements.append(chunk)
+            current = []
+    # Any remaining content
+    if current:
+        chunk = "\n".join(current).strip().rstrip(";").strip()
+        if chunk:
+            statements.append(chunk)
 
     if not statements:
         print(f"[WARN] {migration_name}: No statements found — skipping")
@@ -176,6 +191,27 @@ NAMEPLATE_TEMPLATES = {
                     {"key": "oltc_positions",     "label": "OLTC Positions",     "type": "number",   "required": False, "read_only": False},
                     {"key": "oltc_drive_type",    "label": "OLTC Drive Type",    "type": "dropdown", "required": False, "read_only": False,
                      "options": ["Motor", "Manual"]},
+                ]
+            },
+            {
+                "title": "Bushing Details",
+                "fields": [
+                    {
+                        "key": "bushing_details",
+                        "label": "Bushing Details (per winding / phase)",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "read_only": False,
+                        "columns": [
+                            {"key": "winding",   "label": "Winding / Level", "type": "dropdown",
+                             "options": ["HV (220kV)", "HV (400kV)", "HV (110kV)", "MV (66kV)", "MV (33kV)", "LV (11kV)", "Tertiary", "Neutral"]},
+                            {"key": "phase",     "label": "Phase",   "type": "dropdown", "options": ["R", "Y", "B", "N"]},
+                            {"key": "make",      "label": "Make",    "type": "text"},
+                            {"key": "serial_no", "label": "Sl. No.", "type": "text"},
+                            {"key": "yo_mfg",    "label": "Y.O. Mfg.", "type": "number"},
+                        ],
+                    },
                 ]
             },
             {
@@ -1105,7 +1141,6 @@ def seed_roles(session):
     # 🔐 SYSTEM ROLES
     # =========================
     {"name": "ADMIN", "description": "Full access to all modules"},
-    {"name": "VIEWER", "description": "Read-only access"},
     {"name": "OPERATOR", "description": "Can scan and submit inventory"},
     {"name": "AUDITOR", "description": "Can view scan history and audit trails"},
 
@@ -1121,14 +1156,6 @@ def seed_roles(session):
     {"name": "ORIGINATOR", "description": "Creates testing requests and raises procurement"},
     {"name": "TESTER", "description": "Performs transformer testing and uploads results"},
     {"name": "APPROVER", "description": "Reviews and approves or rejects recommendations"},
-
-    # =========================
-    # ⚡ KPTCL FIELD ROLES
-    # =========================
-    {"name": "AE_JE", "description": "Assistant Engineer / Junior Engineer - failure reporting & commissioning"},
-    {"name": "AEE_MAINTENANCE", "description": "Assistant Executive Engineer - field maintenance authority"},
-    {"name": "EE_TLSS", "description": "Executive Engineer - Transmission Line & Substation reviewer"},
-    {"name": "SEE_WM", "description": "Superintending Engineer - Works & Maintenance supervisor"},
 
     # =========================
     # 🧠 TECHNICAL / COMMITTEE
@@ -1147,13 +1174,17 @@ def seed_roles(session):
     {"name": "FINANCE_OFFICER", "description": "Approves estimates and financial sanction for repair"},
 
     # =========================
-    # 🏢 SPECIALIZED ENGINEERING (R&D / TRANSMISSION)
+    # ⚡ KPTCL FIELD ROLES (system Role table — used by seed_privileges)
+    # OrgRole equivalents with full permissions seeded by seed_seacms_roles_users.py
     # =========================
+    {"name": "AE_JE", "description": "Assistant Engineer / Junior Engineer - failure reporting & commissioning"},
+    {"name": "AEE_MAINTENANCE", "description": "Assistant Executive Engineer - field maintenance authority"},
+    {"name": "EE_TLSS", "description": "Executive Engineer - Transmission Line & Substation reviewer"},
+    {"name": "SEE_WM", "description": "Superintending Engineer - Works & Maintenance supervisor"},
     {"name": "EE_RT", "description": "Executive Engineer - Research & Testing"},
     {"name": "SEE_RT", "description": "Superintending Engineer - Research & Testing"},
-
     {"name": "CEE_TRANSMISSION_ZONE", "description": "Chief Engineer Executive - Transmission zone authority"},
-    {"name": "CEE_RT_RD", "description": "Chief Engineer Executive - Research, Testing & R&D"}
+    {"name": "CEE_RT_RD", "description": "Chief Engineer Executive - Research, Testing & R&D"},
 
 ]
 
@@ -1172,29 +1203,11 @@ def seed_roles(session):
     return role_ids
 
 def assign_viewer_role_to_new_users(session, new_user_ids, role_ids):
-    """Assign Viewer role to new users who don't have ANY role yet.
-    Rule: Each user can only belong to ONE role.
-    """
-    viewer_role_id = role_ids.get("Viewer")
-    if not viewer_role_id:
-        print("[ERROR] Viewer role not found")
+    """No-op — seed_users() returns [] so new_user_ids is always empty.
+    Users are assigned roles via seed_seacms_roles_users (OrgUserRole)."""
+    if not new_user_ids:
         return
-
-    for user_id in new_user_ids:
-        # Skip if user already has ANY role (single-role rule)
-        has_any_role = session.query(UserRole).filter(
-            UserRole.user_id == user_id
-        ).first()
-        if has_any_role:
-            continue
-
-        session.add(UserRole(
-            user_id=user_id,
-            role_id=viewer_role_id
-        ))
-
-    session.commit()
-    print("[OK] Viewer (Read-only) role assigned to new users without any role.")
+    print(f"[SKIP] assign_viewer_role_to_new_users: no new users to assign.")
 
 def seed_plans(session):
     plans_data = [
@@ -1228,8 +1241,11 @@ def seed_category_master(session):
         {"name": "Bank Account Types", "description": "Dropdown values for company bank account types (e.g., savings, current, salary)."},
         {"name": "Bank Document Types", "description": "Dropdown values for required company bank documents (e.g., cancelled cheque, bank statement)."},
         {"name": "GST Slabs", "description": "GST percentage slabs applicable to goods and services in India."},
-        {"name": "Utility", "description": "Type of utility - Generation, Transmission, DISCOM."},
-        
+        {"name": "Utility",              "description": "Type of utility - Generation, Transmission, DISCOM."},
+        # ── Pre-Commission QAP lookup dropdowns ─────────────────────────────────
+        {"name": "PCR Voltage Class",    "description": "Voltage class options for pre-commission QAP transformer requests."},
+        {"name": "PCR Transformer Type", "description": "Winding configuration options for pre-commission QAP requests."},
+        {"name": "PCR Cooling Class",    "description": "Cooling method options for pre-commission QAP transformer requests."},
     ]
 
     master_ids = {}
@@ -1358,6 +1374,24 @@ def seed_category_details(session, master_ids):
         {"master_name": "Utility", "name": "Generation", "description": "Power generation utility"},
         {"master_name": "Utility", "name": "Transmission", "description": "Power transmission utility"},
         {"master_name": "Utility", "name": "DISCOM", "description": "Distribution company utility"},
+
+        # ---------------- PCR Voltage Class ----------------
+        {"master_name": "PCR Voltage Class", "name": "33kV",  "description": "33 kV voltage class transformer"},
+        {"master_name": "PCR Voltage Class", "name": "66kV",  "description": "66 kV voltage class transformer"},
+        {"master_name": "PCR Voltage Class", "name": "110kV", "description": "110 kV voltage class transformer"},
+        {"master_name": "PCR Voltage Class", "name": "220kV", "description": "220 kV voltage class transformer"},
+        {"master_name": "PCR Voltage Class", "name": "400kV", "description": "400 kV voltage class transformer"},
+
+        # ---------------- PCR Transformer Type ----------------
+        {"master_name": "PCR Transformer Type", "name": "Two-winding",      "description": "Standard two-winding power transformer"},
+        {"master_name": "PCR Transformer Type", "name": "Three-winding",    "description": "Three-winding power transformer"},
+        {"master_name": "PCR Transformer Type", "name": "Auto Transformer", "description": "Auto transformer"},
+
+        # ---------------- PCR Cooling Class ----------------
+        {"master_name": "PCR Cooling Class", "name": "ONAN", "description": "Oil Natural Air Natural"},
+        {"master_name": "PCR Cooling Class", "name": "ONAF", "description": "Oil Natural Air Forced"},
+        {"master_name": "PCR Cooling Class", "name": "OFAF", "description": "Oil Forced Air Forced"},
+        {"master_name": "PCR Cooling Class", "name": "ODAF", "description": "Oil Directed Air Forced"},
     ]
 
     for d in category_details_data:
@@ -1464,9 +1498,13 @@ def seed_modules(session):
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
 {"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
 {"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
+{"name": "AE Dashboard",    "path": "ae_dashboard",    "description": "Field officer daily work overview — tests due, overdue maintenance, remedial actions", "group_name": "Testing", "is_menu": False},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "EE RT Dashboard",  "description": "EE RT relay testing & calibration dashboard — calibration compliance, overdue cals, expiring certs, FAIL count, open workflows", "path": "ee_rt_dashboard",  "group_name": "Testing", "is_menu": False},
+{"name": "SEE RT Dashboard", "description": "SEE RT circle-level calibration supervision dashboard — circle compliance, overdue, expiring, FAIL, open workflows", "path": "see_rt_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "CEE RT Dashboard", "description": "CEE RT RD zone-level calibration governance dashboard — zone compliance, relay assets, open workflows, FAIL count", "path": "cee_rt_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
 {"name": "Notification Center",    "description": "Notification Center — manage templates, routing rules and schedules", "path": "org_notification_center",    "group_name": "Organization", "is_menu": True},
@@ -1544,6 +1582,15 @@ def seed_modules(session):
  "description": "24-month post-commissioning surveillance with quarterly testing (Q1-Q4) and final evaluation. "
                 "Tracks DGA, BDV, IR, Oil Quality tests at enhanced frequency with quality ratings.",
  "path": "surveillance-workflows",
+ "group_name": "Field Operations"},
+# ✅ PRE-COMMISSION QAP MODULE
+{"name": "Pre-Commission Requests",
+ "description": "PCR approval queue — raise and approve pre-commission QAP requests before factory inspection begins.",
+ "path": "precommission-requests",
+ "group_name": "Field Operations"},
+{"name": "Pre-Commission Workflows",
+ "description": "9-stage Manufacturing QAP workflow for 110kV/66kV Power Transformers per KPTCL QAP circular.",
+ "path": "precommission-workflows",
  "group_name": "Field Operations"},
 # ✅ SURVEILLANCE DASHBOARD MODULE
 {"name": "Surveillance Dashboard",
@@ -1689,12 +1736,6 @@ def seed_privileges(session, role_ids, module_ids):
                 "can_delete": True, "can_search": True,
                 "can_import": True, "can_export": True
             }
-            for module in module_names
-        ],
-
-        # VIEWER — only view
-        *[
-            { "role": "Viewer", "module": module, "can_view": True }
             for module in module_names
         ],
 
@@ -2044,6 +2085,35 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Senior Management Approver",  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "TRC Member",                  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
+
+        # ✅ PRE-COMMISSION QAP — Request tickets (approval queue)
+        # Asset Data Officer creates PCR tickets; approvers approve/reject.
+        {"role": "Asset Data Officer",         "module": "Pre-Commission Requests", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer",          "module": "Pre-Commission Requests", "can_view": True, "can_add": True, "can_approve": True, "can_search": True},
+        {"role": "Supervisory Officer",        "module": "Pre-Commission Requests", "can_view": True, "can_approve": True, "can_search": True},
+        {"role": "Senior Management Approver", "module": "Pre-Commission Requests", "can_view": True, "can_approve": True, "can_search": True},
+        {"role": "Transformer Repair Coordinator", "module": "Pre-Commission Requests", "can_view": True, "can_search": True},
+
+        # ✅ PRE-COMMISSION QAP — 9-stage workflow execution
+        # Reviewing Officer is the primary stage actor (fills QAP forms, advances stages).
+        # Coordinator handles stage assignment. Senior Management Approver escalation.
+        {"role": "Reviewing Officer",          "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Supervisory Officer",        "module": "Pre-Commission Workflows", "can_view": True, "can_export": True},
+        {"role": "Asset Data Officer",         "module": "Pre-Commission Workflows", "can_view": True},
+        {"role": "Transformer Repair Coordinator", "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_assign": True},
+
+        # ✅ AE DASHBOARD — Test Engineer (AE_JE)
+        {"role": "Test Engineer",              "module": "AE Dashboard",  "can_view": True},
+
+        # ✅ EE RT DASHBOARD — Reviewing Officer (RT track)
+        {"role": "Reviewing Officer",          "module": "EE RT Dashboard",  "can_view": True},
+
+        # ✅ SEE RT DASHBOARD — Supervisory Officer (RT track)
+        {"role": "Supervisory Officer",        "module": "SEE RT Dashboard", "can_view": True},
+
+        # ✅ CEE RT DASHBOARD — Senior Management Approver (RT RD track)
+        {"role": "Senior Management Approver", "module": "CEE RT Dashboard", "can_view": True},
     ]
 
     privileges_data.extend(testing_privileges)
@@ -2464,6 +2534,15 @@ def seed_test_type_categories(session, master_ids):
                 "Capacitance & Tan Delta Test (Transformer)",
                 "Capacitance & Tan Delta Comparison",
                 "Transformer Oil Test",
+                "Dielectric Frequency Response (DFR / IDAX)",
+                "Sweep Frequency Response Analysis (SFRA)",
+                "Tan-Delta, Capacitance & Insulation Diagnostics",
+                "Winding Tan-Delta & Capacitance Test",
+                "220kV Bushing Tan-Delta Test",
+                "66kV Bushing Tan-Delta Test",
+                "Insulation Diagnostics (IDAX)",
+                "Dielectric Frequency Response (DFR) — Routine",
+                "Sweep Frequency Response Analysis (SFRA) — Routine",
             ],
             "maintenance": [
                 "Routine Preventive Maintenance",
@@ -3263,10 +3342,13 @@ def seed_role_templates(session):
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
     asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
     test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
-    aee_dashboard_module_id = modules_by_name.get("AEE Dashboard")
-    see_dashboard_module_id = modules_by_name.get("SEE Dashboard")
-    cee_dashboard_module_id = modules_by_name.get("CEE Dashboard")
-    admin_dashboard_module_id = modules_by_name.get("Admin Dashboard")
+    aee_dashboard_module_id    = modules_by_name.get("AEE Dashboard")
+    see_dashboard_module_id    = modules_by_name.get("SEE Dashboard")
+    cee_dashboard_module_id    = modules_by_name.get("CEE Dashboard")
+    admin_dashboard_module_id  = modules_by_name.get("Admin Dashboard")
+    ee_rt_dashboard_module_id  = modules_by_name.get("EE RT Dashboard")
+    see_rt_dashboard_module_id = modules_by_name.get("SEE RT Dashboard")
+    cee_rt_dashboard_module_id = modules_by_name.get("CEE RT Dashboard")
 
     # ── Named module-set shortcuts ─────────────────────────────────────────
     # Procurement modules (without Dashboard — added individually where needed)
@@ -3293,8 +3375,10 @@ def seed_role_templates(session):
     overhaul_workflows_module       = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
     calibration_workflows_module    = [mid for mid in [modules_by_name.get("Calibration Workflows")] if mid]
     annual_audit_workflows_module   = [mid for mid in [modules_by_name.get("Annual Audit Workflows")] if mid]
-    surveillance_workflows_module   = [mid for mid in [modules_by_name.get("Surveillance Workflows")] if mid]
-    surveillance_dashboard_module   = [mid for mid in [modules_by_name.get("Surveillance Dashboard")] if mid]
+    surveillance_workflows_module        = [mid for mid in [modules_by_name.get("Surveillance Workflows")] if mid]
+    surveillance_dashboard_module        = [mid for mid in [modules_by_name.get("Surveillance Dashboard")] if mid]
+    precommission_requests_module        = [mid for mid in [modules_by_name.get("Pre-Commission Requests")] if mid]
+    precommission_workflows_module       = [mid for mid in [modules_by_name.get("Pre-Commission Workflows")] if mid]
     schedule_compliance_module          = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
     test_schedule_templates_module      = [mid for mid in [modules_by_name.get("Test Schedule Templates")] if mid]
     maintenance_schedule_templates_module = [mid for mid in [modules_by_name.get("Maintenance Schedule Templates")] if mid]
@@ -3391,7 +3475,9 @@ def seed_role_templates(session):
                 _readwrite(testing_requests_module) +
                 _readwrite(equipment_module) +
                 _readwrite(breakdown_workflows_module) +
-                _readwrite(taqc_inspections_module)      # can create TA&QC inspection requests
+                _readwrite(taqc_inspections_module) +    # can create TA&QC inspection requests
+                _readwrite(precommission_requests_module) +   # can create PCR tickets
+                _readonly(precommission_workflows_module)     # view QAP workflow progress
             ),
         },
 
@@ -3479,8 +3565,11 @@ def seed_role_templates(session):
                 _approve(breakdown_workflows_module) +
                 _approve(overhaul_workflows_module) +        # OVERHAUL_TRIGGER review + OFFICER_VERIFICATION
                 _approve(calibration_workflows_module) +     # CAL_REVIEW + CAL_VERIFY
-                _approve(annual_audit_workflows_module) +    # COMPLIANCE_REVIEW
-                _readonly(failure_registry_module)
+                _approve(annual_audit_workflows_module) +        # COMPLIANCE_REVIEW
+                _approve(precommission_requests_module) +        # approve/reject PCR tickets
+                _approve(precommission_workflows_module) +       # QAP stage execution (primary actor)
+                _readonly(failure_registry_module) +
+                _readonly([ee_rt_dashboard_module_id] if ee_rt_dashboard_module_id else [])  # EE RT track dashboard
             ),
         },
 
@@ -3504,9 +3593,12 @@ def seed_role_templates(session):
                 _readonly(equipment_module) +
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
-                _readonly(overhaul_workflows_module) +       # management visibility
-                _readonly(calibration_workflows_module) +    # management visibility
-                _readonly(annual_audit_workflows_module)     # management visibility
+                _readonly(overhaul_workflows_module) +            # management visibility
+                _readonly(calibration_workflows_module) +         # management visibility
+                _readonly(annual_audit_workflows_module) +        # management visibility
+                _approve(precommission_requests_module) +         # can approve PCR tickets
+                _readonly(precommission_workflows_module) +       # management visibility
+                _readonly([see_rt_dashboard_module_id] if see_rt_dashboard_module_id else [])  # SEE RT track dashboard
             ),
         },
 
@@ -3532,7 +3624,10 @@ def seed_role_templates(session):
                 _approve(breakdown_workflows_module) +
                 _approve(overhaul_workflows_module) +        # OFFICER_VERIFICATION final sign-off
                 _approve(calibration_workflows_module) +     # CAL_VERIFY final sign-off
-                _approve(annual_audit_workflows_module)      # OBSERVATION_CLOSURE final sign-off
+                _approve(annual_audit_workflows_module) +        # OBSERVATION_CLOSURE final sign-off
+                _approve(precommission_requests_module) +        # final approval authority for PCR tickets
+                _approve(precommission_workflows_module) +       # QAP_FINAL_DISPATCH escalation approver
+                _readonly([cee_rt_dashboard_module_id] if cee_rt_dashboard_module_id else [])  # CEE RT RD track dashboard
             ),
         },
 
@@ -3567,7 +3662,9 @@ def seed_role_templates(session):
                 _readwrite(breakdown_workflows_module) +
                 _readwrite(overhaul_workflows_module) +      # assignment_role for all 4 overhaul stages
                 _readwrite(calibration_workflows_module) +   # assignment_role for all 4 calibration stages
-                _readwrite(annual_audit_workflows_module) +  # assignment_role for all 5 annual audit stages
+                _readwrite(annual_audit_workflows_module) +       # assignment_role for all 5 annual audit stages
+                _readwrite(precommission_workflows_module) +      # assignment_role for all 9 QAP stages
+                _readonly(precommission_requests_module) +        # view PCR tickets for context
                 _readonly(testing_requests_module)
             ),
         },
@@ -4432,228 +4529,7 @@ def seed_kptcl_organization(session):
         # Build a lookup of all roles (existing + newly provisioned)
         provisioned_by_name = {r.name: r for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
 
-        # Create missing test users for new SRS roles
-        kptcl_users = [
-            {
-                "email": "taqc.inspector@utility.com",
-                "password": "admin123",
-                "firstname": "TAQC",
-                "lastname": "Inspector",
-                "phone": "+91-9900000015",
-                "role_name": "TA&QC Inspector",
-                "employee_id": "KPTCL-TAQC-001",
-            },
-            {
-                "email": "aee.maintenance@utility.com",
-                "password": "admin123",
-                "firstname": "AEE",
-                "lastname": "Maintenance",
-                "phone": "+91-9900000010",
-                "role_name": "Maintenance Officer",
-                "employee_id": "KPTCL-AEE-M-001",
-            },
-            {
-                "email": "ee.tlss@utility.com",
-                "password": "admin123",
-                "firstname": "EE",
-                "lastname": "TLSS",
-                "phone": "+91-9900000011",
-                "role_name": "Reviewing Officer",
-                "employee_id": "KPTCL-EE-TLSS-001",
-            },
-            {
-                "email": "see.wm@utility.com",
-                "password": "admin123",
-                "firstname": "SEE",
-                "lastname": "W&M",
-                "phone": "+91-9900000012",
-                "role_name": "Supervisory Officer",
-                "employee_id": "KPTCL-SEE-WM-001",
-            },
-            {
-                "email": "ee.rt@utility.com",
-                "password": "admin123",
-                "firstname": "EE",
-                "lastname": "RT",
-                "phone": "+91-9900000013",
-                "role_name": "Reviewing Officer",
-                "employee_id": "KPTCL-EE-RT-001",
-            },
-            {
-                "email": "see.rt@utility.com",
-                "password": "admin123",
-                "firstname": "SEE",
-                "lastname": "RT",
-                "phone": "+91-9900000014",
-                "role_name": "Supervisory Officer",
-                "employee_id": "KPTCL-SEE-RT-001",
-                "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
-                "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
-            },
-            # ── Zone-based SEE RT testers ──────────────────────────────────────
-            {
-                "email": "see.rt.bangalore@utility.com",
-                "password": "admin123",
-                "firstname": "Supervisory Officer",
-                "lastname": "Bangalore",
-                "phone": "+91-9900000020",
-                "role_name": "Supervisory Officer",
-                "employee_id": "KPTCL-SEE-RT-BLR-001",
-                "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
-                "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
-            },
-            {
-                "email": "see.rt.hubli@utility.com",
-                "password": "admin123",
-                "firstname": "Supervisory Officer",
-                "lastname": "Hubli",
-                "phone": "+91-9900000021",
-                "role_name": "Supervisory Officer",
-                "employee_id": "KPTCL-SEE-RT-HBL-001",
-                "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
-                "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
-            },
-            {
-                "email": "see.rt.mysore@utility.com",
-                "password": "admin123",
-                "firstname": "Supervisory Officer",
-                "lastname": "Mysore",
-                "phone": "+91-9900000022",
-                "role_name": "Supervisory Officer",
-                "employee_id": "KPTCL-SEE-RT-MYS-001",
-                "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
-                "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
-            },
-            {
-                "email": "see.rt.gulbarga@utility.com",
-                "password": "admin123",
-                "firstname": "Supervisory Officer",
-                "lastname": "Gulbarga",
-                "phone": "+91-9900000023",
-                "role_name": "Supervisory Officer",
-                "employee_id": "KPTCL-SEE-RT-GLB-001",
-                "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
-                "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
-            },
-            {
-                "email": "cee.zone@utility.com",
-                "password": "admin123",
-                "firstname": "CEE",
-                "lastname": "Transmission Zone",
-                "phone": "+91-9900000015",
-                "role_name": "Senior Management Approver",
-                "employee_id": "KPTCL-CEE-TZ-001",
-            },
-            {
-                "email": "cee.rtrd@utility.com",
-                "password": "admin123",
-                "firstname": "CEE",
-                "lastname": "RT&R&D",
-                "phone": "+91-9900000016",
-                "role_name": "Senior Management Approver",
-                "employee_id": "KPTCL-CEE-RTRD-001",
-            },
-            {
-                "email": "field.tester@utility.com",
-                "password": "admin123",
-                "firstname": "Field",
-                "lastname": "Test Engineer",
-                "phone": "+91-9900000017",
-                "role_name": "Test Engineer",
-                "employee_id": "KPTCL-FT-001",
-            },
-            {
-                "email": "lab.tester@utility.com",
-                "password": "admin123",
-                "firstname": "Lab",
-                "lastname": "Test Engineer",
-                "phone": "+91-9900000018",
-                "role_name": "Test Engineer",
-                "employee_id": "KPTCL-LT-001",
-            },
-            {
-                "email": "wf.coordinator@utility.com",
-                "password": "admin123",
-                "firstname": "Workflow",
-                "lastname": "Coordinator",
-                "phone": "+91-9900000019",
-                "role_name": "Transformer Repair Coordinator",
-                "employee_id": "KPTCL-WFC-001",
-            },
-        ]
-
-        # Pick a default substation department for site-level users (TAQC originator).
-        # Use the first leaf-level (deepest) department in the KPTCL hierarchy.
-        _default_dept = (
-            session.query(OrgDepartment)
-            .filter(OrgDepartment.organization_id == org.id, OrgDepartment.is_active == True)
-            .order_by(OrgDepartment.cts.asc())
-            .first()
-        )
-        _default_dept_id = _default_dept.id if _default_dept else None
-
-        created_users = 0
-        for user_data in kptcl_users:
-            existing_user = session.query(User).filter_by(email=user_data["email"]).first()
-            if existing_user:
-                user = existing_user
-                if user.organization_id != org.id:
-                    user.organization_id = org.id
-                # Assign default department if not already set
-                if not user.department_id and _default_dept_id:
-                    user.department_id = _default_dept_id
-            else:
-                user = User(
-                    id=uuid.uuid4(),
-                    email=user_data["email"],
-                    password_hash=get_password_hash(user_data["password"]),
-                    firstname=user_data["firstname"],
-                    lastname=user_data["lastname"],
-                    phone_number=user_data["phone"],
-                    employee_id=user_data.get("employee_id"),
-                    organization_id=org.id,
-                    department_id=_default_dept_id,
-                    isactive=True,
-                    email_confirmed=True,
-                    phone_confirmed=True,
-                    cts=datetime.now(datetime.now().astimezone().tzinfo),
-                    mts=datetime.now(datetime.now().astimezone().tzinfo)
-                )
-                session.add(user)
-                session.flush()
-                created_users += 1
-
-            role = provisioned_by_name.get(user_data["role_name"])
-            if not role:
-                print(f"[WARN] OrgRole '{user_data['role_name']}' not found for {user_data['email']}")
-                continue
-
-            existing_role = session.query(OrgUserRole).filter_by(
-                user_id=user.id,
-                org_role_id=role.id,
-            ).first()
-
-            if existing_role:
-                # UPDATE existing mapping
-                existing_role.department_id = user_data.get("department_id")
-                existing_role.is_active = True
-                existing_role.assigned_at = datetime.now(datetime.now().astimezone().tzinfo)
-                print(f"[UPDATED ROLE] {user.email} -> {user_data.get('department_id')}")
-            else:
-                # CREATE new mapping
-                session.add(OrgUserRole(
-                    id=uuid.uuid4(),
-                    user_id=user.id,
-                    org_role_id=role.id,
-                    department_id=user_data.get("department_id"),
-                    is_active=True,
-                    assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-                    assigned_by=None
-                ))
-                print(f"[CREATED ROLE] {user.email} -> {user_data.get('department_id')}")
-
-        session.commit()
-        print(f"[OK] Created {created_users} new SRS designation users for KPTCL")
+        # Users now seeded exclusively by seed_seacms_roles_users.py — skipped here.
         return existing_org
 
     # Get a basic plan if available
@@ -4800,430 +4676,7 @@ def seed_kptcl_organization(session):
     # Build a lookup of provisioned roles by name for easy access
     provisioned_by_name = {r.name: r for r in session.query(OrgRole).filter_by(organization_id=org.id).all()}
 
-    # Create KPTCL users — one per org role
-    kptcl_users = [
-        {
-            "email": "orgadmin@utility.com",
-            "password": "admin123",
-            "firstname": "Org",
-            "lastname": "Admin",
-            "phone": "+91-9900000001",
-            "role_name": "Admin",
-            "employee_id": "KPTCL-ADM-001",
-        },
-        {
-            "email": "originator@utility.com",
-            "password": "admin123",
-            "firstname": "KPTCL",
-            "lastname": "Asset Data Officer",
-            "phone": "+91-9900000002",
-            "role_name": "Asset Data Officer",
-            "employee_id": "KPTCL-ORIG-001",
-        },
-        {
-            "email": "testassigner@utility.com",
-            "password": "admin123",
-            "firstname": "KPTCL Test",
-            "lastname": "Assigner",
-            "phone": "+91-9900000005",
-            "role_name": "Test & Work Coordinator",
-            "employee_id": "KPTCL-TA-001",
-        },
-        {
-            "email": "depthead@utility.com",
-            "password": "admin123",
-            "firstname": "Department",
-            "lastname": "Head",
-            "phone": "+91-9900000004",
-            "role_name": "Reviewing Officer",
-            "employee_id": "KPTCL-DH-001",
-        },
-        {
-            "email": "purchaser@utility.com",
-            "password": "admin123",
-            "firstname": "KPTCL",
-            "lastname": "Procurement Officer",
-            "phone": "+91-9900000006",
-            "role_name": "Procurement Officer",
-            "employee_id": "KPTCL-PUR-001",
-        },
-        {
-            "email": "docviewer@utility.com",
-            "password": "admin123",
-            "firstname": "KPTCL Doc",
-            "lastname": "Viewer",
-            "phone": "+91-9900000007",
-            "role_name": "doc-viewer",
-            "employee_id": "KPTCL-DOC-001",
-        },
-        # ✅ SRS DESIGNATION ROLES — Test users
-        {
-            "email": "aee.maintenance@utility.com",
-            "password": "admin123",
-            "firstname": "AEE",
-            "lastname": "Maintenance",
-            "phone": "+91-9900000010",
-            "role_name": "Maintenance Officer",
-            "employee_id": "KPTCL-AEE-M-001",
-        },
-        {
-            "email": "ee.tlss@utility.com",
-            "password": "admin123",
-            "firstname": "EE",
-            "lastname": "TLSS",
-            "phone": "+91-9900000011",
-            "role_name": "Reviewing Officer",
-            "employee_id": "KPTCL-EE-TLSS-001",
-        },
-        {
-            "email": "see.wm@utility.com",
-            "password": "admin123",
-            "firstname": "SEE",
-            "lastname": "W&M",
-            "phone": "+91-9900000012",
-            "role_name": "Supervisory Officer",
-            "employee_id": "KPTCL-SEE-WM-001",
-        },
-        {
-            "email": "ee.rt@utility.com",
-            "password": "admin123",
-            "firstname": "EE",
-            "lastname": "RT",
-            "phone": "+91-9900000013",
-            "role_name": "Reviewing Officer",
-            "employee_id": "KPTCL-EE-RT-001",
-        },
-        {
-            "email": "see.rt@utility.com",
-            "password": "admin123",
-            "firstname": "SEE",
-            "lastname": "RT",
-            "phone": "+91-9900000014",
-            "role_name": "Supervisory Officer",
-            "employee_id": "KPTCL-SEE-RT-001",
-            "zone": "Bangalore Zone", "ce_circle": "BMAZ North",
-            "se_division": "Bangalore Urban Division", "ee_subdivision": "TL & SS Sub-Division 1",
-        },
-        # ── Zone-based SEE RT testers ──────────────────────────────────────
-        {
-            "email": "see.rt.bangalore@utility.com",
-            "password": "admin123",
-            "firstname": "Supervisory Officer",
-            "lastname": "Bangalore",
-            "phone": "+91-9900000020",
-            "role_name": "Supervisory Officer",
-            "employee_id": "KPTCL-SEE-RT-BLR-001",
-            "zone": "Bangalore Zone", "ce_circle": "BMAZ South",
-            "se_division": "Bangalore Rural Division", "ee_subdivision": "TL & SS Sub-Division 2",
-        },
-        {
-            "email": "see.rt.hubli@utility.com",
-            "password": "admin123",
-            "firstname": "Supervisory Officer",
-            "lastname": "Hubli",
-            "phone": "+91-9900000021",
-            "role_name": "Supervisory Officer",
-            "employee_id": "KPTCL-SEE-RT-HBL-001",
-            "zone": "Hubli Zone", "ce_circle": "O&M Zone Hubballi",
-            "se_division": "Hubli Division", "ee_subdivision": "TL & SS Sub-Division 1",
-        },
-        {
-            "email": "see.rt.mysore@utility.com",
-            "password": "admin123",
-            "firstname": "Supervisory Officer",
-            "lastname": "Mysore",
-            "phone": "+91-9900000022",
-            "role_name": "Supervisory Officer",
-            "employee_id": "KPTCL-SEE-RT-MYS-001",
-            "zone": "Mysore Zone", "ce_circle": "Mysuru Zone",
-            "se_division": "Mysuru Division", "ee_subdivision": "TL & SS Sub-Division 1",
-        },
-        {
-            "email": "see.rt.gulbarga@utility.com",
-            "password": "admin123",
-            "firstname": "Supervisory Officer",
-            "lastname": "Gulbarga",
-            "phone": "+91-9900000023",
-            "role_name": "Supervisory Officer",
-            "employee_id": "KPTCL-SEE-RT-GLB-001",
-            "zone": "Gulbarga Zone", "ce_circle": "Gulbarga Zone",
-            "se_division": "Gulbarga Division", "ee_subdivision": "TL & SS Sub-Division 1",
-        },
-        {
-            "email": "cee.zone@utility.com",
-            "password": "admin123",
-            "firstname": "CEE",
-            "lastname": "Transmission Zone",
-            "phone": "+91-9900000015",
-            "role_name": "Senior Management Approver",
-            "employee_id": "KPTCL-CEE-TZ-001",
-        },
-        {
-            "email": "cee.rtrd@utility.com",
-            "password": "admin123",
-            "firstname": "CEE",
-            "lastname": "RT&R&D",
-            "phone": "+91-9900000016",
-            "role_name": "Senior Management Approver",
-            "employee_id": "KPTCL-CEE-RTRD-001",
-        },
-        {
-            "email": "field.tester@utility.com",
-            "password": "admin123",
-            "firstname": "Field",
-            "lastname": "Test Engineer",
-            "phone": "+91-9900000017",
-            "role_name": "Test Engineer",
-            "employee_id": "KPTCL-FT-001",
-        },
-        {
-            "email": "lab.tester@utility.com",
-            "password": "admin123",
-            "firstname": "Lab",
-            "lastname": "Test Engineer",
-            "phone": "+91-9900000018",
-            "role_name": "Test Engineer",
-            "employee_id": "KPTCL-LT-001",
-        },
-        {
-            "email": "wf.coordinator@utility.com",
-            "password": "admin123",
-            "firstname": "Workflow",
-            "lastname": "Coordinator",
-            "phone": "+91-9900000019",
-            "role_name": "Transformer Repair Coordinator",
-            "employee_id": "KPTCL-WFC-001",
-        },
-    ]
-
-    # Pick a default substation department for all KPTCL users
-    _default_dept = (
-        session.query(OrgDepartment)
-        .filter(OrgDepartment.organization_id == org.id, OrgDepartment.is_active == True)
-        .order_by(OrgDepartment.cts.asc())
-        .first()
-    )
-    _default_dept_id = _default_dept.id if _default_dept else None
-
-    for user_data in kptcl_users:
-        existing_user = session.query(User).filter_by(email=user_data["email"]).first()
-        if existing_user:
-            user = existing_user
-            if user.organization_id != org.id:
-                user.organization_id = org.id
-            if not user.department_id and _default_dept_id:
-                user.department_id = _default_dept_id
-        else:
-            user = User(
-                id=uuid.uuid4(),
-                email=user_data["email"],
-                password_hash=get_password_hash(user_data["password"]),
-                firstname=user_data["firstname"],
-                lastname=user_data["lastname"],
-                phone_number=user_data["phone"],
-                employee_id=user_data.get("employee_id"),
-                organization_id=org.id,
-                department_id=_default_dept_id,
-                isactive=True,
-                email_confirmed=True,
-                phone_confirmed=True,
-                cts=datetime.now(datetime.now().astimezone().tzinfo),
-                mts=datetime.now(datetime.now().astimezone().tzinfo)
-            )
-            session.add(user)
-            session.flush()
-
-        role = provisioned_by_name.get(user_data["role_name"])
-        if not role:
-            print(f"[WARN] OrgRole '{user_data['role_name']}' not found for {user_data['email']}")
-            continue
-
-        existing_role = session.query(OrgUserRole).filter_by(
-            user_id=user.id, org_role_id=role.id, is_active=True
-        ).first()
-        if existing_role:
-            existing_role.department_id = user_data.get("department_id")
-            existing_role.is_active = True
-            existing_role.assigned_at = datetime.now(datetime.now().astimezone().tzinfo)
-        else:
-            session.add(OrgUserRole(
-                id=uuid.uuid4(),
-                user_id=user.id,
-                org_role_id=role.id,
-                department_id=user_data.get("department_id"),
-                is_active=True,
-                assigned_at=datetime.now(datetime.now().astimezone().tzinfo),
-                assigned_by=None,
-            ))
-
-    session.commit()
-    print(f"[OK] KPTCL organization created with admin user and roles")
-    print("  KPTCL user credentials:")
-    for u in kptcl_users:
-        print(f"    {u['role_name']:20s}  {u['email']:35s}  {u['password']}")
-
-    # Create sample tester roles with EXACT module permissions
-    print(f"[INFO] Creating sample tester roles for KPTCL")
-
-    # Build tester module IDs dynamically to avoid hardcoded IDs that become
-    # stale after DB drops (PostgreSQL sequences advance even on rollback).
-    _tester_module_names = [
-        "Testing Requests",
-        "Testing",
-        "Testing Request Approvals",
-    ]
-    TESTER_REQUIRED_MODULES = []
-    for _mod_name in _tester_module_names:
-        _mod = session.query(Module).filter_by(name=_mod_name, is_active=True).first()
-        if _mod:
-            TESTER_REQUIRED_MODULES.append(_mod.id)
-        else:
-            print(f"[WARN] Module '{_mod_name}' not found — excluded from KPTCL tester role permissions")
-
-    tester_roles_config = [
-        {
-            "name": "Test Engineer",
-            "description": "Test Engineer role with exact module permissions for tester assignment"
-        },
-    ]
-
-    tester_roles = []
-    for role_config in tester_roles_config:
-        # Check if role already exists (also support legacy rename from Field/Lab Tester)
-        existing_role = session.query(OrgRole).filter_by(
-            organization_id=org.id,
-            name=role_config["name"]
-        ).first()
-        if not existing_role:
-            for old_name in ("Field Tester", "Lab Tester"):
-                existing_role = session.query(OrgRole).filter_by(
-                    organization_id=org.id, name=old_name
-                ).first()
-                if existing_role:
-                    existing_role.name = role_config["name"]
-                    break
-
-        if existing_role:
-            role = existing_role
-            # FIX: Clear the limited template permissions so we can overwrite them
-            session.query(OrgRolePermission).filter_by(org_role_id=role.id).delete()
-        else:
-            # Create tester role
-            role = OrgRole(
-                id=uuid.uuid4(),
-                organization_id=org.id,
-                name=role_config["name"],
-                description=role_config["description"],
-                role_type="tester",
-                is_org_admin=False,
-                is_dept_admin=False,
-                is_active=True,
-                cts=now,
-                mts=now
-            )
-            session.add(role)
-            session.flush()
-
-        # FIX: Move this OUTSIDE the else block to guarantee full permissions are added
-        for module_id in TESTER_REQUIRED_MODULES:
-            perm = OrgRolePermission(
-                id=uuid.uuid4(),
-                org_role_id=role.id,
-                module_id=module_id,
-                can_view=True,
-                can_add=True,
-                can_edit=True,
-                can_delete=True,
-                can_approve=True,
-                can_assign=True,
-                can_export=True,
-                can_import=True,
-                cts=now,
-                mts=now
-            )
-            session.add(perm)
-
-        tester_roles.append(role)
-
-    session.commit()
-    print(f"[OK] Created {len(tester_roles)} sample tester roles with exact module permissions {TESTER_REQUIRED_MODULES}")
-
-    # Create sample tester users
-    print(f"[INFO] Creating sample tester users for KPTCL")
-
-    tester_users_config = [
-        {
-            "email": "testengineer1@utility.com",
-            "password": "admin123",
-            "role_name": "Test Engineer",
-            "firstname": "KPTCL Test",
-            "lastname": "Engineer One",
-            "phone": "9999999101"
-        },
-        {
-            "email": "testengineer2@utility.com",
-            "password": "admin123",
-            "role_name": "Test Engineer",
-            "firstname": "KPTCL Test",
-            "lastname": "Engineer Two",
-            "phone": "9999999102"
-        },
-    ]
-
-    created_users = 0
-    for user_config in tester_users_config:
-        # Check if user exists
-        existing_user = session.query(User).filter_by(email=user_config["email"]).first()
-
-        if existing_user:
-            user = existing_user
-        else:
-            # Create user
-            hashed_password = get_password_hash(user_config["password"])
-            user = User(
-                id=uuid.uuid4(),
-                email=user_config["email"],
-                password_hash=hashed_password,
-                firstname=user_config["firstname"],
-                lastname=user_config["lastname"],
-                phone_number=user_config["phone"],
-                organization_id=org.id,
-                isactive=True,
-                email_confirmed=True,
-                phone_confirmed=True,
-                cts=now,
-                mts=now
-            )
-            session.add(user)
-            session.flush()
-            created_users += 1
-
-        # Get the role — first check tester_roles list, then fall back to org roles
-        role = next((r for r in tester_roles if r.name == user_config["role_name"]), None)
-        if not role:
-            role = session.query(OrgRole).filter_by(
-                organization_id=org.id, name=user_config["role_name"]
-            ).first()
-        if not role:
-            print(f"[WARN] Role '{user_config['role_name']}' not found for user {user_config['email']}")
-            continue
-
-        existing_assignment = session.query(OrgUserRole).filter_by(
-            user_id=user.id,
-            org_role_id=role.id
-        ).first()
-
-        if not existing_assignment:
-            session.add(OrgUserRole(
-                id=uuid.uuid4(),
-                user_id=user.id,
-                org_role_id=role.id,
-                is_active=True
-            ))
-
-    session.commit()
-    print(f"[OK] Created {created_users} KPTCL field/lab tester users and assigned roles")
-
+    # Users now seeded exclusively by seed_seacms_roles_users.py — skipped here.
     return org
 # ---------------------------------------------------------------------------
 # ADD: Notifications Module + Role Mapping
@@ -5255,7 +4708,8 @@ def seed_notifications_module_and_permissions(session):
     # ─────────────────────────────────────────────────────────────
     user = session.query(User).filter_by(email="orgadmin@utility.com").first()
     if not user:
-        raise Exception("User orgadmin@utility.com not found")
+        print("[WARN] seed_notifications_module_and_permissions: orgadmin@utility.com not found — skipping")
+        return
 
     # ─────────────────────────────────────────────────────────────
     # 4. Validate user belongs to KPTCL org
@@ -5265,7 +4719,8 @@ def seed_notifications_module_and_permissions(session):
     ).first()
 
     if not org_user_role:
-        raise Exception("User is not part of KPTCL organization")
+        print("[WARN] seed_notifications_module_and_permissions: orgadmin@utility.com has no OrgUserRole — skipping notification permissions")
+        return
 
     # ─────────────────────────────────────────────────────────────
     # 5. Get Org Admin role (ORG-SCOPED)
@@ -5277,7 +4732,8 @@ def seed_notifications_module_and_permissions(session):
     ).first()
 
     if not org_admin_role:
-        raise Exception("Org Admin role not found for KPTCL")
+        print("[WARN] seed_notifications_module_and_permissions: 'System Administrator' OrgRole not found for KPTCL — skipping")
+        return
 
     # ─────────────────────────────────────────────────────────────
     # 6. Assign permissions (ORG-SCOPED)
@@ -5564,9 +5020,16 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         substation_name = (row.get("substation") or "").strip()
         dept_id = dept_map.get(substation_name.lower())
         if not dept_id:
-            print(f"  [WARN] Department not found for substation: '{substation_name}' — skipping row")
-            skipped += 1
-            continue
+            # Fallback: try parent division name from the row
+            division_name = (row.get("division") or "").strip()
+            if division_name:
+                dept_id = dept_map.get(division_name.lower())
+            if not dept_id:
+                print(f"  [WARN] Department not found for substation: '{substation_name}' — skipping row")
+                skipped += 1
+                continue
+            else:
+                print(f"  [INFO] Substation '{substation_name}' mapped to parent division '{division_name}'")
 
         raw_type = (row.get("equipment_type") or "").strip()
         equip_type_id = None
@@ -5966,10 +5429,12 @@ def seed_report_definitions(session):
         # ── Vendor & Repairer group ───────────────────────────────────────────────
         {
             "name": "Vendor Performance Ranking Report",
-            "description": "Vendor delivery timeliness and quality ranking.",
+            "description": "Vendor delivery timeliness and quality ranking. "
+                           "DISABLED: procurement_requests has no vendor/delivery "
+                           "tracking columns — on_demand until schema supports it.",
             "query_key": "vendor_performance_report",
             "output_format": "excel",
-            "frequency": "quarterly",
+            "frequency": "on_demand",
             "group_name": "Vendor & Repairer",
             "notification_event": "vendor_report_ready",
         },
@@ -6484,7 +5949,8 @@ FROM   public.equipment e
 LEFT JOIN public.org_departments  d   ON d.id  = e.department_id
 LEFT JOIN public."CategoryMaster" cm  ON cm.id = e.equipment_type_id
 LEFT JOIN public.testing_requests tr  ON tr.equipment_id = e.id
-LEFT JOIN public.failure_registry fr  ON fr.equipment_id = e.id
+LEFT JOIN public.testing_requests fr  ON fr.equipment_id = e.id
+                                     AND fr.request_category = 'failure_registry'
 LEFT JOIN public.test_results     res ON res.testing_request_id = tr.id
 WHERE  1=1
   {org_clause}
@@ -6510,19 +5976,20 @@ ORDER  BY e.ueic
                         "and voltage class.",
             parameters_schema={"year": "int"},
             sort_order=10,
-            org_alias="fr",
+            org_alias="tr",
             sql_template="""
 SELECT
-    cm.name                                        AS equipment_type,
-    e.manufacturer                                 AS make,
+    cm.name                                              AS equipment_type,
+    e.manufacturer                                       AS make,
     e.voltage_class,
-    COUNT(fr.id)                                   AS failure_count,
-    COUNT(DISTINCT e.id)                           AS units_affected,
-    STRING_AGG(DISTINCT fr.failure_category, ', ') AS failure_categories
-FROM   public.failure_registry fr
-JOIN   public.equipment        e   ON e.id   = fr.equipment_id
+    COUNT(tr.id)                                         AS failure_count,
+    COUNT(DISTINCT e.id)                                 AS units_affected,
+    STRING_AGG(DISTINCT tr.form_data->>'failure_category', ', ') AS failure_categories
+FROM   public.testing_requests tr
+JOIN   public.equipment        e   ON e.id   = tr.equipment_id
 LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
-WHERE  EXTRACT(YEAR FROM fr.cts)
+WHERE  tr.request_category = 'failure_registry'
+  AND  EXTRACT(YEAR FROM tr.cts)
          = COALESCE(:year, EXTRACT(YEAR FROM NOW())::int - 1)
   {org_clause}
 GROUP  BY cm.name, e.manufacturer, e.voltage_class
@@ -6556,10 +6023,10 @@ SELECT
     COUNT(DISTINCT e.id)        AS unit_count,
     ROUND(COUNT(fr.id)::numeric / NULLIF(COUNT(DISTINCT e.id), 0), 2)
                                 AS failure_rate_per_unit
-FROM   public.failure_registry fr
+FROM   public.testing_requests fr
 JOIN   public.equipment        e   ON e.id   = fr.equipment_id
 LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
-WHERE  1=1
+WHERE  fr.request_category = 'failure_registry'
   {org_clause}
   AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
   AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
@@ -6584,24 +6051,25 @@ ORDER  BY failure_rate_per_unit DESC NULLS LAST
             org_alias="fr",
             sql_template="""
 SELECT
-    fr.fr_number,
+    fr.request_number           AS fr_number,
     e.ueic                      AS equipment_ueic,
     cm.name                     AS equipment_type,
-    fr.failure_category,
-    fr.next_action              AS resolution_outcome,
-    fr.approval_status,
+    fr.form_data->>'failure_category' AS failure_category,
+    fr.form_data->>'next_action'      AS resolution_outcome,
+    fr.status                   AS approval_status,
     fr.cts::date                AS failure_date,
     wf.status                   AS linked_workflow_status,
     wf.id                       AS linked_workflow_id
-FROM   public.failure_registry fr
+FROM   public.testing_requests fr
 JOIN   public.equipment        e   ON e.id   = fr.equipment_id
 LEFT JOIN public."CategoryMaster"   cm ON cm.id = e.equipment_type_id
-LEFT JOIN public.workflow_sessions  wf ON wf.source_fr_id = fr.id
-WHERE  1=1
+LEFT JOIN public.repair_workflows   wf ON wf.source_failure_id = fr.id
+WHERE  fr.request_category = 'failure_registry'
   {org_clause}
   AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
   AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
-  AND  (:outcome IS NULL OR :outcome = 'all' OR fr.next_action = :outcome)
+  AND  (:outcome IS NULL OR :outcome = 'all'
+        OR fr.form_data->>'next_action' = :outcome)
 ORDER  BY fr.cts DESC
 """),
 
@@ -6627,27 +6095,28 @@ SELECT
     d.name                          AS department,
     wf.id                           AS workflow_id,
     wf.status                       AS workflow_status,
-    wf.cts::date                    AS started_date,
-    wf.last_stage_name              AS current_stage,
-    wf.completed_stages             AS stages_done,
-    wf.total_stages                 AS stages_total,
-    ROUND(
-        COALESCE(wf.completed_stages, 0)::numeric
-        / NULLIF(wf.total_stages, 0) * 100, 1
-    )                               AS pct_complete,
-    EXTRACT(DAY FROM NOW() - wf.cts)::int AS days_elapsed
-FROM   public.workflow_sessions wf
+    wf.created_at::date             AS started_date,
+    sd.name                         AS current_stage,
+    COUNT(si.id) FILTER (WHERE si.status = 'completed') AS stages_done,
+    COUNT(si.id)                    AS stages_total,
+    ROUND(COALESCE(wf.progress, 0)::numeric, 1) AS pct_complete,
+    EXTRACT(DAY FROM NOW() - wf.created_at)::int AS days_elapsed
+FROM   public.repair_workflows wf
 JOIN   public.equipment          e ON e.id  = wf.equipment_id
-LEFT JOIN public.org_departments d ON d.id  = wf.department_id
+LEFT JOIN public.org_departments d ON d.id  = e.department_id
+LEFT JOIN public.repair_stage_definitions sd ON sd.id = wf.current_stage_id
+LEFT JOIN public.repair_stage_instances   si ON si.workflow_id = wf.id
 WHERE  wf.workflow_type = 'repair_lifecycle'
   AND  e.equipment_type_id IN (
            SELECT id FROM public."CategoryMaster"
            WHERE  name ILIKE '%transformer%')
   {org_clause}
-  AND  (:date_from::date IS NULL OR wf.cts >= :date_from::date)
-  AND  (:date_to::date   IS NULL OR wf.cts <= :date_to::date)
-  AND  (:department_id   IS NULL OR wf.department_id = :department_id::uuid)
-ORDER  BY wf.cts DESC
+  AND  (:date_from::date IS NULL OR wf.created_at >= :date_from::date)
+  AND  (:date_to::date   IS NULL OR wf.created_at <= :date_to::date)
+  AND  (:department_id   IS NULL OR e.department_id = :department_id::uuid)
+GROUP  BY e.ueic, e.manufacturer, e.voltage_class, d.name, wf.id,
+          wf.status, wf.created_at, sd.name, wf.progress
+ORDER  BY wf.created_at DESC
 """),
 
         dict(
@@ -6706,14 +6175,14 @@ SELECT
     post.evaluation_result->>'overall'  AS post_repair_result,
     pre.tested_at                       AS pre_repair_tested_at,
     post.tested_at                      AS post_repair_tested_at
-FROM   public.workflow_sessions wf
+FROM   public.repair_workflows wf
 JOIN   public.equipment          e  ON e.id  = wf.equipment_id
-LEFT JOIN public.org_departments d  ON d.id  = wf.department_id
+LEFT JOIN public.org_departments d  ON d.id  = e.department_id
 LEFT JOIN LATERAL (
     SELECT res.evaluation_result, res.tested_at
     FROM   public.test_results res
     JOIN   public.testing_requests req ON req.id = res.testing_request_id
-    WHERE  req.equipment_id = e.id AND res.tested_at < wf.cts
+    WHERE  req.equipment_id = e.id AND res.tested_at < wf.created_at
     ORDER  BY res.tested_at DESC LIMIT 1
 ) pre  ON true
 LEFT JOIN LATERAL (
@@ -6721,7 +6190,7 @@ LEFT JOIN LATERAL (
     FROM   public.test_results res
     JOIN   public.testing_requests req ON req.id = res.testing_request_id
     WHERE  req.equipment_id = e.id
-      AND  req.category     = 'surveillance'
+      AND  req.surveillance_workflow_id IS NOT NULL
       AND  res.tested_at    > wf.completed_at
     ORDER  BY res.tested_at ASC LIMIT 1
 ) post ON true
@@ -6765,7 +6234,7 @@ LEFT JOIN public.org_departments d  ON d.id   = e.department_id
 LEFT JOIN public.org_departments d2 ON d2.id  = d.parent_department_id
 LEFT JOIN public.org_departments d3 ON d3.id  = d2.parent_department_id
 LEFT JOIN public.org_departments d4 ON d4.id  = d3.parent_department_id
-WHERE  tr.category = 'maintenance'
+WHERE  tr.request_category = 'maintenance'
   AND  EXTRACT(MONTH FROM tr.due_date)
          = COALESCE(:month, EXTRACT(MONTH FROM NOW()))
   AND  EXTRACT(YEAR  FROM tr.due_date)
@@ -6876,28 +6345,31 @@ ORDER  BY pr.raised_at DESC
             description="TA&QC observation compliance status with ageing.",
             parameters_schema={"month": "int", "year": "int", "department_id": "uuid"},
             sort_order=10,
-            org_alias="ti",
+            org_alias="tai",
             sql_template="""
 SELECT
     d.name                          AS department,
-    ti.observation_category,
+    cd.name                         AS observation_category,
     COUNT(ti.id)                    AS total_observations,
-    COUNT(CASE WHEN ti.status = 'closed' THEN 1 END)  AS closed,
-    COUNT(CASE WHEN ti.status != 'closed' THEN 1 END) AS open,
+    COUNT(CASE WHEN ti.current_stage_code ILIKE '%clos%' THEN 1 END) AS closed,
+    COUNT(CASE WHEN ti.current_stage_code NOT ILIKE '%clos%'
+                 OR ti.current_stage_code IS NULL THEN 1 END)        AS open,
     ROUND(
-        COUNT(CASE WHEN ti.status = 'closed' THEN 1 END)::numeric
+        COUNT(CASE WHEN ti.current_stage_code ILIKE '%clos%' THEN 1 END)::numeric
         / NULLIF(COUNT(ti.id), 0) * 100, 1
     )                               AS compliance_pct,
     MAX(EXTRACT(DAY FROM NOW() - ti.cts))::int AS max_age_days
-FROM   public.taqc_inspections ti
-LEFT JOIN public.org_departments d ON d.id = ti.department_id
+FROM   public.taqc_observations ti
+JOIN   public.taqc_annual_inspections tai ON tai.id = ti.inspection_id
+LEFT JOIN public.org_departments d  ON d.id  = tai.department_id
+LEFT JOIN public."CategoryDetails" cd ON cd.id = ti.category_detail_id
 WHERE  EXTRACT(MONTH FROM ti.cts)
          = COALESCE(:month, EXTRACT(MONTH FROM NOW()))
   AND  EXTRACT(YEAR  FROM ti.cts)
          = COALESCE(:year,  EXTRACT(YEAR  FROM NOW()))
   {org_clause}
-  AND  (:department_id IS NULL OR ti.department_id = :department_id::uuid)
-GROUP  BY d.name, ti.observation_category
+  AND  (:department_id IS NULL OR tai.department_id = :department_id::uuid)
+GROUP  BY d.name, cd.name
 ORDER  BY compliance_pct ASC NULLS LAST
 """),
 
@@ -6956,35 +6428,20 @@ ORDER  BY on_time_pct DESC NULLS LAST
             org_alias="wf",
             sql_template="""
 SELECT
-    wf.repairer_name,
+    wf.vendor_name                      AS repairer_name,
     COUNT(wf.id)                        AS total_workflows,
     COUNT(CASE WHEN wf.status = 'completed' THEN 1 END) AS completed,
     ROUND(
-        AVG(EXTRACT(DAY FROM wf.completed_at - wf.cts))
+        AVG(EXTRACT(DAY FROM wf.completed_at - wf.created_at))
         FILTER (WHERE wf.completed_at IS NOT NULL), 1
-    )                                   AS avg_turnaround_days,
-    COUNT(DISTINCT CASE
-        WHEN srv.id IS NOT NULL THEN wf.id END) AS post_repair_surveillances,
-    COUNT(DISTINCT CASE
-        WHEN srv.id IS NOT NULL
-         AND res.evaluation_result->>'overall' = 'NORMAL'
-        THEN wf.id END)                 AS surveillance_pass_count
-FROM   public.workflow_sessions wf
-LEFT JOIN public.workflow_sessions srv
-       ON srv.equipment_id = wf.equipment_id
-      AND srv.workflow_type = 'surveillance'
-      AND srv.cts > wf.completed_at
-LEFT JOIN public.test_results res
-       ON res.testing_request_id IN (
-              SELECT id FROM public.testing_requests
-              WHERE  equipment_id = wf.equipment_id
-                AND  category     = 'surveillance')
+    )                                   AS avg_turnaround_days
+FROM   public.repair_workflows wf
 WHERE  wf.workflow_type  = 'repair_lifecycle'
-  AND  EXTRACT(YEAR FROM wf.cts)
+  AND  EXTRACT(YEAR FROM wf.created_at)
          = COALESCE(:year, EXTRACT(YEAR FROM NOW())::int - 1)
-  AND  wf.repairer_name IS NOT NULL
+  AND  wf.vendor_name IS NOT NULL
   {org_clause}
-GROUP  BY wf.repairer_name
+GROUP  BY wf.vendor_name
 ORDER  BY avg_turnaround_days ASC NULLS LAST
 """),
 
@@ -8300,6 +7757,222 @@ def seed_calibration_template(session) -> int:
     return count
 
 
+def seed_dfr_template(session) -> int:
+    """
+    Seed the Dielectric Frequency Response (DFR / IDAX) OrgTestTemplate.
+
+    Strategy — identical to seed_transformer_oil_template:
+    - Read template_data from TEST_TEMPLATES["dfr_idax_transformer"] (single source of truth).
+    - Look up CategoryMaster "Testing Equipment" (description="Testing Equipment").
+    - Create CategoryDetails "Dielectric Frequency Response (DFR / IDAX)" if absent.
+    - Upsert OrgTestTemplate (template_key="dfr_idax_transformer", org_id=NULL, is_system=True).
+    """
+    from models import CategoryMaster, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    DFR_KEY = "dfr_idax_transformer"
+    template_data = TEST_TEMPLATES[DFR_KEY]
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Testing Equipment",
+            description="Testing Equipment",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+
+    detail = _get_or_create_category_detail(
+        session,
+        name="Dielectric Frequency Response (DFR / IDAX)",
+        category_master_id=master.id,
+        description="DFR / IDAX insulation diagnostics — multi-session moisture and insulation assessment for Power Transformers",
+        category_type="test",
+        is_active=True,
+    )
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == DFR_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=DFR_KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] DFR / IDAX template seeded (master_id={master.id}, detail_id={detail.id}).")
+    return count
+
+
+def seed_tan_delta_templates(session) -> int:
+    """
+    Seed the single-session Tan-Delta / Capacitance / IDAX test types
+    (individual + combined). Each reads template_data from TEST_TEMPLATES
+    (single source of truth) and is upserted as a Power Transformer test type
+    under the "Testing Equipment" CategoryMaster.
+    """
+    from models import CategoryMaster, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    # (template_key, CategoryDetails name, description)
+    _TESTS = [
+        ("tan_delta_capacitance_idax",
+         "Tan-Delta, Capacitance & Insulation Diagnostics",
+         "Combined Tan-Delta/Capacitance (DELTA 4000) and Insulation Diagnostics (IDAX) report."),
+        ("tan_delta_winding",
+         "Winding Tan-Delta & Capacitance Test",
+         "Winding insulation Tan-Delta and capacitance measurement with historical comparison."),
+        ("tan_delta_bushing_220kv",
+         "220kV Bushing Tan-Delta Test",
+         "220kV bushing Tan-Delta and capacitance measurement (R/Y/B phases)."),
+        ("tan_delta_bushing_66kv",
+         "66kV Bushing Tan-Delta Test",
+         "66kV bushing Tan-Delta and capacitance measurement (R/Y/B phases)."),
+        ("idax_insulation",
+         "Insulation Diagnostics (IDAX)",
+         "IDAX insulation diagnostics — % moisture and oil conductivity per winding configuration."),
+        ("dfr_routine",
+         "Dielectric Frequency Response (DFR) — Routine",
+         "Single-session DFR measurement for routine/maintenance testing (no factory baseline)."),
+        ("sfra_routine",
+         "Sweep Frequency Response Analysis (SFRA) — Routine",
+         "Single-session SFRA with static correlation-coefficient acceptance floors (no factory baseline)."),
+        ("transformer_physical_inspection",
+         "Transformer Physical Inspection",
+         "Physical inspection and megger test results for power transformers."),
+    ]
+
+    # Resolve the equipment-type master PER TEMPLATE from its own equipment_type
+    # field (data-driven). The test type's CategoryDetails must hang off the same
+    # equipment-type master the test-request form reads (equipment_type_id ->
+    # CategoryMaster). This works for any equipment type, not just Power Transformer.
+    def _master_for(equipment_type_name: str):
+        m = session.query(CategoryMaster).filter(
+            CategoryMaster.name == equipment_type_name
+        ).first()
+        if not m:
+            m = CategoryMaster(name=equipment_type_name, description="Testing Equipment", is_active=True)
+            session.add(m)
+            session.flush()
+        return m
+
+    count = 0
+    for key, detail_name, desc in _TESTS:
+        if key not in TEST_TEMPLATES:
+            print(f"[WARN] Template '{key}' not found in TEST_TEMPLATES — skipping.")
+            continue
+        template_data = TEST_TEMPLATES[key]
+        equip_type = template_data.get("equipment_type") or "Power Transformer"
+        master = _master_for(equip_type)
+        detail = _get_or_create_category_detail(
+            session,
+            name=detail_name,
+            category_master_id=master.id,
+            description=desc,
+            category_type="test",
+            is_active=True,
+        )
+        existing = session.query(OrgTestTemplate).filter(
+            OrgTestTemplate.template_key == key,
+            OrgTestTemplate.org_id == None,  # noqa: E711
+        ).first()
+        if existing:
+            existing.test_type_id = detail.id
+            existing.template_data = template_data
+            existing.is_system = True
+        else:
+            session.add(OrgTestTemplate(
+                template_key=key,
+                org_id=None,
+                test_type_id=detail.id,
+                template_data=template_data,
+                is_system=True,
+                version=1,
+            ))
+            count += 1
+
+    session.commit()
+    print(f"[OK] Tan-Delta / Capacitance / IDAX / routine DFR-SFRA test types seeded ({len(_TESTS)} types).")
+    return count
+
+
+def seed_sfra_template(session) -> int:
+    """
+    Seed the Sweep Frequency Response Analysis (SFRA) OrgTestTemplate.
+
+    Strategy — identical to seed_dfr_template:
+    - Read template_data from TEST_TEMPLATES["sfra_transformer"] (single source of truth).
+    - Look up CategoryMaster "Testing Equipment" (description="Testing Equipment").
+    - Create CategoryDetails "Sweep Frequency Response Analysis (SFRA)" if absent.
+    - Upsert OrgTestTemplate (template_key="sfra_transformer", org_id=NULL, is_system=True).
+    """
+    from models import CategoryMaster, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+
+    SFRA_KEY = "sfra_transformer"
+    template_data = TEST_TEMPLATES[SFRA_KEY]
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Testing Equipment",
+            description="Testing Equipment",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+
+    detail = _get_or_create_category_detail(
+        session,
+        name="Sweep Frequency Response Analysis (SFRA)",
+        category_master_id=master.id,
+        description="SFRA mechanical-integrity diagnostics — multi-session winding/core fingerprint comparison for Power Transformers (IEC 60076-18 / CIGRE 342)",
+        category_type="test",
+        is_active=True,
+    )
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == SFRA_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+    else:
+        session.add(OrgTestTemplate(
+            template_key=SFRA_KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] SFRA template seeded (master_id={master.id}, detail_id={detail.id}).")
+    return count
+
+
 def seed_transformer_oil_template(session) -> int:
     """
     Seed the Transformer Oil Test OrgTestTemplate.
@@ -9186,10 +8859,10 @@ def _seed_notification_event_catalogue(session) -> int:
         for rt in session.query(RoleTemplate).all()
     }
 
-    # Human-readable guard: catch stale/typo role names before the UUID
-    # resolution silently drops them.  Every name in default_roles MUST match
-    # a live RoleTemplate row.
-    _VALID_ROLES = set(_rt_map.keys())  # dynamic — always in sync with RoleTemplate table
+    # Also accept KPTCL OrgRole names as valid (RoleTemplate replaced by OrgRole)
+    from models import OrgRole as _OrgRole
+    _org_role_names = {r.name for r in session.query(_OrgRole).all()}
+    _VALID_ROLES = set(_rt_map.keys()) | _org_role_names
 
     # group_name values below MUST match the Flutter _groupIcons keys in
     # notification_center_page.dart so every group renders with an icon.
@@ -9202,7 +8875,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when equipment is retired and a replacement unit is commissioned.",
             context_vars=["old_ueic", "new_ueic", "equipment_type", "department",
                           "reason_type", "reason", "replaced_by", "replaced_on"],
-            default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            default_roles=["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="equipment_registered",
@@ -9210,7 +8883,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment Lifecycle",
             description="Fired when a new equipment unit is commissioned into the register.",
             context_vars=["equipment", "equipment_type", "department", "manufacturer", "commissioned_by"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="equipment_retired",
@@ -9218,7 +8891,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment Lifecycle",
             description="Fired when an equipment unit is decommissioned / retired.",
             context_vars=["equipment", "equipment_type", "department", "reason", "retired_by"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="design_problem_alert",
@@ -9226,26 +8899,45 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Equipment Lifecycle",
             description="Fired when a systemic design problem is identified for a make/model.",
             context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
-            default_roles=["Senior Management Approver", "Reviewing Officer"],
+            default_roles=["CEE_TRANSMISSION_ZONE", "EE_TLSS"],
         ),
         # ── Threshold Alerts ──────────────────────────────────────────────────
         dict(
             event_type="eval_critical",
             label="Threshold Critical",
             group_name="Threshold Alerts",
-            description="Fired when a test evaluation result is CRITICAL (per test template thresholds).",
-            context_vars=["equipment", "ueic", "test_type", "result", "dept",
-                          "eval.overall", "eval.evaluated_at", "report.retriepdf"],
-            default_roles=["Reviewing Officer", "Supervisory Officer", "Senior Management Approver", "Maintenance Officer"],
+            description=(
+                "Fired when a test evaluation result is CRITICAL — either from "
+                "per-session threshold bands OR from cross-session deviation comparison "
+                "(e.g. moisture increase vs FACTORY baseline on a DFR multi-session test)."
+            ),
+            context_vars=[
+                "equipment", "ueic", "test_type", "result", "dept",
+                "eval.overall", "eval.evaluated_at", "report.retriepdf",
+                # Standard threshold context
+                "request.number", "tester_name", "result_summary", "revised_interval",
+                # {{alert.thresholdconfig}} renders per-session AND cross-session deviation
+                # tables automatically — use this in email body templates
+                "alert.thresholdconfig",
+            ],
+            default_roles=["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="eval_alert",
             label="Threshold Alert",
             group_name="Threshold Alerts",
-            description="Fired when a test evaluation result is ALERT (per test template thresholds).",
-            context_vars=["equipment", "ueic", "test_type", "result", "dept",
-                          "eval.overall", "eval.evaluated_at", "report.retriepdf"],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            description=(
+                "Fired when a test evaluation result is ALERT — either from "
+                "per-session threshold bands OR from cross-session deviation comparison "
+                "(e.g. tan delta increase vs FACTORY baseline on a DFR multi-session test)."
+            ),
+            context_vars=[
+                "equipment", "ueic", "test_type", "result", "dept",
+                "eval.overall", "eval.evaluated_at", "report.retriepdf",
+                "request.number", "tester_name", "result_summary", "revised_interval",
+                "alert.thresholdconfig",
+            ],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         # ── Testing Requests ──────────────────────────────────────────────────
         dict(
@@ -9255,7 +8947,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when an originator submits a new test request.",
             context_vars=["request.number", "request.title", "request.priority",
                           "request.submitted_by", "equipment.ueic", "equipment.department"],
-            default_roles=["Reviewing Officer"],
+            default_roles=["EE_TLSS"],
         ),
         dict(
             event_type="request_rejected",
@@ -9263,7 +8955,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a testing request is rejected by an approver.",
             context_vars=["request.number", "request.title", "equipment.ueic", "rejected_by", "reason"],
-            default_roles=["Asset Data Officer", "Reviewing Officer"],
+            default_roles=["Asset Data Officer", "EE_TLSS"],
         ),
         dict(
             event_type="tester_assigned",
@@ -9272,7 +8964,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a test request is assigned to a field/lab tester.",
             context_vars=["request.number", "request.title", "request.assigned_to",
                           "request.due_date", "equipment.ueic"],
-            default_roles=["Test Engineer", "Maintenance Officer"],
+            default_roles=["AE_JE", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="tester_declined",
@@ -9280,7 +8972,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a tester declines an assignment — notifies the Test & Work Coordinator.",
             context_vars=["request.number", "tester_name", "reason"],
-            default_roles=["Test & Work Coordinator", "Reviewing Officer"],
+            default_roles=["Test & Work Coordinator", "EE_TLSS"],
         ),
         dict(
             event_type="test_submitted",
@@ -9289,7 +8981,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a tester submits test results for review.",
             context_vars=["request.number", "request.title", "request.submitted_by",
                           "equipment.ueic", "eval.overall", "report.retriepdf"],
-            default_roles=["Reviewing Officer"],
+            default_roles=["EE_TLSS"],
         ),
         dict(
             event_type="status_changed",
@@ -9297,7 +8989,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a normal workflow status changes.",
             context_vars=["request.number", "request.status", "request.title", "equipment.ueic"],
-            default_roles=["Reviewing Officer", "Asset Data Officer"],
+            default_roles=["EE_TLSS", "Asset Data Officer"],
         ),
         dict(
             event_type="recommendation_approved",
@@ -9305,7 +8997,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a technical approver approves a recommendation.",
             context_vars=["request.number", "recommendation_type", "product_count"],
-            default_roles=["Asset Data Officer", "Maintenance Officer"],
+            default_roles=["Asset Data Officer", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="recommendation_rejected",
@@ -9313,7 +9005,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a technical approver rejects a recommendation.",
             context_vars=["request.number", "reason"],
-            default_roles=["Test Engineer", "Asset Data Officer"],
+            default_roles=["AE_JE", "Asset Data Officer"],
         ),
         dict(
             event_type="repair_cancelled",
@@ -9321,7 +9013,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair Lifecycle",
             description="Fired when an active repair workflow is cancelled.",
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="overhaul_cancelled",
@@ -9329,7 +9021,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair Lifecycle",
             description="Fired when an active overhaul workflow is cancelled.",
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="calibration_cancelled",
@@ -9337,7 +9029,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair Lifecycle",
             description="Fired when an active calibration workflow is cancelled.",
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="surveillance_cancelled",
@@ -9345,7 +9037,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Repair Lifecycle",
             description="Fired when an active surveillance workflow is cancelled.",
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
-            default_roles=["Reviewing Officer", "Maintenance Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="procurement_pending",
@@ -9353,7 +9045,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a procurement request is created — notifies Procurement Approvers.",
             context_vars=["request.number", "pr_number", "title"],
-            default_roles=["Procurement Approver", "Reviewing Officer"],
+            default_roles=["Procurement Officer", "EE_TLSS"],
         ),
         dict(
             event_type="procurement_decision",
@@ -9361,7 +9053,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when Procurement approves or rejects a procurement request.",
             context_vars=["request.number", "pr_number", "decision", "notes"],
-            default_roles=["Asset Data Officer", "Reviewing Officer"],
+            default_roles=["Asset Data Officer", "EE_TLSS"],
         ),
         # ── Schedule Reminders ────────────────────────────────────────────────
         dict(
@@ -9371,7 +9063,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired 15 days before a scheduled test is due (SRS §8.2 #1).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="due_reminder_final",
@@ -9380,7 +9072,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Final reminder fired 7 days before a scheduled test is due (SRS §8.2 #2).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_remaining"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="overdue_alert",
@@ -9389,7 +9081,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when a scheduled test passes its due date without completion (SRS §8.2 #3).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "equipment.department", "days_overdue"],
-            default_roles=["Reviewing Officer", "Maintenance Officer", "Supervisory Officer"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE", "SEE_WM"],
         ),
         dict(
             event_type="overdue_escalation",
@@ -9398,7 +9090,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Escalation fired when a test is more than 7 days overdue (SRS §8.2 #4).",
             context_vars=["equipment.ueic", "request.title", "request.due_date",
                           "days_overdue", "equipment.department"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         # ── Stage Workflows ───────────────────────────────────────────────────
         # "Stage Workflows" covers repair / overhaul lifecycle stages
@@ -9408,7 +9100,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired each time the repair workflow advances to the next stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["Maintenance Officer", "Transformer Repair Coordinator"],
+            default_roles=["AEE_MAINTENANCE", "Transformer Repair Coordinator"],
         ),
         dict(
             event_type="repair_delay",
@@ -9416,7 +9108,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when a repair stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["Maintenance Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="overhaul_recommended",
@@ -9424,7 +9116,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when the repair workflow reaches completion — overhaul is done.",
             context_vars=["equipment", "equipment_type", "department", "operation_count", "operation_threshold"],
-            default_roles=["Maintenance Officer", "Senior Management Approver", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE", "EE_TLSS"],
         ),
         dict(
             event_type="overhaul_stage_changed",
@@ -9432,7 +9124,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired each time the overhaul workflow advances to the next stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="overhaul_stage_delay",
@@ -9440,7 +9132,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when an overhaul stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["Maintenance Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="calibration_stage_changed",
@@ -9448,7 +9140,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired each time the calibration workflow advances to the next stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="calibration_stage_delay",
@@ -9456,7 +9148,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when a calibration stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["Maintenance Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="surveillance_stage_changed",
@@ -9464,7 +9156,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired each time the surveillance workflow advances to the next quarter stage.",
             context_vars=["equipment", "equipment_type", "stage", "progress"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="surveillance_stage_delay",
@@ -9472,7 +9164,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Stage Workflows",
             description="Fired when a surveillance stage is rejected / sent back — indicating a delay.",
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
-            default_roles=["Maintenance Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
         # ── Failure Register ──────────────────────────────────────────────────
         dict(
@@ -9481,7 +9173,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Failure Register",
             description="Fired when a new Failure Registry entry is submitted and is awaiting review.",
             context_vars=["fr_number", "equipment", "originator", "category"],
-            default_roles=["Test & Work Coordinator", "Reviewing Officer"],
+            default_roles=["Test & Work Coordinator", "EE_TLSS"],
         ),
         dict(
             event_type="fr_approved",
@@ -9489,7 +9181,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Failure Register",
             description="Fired when a Failure Registry submission is approved.",
             context_vars=["fr_number", "equipment", "approved_by", "next_action"],
-            default_roles=["Asset Data Officer", "Maintenance Officer"],
+            default_roles=["Asset Data Officer", "AEE_MAINTENANCE"],
         ),
         dict(
             event_type="fr_rejected",
@@ -9507,7 +9199,7 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired on the first working day of the month — distributes the monthly MIS report.",
             context_vars=["report_month", "tests_completed", "critical_count", "overdue_count",
                           "report_pdf_url", "report_xls_url"],
-            default_roles=["Supervisory Officer", "Senior Management Approver", "Reviewing Officer"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE", "EE_TLSS"],
         ),
         # ── Report-Ready events (fired by run_scheduled_reports) ──────────────────
         dict(
@@ -9516,7 +9208,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the scheduled Overdue Test Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"],
         ),
         dict(
             event_type="alert_report_ready",
@@ -9524,7 +9216,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the weekly ALERT/CRITICAL Equipment Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"],
         ),
         dict(
             event_type="compliance_report_ready",
@@ -9532,7 +9224,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly Test Compliance Status Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Reviewing Officer", "Supervisory Officer"],
+            default_roles=["EE_TLSS", "SEE_WM"],
         ),
         dict(
             event_type="repair_report_ready",
@@ -9540,7 +9232,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly Transformer Repair Status Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="annual_failure_report_ready",
@@ -9548,7 +9240,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the annual Equipment Failure Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="pm_report_ready",
@@ -9556,7 +9248,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly PM Compliance Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="remedial_report_ready",
@@ -9564,7 +9256,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly Remedial Action Pending Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer", "Reviewing Officer"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         dict(
             event_type="taqc_report_ready",
@@ -9572,7 +9264,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly TA&QC Observation Compliance Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Reviewing Officer", "Supervisory Officer"],
+            default_roles=["EE_TLSS", "SEE_WM"],
         ),
         dict(
             event_type="vendor_report_ready",
@@ -9580,7 +9272,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the quarterly Vendor Performance Ranking Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="repairer_report_ready",
@@ -9588,7 +9280,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the annual Repairer Performance Ranking Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="oltc_report_ready",
@@ -9596,7 +9288,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when the monthly OLTC/CB Operations Count Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Maintenance Officer"],
+            default_roles=["AEE_MAINTENANCE"],
         ),
         dict(
             event_type="post_repair_report_ready",
@@ -9604,7 +9296,7 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Reports",
             description="Fired when a Post-Repair Transformer Evaluation report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
-            default_roles=["Supervisory Officer", "Senior Management Approver"],
+            default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
     ]
 
@@ -11517,6 +11209,12 @@ def run_seed():
         print(f"[OK] Cumulative / Operations Tracking template: {n4} seeded.")
         n5 = seed_calibration_template(session)
         print(f"[OK] Calibration template: {n5} seeded.")
+        n5b = seed_dfr_template(session)
+        print(f"[OK] DFR / IDAX template: {n5b} seeded.")
+        n5c = seed_sfra_template(session)
+        print(f"[OK] SFRA template: {n5c} seeded.")
+        n5d = seed_tan_delta_templates(session)
+        print(f"[OK] Tan-Delta / Capacitance / IDAX test types: {n5d} seeded.")
         n6 = seed_transformer_oil_template(session)
         print(f"[OK] Transformer Oil Test template: {n6} seeded.")
         n7 = seed_capacitance_tandelta_template(session)
@@ -11528,14 +11226,15 @@ def run_seed():
 
         # Organization Multi-Tenancy System
         print("\n--- Organization System Seeding ---")
-        seed_role_templates(session)
         seed_super_admin(session)
         seed_tester_role_module_requirements(session)
         seed_sample_organization(session)
 
         # Seed KPTCL Organization with Departments
         kptcl_org = seed_kptcl_organization(session)
+
         if kptcl_org:
+            # ── 1. Department hierarchy first — roles/users need depts to exist ──
             print("\n--- KPTCL Department Hierarchy Seeding ---")
             try:
                 seed_kptcl_departments(session, str(kptcl_org.id))
@@ -11548,22 +11247,9 @@ def run_seed():
                 print("[INFO] You can retry with:")
                 print(f"       python seed.py --kptcl {kptcl_org.id}")
 
-            try:
-                seed_kptcl_equipment(session, str(kptcl_org.id))
-            except FileNotFoundError:
-                print("[WARN] equipment_seed.xlsx not found. Skipping equipment seeding.")
-            except Exception as e:
-                print(f"[WARN] KPTCL equipment seeding failed: {e}")
-
-        # Annual Audit role mappings for KPTCL (stages must already exist from seed_annual_audit_stages above)
-        if kptcl_org:
-            try:
-                session.rollback()  # clear any aborted transaction from earlier steps
-                from seed_annual_audit import seed_annual_audit_role_mappings
-                seed_annual_audit_role_mappings(session, kptcl_org.id)
-            except Exception as e:
-                session.rollback()
-                print(f"[WARN] Annual Audit role mapping failed: {e}")
+            # Equipment seeding moved after seed_dept_filter_users so RT_EAST/RT_NORTH
+            # etc. divisions exist for the substation→division fallback lookup
+            pass
 
         # Sample Equipment (after departments + equipment types exist)
         seed_sample_equipment(session, kptcl_org)
@@ -11608,34 +11294,21 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Missing role permissions backfill failed (non-fatal): {_e}")
 
-        # Zoho Import Mapping (after KPTCL org + departments exist)
-        seed_zoho_import_mapping(session, kptcl_org)
-        seed_notifications_module_and_permissions(session)
+        # Zoho Import Mapping — moved after seacms so Asset Data Officer role exists
         
         # Org role permissions — AFTER all orgs + org_roles are created
         # DISABLED: This grants VIEW to ALL modules for ALL roles, breaking RBAC
         # Proper permissions are already set via role templates during org role provisioning
         # seed_org_role_permissions_for_modules(session, module_ids)
 
-        # All notification defaults — event catalogue, variables, templates,
-        # schedule rules, routing rules (idempotent, single call)
-        print("\n--- Notification Defaults Seeding ---")
-        try:
-            _nc = seed_notification_defaults(session)
-            print(f"[OK] Event catalogue  : {_nc['event_catalogue']} inserted (0 = already seeded)")
-            print(f"[OK] Variables        : {_nc['variables']} inserted (0 = already seeded)")
-            print(f"[OK] Templates        : {_nc['templates']} inserted (0 = already seeded)")
-            print(f"[OK] Schedule rules   : {_nc['schedule_rules']} inserted (0 = already seeded)")
-            print(f"[OK] Routing rules    : {_nc['routing_rules']} inserted (0 = already seeded)")
-        except Exception as _e:
-            import traceback
-            print(f"[WARN] Notification defaults seed failed (non-fatal): {_e}")
+        # Notification defaults moved after seed_seacms_roles_users so OrgRole
+        # names are available for _VALID_ROLES validation in event catalogue
             traceback.print_exc()
 
-        # Repair Workflow — stages, templates, roles, transitions
+        # Repair Workflow — stages, templates, transitions only (roles deferred)
         print("\n--- Repair Workflow Seeding ---")
         try:
-            seed_workflow(session)
+            seed_workflow(session, skip_roles=True)
         except Exception as _e:
             print(f"[WARN] Repair workflow seed failed (non-fatal): {_e}")
 
@@ -11679,15 +11352,6 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Overhaul workflow seed failed (non-fatal): {_e}")
 
-        # Overhaul role mappings — must run AFTER seed_overhaul_stages so stage rows exist
-        if kptcl_org:
-            try:
-                from seed_overhaul_workflow import seed_overhaul_role_mappings
-                seed_overhaul_role_mappings(session, kptcl_org.id)
-            except Exception as _e:
-                session.rollback()
-                print(f"[WARN] Overhaul role mapping failed: {_e}")
-
         # Calibration Workflow — definition + stages for DATE_ADD fail trigger
         try:
             from seed_calibration_workflow import seed_calibration_stages
@@ -11695,23 +11359,16 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Calibration workflow seed failed (non-fatal): {_e}")
 
-        # Calibration role mappings — must run AFTER seed_calibration_stages
-        if kptcl_org:
-            try:
-                from seed_calibration_workflow import seed_calibration_role_mappings
-                seed_calibration_role_mappings(session, kptcl_org.id)
-            except Exception as _e:
-                session.rollback()
-                print(f"[WARN] Calibration role mapping failed: {_e}")
+        # Pre-Commission QAP Workflow — 9-stage factory inspection workflow
+        print("\n--- Pre-Commission QAP Workflow Seeding ---")
+        try:
+            from seed_precommission_workflow import seed_precommission_stages
+            seed_precommission_stages(session)
+        except Exception as _e:
+            print(f"[WARN] Pre-commission workflow seed failed (non-fatal): {_e}")
 
-        # Surveillance role mappings — must run AFTER seed_surveillance_stages
-        if kptcl_org:
-            try:
-                from seed_surveillance_workflow import seed_surveillance_role_mappings
-                seed_surveillance_role_mappings(session, kptcl_org.id)
-            except Exception as _e:
-                session.rollback()
-                print(f"[WARN] Surveillance role mapping failed: {_e}")
+        # NOTE: All workflow role mappings moved after seed_seacms_roles_users
+        # so KPTCL OrgRoles exist before stage→role assignments are made
 
         # TR / FR / TAQC Workflow Engine — states, transitions, permission matrix
         print("\n--- TR / FR / TAQC Workflow Engine Seeding ---")
@@ -11737,6 +11394,95 @@ def run_seed():
             import traceback
             print(f"[WARN] Dept-filter seed failed (non-fatal): {_e}")
             traceback.print_exc()
+
+        # ── KPTCL Org Roles + Users — LAST, after ALL departments exist ──────────
+        # BLR_CIRCLE, RT_NORTH, RT_EAST etc. are created by seed_dept_filter_users.
+        # Must run after both seed_kptcl_departments AND seed_dept_filter_users.
+        print("\n--- KPTCL Org Roles & Demo Users (seed_seacms_roles_users) ---")
+        try:
+            from seed_seacms_roles_users import seed as seed_seacms_roles_users
+            seed_seacms_roles_users()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] KPTCL org roles seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # Zoho + Notifications — after seacms so roles and users exist
+        seed_zoho_import_mapping(session, kptcl_org)
+        seed_notifications_module_and_permissions(session)
+
+        # Notification defaults — after seacms so OrgRole names pass _VALID_ROLES check
+        print("\n--- Notification Defaults Seeding ---")
+        try:
+            _nc = seed_notification_defaults(session)
+            print(f"[OK] Event catalogue  : {_nc['event_catalogue']} inserted (0 = already seeded)")
+            print(f"[OK] Variables        : {_nc['variables']} inserted (0 = already seeded)")
+            print(f"[OK] Templates        : {_nc['templates']} inserted (0 = already seeded)")
+            print(f"[OK] Schedule rules   : {_nc['schedule_rules']} inserted (0 = already seeded)")
+            print(f"[OK] Routing rules    : {_nc['routing_rules']} inserted (0 = already seeded)")
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Notification defaults seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── All workflow role mappings — after seed_seacms_roles_users ───────────
+        # OrgRoles (EE_TLSS, AEE_MAINTENANCE, etc.) must exist before stage→role
+
+        # Repair workflow role assignments (stages already seeded above)
+        print("\n--- Repair Workflow Role Assignments ---")
+        try:
+            seed_workflow(session, skip_roles=False)
+        except Exception as _e:
+            print(f"[WARN] Repair workflow role assignment failed (non-fatal): {_e}")
+
+        if kptcl_org:
+            try:
+                from seed_overhaul_workflow import seed_overhaul_role_mappings
+                seed_overhaul_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Overhaul role mapping failed: {_e}")
+
+            try:
+                from seed_calibration_workflow import seed_calibration_role_mappings
+                seed_calibration_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Calibration role mapping failed: {_e}")
+
+            try:
+                from seed_surveillance_workflow import seed_surveillance_role_mappings
+                seed_surveillance_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Surveillance role mapping failed: {_e}")
+
+        if kptcl_org:
+            try:
+                from seed_precommission_workflow import seed_precommission_role_mappings
+                seed_precommission_role_mappings(session, kptcl_org.id)
+            except Exception as _e:
+                session.rollback()
+                print(f"[WARN] Pre-commission role mapping failed: {_e}")
+
+        # Equipment + Annual Audit role mappings — after seed_dept_filter_users
+        # so RT_EAST/RT_NORTH/BLR_CIRCLE depts exist for equipment lookup,
+        # and after seed_seacms_roles_users so KPTCL OrgRoles exist for stage mapping
+        if kptcl_org:
+            try:
+                seed_kptcl_equipment(session, str(kptcl_org.id))
+            except FileNotFoundError:
+                print("[WARN] equipment_seed.xlsx not found. Skipping equipment seeding.")
+            except Exception as e:
+                print(f"[WARN] KPTCL equipment seeding failed: {e}")
+
+            try:
+                session.rollback()
+                from seed_annual_audit import seed_annual_audit_role_mappings
+                seed_annual_audit_role_mappings(session, kptcl_org.id)
+            except Exception as e:
+                session.rollback()
+                print(f"[WARN] Annual Audit role mapping failed: {e}")
 
         # Rename duplicate test templates (add category to name for uniqueness)
         print("\n--- Renaming Duplicate Test Templates ---")
@@ -11929,7 +11675,7 @@ def seed_zoho_import_mapping(session, kptcl_org):
     session.add(mapping)
     session.commit()
     print(f"[OK] Zoho import mapping created: KPTCL -> Originator, dept={dept.name if dept else 'None'}")
-def seed_workflow(db):
+def seed_workflow(db, skip_roles=False):
 
     import uuid
     from datetime import datetime
@@ -12042,6 +11788,11 @@ def seed_workflow(db):
     # roles[]         → can_edit=True, can_approve=True, can_assign=False
     # assignment_role → can_edit=False, can_approve=False, can_assign=True
     # -------------------------------
+    if skip_roles:
+        db.commit()
+        print("[OK] Repair workflow seeded successfully (roles deferred)")
+        return
+
     for entry in stage_role_list:
         stage_code = entry.get("stage_code")
         stage_id = stage_map_by_code.get(stage_code)
@@ -12345,16 +12096,15 @@ def seed_workflow(session):
 _DFT_ROLES = [
     ("System Administrator",              False, True),
     ("Asset Data Officer",                False, False),
-    ("Maintenance Officer",               False, False),
-    ("Test Engineer",                     False, False),
+    ("AEE_MAINTENANCE",                   False, False),
+    ("AE_JE",                             False, False),
     ("Test & Work Coordinator",           False, False),
-    ("Reviewing Officer",                 False, True),
-    ("Supervisory Officer",               False, False),
-    ("Senior Management Approver",        False, True),
+    ("EE_TLSS",                           False, True),
+    ("SEE_WM",                            False, False),
+    ("CEE_TRANSMISSION_ZONE",             False, True),
     ("TA&QC Inspector",                   False, False),
     ("Transformer Repair Coordinator",    False, False),
     ("Procurement Officer",               False, False),
-    ("Procurement Approver",              False, False),
 ]
 
 _DFT_DEPTS = [
@@ -12366,70 +12116,65 @@ _DFT_DEPTS = [
 _DFT_ROLE_EMAIL = {
     "System Administrator":             "sysadmin",
     "Asset Data Officer":               "assetofficer",
-    "Maintenance Officer":              "maintoff",
-    "Test Engineer":                    "testengineer",
+    "AEE_MAINTENANCE":                  "maintoff",
+    "AE_JE":                            "testengineer",
     "Test & Work Coordinator":          "testcoord",
-    "Reviewing Officer":                "reviewoff",
-    "Supervisory Officer":              "supervoff",
-    "Senior Management Approver":       "seniormgmt",
+    "EE_TLSS":                          "reviewoff",
+    "SEE_WM":                           "supervoff",
+    "CEE_TRANSMISSION_ZONE":            "seniormgmt",
     "TA&QC Inspector":                  "taqc",
     "Transformer Repair Coordinator":   "repaircoord",
     "Procurement Officer":              "procoff",
-    "Procurement Approver":             "procappr",
 }
 
 _DFT_ROLE_FNAME = {
     "System Administrator":             "SysAdmin",
     "Asset Data Officer":               "AssetOfficer",
-    "Maintenance Officer":              "MaintOfficer",
-    "Test Engineer":                    "TestEngineer",
+    "AEE_MAINTENANCE":                  "AEE",
+    "AE_JE":                            "AE",
     "Test & Work Coordinator":          "TestCoordinator",
-    "Reviewing Officer":                "ReviewOfficer",
-    "Supervisory Officer":              "SupervOfficer",
-    "Senior Management Approver":       "SeniorMgmt",
+    "EE_TLSS":                          "EE",
+    "SEE_WM":                           "SEE",
+    "CEE_TRANSMISSION_ZONE":            "CEE",
     "TA&QC Inspector":                  "TAQCInspector",
     "Transformer Repair Coordinator":   "RepairCoord",
     "Procurement Officer":              "ProcOfficer",
-    "Procurement Approver":             "ProcApprover",
 }
 
 _DFT_PHONE = {
     ("north",  "System Administrator"):             "9900001001",
     ("north",  "Asset Data Officer"):               "9900001002",
-    ("north",  "Maintenance Officer"):              "9900001003",
-    ("north",  "Test Engineer"):                    "9900001004",
+    ("north",  "AEE_MAINTENANCE"):                  "9900001003",
+    ("north",  "AE_JE"):                            "9900001004",
     ("north",  "Test & Work Coordinator"):          "9900001005",
-    ("north",  "Reviewing Officer"):                "9900001006",
-    ("north",  "Supervisory Officer"):              "9900001007",
-    ("north",  "Senior Management Approver"):       "9900001008",
+    ("north",  "EE_TLSS"):                          "9900001006",
+    ("north",  "SEE_WM"):                           "9900001007",
+    ("north",  "CEE_TRANSMISSION_ZONE"):            "9900001008",
     ("north",  "TA&QC Inspector"):                  "9900001009",
     ("north",  "Transformer Repair Coordinator"):   "9900001010",
     ("north",  "Procurement Officer"):              "9900001011",
-    ("north",  "Procurement Approver"):             "9900001012",
     ("south",  "System Administrator"):             "9900002001",
     ("south",  "Asset Data Officer"):               "9900002002",
-    ("south",  "Maintenance Officer"):              "9900002003",
-    ("south",  "Test Engineer"):                    "9900002004",
+    ("south",  "AEE_MAINTENANCE"):                  "9900002003",
+    ("south",  "AE_JE"):                            "9900002004",
     ("south",  "Test & Work Coordinator"):          "9900002005",
-    ("south",  "Reviewing Officer"):                "9900002006",
-    ("south",  "Supervisory Officer"):              "9900002007",
-    ("south",  "Senior Management Approver"):       "9900002008",
+    ("south",  "EE_TLSS"):                          "9900002006",
+    ("south",  "SEE_WM"):                           "9900002007",
+    ("south",  "CEE_TRANSMISSION_ZONE"):            "9900002008",
     ("south",  "TA&QC Inspector"):                  "9900002009",
     ("south",  "Transformer Repair Coordinator"):   "9900002010",
     ("south",  "Procurement Officer"):              "9900002011",
-    ("south",  "Procurement Approver"):             "9900002012",
     ("mysuru", "System Administrator"):             "9900003001",
     ("mysuru", "Asset Data Officer"):               "9900003002",
-    ("mysuru", "Maintenance Officer"):              "9900003003",
-    ("mysuru", "Test Engineer"):                    "9900003004",
+    ("mysuru", "AEE_MAINTENANCE"):                  "9900003003",
+    ("mysuru", "AE_JE"):                            "9900003004",
     ("mysuru", "Test & Work Coordinator"):          "9900003005",
-    ("mysuru", "Reviewing Officer"):                "9900003006",
-    ("mysuru", "Supervisory Officer"):              "9900003007",
-    ("mysuru", "Senior Management Approver"):       "9900003008",
+    ("mysuru", "EE_TLSS"):                          "9900003006",
+    ("mysuru", "SEE_WM"):                           "9900003007",
+    ("mysuru", "CEE_TRANSMISSION_ZONE"):            "9900003008",
     ("mysuru", "TA&QC Inspector"):                  "9900003009",
     ("mysuru", "Transformer Repair Coordinator"):   "9900003010",
     ("mysuru", "Procurement Officer"):              "9900003011",
-    ("mysuru", "Procurement Approver"):             "9900003012",
 }
 
 
@@ -12800,16 +12545,15 @@ def _dft_get_or_create_dept(session, org_id, name, code,
 _DFT_ROLE_MODULE_PATH = {
     "System Administrator":             "admin_dashboard",
     "Asset Data Officer":               "asset_dashboard",
-    "Maintenance Officer":              "aee_dashboard",
-    "Test Engineer":                    "aee_dashboard",
+    "AEE_MAINTENANCE":                  "aee_dashboard",
+    "AE_JE":                            "ae_dashboard",
     "Test & Work Coordinator":          "test_coordinator_dashboard",
-    "Reviewing Officer":                "ee_tlss_dashboard",
-    "Supervisory Officer":              "see_dashboard",
-    "Senior Management Approver":       "cee_dashboard",
+    "EE_TLSS":                          "ee_tlss_dashboard",
+    "SEE_WM":                           "see_dashboard",
+    "CEE_TRANSMISSION_ZONE":            "cee_dashboard",
     "TA&QC Inspector":                  "ee_tlss_dashboard",
     "Transformer Repair Coordinator":   "ee_tlss_dashboard",
     "Procurement Officer":              "aee_dashboard",
-    "Procurement Approver":             "see_dashboard",
 }
 
 
@@ -12818,6 +12562,9 @@ def _dft_get_or_create_role(session, org_id, name,
     r = session.query(OrgRole).filter_by(
         organization_id=org_id, name=name
     ).first()
+    module_path = _DFT_ROLE_MODULE_PATH.get(name)
+    mod = session.query(Module).filter_by(path=module_path).first() if module_path else None
+
     if r:
         # Sync flags so re-seeding always fixes stale DB state
         updated = False
@@ -12827,11 +12574,6 @@ def _dft_get_or_create_role(session, org_id, name,
         if r.is_dept_admin != is_dept_admin:
             r.is_dept_admin = is_dept_admin
             updated = True
-    module_path = _DFT_ROLE_MODULE_PATH.get(name)
-
-    if module_path:
-        mod = session.query(Module).filter_by(path=module_path).first()
-
         if mod and r.default_module_id != mod.id:
             r.default_module_id = mod.id
             updated = True
@@ -13084,14 +12826,31 @@ def seed_dept_filter_users(session, org=None):
         name="RT South Division", code="RT_SOUTH",
         parent_id=circle.id,
     )
+    div_east   = _dft_get_or_create_dept(
+        session, oid,
+        name="RT East Division", code="RT_EAST",
+        parent_id=circle.id,
+    )
     div_mysuru = _dft_get_or_create_dept(
         session, oid,
         name="Mysuru Division", code="MYSURU",
         parent_id=circle.id,
     )
-    dept_map = {"north": div_north, "south": div_south, "mysuru": div_mysuru}
+    dept_map = {"north": div_north, "south": div_south, "east": div_east, "mysuru": div_mysuru}
     for slug, dept in dept_map.items():
         print(f"  Div [{slug:6s}]: {dept.name}  ({dept.id})")
+
+    # Seed RT substations missing from KPTCL_Substation_Mapping.xlsx
+    # so equipment_seed.xlsx rows for these substations resolve to a dept
+    _rt_substations = [
+        ("220kV EDC",             "RT_EDC",       div_east.id),
+        ("400kV DHP",             "RT_DHP",       div_east.id),
+        ("220kV Kanakapura",      "RT_KANAKAPURA", div_south.id),
+        ("220kV Manyatha Tech Park", "RT_MANYATHA", div_north.id),
+    ]
+    for sub_name, sub_code, parent_id in _rt_substations:
+        _dft_get_or_create_dept(session, oid, name=sub_name, code=sub_code, parent_id=parent_id)
+    session.flush()
 
     # 3. Roles  (org-scoped, shared across all 3 divisions)
     print("\n[3] Roles")
@@ -13125,10 +12884,10 @@ def seed_dept_filter_users(session, org=None):
     print("\n[5] Top-level hierarchy users  (circle + zone)")
     _top_level_users = [
         # (email,                   fname,  lname,    role_name,             dept_obj)
-        ("ee.circle@utility.com",   "EE",   "Circle", "Reviewing Officer",             circle),
-        ("see.circle@utility.com",  "SEE",  "Circle", "Reviewing Officer",  circle),
-        ("cee.zone@utility.com",    "CEE",  "Zone",   "System Administrator",           zone),
-        ("see.zone@utility.com",    "SEE",  "Zone",   "Reviewing Officer",  zone),
+        ("ee.circle@utility.com",   "EE",   "Circle", "EE_TLSS",             circle),
+        ("see.circle@utility.com",  "SEE",  "Circle", "SEE_WM",              circle),
+        ("cee.zone@utility.com",    "CEE",  "Zone",   "CEE_TRANSMISSION_ZONE", zone),
+        ("see.zone@utility.com",    "SEE",  "Zone",   "SEE_WM",              zone),
     ]
     for email, fname, lname, role_name, dept_obj in _top_level_users:
         phone = "9000000099"

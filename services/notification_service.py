@@ -279,7 +279,7 @@ def _enrich_context_from_source(
             rec = db.query(Recommendation).filter(Recommendation.id == source_id).first()
             if rec:
                 ctx.setdefault("recommendation.id",     str(rec.id))
-                ctx.setdefault("recommendation.status", rec.status or "")
+                ctx.setdefault("recommendation.status", rec.approval_status or "")
 
     except Exception as _exc:
         logger.warning(f"[Notif] _enrich_context_from_source({source_type}): {_exc}")
@@ -1515,9 +1515,15 @@ def _resolve_routing(
     activity_type: Optional[str] = None,
     status_from: Optional[str] = None,
     status_to: Optional[str] = None,
+    require_followup: bool = False,
 ) -> Optional["NotificationRoutingRule"]:
     """
     Find the best-matching active routing rule for a fire() call.
+
+    When require_followup=True, only rules whose followup_action has
+    create_request=true are considered — used to find the ticket-creating rule
+    independently of the channel-routing rule (an org may have a notification-only
+    rule that wins channel selection while a separate rule carries the followup).
 
     Resolution order
     ────────────────
@@ -1559,6 +1565,10 @@ def _resolve_routing(
     )
 
     for rule in candidates:
+        if require_followup:
+            _fa = rule.followup_action or {}
+            if not _fa.get("create_request"):
+                continue
         if not _scope_matches(rule.applicable_workflow_types,  workflow_type):
             continue
         if not _scope_matches(rule.applicable_equipment_types, equipment_type):
@@ -1592,30 +1602,32 @@ def _execute_followup_action(
     Auto-create a follow-up ticket when eval_alert / eval_critical fires
     and the matched routing rule has a followup_action config.
 
-    Follows the exact same flow as the Recommendation Wizard → Approval →
-    WorkflowDispatchService path — reuses _create_schedules_for_action()
-    so schedule tickets land in the TR Approval Queue (submitted status).
+    Ticket details come from the routing rule's followup_action JSONB (defined
+    in the notification center), not from the linked Recommendation record.
 
     action format (from NotificationRoutingRule.followup_action):
     {
-        "create_request":    true,
-        "next_action":       "maintenance",   # test/maintenance/inspection/repair_cycle
-        "schedule_frequency":"yearly",
+        "create_request":     true,
+        "next_action":        "maintenance",   # test/maintenance/inspection/repair_cycle
+        "schedule_frequency": "yearly",
         "schedule_start_date":"2026-01-01",
         "schedule_end_date":  "2026-12-31",
-        "test_types":        [{"id": 5, "name": "BDV Test"}],
-        "summary":           "Follow-up after CRITICAL alert"
+        "test_types":         [{"id": 5, "name": "BDV Test"}],
+        "summary":            "Follow-up after CRITICAL alert"
     }
     """
+    logger.info(f"[FollowupAction] action={action} source_type={source_type!r} source_id={source_id}")
+
     if not action.get("create_request"):
+        logger.info("[FollowupAction] Skipping — create_request is not true")
         return
 
     next_action_str = (action.get("next_action") or "").lower()
     if not next_action_str:
+        logger.info("[FollowupAction] Skipping — next_action is empty")
         return
 
     # ── Resolve the TestingRequest from the source ────────────────────────────
-    # source_type is "test_result" when fired from testing_service
     from models import (
         TestingRequest, TestResult,
         Recommendation, NextActionType, ScheduleFrequency, RequestCategory,
@@ -1624,6 +1636,7 @@ def _execute_followup_action(
 
     if source_type == "test_result" and source_id:
         result_row = db.query(TestResult).filter(TestResult.id == source_id).first()
+        logger.info(f"[FollowupAction] result_row={result_row} testing_request_id={getattr(result_row, 'testing_request_id', None)}")
         if result_row and result_row.testing_request_id:
             tr = db.query(TestingRequest).filter(
                 TestingRequest.id == result_row.testing_request_id
@@ -1638,29 +1651,33 @@ def _execute_followup_action(
         )
         return
 
+    logger.info(f"[FollowupAction] TR={tr.request_number} equipment_id={tr.equipment_id} title={tr.title!r}")
+
     # ── Guard: skip if open follow-up already exists for this equipment ───────
-    _OPEN = (
-        TestingRequest.status.in_([
-            "submitted", "assigned", "accepted", "in_progress",
-        ])
-    )
-    _cat_map = {
-        "test":         "test",
-        "maintenance":  "maintenance",
-        "inspection":   "inspection",
-        "repair_cycle": "repair_cycle",
-    }
-    followup_category = _cat_map.get(next_action_str, "test")
+    followup_category = next_action_str
 
     if tr.equipment_id:
+        # Open = any non-terminal status. Generated follow-up tickets start as
+        # 'draft' (then assigned/submitted), so the dedup MUST include draft —
+        # otherwise a second alert fire creates a duplicate ticket because the
+        # first (draft) follow-up isn't matched.
+        _open_statuses = [
+            "draft", "submitted", "assigned", "accepted", "in_progress",
+            "test_submitted", "under_approval", "under_review",
+        ]
         existing = (
             db.query(TestingRequest)
             .filter(
                 TestingRequest.equipment_id     == tr.equipment_id,
                 TestingRequest.organization_id  == (organization_id or tr.organization_id),
                 TestingRequest.request_category == followup_category,
-                TestingRequest.status.in_(["submitted", "assigned", "accepted", "in_progress"]),
+                TestingRequest.status.in_(_open_statuses),
                 TestingRequest.is_schedule_template.is_(False),
+                # Don't count the triggering test request itself — otherwise an
+                # alert whose follow-up category matches the in-progress test
+                # (e.g. next_action="test") is blocked by the very test that
+                # fired it. Only pre-existing OTHER open follow-ups should skip.
+                TestingRequest.id != tr.id,
             )
             .first()
         )
@@ -1671,9 +1688,9 @@ def _execute_followup_action(
             )
             return
 
-    # ── Build mock Recommendation from followup_action config ─────────────────
+    # ── Build Recommendation from notification center followup_action config ──
     try:
-        _next_action   = NextActionType(next_action_str)
+        _next_action = NextActionType(next_action_str)
     except ValueError:
         logger.warning(f"[FollowupAction] Invalid next_action={next_action_str!r}")
         return
@@ -1684,17 +1701,20 @@ def _execute_followup_action(
     except ValueError:
         _freq = ScheduleFrequency.yearly
 
+    _test_types = action.get("test_types") or []
+    logger.info(f"[FollowupAction] next_action={next_action_str!r} freq={_freq_str!r} test_types={_test_types} tr.test_type_id={tr.test_type_id}")
+
     mock_rec = Recommendation(
-        testing_request_id = tr.id,
-        organization_id    = organization_id or tr.organization_id,
-        next_action        = _next_action,
-        schedule_frequency = _freq,
-        test_types         = action.get("test_types") or [],
-        summary            = action.get("summary") or f"Auto follow-up: {next_action_str}",
+        testing_request_id  = tr.id,
+        organization_id     = organization_id or tr.organization_id,
+        next_action         = _next_action,
+        schedule_frequency  = _freq,
+        test_types          = _test_types,
+        summary             = action.get("summary") or f"Auto follow-up: {next_action_str}",
         recommendation_type = "fail",
-        submitted_by       = tr.created_by,
-        created_by         = tr.created_by,
-        approval_status    = "approved",
+        submitted_by        = tr.created_by,
+        created_by          = tr.created_by,
+        approval_status     = "approved",
     )
 
     # ── Dispatch via WorkflowDispatchService ──────────────────────────────────
@@ -1707,33 +1727,42 @@ def _execute_followup_action(
         "inspection":  _RC.inspection,
     }
     _category = _rc_map.get(next_action_str)
+    logger.info(f"[FollowupAction] _category={_category}")
 
     svc = WorkflowDispatchService(db)
 
     try:
         if _category:
-            # test / maintenance / inspection → TestRequestSchedule
-            numbers = svc._create_schedules_for_action(
+            # force_immediate_ticket=True → _create_schedule creates the first
+            # ticket right away (single creation point). Do NOT also create the
+            # ticket here, or the same schedule would yield two tickets.
+            schedule_ids = svc._create_schedules_for_action(
                 tr, mock_rec,
                 approver_id=tr.created_by,
                 category=_category,
+                force_immediate_ticket=True,
             )
             db.commit()
             logger.info(
-                f"[FollowupAction] Created {len(numbers)} {next_action_str} "
-                f"schedule(s) for TR={tr.request_number}: {numbers}"
+                f"[FollowupAction] Created {len(schedule_ids)} {next_action_str} "
+                f"schedule(s) for TR={tr.request_number}: {schedule_ids}"
             )
         elif next_action_str == "repair_cycle":
-            # repair_cycle → RepairWorkflow
             wf_id = svc._start_repair_workflow(tr, approver_id=tr.created_by)
             db.commit()
             logger.info(
                 f"[FollowupAction] Started repair workflow {wf_id} "
                 f"for TR={tr.request_number}"
             )
+        else:
+            logger.warning(
+                f"[FollowupAction] Unhandled next_action={next_action_str!r} "
+                f"for TR={tr.request_number}"
+            )
     except Exception as _exc:
+        import traceback as _tb
         db.rollback()
-        logger.warning(f"[FollowupAction] Dispatch failed: {_exc}")
+        logger.warning(f"[FollowupAction] Dispatch failed: {_exc}\n{_tb.format_exc()}")
 
 
 # ── Core dispatch ─────────────────────────────────────────────────────────────
@@ -2030,19 +2059,41 @@ class NotificationService:
             # If the matched routing rule has a followup_action config, create
             # the downstream ticket using WorkflowDispatchService — same logic
             # as the recommendation wizard approval flow.
-            if routing and getattr(routing, 'followup_action', None):
-                try:
-                    _execute_followup_action(
-                        db=self.db,
-                        action=routing.followup_action,
-                        source_id=source_id,
-                        source_type=source_type,
-                        organization_id=organization_id,
-                        department_id=department_id,
-                    )
-                except Exception as _fa_exc:
-                    logger.warning(
-                        f"[Notif] followup_action failed for event={event_type!r}: {_fa_exc}"
+            if event_type in ("eval_alert", "eval_critical"):
+                # The channel-routing rule may be a notification-only rule (no
+                # followup_action). Resolve the ticket-creating rule independently
+                # so a separate matching rule with a followup_action still fires.
+                followup_rule = routing if (
+                    routing and (routing.followup_action or {}).get("create_request")
+                ) else _resolve_routing(
+                    self.db, event_type, organization_id,
+                    workflow_type=workflow_type,
+                    equipment_type=equipment_type,
+                    test_type=test_type,
+                    activity_type=activity_type,
+                    status_from=status_from,
+                    status_to=status_to,
+                    require_followup=True,
+                )
+                if followup_rule and followup_rule.followup_action:
+                    try:
+                        _execute_followup_action(
+                            db=self.db,
+                            action=followup_rule.followup_action,
+                            source_id=source_id,
+                            source_type=source_type,
+                            organization_id=organization_id,
+                            department_id=department_id,
+                        )
+                    except Exception as _fa_exc:
+                        logger.warning(
+                            f"[Notif] followup_action failed for event={event_type!r}: {_fa_exc}"
+                        )
+                else:
+                    logger.info(
+                        f"[Notif] {event_type}: no routing rule with a followup_action "
+                        f"matched (org={organization_id}, equip_type={equipment_type!r}, "
+                        f"workflow={workflow_type!r}) — notification sent, no ticket created"
                     )
 
         except Exception as exc:

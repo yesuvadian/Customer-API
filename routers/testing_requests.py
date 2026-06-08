@@ -119,6 +119,26 @@ def _enrich(req):
     except Exception:
         pass
 
+    # session_types — resolved from template for multi-session requests
+    req.session_types = None
+    try:
+        if req.is_multi_session and req.test_type_id:
+            from models import OrgTestTemplate
+            _tpl = (
+                req._sa_instance_state.session
+                .query(OrgTestTemplate)
+                .filter(OrgTestTemplate.test_type_id == req.test_type_id)
+                .order_by(OrgTestTemplate.version.desc())
+                .first()
+            )
+            if _tpl:
+                _types = (_tpl.template_data or {}).get("session_types")
+                if _types:
+                    req.session_types = _types
+    except Exception as _e:
+        import logging as _log
+        _log.getLogger(__name__).debug(f"session_types enrichment failed: {_e}")
+
     return req
 
 

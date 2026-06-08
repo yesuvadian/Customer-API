@@ -1,0 +1,11 @@
+{
+  "Raw Material Inspection":        "pcr_raw_material",
+  "Core Building & Frame Assembly": "pcr_core_assembly",
+  "Winding Inspection":             "pcr_winding",
+  "Active Part Assembly":           "pcr_active_part",
+  "Tank & Accessories":             "pcr_tank_fittings",
+  "Active Part in Main Tank":       "pcr_active_in_tank",
+  "Pre-Delivery Routine Tests":     "pcr_routine_tests",
+  "Special / Type Tests":           "pcr_special_tests",
+  "Final Inspection & Dispatch":    "pcr_final_dispatch"
+}

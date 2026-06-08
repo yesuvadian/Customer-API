@@ -527,14 +527,23 @@ TEST_TEMPLATES = {
         "name": "Physical inspection",
         "equipment_type": "Transformer",
         "description": "Visual and physical condition assessment of transformer",
+        "context_bindings": {"location": "nameplate.location", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "location", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Transformer Identification",
                 "fields": [
                     {"key": "transformer_make", "label": "Transformer Make", "type": "text", "required": True},
                     {"key": "transformer_serial", "label": "Serial Number", "type": "text", "required": True},
                     {"key": "transformer_rating", "label": "Rating", "type": "text", "placeholder": "e.g. 100 kVA"},
-                    {"key": "location", "label": "Installation Location", "type": "text"},
                 ]
             },
             {
@@ -843,13 +852,16 @@ TEST_TEMPLATES = {
         "name": "Meter Testing",
         "equipment_type": "Electronic Tri-vector Meter",
         "description": "Testing of energy meters at substations",
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+        },
         "sections": [
             {
-                "title": "Test Information",
+                "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                ],
             },
             {
                 "title": "Meter Test Readings",
@@ -893,13 +905,16 @@ TEST_TEMPLATES = {
         "name": "Relay Testing",
         "equipment_type": "Protection Relay",
         "description": "Testing of relays at substations with phase-wise readings",
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+        },
         "sections": [
             {
-                "title": "Test Information",
+                "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                ],
             },
             {
                 "title": "Relay Test Readings",
@@ -938,29 +953,46 @@ TEST_TEMPLATES = {
         "name": "Power Transformer Test Report",
         "equipment_type": "Power Transformer",
         "description": "Power transformer nameplate details and OLTC details",
+        "context_bindings": {
+            "location":           "nameplate.location",
+            "make":               "equipment.manufacturer",
+            "rated_mva":          "nameplate.rated_mva",
+            "rated_voltage":      "equipment.voltage_class",
+            "rated_current":      "nameplate.rated_current",
+            "rated_insulation":   "nameplate.rated_insulation",
+            "frequency":          "nameplate.frequency",
+            "vector_group":       "equipment.vector_group",
+            "impedance_voltage":  "nameplate.impedance_voltage",
+            "sl_no":              "equipment.factory_serial_number",
+            "type_of_cooling":    "nameplate.type_of_cooling",
+            "yom":                "nameplate.yom",
+            "date_of_commission": "nameplate.date_of_commission",
+        },
         "sections": [
             {
-                "title": "Test Information",
+                "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "location", "label": "Location of the Transformer", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
+                    {"key": "location", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "rated_mva", "label": "Rated MVA", "type": "readonly"},
+                    {"key": "rated_voltage", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_current", "label": "Rated Current", "type": "readonly"},
+                    {"key": "rated_insulation", "label": "Rated Insulation", "type": "readonly"},
+                    {"key": "frequency", "label": "Frequency", "type": "readonly"},
+                    {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                    {"key": "impedance_voltage", "label": "Impedance Voltage", "type": "readonly"},
+                    {"key": "sl_no", "label": "Serial Number", "type": "readonly"},
+                    {"key": "type_of_cooling", "label": "Type of Cooling", "type": "readonly"},
+                    {"key": "yom", "label": "Year of Manufacture", "type": "readonly"},
+                    {"key": "date_of_commission", "label": "Date of Commission", "type": "readonly"},
+                ],
             },
             {
                 "title": "Transformer Nameplate Details",
                 "fields": [
-                    {"key": "make", "label": "Make", "type": "text", "required": True},
                     {"key": "tr_class", "label": "Class", "type": "text"},
-                    {"key": "rated_mva", "label": "Rated MVA", "type": "text", "required": True},
-                    {"key": "rated_voltage", "label": "Rated Voltage", "type": "text"},
-                    {"key": "rated_current", "label": "Rated Current", "type": "text"},
-                    {"key": "rated_insulation", "label": "Rated Insulation", "type": "text"},
-                    {"key": "frequency", "label": "Frequency", "type": "text"},
                     {"key": "phases_hv_iv_lv", "label": "Phases HV/IV/LV", "type": "text"},
-                    {"key": "vector_group", "label": "Vector Group", "type": "text"},
-                    {"key": "impedance_voltage", "label": "Impedance Voltage", "type": "text"},
-                    {"key": "sl_no", "label": "Serial Number", "type": "text"},
-                    {"key": "type_of_cooling", "label": "Type of Cooling", "type": "text"},
                     {"key": "total_mass", "label": "Total Mass", "type": "text", "unit": "kg"},
                     {"key": "transport_mass", "label": "Transport Mass", "type": "text", "unit": "kg"},
                     {"key": "untanking_mass", "label": "Untanking Mass", "type": "text", "unit": "kg"},
@@ -974,10 +1006,8 @@ TEST_TEMPLATES = {
                     {"key": "lo_of_keb", "label": "L.O of KEB", "type": "text"},
                     {"key": "date_of_order", "label": "Date of Order", "type": "date"},
                     {"key": "date_of_testing_maker", "label": "Date of Testing by Maker", "type": "date"},
-                    {"key": "yom", "label": "Year of Manufacture", "type": "text"},
                     {"key": "taps_on_hv", "label": "Taps available on HV", "type": "text"},
                     {"key": "specification", "label": "Specification", "type": "text"},
-                    {"key": "date_of_commission", "label": "Date of Commission", "type": "date"},
                 ]
             },
             {
@@ -1000,7 +1030,18 @@ TEST_TEMPLATES = {
         "name": "Transformer Physical Inspection",
         "equipment_type": "Power Transformer",
         "description": "Physical inspection and megger test results for power transformers",
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class", "vector_group": "equipment.vector_group"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Physical Inspection",
                 "fields": [
@@ -1408,14 +1449,27 @@ TEST_TEMPLATES = {
         "name": "CT Insulation Test",
         "equipment_type": "Current Transformer",
         "description": "Current transformer insulation test report with nameplate and IR measurements",
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+            "ct_make":      "equipment.manufacturer",
+            "ct_sl_no":     "equipment.factory_serial_number",
+            "ct_yom":       "nameplate.yom",
+        },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "ct_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "ct_sl_no", "label": "Serial Number", "type": "readonly"},
+                    {"key": "ct_yom", "label": "Year of Manufacture", "type": "readonly"},
+                ],
+            },
             {
                 "title": "CT Details",
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                    {"key": "ct_make", "label": "Make", "type": "text"},
                     {"key": "actr", "label": "ACTR", "type": "text"},
                     {"key": "core1_burden", "label": "Core 1 Burden", "type": "text"},
                     {"key": "core2_burden", "label": "Core 2 Burden", "type": "text"},
@@ -1426,8 +1480,6 @@ TEST_TEMPLATES = {
                     {"key": "highest_system_voltage", "label": "Highest System Voltage", "type": "text"},
                     {"key": "insulation_level", "label": "Insulation Level", "type": "text"},
                     {"key": "stc", "label": "STC", "type": "text"},
-                    {"key": "ct_sl_no", "label": "Serial Number", "type": "text"},
-                    {"key": "ct_yom", "label": "Year of Manufacture", "type": "text"},
                 ]
             },
             {
@@ -1466,13 +1518,21 @@ TEST_TEMPLATES = {
         "name": "CT Ratio Test (Detailed)",
         "equipment_type": "Current Transformer",
         "description": "Detailed CT ratio test with phase-wise readings across multiple cores",
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+        },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Test Information",
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                     {"key": "polarity", "label": "Polarity", "type": "text"},
                 ]
             },
@@ -1527,14 +1587,27 @@ TEST_TEMPLATES = {
         "name": "CVT Test Report",
         "equipment_type": "Capacitor Voltage Transformer",
         "description": "CVT test report with details, insulation resistance, and ratio test",
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+            "cvt_make":     "equipment.manufacturer",
+            "cvt_sl_no":    "equipment.factory_serial_number",
+            "cvt_yom":      "nameplate.yom",
+        },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "cvt_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cvt_sl_no", "label": "Serial Number", "type": "readonly"},
+                    {"key": "cvt_yom", "label": "Year of Manufacture", "type": "readonly"},
+                ],
+            },
             {
                 "title": "CVT Details",
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                    {"key": "cvt_make", "label": "Make", "type": "text"},
                     {"key": "core1_burden", "label": "Core 1 - Burden", "type": "text"},
                     {"key": "core1_class", "label": "Core 1 - Class", "type": "text"},
                     {"key": "core2_burden", "label": "Core 2 - Burden", "type": "text"},
@@ -1543,8 +1616,6 @@ TEST_TEMPLATES = {
                     {"key": "core3_class", "label": "Core 3 - Class", "type": "text"},
                     {"key": "insulation", "label": "Insulation", "type": "text"},
                     {"key": "cvt_type", "label": "Type", "type": "text"},
-                    {"key": "cvt_yom", "label": "Year of Manufacture", "type": "text"},
-                    {"key": "cvt_sl_no", "label": "Serial Number", "type": "text"},
                 ]
             },
             {
@@ -1597,15 +1668,25 @@ TEST_TEMPLATES = {
         "name": "Capacitance & Tan Delta Test (CT)",
         "equipment_type": "Current Transformer",
         "description": "Capacitance and tan delta test results for current transformers",
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+            "ct_make":      "equipment.manufacturer",
+            "ct_sl_no":     "equipment.factory_serial_number",
+        },
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "ct_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "ct_sl_no", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Test Information",
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "bay_name", "label": "Bay Name", "type": "text"},
-                    {"key": "ct_make", "label": "CT Make", "type": "text"},
-                    {"key": "ct_sl_no", "label": "CT Serial No", "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
                 ]
             },
             {
@@ -1643,13 +1724,16 @@ TEST_TEMPLATES = {
         "name": "Capacitance & Tan Delta Comparison",
         "equipment_type": "Power Transformer",
         "description": "Comparison of capacitance and tan delta values across transformer bushings and CTs",
+        "context_bindings": {
+            "station_name": "nameplate.location",
+        },
         "sections": [
             {
-                "title": "Test Information",
+                "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                ],
             },
             {
                 "title": "Comparison Values",
@@ -1680,15 +1764,20 @@ TEST_TEMPLATES = {
         "name": "Tan Delta NCT Test",
         "equipment_type": "Current Transformer",
         "description": "Capacitance and tan delta results for neutral current transformers",
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+            "nct_make":     "equipment.manufacturer",
+            "nct_sl_no":    "equipment.factory_serial_number",
+        },
         "sections": [
             {
-                "title": "NCT Details",
+                "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
-                    {"key": "nct_make", "label": "NCT Make", "type": "text"},
-                    {"key": "nct_sl_no", "label": "NCT Serial No", "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
-                ]
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "nct_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "nct_sl_no", "label": "Serial Number", "type": "readonly"},
+                ],
             },
             {
                 "title": "NCT Tan Delta Readings",
@@ -1732,7 +1821,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": True,
         "typical_session_interval_days": 180,
         "typical_total_sessions": 2,
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "rated_mva": "nameplate.rated_mva", "voltage_class": "equipment.voltage_class", "vector_group": "equipment.vector_group"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "rated_mva", "label": "Rated MVA", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                ],
+            },
             # ── SRS §5.2.1: Universal metadata mandatory on every maintenance record ──
             {
                 "title": "Test / Maintenance Metadata",
@@ -1867,7 +1968,17 @@ TEST_TEMPLATES = {
         "supports_multi_session": True,
         "typical_session_interval_days": 365,
         "typical_total_sessions": 1,
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             # ── SRS §5.2.1: Universal metadata ──
             {
                 "title": "Inspection Metadata",
@@ -2390,50 +2501,18 @@ TEST_TEMPLATES = {
     "supports_multi_session": False,
     "typical_session_interval_days": 365,
     "typical_total_sessions": 1,
+    # Automatically inject equipment fields into the form context.
+    # Keys are form field names; values are "namespace.field" paths.
+    # Supported namespaces: "equipment" (top-level), "nameplate" (nameplate_data JSONB).
+    "context_bindings": {
+        "transformer_voltage": "equipment.voltage_class",
+    },
     "sections": [
 
-        # ── Section 1 — Equipment & Test Details (NO CHANGE) ─────────────────
-        {
-            "title": "Equipment & Test Details",
-            "fields": [
-                {"key": "reference_no",          "label": "Reference No.",           "type": "text",     "required": False},
-                {"key": "substation_name",        "label": "Substation Name",         "type": "text",     "required": True},
-                {"key": "sample_no",              "label": "Sample No.",              "type": "text",     "required": False},
-                {"key": "doc",                    "label": "Date of Commissioning",   "type": "date",     "required": False},
-                {"key": "yom",                    "label": "Year of Manufacture",     "type": "text",     "required": False},
-                {"key": "date_of_filtration",     "label": "Date of Last Filtration", "type": "date",     "required": False},
-                {"key": "date_of_test",           "label": "Date of Test",            "type": "date",     "required": True},
-                {"key": "transformer_voltage",    "label": "Transformer Voltage",     "type": "dropdown", "required": True,
-                 "options": ["11kV", "33kV", "66kV", "110kV", "132kV", "220kV", "400kV"]},
-            ],
-        },
-
-        # ── Section 2 — Oil Test Measurements ───────────────────────────────
+        # ── Oil Test Results ─────────────────────────────────────────────────
         {
             "title": "Oil Test Measurements",
             "fields": [
-                {
-                    "key": "threshold_reference",
-                    "label": "IS 1866:2017 Acceptable Limits (Good Range)",
-                    "type": "calculated",
-                    "rule": {
-                        "type": "LOOKUP",
-                        "config": {
-                            "field": "$form.transformer_voltage",
-                            "mapping": {
-                                "11kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
-                                "33kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
-                                "66kV":  "≤72.5kV Class → Acidity: <0.15 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >40 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <30 ppm",
-                                "110kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
-                                "132kV": "72.5-170kV Class → Acidity: <0.10 | Resistivity@90C: >3 T-Ω·m | Tan δ@90C: <0.5 | BDV Top/Bottom: >50 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <20 ppm",
-                                "220kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
-                                "400kV": ">170kV Class → Acidity: <0.10 | Resistivity@90C: >10 T-Ω·m | Tan δ@90C: <0.2 | BDV Top/Bottom: >60 kV | IFT: >28 mN/m | Flash Point: >140°C | Water: <15 ppm",
-                            }
-                        }
-                    }
-                },
-
-                # ── Oil Test Results Table (NO CHANGE to existing) ───────────
                 {
                     "key": "oil_test_results",
                     "label": "Test Results as per IS 1866:2017",
@@ -2458,13 +2537,13 @@ TEST_TEMPLATES = {
                                         {
                                             "field": "$form.transformer_voltage",
                                             "mapping": {
-                                                "11kV":  "<=72.5kV",
-                                                "33kV":  "<=72.5kV",
-                                                "66kV":  "<=72.5kV",
-                                                "110kV": "72.5-170kV",
-                                                "132kV": "72.5-170kV",
-                                                "220kV": ">170kV",
-                                                "400kV": ">170kV",
+                                                "11":  "<=72.5kV",
+                                                "33":  "<=72.5kV",
+                                                "66":  "<=72.5kV",
+                                                "110": "72.5-170kV",
+                                                "132": "72.5-170kV",
+                                                "220": ">170kV",
+                                                "400": ">170kV",
                                             },
                                         },
                                     ],
@@ -2513,7 +2592,7 @@ TEST_TEMPLATES = {
                                 },
                             },
                         },
-                        {"key": "remarks", "label": "Remarks", "type": "text"},
+                        {"key": "remarks",        "label": "Remarks",         "type": "text"},
                     ],
                     "default_rows": [
                         {"test_name": "Acidity",              "unit": "mg KOH/g"},
@@ -2524,31 +2603,6 @@ TEST_TEMPLATES = {
                         {"test_name": "Interfacial Tension",  "unit": "mN/m"},
                         {"test_name": "Flash Point",          "unit": "°C"},
                         {"test_name": "Water Content",        "unit": "ppm"},
-                    ],
-                },
-
-                # ── ✅ NEW — Dissolved Gas Analysis (DGA) Table ──────────────
-                {
-                    "key": "dga_test_results",
-                    "label": "Test Report of Dissolved Gas Analysis (as per IS 10593:2018)",
-                    "type": "table",
-                    "allow_add_rows": False,
-                    "allow_delete_rows": False,
-                    "lock_default_rows": False,
-                    "columns": [
-                        {"key": "gas_name",       "label": "Gases",                              "type": "readonly"},
-                        {"key": "permissible_limit", "label": "Permissible Limits (IS 10593:2018)", "type": "readonly"},
-                        {"key": "bottom_value",   "label": "Bottom (ppm)",                       "type": "number"},
-                        {"key": "remarks",        "label": "Remarks",                            "type": "text"},
-                    ],
-                    "default_rows": [
-                        {"gas_name": "Methane CH₄",         "permissible_limit": "30–130"},
-                        {"gas_name": "Ethane C₂H₆",         "permissible_limit": "20–90"},
-                        {"gas_name": "Ethylene C₂H₄",       "permissible_limit": "60–280"},
-                        {"gas_name": "Acetylene C₂H₂",      "permissible_limit": "2–20"},
-                        {"gas_name": "Hydrogen H₂",         "permissible_limit": "50–150"},
-                        {"gas_name": "Carbon-dioxide CO₂",  "permissible_limit": "3800–14000"},
-                        {"gas_name": "Carbon monoxide CO",  "permissible_limit": "400–600"},
                     ],
                 },
             ],
@@ -3010,20 +3064,33 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "equipment.department_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+            "rated_current_a": "nameplate.rated_current",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",       "label": "Station Name",          "type": "text",     "required": True},
-                    {"key": "bay_number",          "label": "Bay Number",             "type": "text",     "required": True},
-                    {"key": "date_of_testing",     "label": "Date of Testing",        "type": "date",     "required": True},
-                    {"key": "cb_make",             "label": "CB Make",                "type": "text",     "required": True},
-                    {"key": "cb_model",            "label": "CB Model",               "type": "text"},
-                    {"key": "cb_serial",           "label": "Serial Number",          "type": "text"},
-                    {"key": "voltage_class_kv",    "label": "Voltage Class",          "type": "number",   "unit": "kV",     "required": True},
-                    {"key": "rated_current_a",     "label": "Rated Current",          "type": "number",   "unit": "A"},
-                    {"key": "instrument_used",     "label": "Instrument Used",        "type": "text"},
-                    {"key": "test_current_a",      "label": "Test Current (DLRO)",    "type": "number",   "unit": "A"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_current_a", "label": "Rated Current", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "cb_model",        "label": "CB Model",            "type": "text"},
+                    {"key": "instrument_used", "label": "Instrument Used",     "type": "text"},
+                    {"key": "test_current_a",  "label": "Test Current (DLRO)", "type": "number", "unit": "A"},
                 ],
             },
             {
@@ -3068,16 +3135,28 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "equipment.department_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",       "type": "text",   "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",          "type": "text",   "required": True},
-                    {"key": "date_of_testing",  "label": "Date of Testing",     "type": "date",   "required": True},
-                    {"key": "cb_make",          "label": "CB Make",             "type": "text"},
-                    {"key": "cb_serial",        "label": "Serial Number",       "type": "text"},
-                    {"key": "voltage_class_kv", "label": "Voltage Class",       "type": "number", "unit": "kV",  "required": True},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
                     {"key": "test_voltage_kv",  "label": "Megger Test Voltage", "type": "number", "unit": "kV",  "required": True},
                     {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C"},
                     {"key": "humidity_pct",     "label": "Relative Humidity",   "type": "number", "unit": "%"},
@@ -3143,19 +3222,31 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "equipment.department_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",       "label": "Station Name",            "type": "text",   "required": True},
-                    {"key": "bay_number",          "label": "Bay Number",               "type": "text",   "required": True},
-                    {"key": "date_of_testing",     "label": "Date of Testing",          "type": "date",   "required": True},
-                    {"key": "cb_make",             "label": "CB Make",                  "type": "text"},
-                    {"key": "cb_serial",           "label": "Serial Number",            "type": "text"},
-                    {"key": "voltage_class_kv",    "label": "Voltage Class",            "type": "number", "unit": "kV", "required": True},
-                    {"key": "rated_pressure_bar",  "label": "Rated Gas Pressure",       "type": "number", "unit": "bar (20°C)"},
-                    {"key": "min_op_pressure_bar", "label": "Min Operating Pressure",   "type": "number", "unit": "bar"},
-                    {"key": "alarm_pressure_bar",  "label": "Alarm Pressure Setting",   "type": "number", "unit": "bar"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "rated_pressure_bar",  "label": "Rated Gas Pressure",     "type": "number", "unit": "bar (20°C)"},
+                    {"key": "min_op_pressure_bar", "label": "Min Operating Pressure", "type": "number", "unit": "bar"},
+                    {"key": "alarm_pressure_bar",  "label": "Alarm Pressure Setting", "type": "number", "unit": "bar"},
                 ],
             },
             {
@@ -3201,18 +3292,30 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "equipment.department_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",    "type": "text", "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",       "type": "text", "required": True},
-                    {"key": "date_of_testing",  "label": "Date of Testing",  "type": "date", "required": True},
-                    {"key": "cb_make",          "label": "CB Make",          "type": "text"},
-                    {"key": "cb_serial",        "label": "Serial Number",    "type": "text"},
-                    {"key": "voltage_class_kv", "label": "Voltage Class",    "type": "number", "unit": "kV", "required": True},
-                    {"key": "analyzer_make",    "label": "Analyzer Make",    "type": "text"},
-                    {"key": "analyzer_serial",  "label": "Analyzer Serial",  "type": "text"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "analyzer_make",   "label": "Analyzer Make",   "type": "text"},
+                    {"key": "analyzer_serial", "label": "Analyzer Serial", "type": "text"},
                 ],
             },
             {
@@ -3258,18 +3361,30 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "equipment.department_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",       "type": "text",   "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",          "type": "text",   "required": True},
-                    {"key": "date_of_testing",  "label": "Date of Testing",     "type": "date",   "required": True},
-                    {"key": "cb_make",          "label": "CB Make",             "type": "text"},
-                    {"key": "cb_serial",        "label": "Serial Number",       "type": "text"},
-                    {"key": "voltage_class_kv", "label": "Voltage Class",       "type": "number", "unit": "kV", "required": True},
-                    {"key": "rated_voltage_dc", "label": "Rated Control Voltage","type": "number", "unit": "Vdc"},
-                    {"key": "analyzer_make",    "label": "Analyzer Make/Model", "type": "text"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "rated_voltage_dc", "label": "Rated Control Voltage", "type": "number", "unit": "Vdc"},
+                    {"key": "analyzer_make",    "label": "Analyzer Make/Model",   "type": "text"},
                 ],
             },
             {
@@ -3346,17 +3461,30 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "equipment.department_name",
+            "bay_number":      "equipment.bay_number",
+            "cb_make":         "equipment.manufacturer",
+            "cb_serial":       "equipment.factory_serial_number",
+            "rated_current_a": "nameplate.rated_current",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",         "label": "Station Name",           "type": "text",     "required": True},
-                    {"key": "bay_number",             "label": "Bay Number",              "type": "text",     "required": True},
-                    {"key": "date_of_testing",        "label": "Date of Testing",         "type": "date",     "required": True},
-                    {"key": "cb_make",                "label": "CB Make",                 "type": "text"},
-                    {"key": "cb_serial",              "label": "Serial Number",           "type": "text"},
-                    {"key": "rated_control_voltage_v","label": "Rated Control Voltage",   "type": "number",   "unit": "V",  "required": True},
-                    {"key": "rated_current_a",        "label": "Rated Current",           "type": "number",   "unit": "A"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "cb_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "cb_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_current_a", "label": "Rated Current", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "rated_control_voltage_v", "label": "Rated Control Voltage", "type": "number", "unit": "V", "required": True},
                 ],
             },
             {
@@ -3390,7 +3518,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Maintenance Metadata",
                 "fields": [
@@ -3440,12 +3580,22 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",      "label": "Station Name",       "type": "text", "required": True},
-                    {"key": "bay_number",         "label": "Bay Number",          "type": "text"},
                     {"key": "inspection_date",    "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type",    "label": "Inspection Category", "type": "dropdown", "required": True,
                      "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
@@ -3487,19 +3637,32 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "equipment.department_name",
+            "bay_number":      "equipment.bay_number",
+            "sa_make":         "equipment.manufacturer",
+            "sa_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+            "rated_voltage_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",       "type": "text",   "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",          "type": "text",   "required": True},
-                    {"key": "date_of_testing",  "label": "Date of Testing",     "type": "date",   "required": True},
-                    {"key": "sa_make",          "label": "Surge Arrestor Make", "type": "text"},
-                    {"key": "sa_serial",        "label": "Serial Number",       "type": "text"},
-                    {"key": "voltage_class_kv", "label": "Voltage Class",       "type": "number", "unit": "kV",  "required": True},
-                    {"key": "rated_voltage_kv", "label": "Rated Voltage (Ur)",  "type": "number", "unit": "kV"},
-                    {"key": "test_voltage_kv",  "label": "Megger Test Voltage", "type": "number", "unit": "kV",  "required": True},
-                    {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "sa_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "sa_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_voltage_kv", "label": "Rated Voltage (kV)", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "test_voltage_kv", "label": "Megger Test Voltage", "type": "number", "unit": "kV", "required": True},
+                    {"key": "ambient_temp_c",  "label": "Ambient Temperature", "type": "number", "unit": "°C"},
                 ],
             },
             {
@@ -3544,19 +3707,32 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "equipment.department_name",
+            "bay_number":      "equipment.bay_number",
+            "sa_make":         "equipment.manufacturer",
+            "sa_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+            "rated_voltage_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",     "label": "Station Name",         "type": "text",   "required": True},
-                    {"key": "bay_number",        "label": "Bay Number",            "type": "text",   "required": True},
-                    {"key": "date_of_testing",   "label": "Date of Testing",       "type": "date",   "required": True},
-                    {"key": "sa_make",           "label": "Surge Arrestor Make",   "type": "text"},
-                    {"key": "sa_serial",         "label": "Serial Number",         "type": "text"},
-                    {"key": "voltage_class_kv",  "label": "Voltage Class",         "type": "number", "unit": "kV",  "required": True},
-                    {"key": "rated_voltage_kv",  "label": "Rated Voltage (Ur)",    "type": "number", "unit": "kV"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "sa_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "sa_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_voltage_kv", "label": "Rated Voltage (kV)", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
                     {"key": "nominal_discharge_ka", "label": "Nominal Discharge Current", "type": "number", "unit": "kA"},
-                    {"key": "test_equipment",    "label": "Test Equipment Used",   "type": "text"},
+                    {"key": "test_equipment",        "label": "Test Equipment Used",       "type": "text"},
                 ],
             },
             {
@@ -3603,18 +3779,31 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":    "equipment.department_name",
+            "bay_number":      "equipment.bay_number",
+            "sa_make":         "equipment.manufacturer",
+            "sa_serial":       "equipment.factory_serial_number",
+            "voltage_class_kv":"equipment.voltage_class",
+            "rated_voltage_kv":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",      "label": "Station Name",           "type": "text",   "required": True},
-                    {"key": "bay_number",         "label": "Bay Number",              "type": "text",   "required": True},
-                    {"key": "date_of_testing",    "label": "Date of Testing",         "type": "date",   "required": True},
-                    {"key": "sa_make",            "label": "Surge Arrestor Make",     "type": "text"},
-                    {"key": "sa_serial",          "label": "Serial Number",           "type": "text"},
-                    {"key": "voltage_class_kv",   "label": "Voltage Class",           "type": "number", "unit": "kV",  "required": True},
-                    {"key": "rated_voltage_kv",   "label": "Rated Voltage (Ur)",      "type": "number", "unit": "kV"},
-                    {"key": "test_equipment",     "label": "Test Equipment Used",     "type": "text"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "sa_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "sa_serial", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class_kv", "label": "Voltage Class", "type": "readonly"},
+                    {"key": "rated_voltage_kv", "label": "Rated Voltage (kV)", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "test_equipment", "label": "Test Equipment Used", "type": "text"},
                 ],
             },
             {
@@ -3658,7 +3847,19 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Maintenance Metadata",
                 "fields": [
@@ -3701,12 +3902,22 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",    "label": "Station Name",       "type": "text", "required": True},
-                    {"key": "bay_number",       "label": "Bay Number",          "type": "text"},
                     {"key": "inspection_date",  "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type",  "label": "Inspection Category", "type": "dropdown", "required": True,
                      "options": ["Electrical Safety", "General Maintenance", "Documentation"]},
@@ -3746,19 +3957,29 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":   "equipment.department_name",
+            "battery_make":   "equipment.manufacturer",
+            "rated_voltage_v":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",      "type": "text", "required": True},
-                    {"key": "battery_id",      "label": "Battery Set ID",    "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Testing",   "type": "date", "required": True},
-                    {"key": "battery_make",    "label": "Make",              "type": "text"},
-                    {"key": "battery_type",    "label": "Battery Type",      "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
-                    {"key": "num_cells",       "label": "Number of Cells",   "type": "number"},
-                    {"key": "rated_voltage_v", "label": "Rated Bank Voltage","type": "number", "unit": "V"},
-                    {"key": "hydrometer_make", "label": "Hydrometer Make",   "type": "text"},
-                    {"key": "electrolyte_temp_c", "label": "Electrolyte Temperature", "type": "number", "unit": "°C"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "rated_voltage_v", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "battery_id",         "label": "Battery Set ID",          "type": "text"},
+                    {"key": "battery_type",        "label": "Battery Type",            "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
+                    {"key": "num_cells",           "label": "Number of Cells",         "type": "number"},
+                    {"key": "hydrometer_make",     "label": "Hydrometer Make",         "type": "text"},
+                    {"key": "electrolyte_temp_c",  "label": "Electrolyte Temperature", "type": "number", "unit": "°C"},
                 ],
             },
             {
@@ -3804,18 +4025,27 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+            "battery_make": "equipment.manufacturer",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",       "label": "Station Name",         "type": "text",   "required": True},
-                    {"key": "battery_id",          "label": "Battery Set ID",       "type": "text"},
-                    {"key": "date_of_testing",     "label": "Date of Testing",      "type": "date",   "required": True},
-                    {"key": "battery_make",        "label": "Make",                 "type": "text"},
-                    {"key": "num_cells",           "label": "Number of Cells",      "type": "number"},
-                    {"key": "charger_output_v",    "label": "Charger Output Voltage","type": "number","unit": "V"},
-                    {"key": "rated_float_v",       "label": "Rated Float Voltage/Cell","type": "number","unit": "V"},
-                    {"key": "multimeter_make",     "label": "Multimeter Make",      "type": "text"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "battery_id",       "label": "Battery Set ID",          "type": "text"},
+                    {"key": "num_cells",         "label": "Number of Cells",         "type": "number"},
+                    {"key": "charger_output_v",  "label": "Charger Output Voltage",  "type": "number", "unit": "V"},
+                    {"key": "rated_float_v",     "label": "Rated Float Voltage/Cell","type": "number", "unit": "V"},
+                    {"key": "multimeter_make",   "label": "Multimeter Make",         "type": "text"},
                 ],
             },
             {
@@ -3860,20 +4090,29 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+            "battery_make": "equipment.manufacturer",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",      "label": "Station Name",            "type": "text",   "required": True},
-                    {"key": "battery_id",         "label": "Battery Set ID",          "type": "text"},
-                    {"key": "date_of_testing",    "label": "Date of Testing",         "type": "date",   "required": True},
-                    {"key": "battery_make",       "label": "Make",                    "type": "text"},
-                    {"key": "battery_type",       "label": "Battery Type",            "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
-                    {"key": "rated_capacity_ah",  "label": "Rated Capacity",          "type": "number", "unit": "Ah", "required": True},
-                    {"key": "discharge_rate_hr",  "label": "Discharge Rate",          "type": "number", "unit": "hr (e.g. 10)"},
-                    {"key": "discharge_current_a","label": "Discharge Current",       "type": "number", "unit": "A",  "required": True},
-                    {"key": "initial_voltage_v",  "label": "Initial Voltage",         "type": "number", "unit": "V",  "required": True},
-                    {"key": "cutoff_voltage_v",   "label": "End-of-Discharge Voltage","type": "number", "unit": "V"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "battery_id",          "label": "Battery Set ID",          "type": "text"},
+                    {"key": "battery_type",        "label": "Battery Type",            "type": "dropdown", "options": ["Lead Acid", "VRLA", "Ni-Cd", "Lithium Ion"]},
+                    {"key": "rated_capacity_ah",   "label": "Rated Capacity",          "type": "number", "unit": "Ah", "required": True},
+                    {"key": "discharge_rate_hr",   "label": "Discharge Rate",          "type": "number", "unit": "hr (e.g. 10)"},
+                    {"key": "discharge_current_a", "label": "Discharge Current",       "type": "number", "unit": "A",  "required": True},
+                    {"key": "initial_voltage_v",   "label": "Initial Voltage",         "type": "number", "unit": "V",  "required": True},
+                    {"key": "cutoff_voltage_v",    "label": "End-of-Discharge Voltage","type": "number", "unit": "V"},
                 ],
             },
             {
@@ -3919,15 +4158,24 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+            "battery_make": "equipment.manufacturer",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",    "type": "text", "required": True},
-                    {"key": "battery_id",      "label": "Battery Set ID",  "type": "text"},
-                    {"key": "date_of_testing", "label": "Date of Check",   "type": "date", "required": True},
-                    {"key": "battery_make",    "label": "Make",            "type": "text"},
-                    {"key": "num_cells",       "label": "Number of Cells", "type": "number"},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "battery_id", "label": "Battery Set ID",  "type": "text"},
+                    {"key": "num_cells",  "label": "Number of Cells", "type": "number"},
                 ],
             },
             {
@@ -3970,18 +4218,28 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "station_name":   "equipment.department_name",
+            "battery_make":   "equipment.manufacturer",
+            "rated_voltage_v":"equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Equipment Details",
+                "collapsed": True,
                 "fields": [
-                    {"key": "station_name",       "label": "Station Name",          "type": "text",   "required": True},
-                    {"key": "battery_id",          "label": "Battery Set ID",        "type": "text"},
-                    {"key": "date_of_testing",     "label": "Date of Testing",       "type": "date",   "required": True},
-                    {"key": "battery_make",        "label": "Make",                  "type": "text"},
-                    {"key": "num_cells",           "label": "Number of Cells",       "type": "number"},
-                    {"key": "rated_voltage_v",     "label": "Rated Bank Voltage",    "type": "number", "unit": "V"},
-                    {"key": "multimeter_make",     "label": "Multimeter Make",       "type": "text"},
-                    {"key": "charger_status",      "label": "Charger Status",        "type": "dropdown", "options": ["Float Charge", "Boost Charge", "Off / Standalone"]},
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "battery_make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "rated_voltage_v", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Equipment Details",
+                "fields": [
+                    {"key": "battery_id",     "label": "Battery Set ID",  "type": "text"},
+                    {"key": "num_cells",      "label": "Number of Cells", "type": "number"},
+                    {"key": "multimeter_make","label": "Multimeter Make", "type": "text"},
+                    {"key": "charger_status", "label": "Charger Status",  "type": "dropdown", "options": ["Float Charge", "Boost Charge", "Off / Standalone"]},
                 ],
             },
             {
@@ -4025,7 +4283,17 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Maintenance Metadata",
                 "fields": [
@@ -4071,11 +4339,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",       "type": "text", "required": True},
                     {"key": "battery_id",      "label": "Battery Set ID",     "type": "text"},
                     {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
@@ -4118,11 +4395,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",       "type": "text", "required": True},
                     {"key": "panel_id",        "label": "Panel / Bay ID",     "type": "text"},
                     {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
@@ -4161,11 +4447,20 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Details",
                 "fields": [
-                    {"key": "station_name",   "label": "Station Name",       "type": "text", "required": True},
                     {"key": "feeder_id",       "label": "Feeder / Bay ID",    "type": "text"},
                     {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
                     {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
@@ -4261,7 +4556,16 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Maintenance Information",
                 "fields": [
@@ -4314,7 +4618,16 @@ TEST_TEMPLATES = {
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
+        "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
         "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
             {
                 "title": "Inspection Information",
                 "fields": [
@@ -4371,6 +4684,1011 @@ TEST_TEMPLATES = {
         ],
     },
 
+    # ────────────────────────────────────────────────────────────
+    # Dielectric Frequency Response (DFR / IDAX) — Power Transformer
+    # Multi-session: FACTORY → SITE_RECEIPT → ON_BED → PRE_COMMISSIONING → MAINTENANCE
+    # enable_cross_session=True: each non-FACTORY session is compared vs FACTORY baseline
+    # ────────────────────────────────────────────────────────────
+    "dfr_idax_transformer": {
+        "key": "dfr_idax_transformer",
+        "name": "Dielectric Frequency Response (DFR / IDAX)",
+        "equipment_type": "Power Transformer",
+        "description": "DFR / IDAX insulation diagnostics test for transformer moisture and insulation assessment",
+        "supports_multi_session": True,
+        "multi_session": True,
+        "enable_cross_session": True,
+        "typical_session_interval_days": None,
+        # total sessions derived from len(session_types) automatically
+        "session_types": [
+            "FACTORY",
+            "SITE_RECEIPT",
+            "ON_BED",
+            "PRE_COMMISSIONING",
+            "MAINTENANCE",
+        ],
+        "context_bindings": {
+            "manufacturer":   "equipment.manufacturer",
+            "serial_number":  "equipment.factory_serial_number",
+        },
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Transformer Configuration",
+                "fields": [
+                    {"key": "transformer_type",       "label": "Transformer Type",   "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
+                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number",   "unit": "MVA", "required": True},
+                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number",   "unit": "kV",  "required": True},
+                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number",   "unit": "kV",  "required": True},
+                    {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",   "type": "number",   "unit": "kV"},
+                ],
+            },
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",        "label": "Testing Kit Used",    "type": "text",   "required": True},
+                    {"key": "test_voltage_v",  "label": "Test Voltage",        "type": "number", "unit": "V",  "required": True},
+                    {"key": "ambient_temp_c",  "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",      "label": "Oil Temperature",     "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "DFR Measurement Data",
+                "fields": [
+                    {
+                        "key": "dfr_measurements",
+                        "label": "DFR Measurements",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "frequency_hz",      "label": "Frequency (Hz)",  "type": "number"},
+                            {"key": "capacitance_pf",    "label": "Capacitance (pF)","type": "number"},
+                            {"key": "tan_delta_percent", "label": "Tan Delta (%)",   "type": "number"},
+                        ],
+                        # Cross-session: average tan_delta compared vs FACTORY baseline
+                        "cross_session_evaluation": {
+                            "enabled": True,
+                            "baseline": {
+                                "strategy": "named_session",
+                                "session_name": "FACTORY",
+                            },
+                            "column_comparisons": {
+                                "tan_delta_percent": {
+                                    "aggregate_type": "avg",
+                                    "deviation_type": "absolute",
+                                    "normal_max": 0.3,
+                                    "alert_max": None,
+                                    "alert_min": None,
+                                    "critical_above": 1.5,
+                                    "critical_below": None,
+                                },
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "IDAX Analysis Results",
+                "fields": [
+                    {
+                        "key": "analysis_results",
+                        "label": "Analysis Results",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,   # rows pre-filled from default_rows but cells must remain editable
+                        "columns": [
+                            {"key": "test_configuration",      "label": "Test Configuration",      "type": "readonly"},
+                            {"key": "moisture_percent",        "label": "Moisture in Paper (%)",   "type": "number"},
+                            {"key": "oil_conductivity_psm",   "label": "Oil Conductivity (pS/m)", "type": "number"},
+                            {"key": "moisture_in_oil_percent", "label": "Moisture in Oil (%)",    "type": "number"},
+                            {
+                                "key": "assessment",
+                                "label": "Assessment",
+                                "type": "dropdown",
+                                "options": ["Very Dry", "Good", "Acceptable", "Wet", "Critical"],
+                            },
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "TV-HV"},
+                        ],
+                        # Cross-session: row-by-row vs FACTORY, matched by test_configuration
+                        "cross_session_evaluation": {
+                            "enabled": True,
+                            "baseline": {
+                                "strategy": "named_session",
+                                "session_name": "FACTORY",
+                            },
+                            "match_by_column": "test_configuration",
+                            "column_comparisons": {
+                                "moisture_percent": {
+                                    "aggregate_type": None,
+                                    "deviation_type": "absolute",
+                                    "normal_max": 0.3,
+                                    "alert_max": None,
+                                    "alert_min": None,
+                                    "critical_above": 1.0,
+                                    "critical_below": None,
+                                },
+                                "oil_conductivity_psm": {
+                                    "aggregate_type": None,
+                                    "deviation_type": "relative_percent",
+                                    "normal_max": 20.0,
+                                    "alert_max": None,
+                                    "alert_min": None,
+                                    "critical_above": 50.0,
+                                    "critical_below": None,
+                                },
+                                "moisture_in_oil_percent": {
+                                    "aggregate_type": None,
+                                    "deviation_type": "absolute",
+                                    "normal_max": 5.0,
+                                    "alert_max": None,
+                                    "alert_min": None,
+                                    "critical_above": 15.0,
+                                    "critical_below": None,
+                                },
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result",
+                        "label": "Overall Result",
+                        "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"],
+                        "dropdown_evaluation": {
+                            "enabled": True,
+                            "value_severities": {
+                                "PASS":  "NORMAL",
+                                "ALERT": "ALERT",
+                                "FAIL":  "CRITICAL",
+                            },
+                        },
+                    },
+                    {"key": "observation",    "label": "Observation",   "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ────────────────────────────────────────────────────────────
+    # Sweep Frequency Response Analysis (SFRA) — Power Transformer
+    # Multi-session: FACTORY → SITE_RECEIPT → ON_BED → PRE_COMMISSIONING → MAINTENANCE
+    # enable_cross_session=True: each non-FACTORY session is compared vs FACTORY baseline.
+    # SFRA detects mechanical faults: winding deformation/displacement, core movement,
+    # shorted turns, and loose connections — by comparing the frequency-response
+    # "fingerprint" of each winding against the factory baseline trace.
+    # ────────────────────────────────────────────────────────────
+    "sfra_transformer": {
+        "key": "sfra_transformer",
+        "name": "Sweep Frequency Response Analysis (SFRA)",
+        "equipment_type": "Power Transformer",
+        "description": "SFRA mechanical-integrity diagnostics — compares each winding's frequency-response fingerprint against the factory baseline to detect winding/core deformation (per IEC 60076-18 / CIGRE 342)",
+        "supports_multi_session": True,
+        "multi_session": True,
+        "enable_cross_session": True,
+        "typical_session_interval_days": None,
+        # total sessions derived from len(session_types) automatically
+        "session_types": [
+            "FACTORY",
+            "SITE_RECEIPT",
+            "ON_BED",
+            "PRE_COMMISSIONING",
+            "MAINTENANCE",
+        ],
+        "context_bindings": {
+            "manufacturer":  "equipment.manufacturer",
+            "serial_number": "equipment.factory_serial_number",
+            "vector_group":  "equipment.vector_group",
+        },
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Transformer Configuration",
+                "fields": [
+                    {"key": "transformer_type",       "label": "Transformer Type",   "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
+                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number",   "unit": "MVA", "required": True},
+                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number",   "unit": "kV",  "required": True},
+                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number",   "unit": "kV",  "required": True},
+                    {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",   "type": "number",   "unit": "kV"},
+                ],
+            },
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",          "label": "Testing Kit Used",       "type": "text",   "required": True},
+                    {"key": "sweep_range",       "label": "Sweep Frequency Range",  "type": "text",   "required": True},  # e.g. "20 Hz – 2 MHz"
+                    {"key": "measurement_points","label": "No. of Measurement Points","type": "number"},
+                    {"key": "tap_position",      "label": "Tap Position",           "type": "text"},
+                    {"key": "ambient_temp_c",    "label": "Ambient Temperature",    "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",        "label": "Oil Temperature",        "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "SFRA Trace Data",
+                "fields": [
+                    {
+                        "key": "sfra_measurements",
+                        "label": "SFRA Measurements (Amplitude vs Frequency)",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "winding",           "label": "Winding / Connection", "type": "text"},   # e.g. HV-N, LV-N, HV-LV
+                            {"key": "frequency_hz",      "label": "Frequency (Hz)",       "type": "number"},
+                            {"key": "amplitude_db",      "label": "Amplitude (dB)",       "type": "number"},
+                            {"key": "phase_deg",         "label": "Phase (°)",            "type": "number"},
+                        ],
+                        # Cross-session: amplitude trace compared row-by-row vs FACTORY,
+                        # matched by frequency. Absolute dB deviation flags movement.
+                        "cross_session_evaluation": {
+                            "enabled": True,
+                            "baseline": {
+                                "strategy": "named_session",
+                                "session_name": "FACTORY",
+                            },
+                            "match_by_column": "frequency_hz",
+                            "column_comparisons": {
+                                # Amplitude deviation is bidirectional — a winding/core
+                                # shift can move the trace UP or DOWN. Thresholds are
+                                # symmetric so |deviation| drives the status:
+                                #   |dev| <= 3 dB → NORMAL, 3–6 dB → ALERT, > 6 dB → CRITICAL
+                                "amplitude_db": {
+                                    "aggregate_type": None,
+                                    "deviation_type": "absolute",
+                                    "normal_min": -3.0,
+                                    "normal_max": 3.0,
+                                    "alert_min": None,
+                                    "alert_max": None,
+                                    "critical_below": -6.0,
+                                    "critical_above": 6.0,
+                                },
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "Correlation Coefficient Analysis",
+                "fields": [
+                    {
+                        "key": "correlation_analysis",
+                        "label": "Per-Winding Correlation vs Factory Baseline",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,   # rows pre-filled; cells remain editable
+                        "columns": [
+                            {"key": "winding",   "label": "Winding",                       "type": "readonly"},
+                            {"key": "cc_lf",     "label": "CC — LF (1k–100kHz)",           "type": "number"},
+                            {"key": "cc_mf",     "label": "CC — MF (100k–600kHz)",         "type": "number"},
+                            {"key": "cc_hf",     "label": "CC — HF (600k–1MHz)",           "type": "number"},
+                            {
+                                "key": "assessment",
+                                "label": "Assessment",
+                                "type": "dropdown",
+                                "options": ["Normal", "Slight Deviation", "Marginal", "Abnormal"],
+                            },
+                        ],
+                        "default_rows": [
+                            {"winding": "HV-N"},
+                            {"winding": "LV-N"},
+                            {"winding": "TV-N"},
+                            {"winding": "HV-LV"},
+                            {"winding": "HV-TV"},
+                            {"winding": "LV-TV"},
+                        ],
+                        # Correlation coefficient (0–1, higher = closer to baseline).
+                        # Static per-column acceptance floors — a CC below the floor
+                        # signals a mechanical change in that frequency band, independent
+                        # of any baseline session (baseline CC is ~1.0 against itself).
+                        "table_evaluation": {
+                            "enabled": True,
+                            "remedial_action_text": "SFRA correlation below acceptance floor — investigate winding/core mechanical integrity before energising",
+                            "column_evaluations": {
+                                # LF band — core, magnetizing branch, winding clamping
+                                "cc_lf": {"normal_min": 0.98, "alert_min": 0.95, "critical_below": 0.95},
+                                # MF band — bulk winding movement / axial displacement
+                                "cc_mf": {"normal_min": 0.98, "alert_min": 0.95, "critical_below": 0.95},
+                                # HF band — winding/lead deformation, loose connections
+                                "cc_hf": {"normal_min": 0.97, "alert_min": 0.93, "critical_below": 0.93},
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result",
+                        "label": "Overall Result",
+                        "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"],
+                        "dropdown_evaluation": {
+                            "enabled": True,
+                            "value_severities": {
+                                "PASS":  "NORMAL",
+                                "ALERT": "ALERT",
+                                "FAIL":  "CRITICAL",
+                            },
+                        },
+                    },
+                    {
+                        "key": "fault_type",
+                        "label": "Suspected Fault Type",
+                        "type": "dropdown",
+                        "options": [
+                            "None",
+                            "Winding Deformation",
+                            "Axial Displacement",
+                            "Radial Displacement / Buckling",
+                            "Shorted Turns",
+                            "Core Movement",
+                            "Loose Connection / Lead",
+                        ],
+                    },
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ────────────────────────────────────────────────────────────
+    # Tan-Delta, Capacitance & Insulation Diagnostics (KPTCL R&D)
+    # Single-session combined test: DELTA 4000 + IDAX 300
+    # Covers winding tests + bushing tests + IDAX moisture/conductivity
+    # ────────────────────────────────────────────────────────────
+    "tan_delta_capacitance_idax": {
+        "key": "tan_delta_capacitance_idax",
+        "name": "Tan-Delta, Capacitance & Insulation Diagnostics",
+        "equipment_type": "Power Transformer",
+        "description": "Combined Tan-Delta/Capacitance (DELTA 4000) and Insulation Diagnostics (IDAX) test report for Power Transformers — winding and bushing measurements with historical comparison.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "context_bindings": {
+            "make":               "equipment.manufacturer",
+            "capacity_mva":       "nameplate.rated_mva",
+            "serial_number":      "equipment.factory_serial_number",
+            "year_of_manufacture":"nameplate.yom",
+            "vector_group":       "equipment.vector_group",
+            "doc":                "nameplate.date_of_commission",
+        },
+        "sections": [
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "make", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "capacity_mva", "label": "Rated MVA", "type": "readonly"},
+                    {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "readonly"},
+                    {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                    {"key": "doc", "label": "Date of Commission", "type": "readonly"},
+                ],
+            },
+            # ── Test Information ──────────────────────────────────────────────
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "date_of_previous_test", "label": "Date of Previous Test", "type": "date"},
+                    {"key": "weather_condition",     "label": "Weather Condition",      "type": "text", "placeholder": "e.g. Sunny, Cloudy"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature",    "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            # ── Transformer Details ───────────────────────────────────────────
+            {
+                "title": "Transformer Details",
+                "fields": [
+                    {"key": "voltage_ratio", "label": "Voltage Ratio", "type": "text", "placeholder": "e.g. 220/66/11 kV"},
+                    {"key": "oil_temp_c",    "label": "Oil Temperature","type": "number", "unit": "°C"},
+                ],
+            },
+            # ── Tan-Delta & Capacitance Test ──────────────────────────────────
+            {
+                "title": "Tan-Delta & Capacitance Test",
+                "fields": [
+                    {
+                        "key": "tan_delta_kit",
+                        "label": "Testing Kit Used",
+                        "type": "text",
+                        "required": True,
+                        "placeholder": "e.g. Tan-delta kit of Megger make, Model: DELTA 4000",
+                    },
+                    # a. Winding Test Results
+                    {
+                        "key": "winding_test_results",
+                        "label": "a. Winding Test Results",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_configuration",  "label": "Test Configuration",              "type": "readonly"},
+                            {"key": "kv",                  "label": "kV",                              "type": "number"},
+                            {"key": "capacitance_pf",      "label": "Capacitance C (pF)",              "type": "number"},
+                            {"key": "df_measured",         "label": "% D.F Measured",                  "type": "number"},
+                            {"key": "itc_correction_factor","label": "ITC Correction Factor",          "type": "number"},
+                            {"key": "df_corrected_20c",    "label": "% D.F @ 20°C (ITC Corrected)",   "type": "number"},
+                            {"key": "df_previous_test",    "label": "% D.F Previous Test",             "type": "number"},
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "HV-TV"},
+                        ],
+                    },
+                    # Bushing identity (Make/Sl.No./Y.O.Mfg) comes from the
+                    # Equipment register nameplate (bushing_details) — not re-entered here.
+                    # a. 220kV Bushing Test Results
+                    {
+                        "key": "bushing_220kv_results",
+                        "label": "220kV Bushing Test Results",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "bushing",              "label": "Bushing",                          "type": "readonly"},
+                            {"key": "kv",                   "label": "kV",                               "type": "number"},
+                            {"key": "capacitance_pf",       "label": "Capacitance C (pF)",               "type": "number"},
+                            {"key": "df_measured",          "label": "% D.F Measured",                   "type": "number"},
+                            {"key": "itc_correction_factor","label": "ITC Correction Factor",            "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number"},
+                            {"key": "df_previous_test",     "label": "% D.F Previous Test",              "type": "number"},
+                        ],
+                        "default_rows": [
+                            {"bushing": "'R' Phase"},
+                            {"bushing": "'Y' Phase"},
+                            {"bushing": "'B' Phase"},
+                        ],
+                    },
+                    # b. 66kV Bushing Test Results (identity from nameplate register)
+                    {
+                        "key": "bushing_66kv_results",
+                        "label": "66kV Bushing Test Results",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "bushing",              "label": "Bushing",                          "type": "readonly"},
+                            {"key": "kv",                   "label": "kV",                               "type": "number"},
+                            {"key": "capacitance_pf",       "label": "Capacitance C (pF)",               "type": "number"},
+                            {"key": "df_measured",          "label": "% D.F Measured",                   "type": "number"},
+                            {"key": "itc_correction_factor","label": "ITC Correction Factor",            "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number"},
+                            {"key": "df_previous_test",     "label": "% D.F Previous Test",              "type": "number"},
+                        ],
+                        "default_rows": [
+                            {"bushing": "'R' Phase"},
+                            {"bushing": "'Y' Phase"},
+                            {"bushing": "'B' Phase"},
+                        ],
+                    },
+                    {"key": "tan_delta_observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            # ── Insulation Diagnostics Test (IDAX) ───────────────────────────
+            {
+                "title": "Insulation Diagnostics Test (IDAX)",
+                "fields": [
+                    {
+                        "key": "idax_kit",
+                        "label": "Testing Kit Used",
+                        "type": "text",
+                        "required": True,
+                        "placeholder": "e.g. IDAX kit of Megger make, Model: IDAX 300",
+                    },
+                    {
+                        "key": "insulation_diagnostics",
+                        "label": "Insulation Diagnostics Results",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_configuration",         "label": "Test Configuration",                    "type": "readonly"},
+                            {"key": "moisture_percent",            "label": "% Moisture",                            "type": "number"},
+                            {"key": "moisture_analysis",          "label": "Tr. Analysis (% Moisture)",             "type": "dropdown",
+                             "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]},
+                            {"key": "moisture_previous_test",     "label": "% Moisture Previous Test",              "type": "number"},
+                            {"key": "oil_conductivity_psm",       "label": "Oil Conductivity (pS/m)",               "type": "number"},
+                            {"key": "oil_conductivity_analysis",  "label": "Tr. Analysis (Oil Conductivity)",       "type": "dropdown",
+                             "options": ["As new", "Acceptable", "Poor", "Bad"]},
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "HV-TV"},
+                        ],
+                    },
+                    {"key": "idax_observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            # ── Overall Assessment ────────────────────────────────────────────
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result",
+                        "label": "Overall Result",
+                        "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"],
+                        "required": True,
+                        "dropdown_evaluation": {
+                            "enabled": True,
+                            "value_severities": {
+                                "PASS":        "NORMAL",
+                                "CONDITIONAL": "ALERT",
+                                "FAIL":        "CRITICAL",
+                            },
+                        },
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ────────────────────────────────────────────────────────────
+    # INDIVIDUAL TESTS — single-session, executable on their own.
+    # Consolidated report combines whichever ran per transformer.
+    # ────────────────────────────────────────────────────────────
+
+    # ── Winding Tan-Delta & Capacitance (individual) ──────────────
+    "tan_delta_winding": {
+        "key": "tan_delta_winding",
+        "name": "Winding Tan-Delta & Capacitance Test",
+        "equipment_type": "Power Transformer",
+        "description": "Winding insulation Tan-Delta and capacitance measurement (DELTA 4000) with historical comparison.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "tan_delta_kit",         "label": "Testing Kit Used",    "type": "text", "required": True, "placeholder": "e.g. Megger DELTA 4000"},
+                    {"key": "date_of_previous_test", "label": "Date of Previous Test","type": "date"},
+                    {"key": "weather_condition",     "label": "Weather Condition",   "type": "text"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",            "label": "Oil Temperature",     "type": "number", "unit": "°C"},
+                ],
+            },
+            {
+                "title": "Winding Test Results",
+                "fields": [
+                    {
+                        "key": "winding_test_results",
+                        "label": "Winding Test Results",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_configuration",   "label": "Test Configuration",            "type": "readonly"},
+                            {"key": "kv",                   "label": "kV",                            "type": "number"},
+                            {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
+                            {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
+                            {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "HV-TV"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                # IEEE/IEC winding power-factor guidance (corrected to 20°C)
+                                "df_corrected_20c": {
+                                    "normal_min": None,    "normal_max": 0.5,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 1.0,
+                                },
+                            },
+                        },
+                    },
+                    {"key": "observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── 220kV Bushing Tan-Delta (individual) ──────────────────────
+    "tan_delta_bushing_220kv": {
+        "key": "tan_delta_bushing_220kv",
+        "name": "220kV Bushing Tan-Delta Test",
+        "equipment_type": "Power Transformer",
+        "description": "220kV bushing Tan-Delta and capacitance measurement (R/Y/B phases) with historical comparison.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "tan_delta_kit",         "label": "Testing Kit Used",    "type": "text", "required": True},
+                    {"key": "date_of_previous_test", "label": "Date of Previous Test","type": "date"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "220kV Bushing Test Results",
+                "fields": [
+                    {
+                        "key": "bushing_test_results", "label": "220kV Bushing Test Results", "type": "table",
+                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
+                        "columns": [
+                            {"key": "bushing",              "label": "Bushing",                       "type": "readonly"},
+                            {"key": "kv",                   "label": "kV",                            "type": "number"},
+                            {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
+                            {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
+                            {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
+                        ],
+                        "default_rows": [{"bushing": "'R' Phase"}, {"bushing": "'Y' Phase"}, {"bushing": "'B' Phase"}],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                # 220kV OIP bushing power-factor limits
+                                "df_corrected_20c": {
+                                    "normal_min": None,    "normal_max": 0.5,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 0.7,
+                                },
+                            },
+                        },
+                    },
+                    {"key": "observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── 66kV Bushing Tan-Delta (individual) ───────────────────────
+    "tan_delta_bushing_66kv": {
+        "key": "tan_delta_bushing_66kv",
+        "name": "66kV Bushing Tan-Delta Test",
+        "equipment_type": "Power Transformer",
+        "description": "66kV bushing Tan-Delta and capacitance measurement (R/Y/B phases) with historical comparison.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "tan_delta_kit",         "label": "Testing Kit Used",    "type": "text", "required": True},
+                    {"key": "date_of_previous_test", "label": "Date of Previous Test","type": "date"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "66kV Bushing Test Results",
+                "fields": [
+                    {
+                        "key": "bushing_test_results", "label": "66kV Bushing Test Results", "type": "table",
+                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
+                        "columns": [
+                            {"key": "bushing",              "label": "Bushing",                       "type": "readonly"},
+                            {"key": "kv",                   "label": "kV",                            "type": "number"},
+                            {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
+                            {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
+                            {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
+                        ],
+                        "default_rows": [{"bushing": "'R' Phase"}, {"bushing": "'Y' Phase"}, {"bushing": "'B' Phase"}],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                # 66kV OIP bushing power-factor limits
+                                "df_corrected_20c": {
+                                    "normal_min": None,    "normal_max": 0.7,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 1.0,
+                                },
+                            },
+                        },
+                    },
+                    {"key": "observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── IDAX Insulation Diagnostics (individual) ──────────────────
+    "idax_insulation": {
+        "key": "idax_insulation",
+        "name": "Insulation Diagnostics (IDAX)",
+        "equipment_type": "Power Transformer",
+        "description": "IDAX insulation diagnostics — % moisture and oil conductivity per winding configuration with historical comparison.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Information",
+                "fields": [
+                    {"key": "idax_kit",              "label": "Testing Kit Used",    "type": "text", "required": True, "placeholder": "e.g. Megger IDAX 300"},
+                    {"key": "date_of_previous_test", "label": "Date of Previous Test","type": "date"},
+                    {"key": "ambient_temp_c",        "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",            "label": "Oil Temperature",     "type": "number", "unit": "°C"},
+                ],
+            },
+            {
+                "title": "Insulation Diagnostics Results",
+                "fields": [
+                    {
+                        "key": "insulation_diagnostics", "label": "Insulation Diagnostics Results", "type": "table",
+                        "allow_add_rows": False, "allow_delete_rows": False, "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_configuration",        "label": "Test Configuration",              "type": "readonly"},
+                            {"key": "moisture_percent",          "label": "% Moisture",                      "type": "number"},
+                            {"key": "moisture_analysis",         "label": "Tr. Analysis (% Moisture)",       "type": "dropdown", "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]},
+                            {"key": "moisture_previous_test",    "label": "% Moisture Previous Test",        "type": "number"},
+                            {"key": "oil_conductivity_psm",      "label": "Oil Conductivity (pS/m)",         "type": "number"},
+                            {"key": "oil_conductivity_analysis", "label": "Tr. Analysis (Oil Conductivity)", "type": "dropdown", "options": ["As new", "Acceptable", "Poor", "Bad"]},
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "HV-TV"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "moisture_percent": {
+                                    "normal_min": None,    "normal_max": 2.0,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 3.0,
+                                },
+                            },
+                        },
+                    },
+                    {"key": "observations", "label": "Observations", "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── DFR (single-session, routine/maintenance — no baseline) ───────────────
+    "dfr_routine": {
+        "key": "dfr_routine",
+        "name": "Dielectric Frequency Response (DFR) — Routine",
+        "equipment_type": "Power Transformer",
+        "description": "Single-session Dielectric Frequency Response measurement for routine/maintenance testing (no factory-baseline comparison).",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",         "label": "Testing Kit Used",    "type": "text",   "required": True},
+                    {"key": "test_voltage_v",   "label": "Test Voltage",        "type": "number", "unit": "V",  "required": True},
+                    {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",       "label": "Oil Temperature",     "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "DFR Measurement Data",
+                "fields": [
+                    {
+                        "key": "dfr_measurements",
+                        "label": "DFR Measurements",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "frequency_hz",      "label": "Frequency (Hz)",   "type": "number"},
+                            {"key": "capacitance_pf",    "label": "Capacitance (pF)", "type": "number"},
+                            {"key": "tan_delta_percent", "label": "Tan Delta (%)",    "type": "number"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "tan_delta_percent": {
+                                    "normal_min": None,    "normal_max": 0.5,
+                                    "alert_min": None,     "alert_max": None,
+                                    "critical_below": None, "critical_above": 1.0,
+                                },
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ── SFRA (single-session, routine/maintenance — static CC floors) ─────────
+    "sfra_routine": {
+        "key": "sfra_routine",
+        "name": "Sweep Frequency Response Analysis (SFRA) — Routine",
+        "equipment_type": "Power Transformer",
+        "description": "Single-session SFRA measurement for routine/maintenance testing. Uses static correlation-coefficient acceptance floors (no factory-baseline session).",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",          "label": "Testing Kit Used",         "type": "text",   "required": True},
+                    {"key": "sweep_range",       "label": "Sweep Frequency Range",    "type": "text",   "required": True},
+                    {"key": "measurement_points","label": "No. of Measurement Points","type": "number"},
+                    {"key": "tap_position",      "label": "Tap Position",             "type": "text"},
+                    {"key": "ambient_temp_c",    "label": "Ambient Temperature",      "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",        "label": "Oil Temperature",          "type": "number", "unit": "°C", "required": True},
+                ],
+            },
+            {
+                "title": "SFRA Trace Data",
+                "fields": [
+                    {
+                        "key": "sfra_measurements",
+                        "label": "SFRA Measurements (Amplitude vs Frequency)",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "winding",      "label": "Winding / Connection", "type": "text"},
+                            {"key": "frequency_hz", "label": "Frequency (Hz)",       "type": "number"},
+                            {"key": "amplitude_db", "label": "Amplitude (dB)",       "type": "number"},
+                            {"key": "phase_deg",    "label": "Phase (°)",            "type": "number"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Correlation Coefficient Analysis",
+                "fields": [
+                    {
+                        "key": "correlation_analysis",
+                        "label": "Per-Winding Correlation",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "winding",   "label": "Winding",               "type": "readonly"},
+                            {"key": "cc_lf",     "label": "CC — LF (1k–100kHz)",   "type": "number"},
+                            {"key": "cc_mf",     "label": "CC — MF (100k–600kHz)", "type": "number"},
+                            {"key": "cc_hf",     "label": "CC — HF (600k–1MHz)",   "type": "number"},
+                            {"key": "assessment","label": "Assessment", "type": "dropdown",
+                             "options": ["Normal", "Slight Deviation", "Marginal", "Abnormal"]},
+                        ],
+                        "default_rows": [
+                            {"winding": "HV-N"}, {"winding": "LV-N"}, {"winding": "TV-N"},
+                            {"winding": "HV-LV"}, {"winding": "HV-TV"}, {"winding": "LV-TV"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "remedial_action_text": "SFRA correlation below acceptance floor — investigate winding/core mechanical integrity",
+                            "column_evaluations": {
+                                "cc_lf": {"normal_min": 0.98, "normal_max": None, "alert_min": 0.95, "alert_max": None, "critical_below": 0.95, "critical_above": None},
+                                "cc_mf": {"normal_min": 0.98, "normal_max": None, "alert_min": 0.95, "alert_max": None, "critical_below": 0.95, "critical_above": None},
+                                "cc_hf": {"normal_min": 0.97, "normal_max": None, "alert_min": 0.93, "alert_max": None, "critical_below": 0.93, "critical_above": None},
+                            },
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {
+                        "key": "fault_type", "label": "Suspected Fault Type", "type": "dropdown",
+                        "options": ["None", "Winding Deformation", "Axial Displacement",
+                                    "Radial Displacement / Buckling", "Shorted Turns",
+                                    "Core Movement", "Loose Connection / Lead"],
+                    },
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
 }
 
 
@@ -4422,6 +5740,25 @@ TEST_TYPE_TO_TEMPLATE = {
     "Tan Delta NCT Test": "tandelta_nct",
     # CVT
     "CVT Test Report": "cvt_test",
+
+    # ── DFR / IDAX (multi-session, cross-session comparison) ──
+    "Dielectric Frequency Response (DFR / IDAX)": "dfr_idax_transformer",
+    "DFR / IDAX":                                 "dfr_idax_transformer",
+
+    # ── Tan-Delta / Capacitance / IDAX (single-session, individual + combined) ──
+    "Tan-Delta, Capacitance & Insulation Diagnostics": "tan_delta_capacitance_idax",
+    "Winding Tan-Delta & Capacitance Test":            "tan_delta_winding",
+    "220kV Bushing Tan-Delta Test":                    "tan_delta_bushing_220kv",
+    "66kV Bushing Tan-Delta Test":                     "tan_delta_bushing_66kv",
+    "Insulation Diagnostics (IDAX)":                   "idax_insulation",
+
+    # ── SFRA (multi-session, cross-session comparison) ──
+    "Sweep Frequency Response Analysis (SFRA)":   "sfra_transformer",
+    "SFRA":                                       "sfra_transformer",
+
+    # ── Single-session routine DFR / SFRA (no factory baseline) ──
+    "Dielectric Frequency Response (DFR) — Routine":        "dfr_routine",
+    "Sweep Frequency Response Analysis (SFRA) — Routine":   "sfra_routine",
 
     # ── Oil test ──
     "Transformer Oil Test":             "transformer_oil_test",

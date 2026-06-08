@@ -95,6 +95,7 @@ from routers import (
 )
 from routers import cumulative  # Cumulative / Overhaul lifecycle module
 from routers import calibration as calibration_router  # Calibration lifecycle module
+from routers import precommission as precommission_router  # Pre-Commission QAP module
 
 # Organization Multi-Tenancy
 from routers import organizations, org_departments, org_users, org_roles
@@ -109,6 +110,7 @@ from routers import admin_notification_events as admin_notification_events_route
 
 # Dashboard KPIs
 from routers import dashboard_kpi
+from routers import dashboard_role_kpi
 
 # Reporting Suite
 from routers import reporting as reporting_router
@@ -1007,6 +1009,7 @@ app.include_router(annual_audits.router)       # Annual Audit observations
 app.include_router(test_register.router)       # NEW: Test Register catalogue
 app.include_router(cumulative.router)          # Cumulative / Overhaul lifecycle
 app.include_router(calibration_router.router)  # Calibration lifecycle
+app.include_router(precommission_router.router)  # Pre-Commission QAP
 
 # Equipment Asset Register
 app.include_router(equipment.router)
@@ -1018,6 +1021,7 @@ app.include_router(admin_notification_events_router.router)
 
 # Dashboard KPIs
 app.include_router(dashboard_kpi.router)
+app.include_router(dashboard_role_kpi.router)
 
 # Reporting Suite
 app.include_router(reporting_router.router)
@@ -1060,6 +1064,46 @@ async def startup_event():
     import overhaul_hooks  # noqa: F401
     import surveillance_hooks  # noqa: F401
     logger.info("[Hooks] Workflow lifecycle hooks registered")
+
+    # Seed pre-commission QAP workflow stages + org role mappings (idempotent)
+    try:
+        _db = SessionLocal()
+        from seed_precommission_workflow import (
+            seed_precommission_stages,
+            seed_precommission_role_mappings,
+        )
+        from models import Organization
+        seed_precommission_stages(_db)
+        # Seed role mappings only for orgs that have the required OrgRoles
+        from models import OrgRole
+        _orgs = _db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        seeded = 0
+        for _org in _orgs:
+            has_roles = _db.query(OrgRole).filter_by(
+                organization_id=_org.id, name="EE_TLSS"
+            ).first()
+            if not has_roles:
+                continue
+            try:
+                seed_precommission_role_mappings(_db, _org.id)
+                seeded += 1
+            except Exception as _re:
+                logger.warning(f"[Seed] PCR role mapping failed for org {_org.id}: {_re}")
+        _db.close()
+        logger.info(f"[Seed] Pre-commission QAP workflow staged + role mappings seeded for {seeded} org(s)")
+    except Exception as _e:
+        logger.warning(f"[Seed] Pre-commission seed failed on startup (non-fatal): {_e}")
+
+    # Seed DFR + Tan-Delta/IDAX templates — idempotent upsert on every restart
+    try:
+        _db = SessionLocal()
+        from seed import seed_dfr_template, seed_tan_delta_templates
+        seed_dfr_template(_db)
+        seed_tan_delta_templates(_db)
+        _db.close()
+        logger.info("[Seed] DFR + Tan-Delta/IDAX templates upserted on startup")
+    except Exception as _e:
+        logger.warning(f"[Seed] DFR/Tan-Delta template seed failed on startup (non-fatal): {_e}")
 
     # Seed all notification defaults (event catalogue, variables, templates,
     # schedule rules, routing rules) — idempotent, safe to run on every restart

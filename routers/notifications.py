@@ -1932,6 +1932,7 @@ def clone_routing_rule_as_org_override(
             else list(source.channels_enabled or ["email", "sms", "inapp"]),
         recipient_roles_override=data.recipient_roles_override or source.recipient_roles_override,
         advanced_conditions=data.advanced_conditions if data.advanced_conditions is not None else source.advanced_conditions,
+        followup_action=data.followup_action if data.followup_action is not None else source.followup_action,
         priority=data.priority if data.priority is not None else 10,
         is_active=True,
     )
