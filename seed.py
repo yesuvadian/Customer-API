@@ -11308,6 +11308,11 @@ def run_seed():
         # Repair Workflow — stages, templates, transitions only (roles deferred)
         print("\n--- Repair Workflow Seeding ---")
         try:
+            import inspect
+
+            print("FUNCTION:", seed_workflow)
+            print("MODULE:", seed_workflow.__module__)
+            print("SIGNATURE:", inspect.signature(seed_workflow))
             seed_workflow(session, skip_roles=True)
         except Exception as _e:
             print(f"[WARN] Repair workflow seed failed (non-fatal): {_e}")
@@ -11431,6 +11436,11 @@ def run_seed():
         # Repair workflow role assignments (stages already seeded above)
         print("\n--- Repair Workflow Role Assignments ---")
         try:
+            import inspect
+
+            print("FUNCTION:", seed_workflow)
+            print("MODULE:", seed_workflow.__module__)
+            print("SIGNATURE:", inspect.signature(seed_workflow))
             seed_workflow(session, skip_roles=False)
         except Exception as _e:
             print(f"[WARN] Repair workflow role assignment failed (non-fatal): {_e}")
@@ -11676,40 +11686,59 @@ def seed_zoho_import_mapping(session, kptcl_org):
     session.commit()
     print(f"[OK] Zoho import mapping created: KPTCL -> Originator, dept={dept.name if dept else 'None'}")
 def seed_workflow(db, skip_roles=False):
-
     import uuid
-    from datetime import datetime
 
     stages = load_json("REPAIR_WORKFLOW_STAGES.json")
     templates = load_json("REPAIR_STAGE_TEMPLATES.json")
     stage_template_map = load_json("STAGE_TEMPLATE_MAP.json")
-    # repair_stage_roles.json is a LIST: [{stage_code, roles}, ...]
     stage_role_list = load_json("repair_stage_roles.json")
-    # Repair_Role_Transitions.json is a LIST: [{from, to, action}, ...]  — match by stage name
     transitions = load_json("Repair_Role_Transitions.json")
 
-    # Derived name → code mapping (from stage sequence / template map keys)
     NAME_TO_CODE = {
-        "Failure Reporting":   "FAILURE_REPORT",
-        "Committee Review":    "COMMITTEE_REVIEW",
-        "Vendor Assignment":   "VENDOR_ASSIGNMENT",
-        "Lifting":             "LIFTING",
-        "Joint Inspection":    "JOINT_INSPECTION",
+        "Failure Reporting": "FAILURE_REPORT",
+        "Committee Review": "COMMITTEE_REVIEW",
+        "Vendor Assignment": "VENDOR_ASSIGNMENT",
+        "Lifting": "LIFTING",
+        "Joint Inspection": "JOINT_INSPECTION",
         "Estimate & Work Award": "ESTIMATE",
-        "Repair QA":           "QA",
-        "Final Inspection":    "FINAL_INSPECTION",
-        "Dispatch":            "DISPATCH",
-        "Commissioning":       "COMMISSIONING",
+        "Repair QA": "QA",
+        "Final Inspection": "FINAL_INSPECTION",
+        "Dispatch": "DISPATCH",
+        "Commissioning": "COMMISSIONING",
     }
 
-    # -------------------------------
+    # --------------------------------------------------
+    # 0. WORKFLOW DEFINITION
+    # --------------------------------------------------
+    workflow_def = (
+        db.query(RepairWorkflowDefinition)
+        .filter_by(workflow_code="BREAKDOWN")
+        .first()
+    )
+
+    if not workflow_def:
+        workflow_def = RepairWorkflowDefinition(
+            id=uuid.uuid4(),
+            workflow_code="BREAKDOWN",
+            name="Breakdown Repair Workflow",
+            is_active=True,
+        )
+        db.add(workflow_def)
+        db.flush()
+
+    # --------------------------------------------------
     # 1. TEMPLATES
-    # -------------------------------
+    # --------------------------------------------------
     template_map = {}
 
     for key, t in templates.items():
 
-        existing = db.query(OrgTestTemplate).filter_by(template_key=key).first()
+        existing = (
+            db.query(OrgTestTemplate)
+            .filter_by(template_key=key)
+            .first()
+        )
+
         if existing:
             template_map[key] = existing.id
             continue
@@ -11717,9 +11746,9 @@ def seed_workflow(db, skip_roles=False):
         obj = OrgTestTemplate(
             id=uuid.uuid4(),
             template_key=key,
-            template_type=t["template_type"],
             template_data=t,
-            created_at=datetime.utcnow()
+            is_system=True,
+            version=1,
         )
 
         db.add(obj)
@@ -11727,26 +11756,44 @@ def seed_workflow(db, skip_roles=False):
 
         template_map[key] = obj.id
 
-    # -------------------------------
+    # --------------------------------------------------
     # 2. STAGES
-    # Keyed by name for template/transition lookup;
-    # also keyed by code for role lookup.
-    # -------------------------------
-    stage_map_by_name = {}  # stage name -> stage.id
-    stage_map_by_code = {}  # stage code -> stage.id
+    # --------------------------------------------------
+    stage_map_by_name = {}
+    stage_map_by_code = {}
 
     for s in stages:
-        stage_name = s["name"]
-        stage_code = s.get("code") or NAME_TO_CODE.get(stage_name, stage_name.upper().replace(" ", "_"))
 
-        existing = db.query(RepairStageDefinition).filter_by(name=stage_name).first()
+        stage_name = s["name"]
+
+        stage_code = (
+            s.get("code")
+            or NAME_TO_CODE.get(
+                stage_name,
+                stage_name.upper().replace(" ", "_")
+            )
+        )
+
+        existing = (
+            db.query(RepairStageDefinition)
+            .filter_by(
+                workflow_definition_id=workflow_def.id,
+                name=stage_name
+            )
+            .first()
+        )
+
         if existing:
+            if existing.workflow_definition_id != workflow_def.id:
+                existing.workflow_definition_id = workflow_def.id
+
             stage_map_by_name[stage_name] = existing.id
             stage_map_by_code[existing.code] = existing.id
             continue
 
         stage = RepairStageDefinition(
             id=uuid.uuid4(),
+            workflow_definition_id=workflow_def.id,
             name=stage_name,
             code=stage_code,
             sequence=s["sequence"],
@@ -11761,9 +11808,9 @@ def seed_workflow(db, skip_roles=False):
         stage_map_by_name[stage_name] = stage.id
         stage_map_by_code[stage_code] = stage.id
 
-    # -------------------------------
+    # --------------------------------------------------
     # 3. STAGE → TEMPLATE
-    # -------------------------------
+    # --------------------------------------------------
     for stage_name, template_key in stage_template_map.items():
 
         stage_id = stage_map_by_name.get(stage_name)
@@ -11772,117 +11819,161 @@ def seed_workflow(db, skip_roles=False):
         if not stage_id or not template_id:
             continue
 
-        exists = db.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
+        exists = (
+            db.query(RepairStageTemplate)
+            .filter_by(stage_id=stage_id)
+            .first()
+        )
 
         if not exists:
-            db.add(RepairStageTemplate(
-                stage_id=stage_id,
-                template_id=template_id
-            ))
+            db.add(
+                RepairStageTemplate(
+                    stage_id=stage_id,
+                    template_id=template_id,
+                )
+            )
         else:
             exists.template_id = template_id
 
-    # -------------------------------
-    # 4. STAGE → ROLE
-    # repair_stage_roles.json: [{stage_code, roles, assignment_role}, ...]
-    # roles[]         → can_edit=True, can_approve=True, can_assign=False
-    # assignment_role → can_edit=False, can_approve=False, can_assign=True
-    # -------------------------------
+    # --------------------------------------------------
+    # 4. ROLES (optional)
+    # --------------------------------------------------
     if skip_roles:
         db.commit()
-        print("[OK] Repair workflow seeded successfully (roles deferred)")
+        print(
+            f"[OK] BREAKDOWN workflow seeded "
+            f"({len(stage_map_by_name)} stages, roles deferred)"
+        )
         return
 
     for entry in stage_role_list:
+
         stage_code = entry.get("stage_code")
         stage_id = stage_map_by_code.get(stage_code)
 
         if not stage_id:
-            print(f"  [WARN] seed_workflow: stage_code '{stage_code}' not found — skipping roles")
+            print(
+                f"[WARN] stage_code '{stage_code}' not found"
+            )
             continue
 
-        # Stage actor roles (can_edit + can_approve)
         for role_name in entry.get("roles", []):
-            role = db.query(OrgRole).filter_by(name=role_name).first()
+
+            role = (
+                db.query(OrgRole)
+                .filter_by(name=role_name)
+                .first()
+            )
+
             if not role:
-                print(f"  [WARN] seed_workflow: role '{role_name}' not found in org_roles")
+                print(
+                    f"[WARN] role '{role_name}' not found"
+                )
                 continue
 
-            exists = db.query(RepairStageRole).filter_by(
-                stage_id=stage_id,
-                role_id=role.id
-            ).first()
-
-            if not exists:
-                db.add(RepairStageRole(
-                    id=uuid.uuid4(),
+            exists = (
+                db.query(RepairStageRole)
+                .filter_by(
                     stage_id=stage_id,
                     role_id=role.id,
-                    can_edit=True,
-                    can_approve=True,
-                    can_assign=False,
-                ))
+                )
+                .first()
+            )
 
-        # Assignment role (can_assign only — driven from JSON, not hardcoded)
-        assign_role_name = entry.get("assignment_role")
-        if assign_role_name:
-            assign_role = db.query(OrgRole).filter_by(name=assign_role_name).first()
-            if assign_role:
-                exists = db.query(RepairStageRole).filter_by(
-                    stage_id=stage_id,
-                    role_id=assign_role.id
-                ).first()
-                if not exists:
-                    db.add(RepairStageRole(
+            if not exists:
+                db.add(
+                    RepairStageRole(
                         id=uuid.uuid4(),
                         stage_id=stage_id,
+                        role_id=role.id,
+                        can_edit=True,
+                        can_approve=True,
+                        can_assign=False,
+                    )
+                )
+
+        assign_role_name = entry.get("assignment_role")
+
+        if assign_role_name:
+
+            assign_role = (
+                db.query(OrgRole)
+                .filter_by(name=assign_role_name)
+                .first()
+            )
+
+            if assign_role:
+
+                exists = (
+                    db.query(RepairStageRole)
+                    .filter_by(
+                        stage_id=stage_id,
                         role_id=assign_role.id,
-                        can_edit=False,
-                        can_approve=False,
-                        can_assign=True,
-                    ))
+                    )
+                    .first()
+                )
+
+                if not exists:
+                    db.add(
+                        RepairStageRole(
+                            id=uuid.uuid4(),
+                            stage_id=stage_id,
+                            role_id=assign_role.id,
+                            can_edit=False,
+                            can_approve=False,
+                            can_assign=True,
+                        )
+                    )
                 elif not exists.can_assign:
                     exists.can_assign = True
 
-    # -------------------------------
+    # --------------------------------------------------
     # 5. TRANSITIONS
-    # Repair_Role_Transitions.json: [{from, to, action}, ...]
-    # Match stages by name.
-    # -------------------------------
+    # --------------------------------------------------
     for t in transitions:
+
         from_id = stage_map_by_name.get(t["from"])
         to_id = stage_map_by_name.get(t["to"])
 
         if not from_id:
-            print(f"  [WARN] seed_workflow: transition from-stage '{t['from']}' not found")
+            print(
+                f"[WARN] transition from '{t['from']}' not found"
+            )
             continue
 
-        exists = db.query(RepairStageTransition).filter_by(
-            from_stage_id=from_id,
-            action=t["action"]
-        ).first()
+        exists = (
+            db.query(RepairStageTransition)
+            .filter_by(
+                from_stage_id=from_id,
+                action=t["action"],
+            )
+            .first()
+        )
 
         if not exists:
-            db.add(RepairStageTransition(
-                id=uuid.uuid4(),
-                from_stage_id=from_id,
-                to_stage_id=to_id,
-                action=t["action"]
-            ))
+            db.add(
+                RepairStageTransition(
+                    id=uuid.uuid4(),
+                    from_stage_id=from_id,
+                    to_stage_id=to_id,
+                    action=t["action"],
+                )
+            )
         else:
             exists.to_stage_id = to_id
 
     db.commit()
-    # -------------------------------
-    # DONE
-    # -------------------------------
-    print("✅ Workflow seeded")
+
+    print(
+        f"[OK] BREAKDOWN workflow seeded successfully "
+        f"({len(stage_map_by_name)} stages)"
+    )
 
 def load_json(file_name):
     with open(file_name, "r") as f:
         return json.load(f)
 
-def seed_workflow(session):
+def seed_workflow_legacy(session):
     """
     Seed repair workflow stages, templates, role assignments, and transitions.
 
