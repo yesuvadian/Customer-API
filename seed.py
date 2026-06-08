@@ -12488,22 +12488,30 @@ def seed_surveillance_workflow(session):
     print("\n[SUCCESS] Surveillance workflow seed validation passed!")
 
 
+from sqlalchemy import func
+
 def seed_surveillance_config(session):
     """
     Seed surveillance configuration data.
 
     Creates:
-    1. System-wide default surveillance config (24 months, 2x frequency)
-    2. Test type configurations (DGA, BDV, IR, Oil Quality for surveillance)
+    1. System-wide default surveillance config
+    2. Surveillance test configurations for Power Transformers
     """
+
     print("\n[INFO] Seeding surveillance configuration...")
 
-    # ── 1. System-wide Default Config ─────────────────────────────────────────
-    # Check if system default already exists
-    system_config = session.query(SurveillanceConfig).filter_by(
-        organization_id=None,
-        department_id=None
-    ).first()
+    # ------------------------------------------------------------------
+    # 1. System Configuration
+    # ------------------------------------------------------------------
+    system_config = (
+        session.query(SurveillanceConfig)
+        .filter_by(
+            organization_id=None,
+            department_id=None
+        )
+        .first()
+    )
 
     if not system_config:
         system_config = SurveillanceConfig(
@@ -12512,65 +12520,115 @@ def seed_surveillance_config(session):
             department_id=None,
             surveillance_period_months=24,
             frequency_multiplier=2.0,
-            abnormal_statuses=['FAIL', 'MARGINAL', 'CRITICAL', 'ALERT'],
+            abnormal_statuses=[
+                "FAIL",
+                "MARGINAL",
+                "CRITICAL",
+                "ALERT",
+            ],
             quality_threshold_fair=20.0,
             is_active=True,
         )
+
         session.add(system_config)
         session.flush()
-        print(f"[OK] System surveillance config created: {system_config.id}")
+
+        print(
+            f"[OK] System surveillance config created: "
+            f"{system_config.id}"
+        )
     else:
-        print(f"[SKIP] System surveillance config already exists: {system_config.id}")
+        print(
+            f"[SKIP] System surveillance config already exists: "
+            f"{system_config.id}"
+        )
 
-    # ── 2. Surveillance Test Configurations ───────────────────────────────────
-    # Get equipment types and test types from CategoryDetails
-
-    # Find "Power Transformer" equipment master
-    equip_master = session.query(CategoryMaster).filter_by(name="Power Transformer").first()
+    # ------------------------------------------------------------------
+    # 2. Equipment Type
+    # ------------------------------------------------------------------
+    equip_master = (
+        session.query(CategoryMaster)
+        .filter(
+            func.lower(CategoryMaster.name)
+            == "power transformer"
+        )
+        .first()
+    )
 
     if not equip_master:
-        print("[WARN] Power Transformer CategoryMaster not found - skipping test config")
+        print(
+            "[WARN] Power Transformer CategoryMaster not found "
+            "- skipping surveillance test config"
+        )
         return
 
-    # Surveillance test types mapped to existing CategoryDetails names
+    # ------------------------------------------------------------------
+    # 3. Surveillance Tests
+    # ------------------------------------------------------------------
     surveillance_tests = [
-        ("Transformer Oil Test",       "high",   True),
+        ("Transformer Oil Test", "high", True),
         ("Capacitance & Tan Delta Test (Transformer)", "high", True),
         ("Transformer Physical Inspection", "medium", True),
-        ("Insulation resistance test", "medium", True),
+        ("Insulation Resistance Test", "medium", True),
     ]
 
     for test_name, priority, required in surveillance_tests:
-        test_type = session.query(CategoryDetails).filter_by(
-            name=test_name,
-            category_master_id=equip_master.id,
-        ).first()
+
+        test_type = (
+            session.query(CategoryDetails)
+            .filter(
+                func.lower(CategoryDetails.name)
+                == test_name.lower(),
+                CategoryDetails.category_master_id
+                == equip_master.id,
+            )
+            .first()
+        )
 
         if not test_type:
-            print(f"[WARN] Test type not found for surveillance config: {test_name}")
+            print(
+                f"[WARN] Test type not found for surveillance "
+                f"config: {test_name}"
+            )
             continue
 
-        existing = session.query(SurveillanceTestConfig).filter_by(
-            equipment_type_id=equip_master.id,
-            test_type_id=test_type.id,
-        ).first()
+        existing = (
+            session.query(SurveillanceTestConfig)
+            .filter_by(
+                equipment_type_id=equip_master.id,
+                test_type_id=test_type.id,
+            )
+            .first()
+        )
 
         if existing:
-            print(f"[SKIP] Surveillance test config exists: {test_name}")
+            print(
+                f"[SKIP] Surveillance test config exists: "
+                f"{test_name}"
+            )
             continue
 
-        session.add(SurveillanceTestConfig(
-            id=uuid.uuid4(),
-            equipment_type_id=equip_master.id,
-            test_type_id=test_type.id,
-            is_required=required,
-            default_priority=priority,
-            is_active=True,
-        ))
-        print(f"[OK] Surveillance test config created: {test_name}")
+        session.add(
+            SurveillanceTestConfig(
+                id=uuid.uuid4(),
+                equipment_type_id=equip_master.id,
+                test_type_id=test_type.id,
+                is_required=required,
+                default_priority=priority,
+                is_active=True,
+            )
+        )
+
+        print(
+            f"[OK] Surveillance test config created: "
+            f"{test_name}"
+        )
 
     session.commit()
-    print("[OK] Surveillance configuration seeded successfully")
+
+    print(
+        "[OK] Surveillance configuration seeded successfully"
+    )
 
 
 def _dft_get_or_create_org(session) -> Organization:
