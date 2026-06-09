@@ -408,6 +408,20 @@ class OrgTestTemplateService:
                     existing.template_key  = template_key
                     existing.version       = (existing.version or 1) + 1
                     flag_modified(existing, "template_data")
+                    # Cascade to org-specific copies (same key, non-null org_id)
+                    # so that all orgs always see the latest template definition.
+                    org_copies = (
+                        self.db.query(OrgTestTemplate)
+                        .filter(
+                            OrgTestTemplate.template_key == template_key,
+                            OrgTestTemplate.org_id != None,  # noqa: E711
+                        )
+                        .all()
+                    )
+                    for copy in org_copies:
+                        copy.template_data = template_data
+                        copy.version = existing.version
+                        flag_modified(copy, "template_data")
                     continue
 
                 self.db.add(OrgTestTemplate(
