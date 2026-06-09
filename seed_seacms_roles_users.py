@@ -420,7 +420,7 @@ USER_DEFS = [
     ("see.rt@utility.local",          "Anand",     "Krishnamurthy", "9900001006", "BLR_CIRCLE",  "SEE_RT"),
     ("cee.transmission@utility.local","Rajesh",    "Srinivasan",    "9900001007", "BLR_CIRCLE",  "CEE_TRANSMISSION_ZONE"),
     ("cee.rtrd@utility.local",        "Prakash",   "Murthy",        "9900001008", "BLR_CIRCLE",  "CEE_RT_RD"),
-    ("orgadmin@utility.com",          "Org",       "Admin",         "9900001000", "BLR_CIRCLE",  "System Administrator"),
+    ("orgadmin@utility.com",          "Org",       "Admin",         "9900001000", None,          "System Administrator"),
     ("asset.officer@utility.local",   "Kavitha",   "Nair",          "9900001009", "BLR_CIRCLE",  "Asset Data Officer"),
     ("trc@utility.local",             "Sanjay",    "Reddy",         "9900001010", "BLR_CIRCLE",  "Transformer Repair Coordinator"),
     ("taqc.inspector@utility.local",  "Deepa",     "Menon",         "9900001011", "BLR_CIRCLE",  "TA&QC Inspector"),
@@ -465,6 +465,8 @@ def seed():
 
         def _dept(code):
             """Return dept id by code, fallback to first available dept or None."""
+            if code is None:
+                return None
             if code in dept_map:
                 return dept_map[code]
             # Try prefix match on code
