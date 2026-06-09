@@ -11412,6 +11412,14 @@ def run_seed():
             print(f"[WARN] KPTCL org roles seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
+        # System Administrator — elevate to org-admin + full module permissions
+        # Must run after seed_seacms_roles_users so OrgRoles exist
+        print("\n--- System Administrator Permissions ---")
+        try:
+            seed_system_admin_permissions(session)
+        except Exception as _e:
+            print(f"[WARN] System Administrator permissions failed (non-fatal): {_e}")
+
         # Zoho + Notifications — after seacms so roles and users exist
         seed_zoho_import_mapping(session, kptcl_org)
         seed_notifications_module_and_permissions(session)
@@ -11513,6 +11521,78 @@ def run_seed():
         print("  4. Dept-filter users: tester.north / tester.south / tester.mysuru @ kptcl.com / TestDept@123")
         print(f"  {5 if kptcl_org else 4}. View API docs: http://localhost:8000/docs")
         print("\n" + "=" * 80 + "\n")
+
+
+def seed_system_admin_permissions(session) -> int:
+    """
+    Idempotently elevate every 'System Administrator' OrgRole to full org-admin.
+
+    Mirrors the logic in system_admin_permissions.py so it runs automatically
+    during seed instead of requiring a manual script invocation.
+
+    Steps:
+      1. Find all OrgRole rows named 'System Administrator' (any org)
+      2. Set is_org_admin=True, is_active=True
+      3. Upsert OrgRolePermission for every active Module with all flags True
+
+    Returns the number of permission rows created/updated.
+    """
+    roles = (
+        session.query(OrgRole)
+        .filter(OrgRole.name == "System Administrator")
+        .all()
+    )
+
+    if not roles:
+        print("[WARN] seed_system_admin_permissions: no 'System Administrator' OrgRole found — skipping")
+        return 0
+
+    modules = session.query(Module).filter_by(is_active=True).all()
+    total_upserted = 0
+
+    for role in roles:
+        # Elevate to org-admin
+        role.is_org_admin = True
+        role.is_active    = True
+
+        for module in modules:
+            perm = (
+                session.query(OrgRolePermission)
+                .filter_by(org_role_id=role.id, module_id=module.id)
+                .first()
+            )
+            if perm:
+                perm.can_view    = True
+                perm.can_add     = True
+                perm.can_edit    = True
+                perm.can_delete  = True
+                perm.can_approve = True
+                perm.can_assign  = True
+                if hasattr(perm, "can_export"):
+                    perm.can_export = True
+                if hasattr(perm, "can_import"):
+                    perm.can_import = True
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=module.id,
+                    can_view=True,
+                    can_add=True,
+                    can_edit=True,
+                    can_delete=True,
+                    can_approve=True,
+                    can_assign=True,
+                    can_export=True,
+                    can_import=True,
+                    cts=datetime.now(),
+                    mts=datetime.now(),
+                ))
+            total_upserted += 1
+
+    session.commit()
+    print(f"[OK] seed_system_admin_permissions: {len(roles)} role(s), {total_upserted} permission rows upserted")
+    return total_upserted
 
 
 def seed_sample_equipment(session, org):
