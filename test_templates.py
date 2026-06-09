@@ -2616,9 +2616,10 @@ TEST_TEMPLATES = {
                                             "<=72.5kV":   {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
                                         },
                                         "Tan Delta at 90C": {
-                                            ">170kV":     {"Good": [0, 0.2], "Poor": [0.2, None]},
-                                            "72.5-170kV": {"Good": [0, 0.5], "Poor": [0.5, None]},
-                                            "<=72.5kV":   {"Good": [0, 0.5], "Poor": [0.5, None]},
+                                            # IEC 60422:2013 / IS 1866:2017 — dimensionless ratio (not %)
+                                            ">170kV":     {"Good": [0, 0.010], "Fair": [0.010, 0.050], "Poor": [0.050, None]},
+                                            "72.5-170kV": {"Good": [0, 0.020], "Fair": [0.020, 0.100], "Poor": [0.100, None]},
+                                            "<=72.5kV":   {"Good": [0, 0.050], "Fair": [0.050, 0.200], "Poor": [0.200, None]},
                                         },
                                         "BDV Top (T)": {
                                             ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},

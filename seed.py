@@ -7983,6 +7983,7 @@ def seed_transformer_oil_template(session) -> int:
     """
     from models import CategoryMaster, CategoryDetails, OrgTestTemplate
     from test_templates import TEST_TEMPLATES
+    from sqlalchemy.orm.attributes import flag_modified
 
     master = session.query(CategoryMaster).filter(
         CategoryMaster.description == "Testing Equipment"
@@ -8016,6 +8017,7 @@ def seed_transformer_oil_template(session) -> int:
         existing.test_type_id = detail.id
         existing.template_data = template_data
         existing.is_system = True
+        flag_modified(existing, "template_data")
     else:
         session.add(OrgTestTemplate(
             template_key=OIL_KEY,
