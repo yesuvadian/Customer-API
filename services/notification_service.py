@@ -2581,7 +2581,13 @@ class NotificationService:
         (SRS — Equipment Register: New).
         """
         ueic    = getattr(equipment, "ueic", "N/A")
-        eq_type = getattr(equipment, "equipment_type_name", "Equipment")
+        # equipment.equipment_type is a SQLAlchemy relationship (CategoryMaster),
+        # not a plain string — resolve .name to avoid "CategoryMaster object" repr.
+        _eq_type_rel = getattr(equipment, "equipment_type", None)
+        if _eq_type_rel and hasattr(_eq_type_rel, "name"):
+            eq_type = _eq_type_rel.name or "Equipment"
+        else:
+            eq_type = getattr(equipment, "equipment_type_name", "") or "Equipment"
         dept    = getattr(equipment, "department_name", "")
         mfr     = getattr(equipment, "manufacturer", "")
         self.fire(
