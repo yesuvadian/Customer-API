@@ -5326,6 +5326,19 @@ TEST_TEMPLATES = {
                                 },
                             },
                         },
+                        "rule": {
+                            "type": "THRESHOLD",
+                            "config": {
+                                "input_field": "$row.df_corrected_20c",
+                                "thresholds": {
+                                    "Power Factor @ 20°C (%)": {
+                                        "Good":  [None, 0.5],
+                                        "Fair":  [0.5,  1.0],
+                                        "Poor":  [1.0,  None],
+                                    }
+                                }
+                            }
+                        },
                     },
                     {"key": "observations", "label": "Observations", "type": "textarea"},
                 ],
