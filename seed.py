@@ -7671,7 +7671,7 @@ def seed_calibration_template(session) -> int:
         "key": CAL_KEY,
         "description": "Equipment calibration lifecycle tracking. Computes next due date and triggers repair on failure.",
         "enable_calibration": True,
-        "multi_session": True,
+        "multi_session": False,
         "sections": [
             {
                 "title": "Calibration Record",
@@ -9492,18 +9492,18 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{replaced_on}}</td></tr>"
             "</table>"
             "<p>Log in to SEACMS Equipment Register to download the Replacement Report PDF.</p>",
-            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            ["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         _s(
             "[KPTCL-SEACMS] {{equipment.type}} at {{equipment.department}} replaced."
             " Old:{{old_ueic}} New:{{new_ueic}}. By {{replaced_by}} on {{replaced_on}}.",
-            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            ["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         _i(
             "Equipment replaced — {{old_ueic}} → {{new_ueic}}",
             "{{equipment.type}} at {{equipment.department}} replaced by {{replaced_by}} on {{replaced_on}}."
             " Reason: {{reason_type}}.",
-            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            ["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
     )
 
@@ -9907,17 +9907,17 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
             "</table>"
             "<p>Log in to SEACMS to review the equipment details and configure test schedules.</p>",
-            ["Maintenance Officer", "Reviewing Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         _s(
             "[KPTCL-SEACMS] New equipment registered: {{equipment.ueic}} ({{equipment.type}})"
             " at {{equipment.department}} on {{system.date}} by {{commissioned_by}}.",
-            ["Maintenance Officer", "Reviewing Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         _i(
             "New equipment — {{equipment.ueic}}",
             "{{equipment.type}} ({{equipment.ueic}}) commissioned at {{equipment.department}} by {{commissioned_by}}.",
-            ["Maintenance Officer", "Reviewing Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS"],
         ),
     )
 
@@ -9935,17 +9935,17 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
             "</table>"
             "<p>All pending test schedules for this equipment have been cancelled. Log in to SEACMS to confirm.</p>",
-            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"],
         ),
         _s(
             "[KPTCL-SEACMS] Equipment {{equipment.ueic}} ({{equipment.type}}) at"
             " {{equipment.department}} RETIRED on {{system.date}}. Reason: {{reason}}.",
-            ["Maintenance Officer", "Reviewing Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         _i(
             "Equipment retired — {{equipment.ueic}}",
             "{{equipment.type}} ({{equipment.ueic}}) at {{equipment.department}} has been decommissioned. Reason: {{reason}}.",
-            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"],
         ),
     )
 

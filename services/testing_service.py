@@ -783,6 +783,43 @@ class TestingService:
         self.db.commit()
         self.db.refresh(result)
 
+        # ── Calibration DATE_ADD evaluation (fire-and-forget; never blocks save) ─
+        # Fires for any template whose rules list contains a DATE_ADD rule.
+        # Reads calibration_date + validity_months from test_data, computes
+        # next_due, updates equipment calibration status, and triggers repair
+        # workflow if result == Fail.
+        if getattr(request, 'equipment_id', None) and result.template_key:
+            try:
+                from test_templates import get_template_by_key as _get_tmpl_cal
+                _tmpl_cal = _get_tmpl_cal(result.template_key)
+                if _tmpl_cal is None:
+                    from services.org_test_template_service import OrgTestTemplateService as _OTS_CAL
+                    try:
+                        _ot_cal = _OTS_CAL(self.db).get_by_template_key(result.template_key)
+                        _tmpl_cal = _ot_cal.template_data if _ot_cal else None
+                    except Exception:
+                        _tmpl_cal = None
+
+                _has_date_add = any(
+                    (r.get("type") or "").upper() == "DATE_ADD"
+                    for r in (_tmpl_cal or {}).get("rules", [])
+                )
+
+                if _has_date_add:
+                    from services.calibration_service import CalibrationService
+                    CalibrationService(self.db).evaluate_calibration(
+                        equipment_id=request.equipment_id,
+                        user_id=tester_id,
+                    )
+                    print(
+                        f"[CALIBRATION] DATE_ADD evaluated — equipment={request.equipment_id} "
+                        f"template={result.template_key}"
+                    )
+            except Exception as _cal_err:
+                import traceback
+                print(f"[WARN] Calibration DATE_ADD evaluation failed: {_cal_err}")
+                traceback.print_exc()
+
         # ── Cumulative overhaul evaluation (fire-and-forget; never blocks save) ─
         # Fires for any template whose rules list contains a CUMULATIVE_DIFF rule.
         # Covers all cumulative test types (OLTC ops count, CB ops count, etc.)
