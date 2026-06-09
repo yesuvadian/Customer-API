@@ -423,6 +423,7 @@ class RepairWorkflowService:
             workflow_number=workflow_number,
             workflow_code="BREAKDOWN",
             equipment_id=equipment_id,
+            organization_id=equipment.organization_id,
             source_failure_id=source_failure_id,
             current_stage_id=first_stage.id,
             status="active",
@@ -1024,8 +1025,11 @@ class RepairWorkflowService:
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
+        organization_id=None,
     ) -> list:
         q = self.db.query(RepairWorkflow)
+        if organization_id:
+            q = q.filter(RepairWorkflow.organization_id == organization_id)
         if status == "annual_audit":
             q = q.filter(RepairWorkflow.workflow_code == "ANNUAL_AUDIT")
             status = None
@@ -1035,8 +1039,15 @@ class RepairWorkflowService:
         elif status == "surveillance":
             q = q.filter(RepairWorkflow.workflow_code == "SURVEILLANCE")
             status = None
+        elif status == "breakdown":
+            # 'breakdown' is a workflow_code filter, not a status filter
+            q = q.filter(or_(
+                RepairWorkflow.workflow_code.is_(None),
+                RepairWorkflow.workflow_code == "BREAKDOWN",
+            ))
+            status = None
         else:
-            # Default: exclude non-repair workflow types from general list
+            # Default (all): exclude non-repair workflow types
             q = q.filter(or_(
                 RepairWorkflow.workflow_code.is_(None),
                 RepairWorkflow.workflow_code.notin_(["ANNUAL_AUDIT", "PRE_COMMISSION", "SURVEILLANCE"]),
@@ -1972,6 +1983,10 @@ class RepairWorkflowService:
                     actual_event = "calibration_stage_changed"
                 elif wf_code == "SURVEILLANCE":
                     actual_event = "surveillance_stage_changed"
+                elif wf_code == "ANNUAL_AUDIT":
+                    actual_event = "annual_audit_stage_changed"
+                elif wf_code == "PRE_COMMISSION":
+                    actual_event = "precommission_stage_changed"
                 else:
                     actual_event = "repair_stage_changed"
                 svc.fire(
@@ -1999,6 +2014,10 @@ class RepairWorkflowService:
                     actual_event = "calibration_stage_delay"
                 elif wf_code == "SURVEILLANCE":
                     actual_event = "surveillance_stage_delay"
+                elif wf_code == "ANNUAL_AUDIT":
+                    actual_event = "annual_audit_stage_delay"
+                elif wf_code == "PRE_COMMISSION":
+                    actual_event = "precommission_stage_delay"
                 else:
                     actual_event = "repair_delay"
 
@@ -2048,6 +2067,10 @@ class RepairWorkflowService:
                     actual_event = "calibration_cancelled"
                 elif wf_code == "SURVEILLANCE":
                     actual_event = "surveillance_cancelled"
+                elif wf_code == "ANNUAL_AUDIT":
+                    actual_event = "annual_audit_cancelled"
+                elif wf_code == "PRE_COMMISSION":
+                    actual_event = "precommission_cancelled"
                 else:
                     actual_event = "repair_cancelled"
 

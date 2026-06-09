@@ -1038,10 +1038,14 @@ async def replace_equipment(
                 "department":     dept_name,
                 "reason_type":    reason_type,
                 "reason":         reason,
-                "replaced_by":    f"{current_user.firstname} {current_user.lastname}",
+                "replaced_by":    (
+                    f"{current_user.firstname or ''} {current_user.lastname or ''}".strip()
+                    or current_user.email
+                ),
                 "replaced_on":    _dt(old.retired_date) or "-",
             },
             organization_id=org_id,
+            department_id=existing.department_id,
             source_id=new.id,
             source_type="equipment",
             severity="info",

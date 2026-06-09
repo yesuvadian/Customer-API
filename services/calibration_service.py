@@ -67,7 +67,7 @@ CALIBRATION_TEMPLATE: dict = {
     "key": CALIBRATION_KEY,
     "description": "Equipment calibration lifecycle tracking. Computes next due date and triggers repair on failure.",
     "enable_calibration": True,
-    "multi_session": True,
+    "multi_session": False,
     "sections": [
         {
             "title": "Calibration Record",
@@ -793,7 +793,7 @@ class CalibrationService:
                 test_type_id=cal_type_id,
                 request_category="test",
                 status=TestingRequestStatus.draft,
-                is_multi_session=True,
+                is_multi_session=False,
                 is_calibration=True,
                 priority="normal",
             )

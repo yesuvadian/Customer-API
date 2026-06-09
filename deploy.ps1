@@ -10,11 +10,13 @@ if ($Environment -eq "main") {
     $Server = "erp@192.168.0.105"
     $ServerDR = "erp@192.168.0.100"
     $BASE_URL = "https://api.procurement.cogniwatt.com"
+    $ServiceName = "api-procurement"
 }
 else {
-    $Server = "erp@192.168.0.103"
+    $Server = "erp@192.168.0.109"
     $ServerDR = $null
     $BASE_URL = "https://devsupplier.cogniwatt.com"
+    $ServiceName = "customer-api"
 }
 
 $RemoteBasePath = "/apps/customer"
@@ -76,7 +78,7 @@ sed -i 's|^DB_PORT=.*|DB_PORT=5432|' $ApiPath/.env &&
 sed -i 's|^DB_NAME=.*|DB_NAME=Relu_Vendor2|' $ApiPath/.env &&
 sed -i 's|^APP_NAME=.*|APP_NAME=Relu-Vendor-API|' $ApiPath/.env &&
 sed -i 's|^BASE_URL=.*|BASE_URL=$BaseUrl|' $ApiPath/.env &&
-sudo /usr/bin/systemctl restart api-procurement
+sudo /usr/bin/systemctl restart $ServiceName
 "@
 }
 

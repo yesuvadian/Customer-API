@@ -1709,7 +1709,26 @@ TEST_TEMPLATES = {
                             {"key": "b_current", "label": "B-ph I (mA)", "type": "number"},
                             {"key": "b_cap", "label": "B-ph C (pF)", "type": "number"},
                             {"key": "b_tandelta", "label": "B-ph %TanD", "type": "number"},
-                        ]
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "r_tandelta",
+                                        "thresholds": {
+                                            "CT % Tan Delta (IEC 60044-1)": {
+                                                "Good": [None, 0.5],
+                                                "Fair": [0.5,  1.0],
+                                                "Poor": [1.0,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        ],
                     }
                 ]
             },
@@ -1749,7 +1768,26 @@ TEST_TEMPLATES = {
                             {"key": "tandelta_pct", "label": "tan δ (%)", "type": "number"},
                             {"key": "tandelta_temp_corrected", "label": "tan δ Temp Corrected (%)", "type": "number"},
                             {"key": "remarks", "label": "Remarks", "type": "text"},
-                        ]
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "tandelta_temp_corrected",
+                                        "thresholds": {
+                                            "tan δ @ 20°C (IEC)": {
+                                                "Good": [None, 0.5],
+                                                "Fair": [0.5,  1.0],
+                                                "Poor": [1.0,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        ],
                     }
                 ]
             },
@@ -1793,7 +1831,26 @@ TEST_TEMPLATES = {
                             {"key": "current_ma", "label": "I (mA)", "type": "number"},
                             {"key": "cap_pf", "label": "C (pF)", "type": "number"},
                             {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
-                        ]
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "tandelta_pct",
+                                        "thresholds": {
+                                            "NCT % Tan Delta (IEC)": {
+                                                "Good": [None, 0.5],
+                                                "Fair": [0.5,  1.0],
+                                                "Poor": [1.0,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        ],
                     }
                 ]
             },
@@ -2559,9 +2616,10 @@ TEST_TEMPLATES = {
                                             "<=72.5kV":   {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
                                         },
                                         "Tan Delta at 90C": {
-                                            ">170kV":     {"Good": [0, 0.2], "Poor": [0.2, None]},
-                                            "72.5-170kV": {"Good": [0, 0.5], "Poor": [0.5, None]},
-                                            "<=72.5kV":   {"Good": [0, 0.5], "Poor": [0.5, None]},
+                                            # IEC 60422:2013 / IS 1866:2017 — dimensionless ratio (not %)
+                                            ">170kV":     {"Good": [0, 0.010], "Fair": [0.010, 0.050], "Poor": [0.050, None]},
+                                            "72.5-170kV": {"Good": [0, 0.020], "Fair": [0.020, 0.100], "Poor": [0.100, None]},
+                                            "<=72.5kV":   {"Good": [0, 0.050], "Fair": [0.050, 0.200], "Poor": [0.200, None]},
                                         },
                                         "BDV Top (T)": {
                                             ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
@@ -2737,15 +2795,30 @@ TEST_TEMPLATES = {
                 "default": "PASS"
               }
             },
-              {
-
-                            "key": "df_measured_on_date",
-
-                            "label": "% D.F After Temp Correction at 20°C (IEC Correction on previous Date)",
-
-                            "type": "number",
-
-                        },
+            {
+              "key": "df_previous_date",
+              "label": "% D.F After Temp Correction at 20°C (Previous Test)",
+              "type": "number",
+            },
+            {
+              "key": "condition",
+              "label": "Condition",
+              "type": "calculated",
+              "read_only": True,
+              "rule": {
+                "type": "THRESHOLD",
+                "config": {
+                  "input_field": "df_measured_on_date",
+                  "thresholds": {
+                    "Winding % D.F @ 20°C": {
+                      "Good": [None, 0.5],
+                      "Fair": [0.5,  1.0],
+                      "Poor": [1.0,  None],
+                    }
+                  }
+                }
+              }
+            },
           ],
           "default_rows": [
             { "sl_no": "1", "test_configuration": "HV-GND" },
@@ -2840,6 +2913,25 @@ TEST_TEMPLATES = {
               "key": "df_previous_date",
               "label": "% D.F Corrected at 20°C (Previous Test)",
               "type": "number"
+            },
+            {
+              "key": "condition",
+              "label": "Condition",
+              "type": "calculated",
+              "read_only": True,
+              "rule": {
+                "type": "THRESHOLD",
+                "config": {
+                  "input_field": "df_corrected_20c",
+                  "thresholds": {
+                    "HV Bushing % D.F @ 20°C": {
+                      "Good":  [None, 0.5],
+                      "Alert": [0.5,  0.7],
+                      "Poor":  [0.7,  None],
+                    }
+                  }
+                }
+              }
             },
           ],
           "default_rows": [
@@ -2999,7 +3091,26 @@ TEST_TEMPLATES = {
                 ],
                 "default": "PASS"
               }
-            }
+            },
+            {
+              "key": "condition",
+              "label": "Condition",
+              "type": "calculated",
+              "read_only": True,
+              "rule": {
+                "type": "THRESHOLD",
+                "config": {
+                  "input_field": "df_corrected_20c",
+                  "thresholds": {
+                    "LV Bushing % D.F @ 20°C": {
+                      "Good":  [None, 0.5],
+                      "Alert": [0.5,  0.7],
+                      "Poor":  [0.7,  None],
+                    }
+                  }
+                }
+              }
+            },
           ],
           "default_rows": [
             { "sl_no": "1", "bushing": "R Phase" },
@@ -5138,6 +5249,25 @@ TEST_TEMPLATES = {
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",          "type": "number"},
                             {"key": "df_corrected_20c",    "label": "% D.F @ 20°C (ITC Corrected)",   "type": "number"},
                             {"key": "df_previous_test",    "label": "% D.F Previous Test",             "type": "number"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "df_corrected_20c",
+                                        "thresholds": {
+                                            "Winding % D.F @ 20°C (IEEE/IEC)": {
+                                                "Good": [None, 0.5],
+                                                "Fair": [0.5,  1.0],
+                                                "Poor": [1.0,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                         ],
                         "default_rows": [
                             {"test_configuration": "HV-GND"},
@@ -5166,6 +5296,25 @@ TEST_TEMPLATES = {
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",            "type": "number"},
                             {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",              "type": "number"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "df_corrected_20c",
+                                        "thresholds": {
+                                            "220kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                                "Good":  [None, 0.5],
+                                                "Alert": [0.5,  0.7],
+                                                "Poor":  [0.7,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                         ],
                         "default_rows": [
                             {"bushing": "'R' Phase"},
@@ -5189,6 +5338,25 @@ TEST_TEMPLATES = {
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",            "type": "number"},
                             {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",              "type": "number"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "df_corrected_20c",
+                                        "thresholds": {
+                                            "66kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                                "Good":  [None, 0.7],
+                                                "Alert": [0.7,  1.0],
+                                                "Poor":  [1.0,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                         ],
                         "default_rows": [
                             {"bushing": "'R' Phase"},
@@ -5306,6 +5474,25 @@ TEST_TEMPLATES = {
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
                             {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "df_corrected_20c",
+                                        "thresholds": {
+                                            "Winding % D.F @ 20°C (IEEE/IEC)": {
+                                                "Good": [None, 0.5],
+                                                "Fair": [0.5,  1.0],
+                                                "Poor": [1.0,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                         ],
                         "default_rows": [
                             {"test_configuration": "HV-GND"},
@@ -5375,6 +5562,25 @@ TEST_TEMPLATES = {
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
                             {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "df_corrected_20c",
+                                        "thresholds": {
+                                            "220kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                                "Good":  [None, 0.5],
+                                                "Alert": [0.5,  0.7],
+                                                "Poor":  [0.7,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                         ],
                         "default_rows": [{"bushing": "'R' Phase"}, {"bushing": "'Y' Phase"}, {"bushing": "'B' Phase"}],
                         "table_evaluation": {
@@ -5437,6 +5643,25 @@ TEST_TEMPLATES = {
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
                             {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "df_corrected_20c",
+                                        "thresholds": {
+                                            "66kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                                "Good":  [None, 0.7],
+                                                "Alert": [0.7,  1.0],
+                                                "Poor":  [1.0,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                         ],
                         "default_rows": [{"bushing": "'R' Phase"}, {"bushing": "'Y' Phase"}, {"bushing": "'B' Phase"}],
                         "table_evaluation": {

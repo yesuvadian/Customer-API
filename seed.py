@@ -7671,7 +7671,7 @@ def seed_calibration_template(session) -> int:
         "key": CAL_KEY,
         "description": "Equipment calibration lifecycle tracking. Computes next due date and triggers repair on failure.",
         "enable_calibration": True,
-        "multi_session": True,
+        "multi_session": False,
         "sections": [
             {
                 "title": "Calibration Record",
@@ -7983,6 +7983,7 @@ def seed_transformer_oil_template(session) -> int:
     """
     from models import CategoryMaster, CategoryDetails, OrgTestTemplate
     from test_templates import TEST_TEMPLATES
+    from sqlalchemy.orm.attributes import flag_modified
 
     master = session.query(CategoryMaster).filter(
         CategoryMaster.description == "Testing Equipment"
@@ -8016,6 +8017,7 @@ def seed_transformer_oil_template(session) -> int:
         existing.test_type_id = detail.id
         existing.template_data = template_data
         existing.is_system = True
+        flag_modified(existing, "template_data")
     else:
         session.add(OrgTestTemplate(
             template_key=OIL_KEY,
@@ -9166,6 +9168,54 @@ def _seed_notification_event_catalogue(session) -> int:
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
             default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
+        dict(
+            event_type="annual_audit_stage_changed",
+            label="Annual Audit Stage Advanced",
+            group_name="Stage Workflows",
+            description="Fired each time the annual audit workflow advances to the next stage.",
+            context_vars=["equipment", "equipment_type", "stage", "progress"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        dict(
+            event_type="annual_audit_stage_delay",
+            label="Annual Audit Stage Delayed",
+            group_name="Stage Workflows",
+            description="Fired when an annual audit stage is rejected / sent back — indicating a delay.",
+            context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
+        ),
+        dict(
+            event_type="annual_audit_cancelled",
+            label="Annual Audit Workflow Cancelled",
+            group_name="Stage Workflows",
+            description="Fired when an active annual audit workflow is cancelled.",
+            context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
+        ),
+        dict(
+            event_type="precommission_stage_changed",
+            label="Pre-Commission Stage Advanced",
+            group_name="Stage Workflows",
+            description="Fired each time the pre-commission QAP workflow advances to the next stage.",
+            context_vars=["equipment", "equipment_type", "stage", "progress"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        dict(
+            event_type="precommission_stage_delay",
+            label="Pre-Commission Stage Delayed",
+            group_name="Stage Workflows",
+            description="Fired when a pre-commission stage is rejected / sent back — indicating a delay.",
+            context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
+        ),
+        dict(
+            event_type="precommission_cancelled",
+            label="Pre-Commission Workflow Cancelled",
+            group_name="Stage Workflows",
+            description="Fired when an active pre-commission QAP workflow is cancelled.",
+            context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
+        ),
         # ── Failure Register ──────────────────────────────────────────────────
         dict(
             event_type="fr_submitted",
@@ -9444,18 +9494,18 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{replaced_on}}</td></tr>"
             "</table>"
             "<p>Log in to SEACMS Equipment Register to download the Replacement Report PDF.</p>",
-            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            ["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         _s(
             "[KPTCL-SEACMS] {{equipment.type}} at {{equipment.department}} replaced."
             " Old:{{old_ueic}} New:{{new_ueic}}. By {{replaced_by}} on {{replaced_on}}.",
-            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            ["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
         _i(
             "Equipment replaced — {{old_ueic}} → {{new_ueic}}",
             "{{equipment.type}} at {{equipment.department}} replaced by {{replaced_by}} on {{replaced_on}}."
             " Reason: {{reason_type}}.",
-            ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"],
+            ["EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
     )
 
@@ -9859,17 +9909,17 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
             "</table>"
             "<p>Log in to SEACMS to review the equipment details and configure test schedules.</p>",
-            ["Maintenance Officer", "Reviewing Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         _s(
             "[KPTCL-SEACMS] New equipment registered: {{equipment.ueic}} ({{equipment.type}})"
             " at {{equipment.department}} on {{system.date}} by {{commissioned_by}}.",
-            ["Maintenance Officer", "Reviewing Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         _i(
             "New equipment — {{equipment.ueic}}",
             "{{equipment.type}} ({{equipment.ueic}}) commissioned at {{equipment.department}} by {{commissioned_by}}.",
-            ["Maintenance Officer", "Reviewing Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS"],
         ),
     )
 
@@ -9887,17 +9937,17 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{system.date}}</td></tr>"
             "</table>"
             "<p>All pending test schedules for this equipment have been cancelled. Log in to SEACMS to confirm.</p>",
-            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"],
         ),
         _s(
             "[KPTCL-SEACMS] Equipment {{equipment.ueic}} ({{equipment.type}}) at"
             " {{equipment.department}} RETIRED on {{system.date}}. Reason: {{reason}}.",
-            ["Maintenance Officer", "Reviewing Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS"],
         ),
         _i(
             "Equipment retired — {{equipment.ueic}}",
             "{{equipment.type}} ({{equipment.ueic}}) at {{equipment.department}} has been decommissioned. Reason: {{reason}}.",
-            ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+            ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"],
         ),
     )
 
@@ -10488,6 +10538,194 @@ def _seed_notification_templates(session) -> int:
         _i(
             "Surveillance workflow cancelled — {{equipment}}",
             "The surveillance workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    # ── Annual Audit Workflow Notifications ────────────────────────────────────
+    _tmpl("annual_audit_stage_changed",
+        _e(
+            "[ANNUAL AUDIT] Stage Advanced — {{equipment}} ({{stage}})",
+            "<h3 style='color:#1E3C72'>Annual Audit Stage Update</h3>"
+            "<p>The annual audit workflow has advanced to a new stage.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Current Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Progress</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{progress}}%</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS to view the latest audit stage progress.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Annual Audit stage '{{stage}}' reached for {{equipment}} ({{progress}}% complete).",
+            ["Reviewing Officer"],
+        ),
+        _i(
+            "Annual Audit advanced — {{stage}}",
+            "Annual audit for {{equipment}} is now at stage '{{stage}}' ({{progress}}% complete).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("annual_audit_stage_delay",
+        _e(
+            "[ANNUAL AUDIT DELAY] Stage Rejected — {{equipment.ueic}}",
+            "<h3 style='color:darkorange'>Annual Audit Delay Alert</h3>"
+            "<p>An annual audit stage has been rejected and sent back, indicating a delay.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Audit Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
+            "</table>"
+            "<p>Please review and update the annual audit timeline in SEACMS.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] ANNUAL AUDIT DELAY: {{equipment.ueic}} stage '{{repair_stage}}'"
+            " is {{days_delayed}} days overdue.",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Annual audit delay — {{equipment.ueic}} ({{repair_stage}})",
+            "Annual audit stage '{{repair_stage}}' for {{equipment.ueic}} was rejected,"
+            " causing a delay of {{days_delayed}} day(s).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("annual_audit_cancelled",
+        _e(
+            "[ANNUAL AUDIT] Workflow Cancelled — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#B00020'>Annual Audit Workflow Cancelled</h3>"
+            "<p>The annual audit workflow for {{equipment}} has been cancelled.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Cancelled By</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancelled_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancel_reason}}</td></tr>"
+            "</table>"
+            "<p>Review the cancelled workflow in SEACMS for next steps.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "Annual Audit workflow for {{equipment}} was cancelled by {{cancelled_by}}. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Annual audit workflow cancelled — {{equipment}}",
+            "The annual audit workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    # ── Pre-Commission Workflow Notifications ──────────────────────────────────
+    _tmpl("precommission_stage_changed",
+        _e(
+            "[PRE-COMMISSION] QAP Stage Advanced — {{equipment}} ({{stage}})",
+            "<h3 style='color:#1E3C72'>Pre-Commission QAP Stage Update</h3>"
+            "<p>The pre-commission QAP workflow has advanced to a new stage.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Current Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Progress</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{progress}}%</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS to view the QAP stage progress.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Pre-Commission QAP stage '{{stage}}' reached for {{equipment}} ({{progress}}% complete).",
+            ["Reviewing Officer"],
+        ),
+        _i(
+            "Pre-Commission QAP advanced — {{stage}}",
+            "Pre-commission for {{equipment}} is now at QAP stage '{{stage}}' ({{progress}}% complete).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("precommission_stage_delay",
+        _e(
+            "[PRE-COMMISSION DELAY] QAP Stage Rejected — {{equipment.ueic}}",
+            "<h3 style='color:darkorange'>Pre-Commission QAP Delay Alert</h3>"
+            "<p>A pre-commission QAP stage has been rejected and sent back, indicating a delay.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>QAP Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
+            "</table>"
+            "<p>Please review and update the pre-commission QAP timeline in SEACMS.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] PRE-COMMISSION DELAY: {{equipment.ueic}} QAP stage '{{repair_stage}}'"
+            " is {{days_delayed}} days overdue.",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Pre-commission QAP delay — {{equipment.ueic}} ({{repair_stage}})",
+            "Pre-commission QAP stage '{{repair_stage}}' for {{equipment.ueic}} was rejected,"
+            " causing a delay of {{days_delayed}} day(s).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("precommission_cancelled",
+        _e(
+            "[PRE-COMMISSION] Workflow Cancelled — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#B00020'>Pre-Commission Workflow Cancelled</h3>"
+            "<p>The pre-commission workflow for {{equipment}} has been cancelled.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Cancelled By</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancelled_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancel_reason}}</td></tr>"
+            "</table>"
+            "<p>Review the cancelled workflow in SEACMS for next steps.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "Pre-commission workflow for {{equipment}} was cancelled by {{cancelled_by}}. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Pre-commission workflow cancelled — {{equipment}}",
+            "The pre-commission workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
     )
@@ -11412,6 +11650,14 @@ def run_seed():
             print(f"[WARN] KPTCL org roles seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
+        # System Administrator — elevate to org-admin + full module permissions
+        # Must run after seed_seacms_roles_users so OrgRoles exist
+        print("\n--- System Administrator Permissions ---")
+        try:
+            seed_system_admin_permissions(session)
+        except Exception as _e:
+            print(f"[WARN] System Administrator permissions failed (non-fatal): {_e}")
+
         # Zoho + Notifications — after seacms so roles and users exist
         seed_zoho_import_mapping(session, kptcl_org)
         seed_notifications_module_and_permissions(session)
@@ -11513,6 +11759,78 @@ def run_seed():
         print("  4. Dept-filter users: tester.north / tester.south / tester.mysuru @ kptcl.com / TestDept@123")
         print(f"  {5 if kptcl_org else 4}. View API docs: http://localhost:8000/docs")
         print("\n" + "=" * 80 + "\n")
+
+
+def seed_system_admin_permissions(session) -> int:
+    """
+    Idempotently elevate every 'System Administrator' OrgRole to full org-admin.
+
+    Mirrors the logic in system_admin_permissions.py so it runs automatically
+    during seed instead of requiring a manual script invocation.
+
+    Steps:
+      1. Find all OrgRole rows named 'System Administrator' (any org)
+      2. Set is_org_admin=True, is_active=True
+      3. Upsert OrgRolePermission for every active Module with all flags True
+
+    Returns the number of permission rows created/updated.
+    """
+    roles = (
+        session.query(OrgRole)
+        .filter(OrgRole.name == "System Administrator")
+        .all()
+    )
+
+    if not roles:
+        print("[WARN] seed_system_admin_permissions: no 'System Administrator' OrgRole found — skipping")
+        return 0
+
+    modules = session.query(Module).filter_by(is_active=True).all()
+    total_upserted = 0
+
+    for role in roles:
+        # Elevate to org-admin
+        role.is_org_admin = True
+        role.is_active    = True
+
+        for module in modules:
+            perm = (
+                session.query(OrgRolePermission)
+                .filter_by(org_role_id=role.id, module_id=module.id)
+                .first()
+            )
+            if perm:
+                perm.can_view    = True
+                perm.can_add     = True
+                perm.can_edit    = True
+                perm.can_delete  = True
+                perm.can_approve = True
+                perm.can_assign  = True
+                if hasattr(perm, "can_export"):
+                    perm.can_export = True
+                if hasattr(perm, "can_import"):
+                    perm.can_import = True
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=module.id,
+                    can_view=True,
+                    can_add=True,
+                    can_edit=True,
+                    can_delete=True,
+                    can_approve=True,
+                    can_assign=True,
+                    can_export=True,
+                    can_import=True,
+                    cts=datetime.now(),
+                    mts=datetime.now(),
+                ))
+            total_upserted += 1
+
+    session.commit()
+    print(f"[OK] seed_system_admin_permissions: {len(roles)} role(s), {total_upserted} permission rows upserted")
+    return total_upserted
 
 
 def seed_sample_equipment(session, org):
@@ -12362,6 +12680,8 @@ def seed_surveillance_workflow(session):
                 existing.workflow_definition_id = wf_def.id
             if duration is not None and existing.default_duration_days != duration:
                 existing.default_duration_days = duration
+            if not existing.weight:  # backfill weight so progress calc works
+                existing.weight = 20
             stage_map[name] = existing.id
             code_map[code]  = existing.id
             continue
@@ -12370,6 +12690,7 @@ def seed_surveillance_workflow(session):
             name=name,
             code=code,
             sequence=s["sequence"],
+            weight=20,          # 5 stages × 20 = 100 — required for progress calculation
             is_active=True,
             is_mandatory=True,
             workflow_definition_id=wf_def.id,
@@ -12400,7 +12721,7 @@ def seed_surveillance_workflow(session):
                 print(f"[WARN] Stage code not found: {stage_code}")
                 continue
 
-            # Stage actor roles
+            # Stage actor roles (can_edit + can_approve)
             for role_name in entry.get("roles", []):
                 matched_roles = session.query(OrgRole).filter(OrgRole.name == role_name).all()
                 if not matched_roles:
@@ -12416,7 +12737,42 @@ def seed_surveillance_workflow(session):
                             role_id=role.id,
                             can_edit=True,
                             can_approve=True,
+                            can_assign=False,
                         ))
+                    else:
+                        exists.can_edit    = True
+                        exists.can_approve = True
+
+            # Stage actor roles that also get can_assign (e.g. senior officer can assign)
+            for role_name in entry.get("assign_also", []):
+                matched_roles = session.query(OrgRole).filter(OrgRole.name == role_name).all()
+                for role in matched_roles:
+                    mapping = session.query(RepairStageRole).filter_by(
+                        stage_id=stage_id, role_id=role.id
+                    ).first()
+                    if mapping and not mapping.can_assign:
+                        mapping.can_assign = True
+
+            # Assignment coordinator role (can_assign only)
+            assign_role_name = entry.get("assignment_role")
+            if assign_role_name:
+                matched_assign_roles = session.query(OrgRole).filter(OrgRole.name == assign_role_name).all()
+                if not matched_assign_roles:
+                    print(f"[WARN] Assignment role not found in any org: {assign_role_name}")
+                for role in matched_assign_roles:
+                    exists = session.query(RepairStageRole).filter_by(
+                        stage_id=stage_id, role_id=role.id
+                    ).first()
+                    if not exists:
+                        session.add(RepairStageRole(
+                            stage_id=stage_id,
+                            role_id=role.id,
+                            can_edit=False,
+                            can_approve=False,
+                            can_assign=True,
+                        ))
+                    elif not exists.can_assign:
+                        exists.can_assign = True
 
     # ── 5. Stage Transitions ──────────────────────────────────────────────────
     # Q1 → Q2 → Q3 → Q4 → Final (no transition after final = workflow completes)

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 
-from models import User
+from models import User, TestRequestScheduleLog
 
 from schemas import (
     TestRequestScheduleCreate,
@@ -363,10 +363,9 @@ def get_schedule_logs(
     )
 
     return (
-        db.query(schedule.logs.__class__)
+        db.query(TestRequestScheduleLog)
         .filter(
-            schedule.logs.__class__.schedule_id
-                == schedule.id
+            TestRequestScheduleLog.schedule_id == schedule.id
         )
         .offset(skip)
         .limit(limit)

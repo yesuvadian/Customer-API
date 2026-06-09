@@ -2581,7 +2581,13 @@ class NotificationService:
         (SRS — Equipment Register: New).
         """
         ueic    = getattr(equipment, "ueic", "N/A")
-        eq_type = getattr(equipment, "equipment_type_name", "Equipment")
+        # equipment.equipment_type is a SQLAlchemy relationship (CategoryMaster),
+        # not a plain string — resolve .name to avoid "CategoryMaster object" repr.
+        _eq_type_rel = getattr(equipment, "equipment_type", None)
+        if _eq_type_rel and hasattr(_eq_type_rel, "name"):
+            eq_type = _eq_type_rel.name or "Equipment"
+        else:
+            eq_type = getattr(equipment, "equipment_type_name", "") or "Equipment"
         dept    = getattr(equipment, "department_name", "")
         mfr     = getattr(equipment, "manufacturer", "")
         self.fire(
@@ -3154,7 +3160,18 @@ class NotificationService:
                 else None
             ),
         )
-        self.db.add(rcpt)
+        # ── Use a savepoint so that if notification_log_recipient table is
+        # missing (migration 019 not applied), only this row is rolled back;
+        # the outer transaction (UserNotification / NotificationLog) stays live.
+        try:
+            with self.db.begin_nested():
+                self.db.add(rcpt)
+        except Exception as _rcpt_exc:
+            logger.warning(
+                f"[Notif] NotificationLogRecipient insert skipped for user={user.id} "
+                f"channel={tmpl.channel!r} — run migration 019 to enable recipient tracking. "
+                f"Error: {_rcpt_exc}"
+            )
 
         if tmpl.channel == "inapp":
             # Inapp: create UserNotification immediately (no network needed)
