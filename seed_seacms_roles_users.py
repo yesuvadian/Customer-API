@@ -648,11 +648,15 @@ def seed():
                 user_id = user.id
                 action  = "CREATED"
 
-            # OrgUserRole assignment
+            # OrgUserRole assignment — always sync department_id so re-seed
+            # correctly resets org admin to root (None) if previously set to a zone.
             existing_ur = session.query(OrgUserRole).filter_by(
                 user_id=user_id, org_role_id=role_id
             ).first()
-            if not existing_ur:
+            if existing_ur:
+                existing_ur.department_id = dept_id
+                existing_ur.is_active     = True
+            else:
                 session.add(OrgUserRole(
                     id=uuid.uuid4(),
                     user_id=user_id,
