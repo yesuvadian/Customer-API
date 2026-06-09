@@ -109,8 +109,8 @@ ROLE_DEFS = [
             # CONDITION MONITORING
             ("testing_requests",        READ),
             ("testing",                 RW),
-            # MAINTENANCE
-            ("cumulative",              RW),        # raises CB/OLTC ops at substation level
+            # LIFECYCLE
+            ("overhaul-workflows",      RW),         # cumulative ops → overhaul trigger
             # OUTPUT
             ("notifications",           READ),
             # DASHBOARDS
@@ -137,12 +137,11 @@ ROLE_DEFS = [
             ("approvals",                  READ_APPROVE),
             ("testing_request_approvals",  READ_APPROVE),
             # MAINTENANCE
-            ("cumulative",                 RW_APPROVE),  # first approval tier for CB/OLTC ops
             ("maintenance_schedules",      READ),
             ("schedule_compliance",        READ),
             # REPAIR & LIFECYCLE
-            ("repair-workflows",           RW_APPROVE_ASSIGN),  # can_assign enables audit queue
-            ("overhaul-workflows",         RW_APPROVE),
+            ("repair-workflows",           RW_APPROVE_ASSIGN),
+            ("overhaul-workflows",         RW_APPROVE),         # cumulative → overhaul trigger
             ("surveillance-workflows",     RW_APPROVE),
             ("surveillance-dashboard",     EXPORT),
             # TA&QC
@@ -181,12 +180,11 @@ ROLE_DEFS = [
             ("approvals",                  READ_APPROVE),
             ("testing_request_approvals",  READ_APPROVE),
             # MAINTENANCE
-            ("cumulative",                 APPROVE),   # approve-only at this level
             ("maintenance_schedules",      READ),
             ("schedule_compliance",        READ),
             # REPAIR & LIFECYCLE
-            ("repair-workflows",           RW_APPROVE_ASSIGN),  # can_assign enables audit queue
-            ("overhaul-workflows",         RW_APPROVE),
+            ("repair-workflows",           RW_APPROVE_ASSIGN),
+            ("overhaul-workflows",         RW_APPROVE),         # cumulative → overhaul trigger
             ("surveillance-workflows",     RW_APPROVE),
             ("surveillance-dashboard",     EXPORT),
             # TA&QC
@@ -220,7 +218,6 @@ ROLE_DEFS = [
             ("testing",                 RW),
             ("test_register",           READ),
             # RELAY TESTING (RT TRACK)
-            ("calibration",             RW_APPROVE),
             ("calibration-workflows",   RW_APPROVE),
             # OUTPUT
             ("notifications",           READ),
@@ -285,7 +282,6 @@ ROLE_DEFS = [
             ("testing",                 RW),
             ("test_register",           READ),
             # RELAY TESTING (RT TRACK)
-            ("calibration",             RW_APPROVE),
             ("calibration-workflows",   RW_APPROVE),
             # OUTPUT
             ("notifications",           READ),
@@ -349,7 +345,6 @@ ROLE_DEFS = [
             ("test_register",              READ),
             ("testing_request_approvals",  READ_APPROVE),
             # RELAY TESTING (RT TRACK)
-            ("calibration",                RW_APPROVE),
             ("calibration-workflows",      RW_APPROVE),
             # CONFIGURATION
             ("test_templates",             RW),   # only role that can create/edit templates
@@ -399,10 +394,8 @@ ROLE_DEFS = [
             ("recommendations",            FULL),
             ("approvals",                  FULL),
             ("testing_request_approvals",  FULL),
-            ("cumulative",                 FULL),
             ("repair-workflows",           FULL),
             ("overhaul-workflows",         FULL),
-            ("calibration",                FULL),
             ("calibration-workflows",      FULL),
             ("surveillance-workflows",     FULL),
             ("surveillance-dashboard",     FULL),
