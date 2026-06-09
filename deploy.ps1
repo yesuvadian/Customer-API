@@ -12,7 +12,7 @@ if ($Environment -eq "main") {
     $BASE_URL = "https://api.procurement.cogniwatt.com"
 }
 else {
-    $Server = "erp@192.168.0.103"
+    $Server = "erp@192.168.0.109"
     $ServerDR = $null
     $BASE_URL = "https://devsupplier.cogniwatt.com"
 }
