@@ -9166,6 +9166,54 @@ def _seed_notification_event_catalogue(session) -> int:
             context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
             default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
         ),
+        dict(
+            event_type="annual_audit_stage_changed",
+            label="Annual Audit Stage Advanced",
+            group_name="Stage Workflows",
+            description="Fired each time the annual audit workflow advances to the next stage.",
+            context_vars=["equipment", "equipment_type", "stage", "progress"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        dict(
+            event_type="annual_audit_stage_delay",
+            label="Annual Audit Stage Delayed",
+            group_name="Stage Workflows",
+            description="Fired when an annual audit stage is rejected / sent back — indicating a delay.",
+            context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
+        ),
+        dict(
+            event_type="annual_audit_cancelled",
+            label="Annual Audit Workflow Cancelled",
+            group_name="Stage Workflows",
+            description="Fired when an active annual audit workflow is cancelled.",
+            context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
+        ),
+        dict(
+            event_type="precommission_stage_changed",
+            label="Pre-Commission Stage Advanced",
+            group_name="Stage Workflows",
+            description="Fired each time the pre-commission QAP workflow advances to the next stage.",
+            context_vars=["equipment", "equipment_type", "stage", "progress"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        dict(
+            event_type="precommission_stage_delay",
+            label="Pre-Commission Stage Delayed",
+            group_name="Stage Workflows",
+            description="Fired when a pre-commission stage is rejected / sent back — indicating a delay.",
+            context_vars=["equipment", "equipment_type", "department", "repair_stage", "days_delayed"],
+            default_roles=["AEE_MAINTENANCE", "CEE_TRANSMISSION_ZONE"],
+        ),
+        dict(
+            event_type="precommission_cancelled",
+            label="Pre-Commission Workflow Cancelled",
+            group_name="Stage Workflows",
+            description="Fired when an active pre-commission QAP workflow is cancelled.",
+            context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
+        ),
         # ── Failure Register ──────────────────────────────────────────────────
         dict(
             event_type="fr_submitted",
@@ -10488,6 +10536,194 @@ def _seed_notification_templates(session) -> int:
         _i(
             "Surveillance workflow cancelled — {{equipment}}",
             "The surveillance workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    # ── Annual Audit Workflow Notifications ────────────────────────────────────
+    _tmpl("annual_audit_stage_changed",
+        _e(
+            "[ANNUAL AUDIT] Stage Advanced — {{equipment}} ({{stage}})",
+            "<h3 style='color:#1E3C72'>Annual Audit Stage Update</h3>"
+            "<p>The annual audit workflow has advanced to a new stage.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Current Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Progress</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{progress}}%</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS to view the latest audit stage progress.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Annual Audit stage '{{stage}}' reached for {{equipment}} ({{progress}}% complete).",
+            ["Reviewing Officer"],
+        ),
+        _i(
+            "Annual Audit advanced — {{stage}}",
+            "Annual audit for {{equipment}} is now at stage '{{stage}}' ({{progress}}% complete).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("annual_audit_stage_delay",
+        _e(
+            "[ANNUAL AUDIT DELAY] Stage Rejected — {{equipment.ueic}}",
+            "<h3 style='color:darkorange'>Annual Audit Delay Alert</h3>"
+            "<p>An annual audit stage has been rejected and sent back, indicating a delay.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Audit Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
+            "</table>"
+            "<p>Please review and update the annual audit timeline in SEACMS.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] ANNUAL AUDIT DELAY: {{equipment.ueic}} stage '{{repair_stage}}'"
+            " is {{days_delayed}} days overdue.",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Annual audit delay — {{equipment.ueic}} ({{repair_stage}})",
+            "Annual audit stage '{{repair_stage}}' for {{equipment.ueic}} was rejected,"
+            " causing a delay of {{days_delayed}} day(s).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("annual_audit_cancelled",
+        _e(
+            "[ANNUAL AUDIT] Workflow Cancelled — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#B00020'>Annual Audit Workflow Cancelled</h3>"
+            "<p>The annual audit workflow for {{equipment}} has been cancelled.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Cancelled By</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancelled_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancel_reason}}</td></tr>"
+            "</table>"
+            "<p>Review the cancelled workflow in SEACMS for next steps.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "Annual Audit workflow for {{equipment}} was cancelled by {{cancelled_by}}. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Annual audit workflow cancelled — {{equipment}}",
+            "The annual audit workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    # ── Pre-Commission Workflow Notifications ──────────────────────────────────
+    _tmpl("precommission_stage_changed",
+        _e(
+            "[PRE-COMMISSION] QAP Stage Advanced — {{equipment}} ({{stage}})",
+            "<h3 style='color:#1E3C72'>Pre-Commission QAP Stage Update</h3>"
+            "<p>The pre-commission QAP workflow has advanced to a new stage.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Current Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Progress</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{progress}}%</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS to view the QAP stage progress.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] Pre-Commission QAP stage '{{stage}}' reached for {{equipment}} ({{progress}}% complete).",
+            ["Reviewing Officer"],
+        ),
+        _i(
+            "Pre-Commission QAP advanced — {{stage}}",
+            "Pre-commission for {{equipment}} is now at QAP stage '{{stage}}' ({{progress}}% complete).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("precommission_stage_delay",
+        _e(
+            "[PRE-COMMISSION DELAY] QAP Stage Rejected — {{equipment.ueic}}",
+            "<h3 style='color:darkorange'>Pre-Commission QAP Delay Alert</h3>"
+            "<p>A pre-commission QAP stage has been rejected and sent back, indicating a delay.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>QAP Stage</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{repair_stage}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Delayed</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{days_delayed}}</td></tr>"
+            "</table>"
+            "<p>Please review and update the pre-commission QAP timeline in SEACMS.</p>",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] PRE-COMMISSION DELAY: {{equipment.ueic}} QAP stage '{{repair_stage}}'"
+            " is {{days_delayed}} days overdue.",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+        _i(
+            "Pre-commission QAP delay — {{equipment.ueic}} ({{repair_stage}})",
+            "Pre-commission QAP stage '{{repair_stage}}' for {{equipment.ueic}} was rejected,"
+            " causing a delay of {{days_delayed}} day(s).",
+            ["Reviewing Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("precommission_cancelled",
+        _e(
+            "[PRE-COMMISSION] Workflow Cancelled — {{equipment}} ({{equipment_type}})",
+            "<h3 style='color:#B00020'>Pre-Commission Workflow Cancelled</h3>"
+            "<p>The pre-commission workflow for {{equipment}} has been cancelled.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Type</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{equipment_type}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Department</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{department}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Cancelled By</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancelled_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Reason</b></td>"
+            "<td style='padding:4px 8px;border:1px solid #ddd'>{{cancel_reason}}</td></tr>"
+            "</table>"
+            "<p>Review the cancelled workflow in SEACMS for next steps.</p>",
+            ["Maintenance Officer", "Reviewing Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "Pre-commission workflow for {{equipment}} was cancelled by {{cancelled_by}}. Reason: {{cancel_reason}}.",
+            ["Maintenance Officer", "Reviewing Officer"],
+        ),
+        _i(
+            "Pre-commission workflow cancelled — {{equipment}}",
+            "The pre-commission workflow for {{equipment}} has been cancelled. Reason: {{cancel_reason}}.",
             ["Maintenance Officer", "Reviewing Officer"],
         ),
     )

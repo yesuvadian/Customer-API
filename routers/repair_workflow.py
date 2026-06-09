@@ -196,10 +196,13 @@ def list_workflows(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=1000),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """List repair workflows. Filter by equipment_id and/or status."""
+    org_id = current_user.organization_id
     return RepairWorkflowService(db).list_workflows(
-        equipment_id=equipment_id, status=status, skip=skip, limit=limit
+        equipment_id=equipment_id, status=status, skip=skip, limit=limit,
+        organization_id=org_id,
     )
 
 
