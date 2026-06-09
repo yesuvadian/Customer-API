@@ -236,11 +236,34 @@ class CumulativeService:
         )
         return detail
 
-    def calculate_cumulative(self, equipment_id: UUID) -> float:
+    def _last_overhaul_closed_at(self, equipment_id: UUID) -> Optional[datetime]:
+        """
+        Return the closed_at timestamp of the most recently CLOSED OverhaulRecommendation
+        for this equipment, or None if no overhaul has ever been completed.
+        Used as a cumulative reset point — only readings AFTER this date count toward
+        the next overhaul threshold.
+        """
+        rec = (
+            self.db.query(OverhaulRecommendation)
+            .filter(
+                OverhaulRecommendation.equipment_id == equipment_id,
+                OverhaulRecommendation.status == "CLOSED",
+                OverhaulRecommendation.completed_at.isnot(None),
+            )
+            .order_by(OverhaulRecommendation.completed_at.desc())
+            .first()
+        )
+        return rec.completed_at if rec else None
+
+    def calculate_cumulative(self, equipment_id: UUID, since: Optional[datetime] = None) -> float:
         """
         Sum CUMULATIVE_DIFF across all TestResult rows for this equipment
         where is_cumulative=True and template_key='operations_tracking'.
         Ordered by reading_date from test_data (falls back to cts).
+
+        since: if provided, only readings with reading_time >= since are included.
+               Used to reset the counter after each completed overhaul so the
+               trigger doesn't immediately re-fire.
         """
         request_ids = [
             r[0]
@@ -284,6 +307,11 @@ class CumulativeService:
                     reading_time = r.cts or self._utc_now()
             else:
                 reading_time = r.cts or self._utc_now()
+
+            # Skip readings before the last overhaul completion (reset point)
+            if since and reading_time < since:
+                continue
+
             rows.append({
                 "reading_time": reading_time,
                 "reading": float(data.get("reading") or 0),
@@ -334,22 +362,57 @@ class CumulativeService:
             pass
         return None
 
+    def _active_overhaul_workflow(self, equipment_id: UUID) -> Optional[RepairWorkflow]:
+        """Return an active OVERHAUL RepairWorkflow for this equipment, or None."""
+        return (
+            self.db.query(RepairWorkflow)
+            .filter(
+                RepairWorkflow.equipment_id == equipment_id,
+                RepairWorkflow.workflow_code == OVERHAUL_WORKFLOW_CODE,
+                RepairWorkflow.status == "active",
+            )
+            .first()
+        )
+
     def evaluate_overhaul_trigger(
         self, equipment_id: UUID, user_id: Optional[UUID] = None
     ) -> dict:
         """
-        Calculate cumulative, compare to threshold.
+        Calculate cumulative (post-last-overhaul), compare to threshold.
         1. Uses equipment-specific threshold if set (EquipmentOverhaulConfig)
         2. Falls back to template default_threshold
-        If threshold crossed and no open recommendation exists → create recommendation + workflow.
+
+        Guards before creating a new workflow:
+          - No existing OPEN recommendation for this equipment
+          - No existing ACTIVE overhaul workflow for this equipment
+          - Cumulative resets to 0 after each completed overhaul so the trigger
+            does not immediately re-fire once an overhaul is closed.
+
         Returns lifecycle status dict.
         """
-        cumulative = self.calculate_cumulative(equipment_id)
+        # Reset point: only count readings after the last completed overhaul
+        last_overhaul_date = self._last_overhaul_closed_at(equipment_id)
+        cumulative = self.calculate_cumulative(equipment_id, since=last_overhaul_date)
         threshold = self._get_effective_threshold(equipment_id)
 
         open_rec = self._open_recommendation(equipment_id)
 
-        if threshold is not None and cumulative >= threshold and not open_rec:
+        # Guard 1: already have an open recommendation
+        if open_rec:
+            return self._lifecycle_status(equipment_id, cumulative, threshold, open_rec)
+
+        # Guard 2: already have an active overhaul workflow (recommendation may be out of sync)
+        active_wf = self._active_overhaul_workflow(equipment_id)
+        if active_wf:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "[CUMULATIVE] Active OVERHAUL workflow %s exists for equipment %s "
+                "but no OPEN recommendation — skipping new trigger.",
+                active_wf.workflow_number, equipment_id,
+            )
+            return self._lifecycle_status(equipment_id, cumulative, threshold, None)
+
+        if threshold is not None and cumulative >= threshold:
             rec = self._trigger_overhaul(equipment_id, cumulative, threshold, user_id)
             open_rec = rec
 
@@ -446,11 +509,22 @@ class CumulativeService:
 
         first_stage = stages[0]
 
-        # ── 3. Generate a unique workflow number ──────────────────────────────
-        count = self.db.query(func.count(RepairWorkflow.id)).scalar() or 0
-        workflow_number = (
-            f"OVH-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{count + 1:04d}"
+        # ── 3. Generate a unique workflow number (scoped to OVH prefix + today) ──
+        today = datetime.now(timezone.utc).strftime('%Y%m%d')
+        prefix = f"OVH-{today}-"
+        last = (
+            self.db.query(RepairWorkflow)
+            .filter(RepairWorkflow.workflow_number.like(f"{prefix}%"))
+            .order_by(RepairWorkflow.workflow_number.desc())
+            .first()
         )
+        last_seq = 0
+        if last and last.workflow_number:
+            try:
+                last_seq = int(last.workflow_number.split("-")[-1])
+            except Exception:
+                last_seq = 0
+        workflow_number = f"{prefix}{last_seq + 1:04d}"
 
         # ── 4. Create the RepairWorkflow row ──────────────────────────────────
         workflow = RepairWorkflow(
@@ -533,7 +607,9 @@ class CumulativeService:
     # ── Lifecycle status ──────────────────────────────────────────────────────
 
     def get_lifecycle_status(self, equipment_id: UUID) -> dict:
-        cumulative = self.calculate_cumulative(equipment_id)
+        # Use the same post-overhaul reset point as evaluate_overhaul_trigger
+        last_overhaul_date = self._last_overhaul_closed_at(equipment_id)
+        cumulative = self.calculate_cumulative(equipment_id, since=last_overhaul_date)
         threshold = self._get_effective_threshold(equipment_id)
         open_rec = self._open_recommendation(equipment_id)
         return self._lifecycle_status(equipment_id, cumulative, threshold, open_rec)
