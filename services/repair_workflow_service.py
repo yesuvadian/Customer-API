@@ -423,6 +423,7 @@ class RepairWorkflowService:
             workflow_number=workflow_number,
             workflow_code="BREAKDOWN",
             equipment_id=equipment_id,
+            organization_id=equipment.organization_id,
             source_failure_id=source_failure_id,
             current_stage_id=first_stage.id,
             status="active",

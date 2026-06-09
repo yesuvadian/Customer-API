@@ -761,6 +761,7 @@ class TestingService:
 
         except Exception as _eval_err:  # evaluation must never block save
             import traceback
+            logger.error(f"[EVAL_FAIL] template={template_key} org={request.organization_id} err={_eval_err}\n{traceback.format_exc()}")
             print(f"[WARN] Evaluation failed for {template_key}: {_eval_err}")
             traceback.print_exc()
 
