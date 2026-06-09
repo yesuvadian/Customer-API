@@ -30,7 +30,7 @@ from models import (
     User,
 )
 from fastapi.responses import FileResponse
-from schemas import RepairSaveDataRequest, RepairAdvanceRequest, RepairSubmitRequest
+from schemas import RepairSaveDataRequest, RepairAdvanceRequest, RepairSubmitRequest, RepairAssignRequest
 from services.repair_workflow_service import RepairWorkflowService
 from services.surveillance_template_service import SurveillanceTemplateService
 from utils.common_service import get_user_dept_scope
@@ -604,7 +604,10 @@ def available_transitions(
                     .all()
                 )
                 total = len(tickets)
-                done = sum(1 for t in tickets if t.status in _DONE_STATUSES)
+                done = sum(
+                    1 for t in tickets
+                    if (t.status.value if hasattr(t.status, 'value') else t.status) in _DONE_STATUSES
+                )
                 pending = total - done
 
                 if total == 0 or pending > 0:
@@ -702,7 +705,7 @@ def get_eligible_users(
 def assign_stage(
     workflow_id: UUID,
     stage_id: UUID,
-    payload: dict,
+    payload: RepairAssignRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -711,8 +714,8 @@ def assign_stage(
     """
     _check_workflow_access(db, workflow_id, user)
     try:
-        return RepairWorkflowService(db).assign_stage(
-            workflow_id, stage_id, payload.get("user_id"), user.id
+        return RepairWorkflowService(db).assign_stage_user(
+            workflow_id, stage_id, payload.assign_to_user_id, user.id
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

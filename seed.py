@@ -12362,6 +12362,8 @@ def seed_surveillance_workflow(session):
                 existing.workflow_definition_id = wf_def.id
             if duration is not None and existing.default_duration_days != duration:
                 existing.default_duration_days = duration
+            if not existing.weight:  # backfill weight so progress calc works
+                existing.weight = 20
             stage_map[name] = existing.id
             code_map[code]  = existing.id
             continue
@@ -12370,6 +12372,7 @@ def seed_surveillance_workflow(session):
             name=name,
             code=code,
             sequence=s["sequence"],
+            weight=20,          # 5 stages × 20 = 100 — required for progress calculation
             is_active=True,
             is_mandatory=True,
             workflow_definition_id=wf_def.id,
@@ -12400,7 +12403,7 @@ def seed_surveillance_workflow(session):
                 print(f"[WARN] Stage code not found: {stage_code}")
                 continue
 
-            # Stage actor roles
+            # Stage actor roles (can_edit + can_approve)
             for role_name in entry.get("roles", []):
                 matched_roles = session.query(OrgRole).filter(OrgRole.name == role_name).all()
                 if not matched_roles:
@@ -12416,7 +12419,42 @@ def seed_surveillance_workflow(session):
                             role_id=role.id,
                             can_edit=True,
                             can_approve=True,
+                            can_assign=False,
                         ))
+                    else:
+                        exists.can_edit    = True
+                        exists.can_approve = True
+
+            # Stage actor roles that also get can_assign (e.g. senior officer can assign)
+            for role_name in entry.get("assign_also", []):
+                matched_roles = session.query(OrgRole).filter(OrgRole.name == role_name).all()
+                for role in matched_roles:
+                    mapping = session.query(RepairStageRole).filter_by(
+                        stage_id=stage_id, role_id=role.id
+                    ).first()
+                    if mapping and not mapping.can_assign:
+                        mapping.can_assign = True
+
+            # Assignment coordinator role (can_assign only)
+            assign_role_name = entry.get("assignment_role")
+            if assign_role_name:
+                matched_assign_roles = session.query(OrgRole).filter(OrgRole.name == assign_role_name).all()
+                if not matched_assign_roles:
+                    print(f"[WARN] Assignment role not found in any org: {assign_role_name}")
+                for role in matched_assign_roles:
+                    exists = session.query(RepairStageRole).filter_by(
+                        stage_id=stage_id, role_id=role.id
+                    ).first()
+                    if not exists:
+                        session.add(RepairStageRole(
+                            stage_id=stage_id,
+                            role_id=role.id,
+                            can_edit=False,
+                            can_approve=False,
+                            can_assign=True,
+                        ))
+                    elif not exists.can_assign:
+                        exists.can_assign = True
 
     # ── 5. Stage Transitions ──────────────────────────────────────────────────
     # Q1 → Q2 → Q3 → Q4 → Final (no transition after final = workflow completes)
