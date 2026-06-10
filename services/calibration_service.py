@@ -8,7 +8,7 @@ Data flow:
     └─ TestResult.test_data = {
            "calibration_date": "2025-01-01",
            "validity_months": 12,
-           "overall_result": "Pass" | "Fail",
+           "recommendation_type": "Pass" | "Fail" | "Conditional" | "Retest",
            "calibrated_by": "...",       (optional)
            "certificate_number": "...",  (optional)
            "notes": "...",               (optional)
@@ -74,7 +74,6 @@ CALIBRATION_TEMPLATE: dict = {
             "fields": [
                 {"key": "calibration_date", "label": "Calibration Date", "type": "date", "required": True},
                 {"key": "validity_months", "label": "Validity (Months)", "type": "number", "required": True, "unit": "months"},
-                {"key": "overall_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True},
                 {"key": "calibrated_by", "label": "Calibrated By (Agency / Lab)", "type": "text", "required": False},
                 {"key": "certificate_number", "label": "Certificate Number", "type": "text", "required": False},
                 {"key": "notes", "label": "Notes", "type": "textarea", "required": False},
@@ -87,10 +86,10 @@ CALIBRATION_TEMPLATE: dict = {
             "type": "DATE_ADD",
             "config": {
                 "validity_field": "validity_months",
-                "result_field": "overall_result",
+                "result_field": "recommendation_type",
                 "order_by": "calibration_date",
                 "group_by": "equipment_id",
-                "requires_multi_session": True,
+                "requires_multi_session": False,
             },
         }
     ],
@@ -177,9 +176,8 @@ class CalibrationService:
             )
             self.db.add(tpl)
             created.append(f"OrgTestTemplate: {CALIBRATION_KEY}")
-        else:
-            tpl.template_data = CALIBRATION_TEMPLATE
-            tpl.version = (tpl.version or 1) + 1
+        # else: template already exists — seed.py is the authoritative source,
+        # so do NOT overwrite here (that would undo seed.py's fixes).
 
         self.db.commit()
         return {"status": "ok", "created": created, "template_id": str(tpl.id)}
@@ -270,8 +268,14 @@ class CalibrationService:
             "submitted_at": result.cts,
             "calibration_date": data["calibration_date"],
             "validity_months": int(data["validity_months"]),
-            # overall_result: prefer test_data field, fall back to top-level column
-            "overall_result": (data.get("overall_result") or result.overall_result or "").strip() or None,
+            # overall_result: wizard saves as recommendation_type (Pass/Fail/Conditional/Retest)
+            # fall back to legacy test_data field, then top-level column
+            "overall_result": (
+                data.get("recommendation_type")
+                or data.get("overall_result")
+                or result.overall_result
+                or ""
+            ).strip() or None,
             "calibrated_by": data.get("calibrated_by"),
             "certificate_number": data.get("certificate_number"),
             "notes": data.get("notes"),
@@ -312,7 +316,7 @@ class CalibrationService:
                 "submitted_at": r.cts.isoformat() if r.cts else None,
                 "calibration_date": data.get("calibration_date"),
                 "validity_months": data.get("validity_months"),
-                "overall_result": data.get("overall_result") or r.overall_result,
+                "overall_result": data.get("recommendation_type") or data.get("overall_result") or r.overall_result,
                 "calibrated_by": data.get("calibrated_by"),
                 "certificate_number": data.get("certificate_number"),
                 "notes": data.get("notes"),

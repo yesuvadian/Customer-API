@@ -7716,10 +7716,10 @@ def seed_calibration_template(session) -> int:
                 "type": "DATE_ADD",
                 "config": {
                     "validity_field": "validity_months",
-                    "result_field": "overall_result",
+                    "result_field": "recommendation_type",
                     "order_by": "calibration_date",
                     "group_by": "equipment_id",
-                    "requires_multi_session": True,
+                    "requires_multi_session": False,
                 },
             }
         ],
