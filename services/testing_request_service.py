@@ -34,25 +34,43 @@ class TestingRequestService:
     def _resolve_is_cumulative(self, test_type_id) -> bool:
         """
         Return True if the template has enable_cumulative=true OR a CUMULATIVE_DIFF rule.
-        Covers both legacy flag-based templates and rule-driven templates.
+        Checks DB OrgTestTemplate first, then falls back to test_templates.py static dict
+        (used by equipment-specific templates like circuit_breaker_operations, oltc_operations).
         """
         if not test_type_id:
             return False
+
+        def _has_cumulative(data: dict) -> bool:
+            if data.get("enable_cumulative"):
+                return True
+            return any(
+                (r.get("type") or "").upper() == "CUMULATIVE_DIFF"
+                for r in data.get("rules", [])
+            )
+
         tpl = (
             self.db.query(OrgTestTemplate)
             .filter(OrgTestTemplate.test_type_id == test_type_id)
             .order_by(OrgTestTemplate.version.desc())
             .first()
         )
-        if not tpl:
-            return False
-        data = tpl.template_data or {}
-        if data.get("enable_cumulative"):
+        if tpl and _has_cumulative(tpl.template_data or {}):
             return True
-        return any(
-            (r.get("type") or "").upper() == "CUMULATIVE_DIFF"
-            for r in data.get("rules", [])
-        )
+
+        # Fall back to test_templates.py static dict via test type name
+        try:
+            from test_templates import TEST_TYPE_TO_TEMPLATE, get_template_by_key
+            detail = self.db.query(CategoryDetails).filter(CategoryDetails.id == test_type_id).first()
+            if detail:
+                tmpl_key = TEST_TYPE_TO_TEMPLATE.get(detail.name)
+                if tmpl_key:
+                    static_tpl = get_template_by_key(tmpl_key)
+                    if static_tpl and _has_cumulative(static_tpl):
+                        return True
+        except Exception:
+            pass
+
+        return False
 
     def _resolve_is_multi_session(self, test_type_id) -> tuple:
         """
