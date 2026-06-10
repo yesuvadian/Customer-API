@@ -7690,13 +7690,6 @@ def seed_calibration_template(session) -> int:
                         "unit": "months",
                     },
                     {
-                        "key": "overall_result",
-                        "label": "Result",
-                        "type": "dropdown",
-                        "options": ["Pass", "Fail"],
-                        "required": True,
-                    },
-                    {
                         "key": "calibrated_by",
                         "label": "Calibrated By (Agency / Lab)",
                         "type": "text",
@@ -7736,11 +7729,13 @@ def seed_calibration_template(session) -> int:
         OrgTestTemplate.template_key == CAL_KEY,
         OrgTestTemplate.org_id == None,  # noqa: E711
     ).first()
+    from sqlalchemy.orm.attributes import flag_modified
     count = 0
     if existing:
         existing.test_type_id = d.id
         existing.template_data = cal_template_data
         existing.is_system = True
+        flag_modified(existing, "template_data")
     else:
         session.add(OrgTestTemplate(
             template_key=CAL_KEY,

@@ -222,8 +222,10 @@ class TestSessionService(UTCDateTimeMixin):
                 f"status={lifecycle.get('status')}"
             )
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"[CUMULATIVE] evaluate failed: {e}")
+            import logging, traceback
+            logging.getLogger(__name__).error(
+                f"[CUMULATIVE] evaluate_overhaul_trigger failed: {e}\n{traceback.format_exc()}"
+            )
 
     # ═══════════════════════════════════════════════════════════
     # TEST SESSION READING CRUD
