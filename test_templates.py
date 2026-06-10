@@ -2320,7 +2320,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Protection Relay",
         "description": "Calibration record for protection relays — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
         "enable_calibration": True,
-        "multi_session": True,
+        "multi_session": False,
         "sections": [
             {
                 "title": "Relay Identification",
@@ -2350,7 +2350,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "calibration_date",    "label": "Calibration Date",                  "type": "date",     "required": True},
                     {"key": "validity_months",     "label": "Validity (Months)",                 "type": "number",   "required": True,  "unit": "months"},
-                    {"key": "overall_result",      "label": "Calibration Result",                "type": "dropdown", "required": True,  "options": ["Pass", "Fail"]},
                     {"key": "calibrated_by",       "label": "Calibrated By (Agency / Lab)",      "type": "text",     "required": False},
                     {"key": "certificate_number",  "label": "Certificate Number",                "type": "text",     "required": False},
                     {"key": "next_calibration_due","label": "Next Calibration Due (computed)",   "type": "calculated", "formula": "date_add(calibration_date, validity_months)", "required": False, "read_only": True},
@@ -2364,10 +2363,10 @@ TEST_TEMPLATES = {
                 "type": "DATE_ADD",
                 "config": {
                     "validity_field": "validity_months",
-                    "result_field": "overall_result",
+                    "result_field": "recommendation_type",
                     "order_by": "calibration_date",
                     "group_by": "equipment_id",
-                    "requires_multi_session": True,
+                    "requires_multi_session": False,
                 },
             }
         ],
@@ -2383,7 +2382,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Electronic Tri-vector Meter",
         "description": "Calibration record for electronic tri-vector meters — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
         "enable_calibration": True,
-        "multi_session": True,
+        "multi_session": False,
         "sections": [
             {
                 "title": "Meter Identification",
@@ -2417,7 +2416,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "calibration_date",   "label": "Calibration Date",                 "type": "date",     "required": True},
                     {"key": "validity_months",    "label": "Validity (Months)",                "type": "number",   "required": True,  "unit": "months"},
-                    {"key": "overall_result",     "label": "Calibration Result",               "type": "dropdown", "required": True,  "options": ["Pass", "Fail"]},
                     {"key": "calibrated_by",      "label": "Calibrated By (Agency / Lab)",     "type": "text",     "required": False},
                     {"key": "certificate_number", "label": "Certificate Number",               "type": "text",     "required": False},
                     {"key": "next_calibration_due","label": "Next Calibration Due (computed)", "type": "calculated", "formula": "date_add(calibration_date, validity_months)", "required": False, "read_only": True},
@@ -2431,10 +2429,10 @@ TEST_TEMPLATES = {
                 "type": "DATE_ADD",
                 "config": {
                     "validity_field": "validity_months",
-                    "result_field": "overall_result",
+                    "result_field": "recommendation_type",
                     "order_by": "calibration_date",
                     "group_by": "equipment_id",
-                    "requires_multi_session": True,
+                    "requires_multi_session": False,
                 },
             }
         ],
