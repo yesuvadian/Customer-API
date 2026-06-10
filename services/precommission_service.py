@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from models import (
     Equipment,
+    Module,
     OrgRole,
+    OrgRolePermission,
     OrgUserRole,
     PreCommissionRequest,
     RepairAssignmentQueue,
@@ -67,14 +69,31 @@ class PreCommissionService:
         return pcr
 
     def _can_approve(self, user: User) -> bool:
-        approver_roles = {"Reviewing Officer", "Senior Management Approver"}
-        user_roles = (
-            self.db.query(OrgRole.name)
-            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
-            .filter(OrgUserRole.user_id == user.id)
-            .all()
+        """Check can_approve on the 'Pre-Commission Requests' module via OrgRolePermission."""
+        module = (
+            self.db.query(Module)
+            .filter(Module.name == "Pre-Commission Requests")
+            .first()
         )
-        return any(r.name in approver_roles for r in user_roles)
+        if not module:
+            return False
+        org_role_ids = [
+            r.org_role_id
+            for r in self.db.query(OrgUserRole)
+            .filter(OrgUserRole.user_id == user.id, OrgUserRole.is_active.is_(True))
+            .all()
+        ]
+        if not org_role_ids:
+            return False
+        return (
+            self.db.query(OrgRolePermission)
+            .filter(
+                OrgRolePermission.org_role_id.in_(org_role_ids),
+                OrgRolePermission.module_id == module.id,
+                OrgRolePermission.can_approve.is_(True),
+            )
+            .first()
+        ) is not None
 
     def _pcr_to_dict(self, pcr: PreCommissionRequest) -> dict:
         return {
