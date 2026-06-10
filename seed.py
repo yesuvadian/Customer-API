@@ -8029,6 +8029,61 @@ def seed_transformer_oil_template(session) -> int:
     return count
 
 
+def seed_transformer_dga_template(session) -> int:
+    """Seed the standalone Transformer DGA OrgTestTemplate."""
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+    from sqlalchemy.orm.attributes import flag_modified
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Testing Equipment",
+            description="Testing Equipment",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+
+    detail = _get_or_create_category_detail(
+        session,
+        name="Transformer Dissolved Gas Analysis (DGA)",
+        category_master_id=master.id,
+        description="Standalone DGA sampling — gas concentration analysis per IS 10593:2017 / IEC 60599",
+        is_active=True,
+    )
+
+    DGA_KEY = "transformer_dga"
+    template_data = TEST_TEMPLATES[DGA_KEY]
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == DGA_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+        flag_modified(existing, "template_data")
+    else:
+        session.add(OrgTestTemplate(
+            template_key=DGA_KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] Transformer DGA template seeded (detail_id={detail.id}).")
+    return count
+
+
 def seed_capacitance_tandelta_template(session) -> int:
     """Seed the Capacitance & Tan Delta Test (Transformer) OrgTestTemplate.
 
@@ -11450,6 +11505,8 @@ def run_seed():
         print(f"[OK] Tan-Delta / Capacitance / IDAX test types: {n5d} seeded.")
         n6 = seed_transformer_oil_template(session)
         print(f"[OK] Transformer Oil Test template: {n6} seeded.")
+        n6b = seed_transformer_dga_template(session)
+        print(f"[OK] Transformer DGA template: {n6b} seeded.")
         n7 = seed_capacitance_tandelta_template(session)
         print(f"[OK] Capacitance & Tan Delta template: {n7} seeded.")
         n8 = seed_inspection_templates(session)

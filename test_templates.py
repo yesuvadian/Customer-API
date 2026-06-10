@@ -2664,8 +2664,346 @@ TEST_TEMPLATES = {
             ],
         },
 
+        # ── Dissolved Gas Analysis ───────────────────────────────────────────
+        {
+            "title": "Dissolved Gas Analysis (DGA)",
+            "fields": [
+                {
+                    "key": "dga_standard",
+                    "label": "Standard",
+                    "type": "dropdown",
+                    "options": ["IS 10593:2017", "IS 10593:2000", "IEC 60599:2022"],
+                    "default": "IS 10593:2017",
+                    "required": False,
+                },
+                {
+                    "key": "dga_sample_location",
+                    "label": "Sample Location",
+                    "type": "dropdown",
+                    "options": ["Bottom", "Top", "Middle", "Both (Top & Bottom)"],
+                    "default": "Bottom",
+                    "required": False,
+                },
+                {
+                    "key": "dga_results",
+                    "label": "Dissolved Gas Analysis Results (ppm)",
+                    "type": "table",
+                    "allow_add_rows": False,
+                    "allow_delete_rows": False,
+                    "columns": [
+                        {"key": "gas",         "label": "Gas",            "type": "readonly"},
+                        {"key": "formula",     "label": "Formula",        "type": "readonly"},
+                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number"},
+                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number"},
+                        {
+                            "key": "condition",
+                            "label": "Status",
+                            "type": "calculated",
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "value_bottom",
+                                    "lookup_fields": [
+                                        "gas",
+                                        {
+                                            "field": "$form.dga_standard",
+                                            "mapping": {
+                                                "IS 10593:2017":  "IS 10593:2017",
+                                                "IS 10593:2000":  "IS 10593:2000",
+                                                "IEC 60599:2022": "IEC 60599:2022",
+                                            },
+                                        },
+                                    ],
+                                    "thresholds": {
+                                        "Methane": {
+                                            "IS 10593:2017":  {"Normal": [0, 130],   "Alert": [130,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 300],   "Alert": [300,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 130],   "Alert": [130,   None]},
+                                        },
+                                        "Ethane": {
+                                            "IS 10593:2017":  {"Normal": [0, 90],    "Alert": [90,    None]},
+                                            "IS 10593:2000":  {"Normal": [0, 1000],  "Alert": [1000,  None]},
+                                            "IEC 60599:2022": {"Normal": [0, 90],    "Alert": [90,    None]},
+                                        },
+                                        "Ethylene": {
+                                            "IS 10593:2017":  {"Normal": [0, 280],   "Alert": [280,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 400],   "Alert": [400,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 280],   "Alert": [280,   None]},
+                                        },
+                                        "Acetylene": {
+                                            "IS 10593:2017":  {"Normal": [0, 20],    "Alert": [20,    None]},
+                                            "IS 10593:2000":  {"Normal": [0, 200],   "Alert": [200,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 20],    "Alert": [20,    None]},
+                                        },
+                                        "Hydrogen": {
+                                            "IS 10593:2017":  {"Normal": [0, 150],   "Alert": [150,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 300],   "Alert": [300,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 150],   "Alert": [150,   None]},
+                                        },
+                                        "Carbon Dioxide": {
+                                            "IS 10593:2017":  {"Normal": [0, 14000], "Alert": [14000, None]},
+                                            "IS 10593:2000":  {"Normal": [0, 12000], "Alert": [12000, None]},
+                                            "IEC 60599:2022": {"Normal": [0, 14000], "Alert": [14000, None]},
+                                        },
+                                        "Carbon Monoxide": {
+                                            "IS 10593:2017":  {"Normal": [0, 600],   "Alert": [600,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 700],   "Alert": [700,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 600],   "Alert": [600,   None]},
+                                        },
+                                        "TGC": {
+                                            "IS 10593:2017":  {"Normal": [0, 500],   "Alert": [500,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 500],   "Alert": [500,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 500],   "Alert": [500,   None]},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        {"key": "remarks", "label": "Remarks", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"gas": "Methane",         "formula": "CH4"},
+                        {"gas": "Ethane",          "formula": "C2H6"},
+                        {"gas": "Ethylene",        "formula": "C2H4"},
+                        {"gas": "Acetylene",       "formula": "C2H2"},
+                        {"gas": "Hydrogen",        "formula": "H2"},
+                        {"gas": "Carbon Dioxide",  "formula": "CO2"},
+                        {"gas": "Carbon Monoxide", "formula": "CO"},
+                        {"gas": "TGC",             "formula": "TGC"},
+                    ],
+                },
+                {
+                    "key": "dga_overall",
+                    "label": "DGA Overall Assessment",
+                    "type": "dropdown",
+                    "options": ["Normal — Gases within limits", "Alert — Monitor closely", "Abnormal / Critical — Investigate"],
+                    "required": False,
+                },
+                {
+                    "key": "dga_remarks",
+                    "label": "DGA Remarks",
+                    "type": "textarea",
+                    "required": False,
+                },
+            ],
+        },
+
     ],
 },
+    # ────────────────────────────────────────────────────────────────────────────
+    # Dissolved Gas Analysis — standalone (Power Transformer)
+    # Independent DGA sampling — not tied to a full oil test.
+    # Thresholds per IS 10593:2017 (>10 yr transformer limits).
+    # ────────────────────────────────────────────────────────────────────────────
+    "transformer_dga": {
+    "key": "transformer_dga",
+    "name": "Transformer Dissolved Gas Analysis (DGA)",
+    "equipment_type": "Power Transformer",
+    "description": "Standalone DGA sampling as per IS 10593:2017 / IEC 60599.",
+    "supports_multi_session": False,
+    "typical_session_interval_days": 180,
+    "typical_total_sessions": 1,
+    "sections": [
+        {
+            "title": "Sample Details",
+            "fields": [
+                {
+                    "key": "sample_reference",
+                    "label": "Sample Reference No.",
+                    "type": "text",
+                    "required": False,
+                },
+                {
+                    "key": "dga_standard",
+                    "label": "Standard",
+                    "type": "dropdown",
+                    "options": ["IS 10593:2017", "IS 10593:2000", "IEC 60599:2022"],
+                    "default": "IS 10593:2017",
+                    "required": False,
+                },
+                {
+                    "key": "sample_location",
+                    "label": "Sample Location",
+                    "type": "dropdown",
+                    "options": ["Bottom", "Top", "Middle", "Both (Top & Bottom)"],
+                    "default": "Bottom",
+                    "required": True,
+                },
+                {
+                    "key": "transformer_age_category",
+                    "label": "Transformer Age",
+                    "type": "dropdown",
+                    "options": ["< 4 Years", "4–10 Years", "> 10 Years"],
+                    "required": False,
+                },
+                {
+                    "key": "oil_temperature_c",
+                    "label": "Oil Temperature at Sampling",
+                    "type": "number",
+                    "unit": "°C",
+                    "required": False,
+                },
+                {
+                    "key": "load_at_sampling",
+                    "label": "Load at Time of Sampling",
+                    "type": "text",
+                    "required": False,
+                },
+            ],
+        },
+        {
+            "title": "Dissolved Gas Analysis Results",
+            "fields": [
+                {
+                    "key": "dga_results",
+                    "label": "Gas Concentrations (ppm)",
+                    "type": "table",
+                    "allow_add_rows": False,
+                    "allow_delete_rows": False,
+                    "columns": [
+                        {"key": "gas",         "label": "Gas",            "type": "readonly"},
+                        {"key": "formula",     "label": "Formula",        "type": "readonly"},
+                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number"},
+                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number"},
+                        {
+                            "key": "condition",
+                            "label": "Status",
+                            "type": "calculated",
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "value_bottom",
+                                    "lookup_fields": [
+                                        "gas",
+                                        {
+                                            "field": "$form.dga_standard",
+                                            "mapping": {
+                                                "IS 10593:2017":  "IS 10593:2017",
+                                                "IS 10593:2000":  "IS 10593:2000",
+                                                "IEC 60599:2022": "IEC 60599:2022",
+                                            },
+                                        },
+                                    ],
+                                    "thresholds": {
+                                        "Methane": {
+                                            "IS 10593:2017":  {"Normal": [0, 130],   "Alert": [130,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 300],   "Alert": [300,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 130],   "Alert": [130,   None]},
+                                        },
+                                        "Ethane": {
+                                            "IS 10593:2017":  {"Normal": [0, 90],    "Alert": [90,    None]},
+                                            "IS 10593:2000":  {"Normal": [0, 1000],  "Alert": [1000,  None]},
+                                            "IEC 60599:2022": {"Normal": [0, 90],    "Alert": [90,    None]},
+                                        },
+                                        "Ethylene": {
+                                            "IS 10593:2017":  {"Normal": [0, 280],   "Alert": [280,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 400],   "Alert": [400,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 280],   "Alert": [280,   None]},
+                                        },
+                                        "Acetylene": {
+                                            "IS 10593:2017":  {"Normal": [0, 20],    "Alert": [20,    None]},
+                                            "IS 10593:2000":  {"Normal": [0, 200],   "Alert": [200,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 20],    "Alert": [20,    None]},
+                                        },
+                                        "Hydrogen": {
+                                            "IS 10593:2017":  {"Normal": [0, 150],   "Alert": [150,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 300],   "Alert": [300,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 150],   "Alert": [150,   None]},
+                                        },
+                                        "Carbon Dioxide": {
+                                            "IS 10593:2017":  {"Normal": [0, 14000], "Alert": [14000, None]},
+                                            "IS 10593:2000":  {"Normal": [0, 12000], "Alert": [12000, None]},
+                                            "IEC 60599:2022": {"Normal": [0, 14000], "Alert": [14000, None]},
+                                        },
+                                        "Carbon Monoxide": {
+                                            "IS 10593:2017":  {"Normal": [0, 600],   "Alert": [600,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 700],   "Alert": [700,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 600],   "Alert": [600,   None]},
+                                        },
+                                        "TGC": {
+                                            "IS 10593:2017":  {"Normal": [0, 500],   "Alert": [500,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 500],   "Alert": [500,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 500],   "Alert": [500,   None]},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        {"key": "remarks", "label": "Remarks", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"gas": "Methane",         "formula": "CH4"},
+                        {"gas": "Ethane",          "formula": "C2H6"},
+                        {"gas": "Ethylene",        "formula": "C2H4"},
+                        {"gas": "Acetylene",       "formula": "C2H2"},
+                        {"gas": "Hydrogen",        "formula": "H2"},
+                        {"gas": "Carbon Dioxide",  "formula": "CO2"},
+                        {"gas": "Carbon Monoxide", "formula": "CO"},
+                        {"gas": "TGC",             "formula": "TGC"},
+                    ],
+                },
+            ],
+        },
+        {
+            "title": "Assessment",
+            "fields": [
+                {
+                    "key": "overall_assessment",
+                    "label": "Overall DGA Assessment",
+                    "type": "dropdown",
+                    "options": [
+                        "Normal — Gases within limits",
+                        "Alert — Monitor closely",
+                        "Abnormal / Critical — Investigate immediately",
+                    ],
+                    "required": False,
+                },
+                {
+                    "key": "key_gases_identified",
+                    "label": "Key Gas(es) of Concern",
+                    "type": "text",
+                    "required": False,
+                },
+                {
+                    "key": "probable_fault",
+                    "label": "Probable Fault Type",
+                    "type": "dropdown",
+                    "options": [
+                        "None — Normal aging",
+                        "Partial Discharge",
+                        "Low-energy Discharge",
+                        "High-energy Discharge (Arcing)",
+                        "Thermal Fault < 300°C",
+                        "Thermal Fault 300–700°C",
+                        "Thermal Fault > 700°C",
+                        "Cellulose Degradation",
+                        "Inconclusive",
+                    ],
+                    "required": False,
+                },
+                {
+                    "key": "recommended_action",
+                    "label": "Recommended Action",
+                    "type": "dropdown",
+                    "options": [
+                        "Continue normal monitoring",
+                        "Increase monitoring frequency",
+                        "Schedule detailed investigation",
+                        "Take offline for inspection",
+                    ],
+                    "required": False,
+                },
+                {
+                    "key": "remarks",
+                    "label": "Remarks",
+                    "type": "textarea",
+                    "required": False,
+                },
+            ],
+        },
+    ],
+},
+
     # ────────────────────────────────────────────────────────────────────────────
     # Capacitance & Tan Delta Test (Transformer)
     # Point-in-time insulation quality measurement — no multi-session.
@@ -5987,6 +6325,11 @@ TEST_TYPE_TO_TEMPLATE = {
     "Transformer Oil Test":             "transformer_oil_test",
     "Insulating Oil Test":              "transformer_oil_test",
     "Oil BDV Test":                     "transformer_oil_test",
+
+    # ── DGA ──
+    "Transformer Dissolved Gas Analysis (DGA)": "transformer_dga",
+    "Dissolved Gas Analysis":                   "transformer_dga",
+    "DGA Test":                                 "transformer_dga",
 
     # ── Calibration test types (enable_calibration=True, DATE_ADD rule) ──
     "Protection Relay Calibration and History": "protection_relay_calibration",
