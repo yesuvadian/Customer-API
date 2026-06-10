@@ -4557,6 +4557,155 @@ class RepairSurveillanceTest(Base):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# ANALYTICS ENGINE
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestAnalytics(Base):
+    """Analytics computed for a single test result.  One row per test_result_id."""
+    __tablename__ = "test_analytics"
+    __table_args__ = (
+        UniqueConstraint("test_result_id", name="uq_test_analytics_result"),
+        {"schema": "public"},
+    )
+
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id     = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id        = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=False)
+    test_result_id      = Column(UUID(as_uuid=True), ForeignKey("public.test_results.id",  ondelete="CASCADE"), nullable=False)
+    testing_request_id  = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="SET NULL"), nullable=True)
+    template_key        = Column(String(100), nullable=False)
+
+    health_score        = Column(Numeric(5, 2), nullable=True)
+    risk_level          = Column(String(20), nullable=True)     # Low | Medium | High | Critical
+    condition_summary   = Column(String(20), nullable=True)     # Good | Fair | Poor
+
+    trend_summary       = Column(Text, nullable=True)
+    critical_findings   = Column(JSONB, default=list)
+    recommendations     = Column(JSONB, default=list)
+
+    parameter_count     = Column(Integer, default=0)
+    evaluated_count     = Column(Integer, default=0)
+    calculated_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    test_result     = relationship("TestResult",     foreign_keys=[test_result_id])
+    equipment       = relationship("Equipment",      foreign_keys=[equipment_id])
+    organization    = relationship("Organization",   foreign_keys=[organization_id])
+
+
+class ParameterAnalytics(Base):
+    """Analytics computed per parameter for a test result.  One row per (test_result_id, parameter_key)."""
+    __tablename__ = "parameter_analytics"
+    __table_args__ = (
+        UniqueConstraint("test_result_id", "parameter_key", name="uq_param_analytics"),
+        {"schema": "public"},
+    )
+
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id     = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id        = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=False)
+    test_result_id      = Column(UUID(as_uuid=True), ForeignKey("public.test_results.id",  ondelete="CASCADE"), nullable=False)
+    template_key        = Column(String(100), nullable=False)
+    parameter_key       = Column(String(100), nullable=False)
+    parameter_label     = Column(String(255), nullable=True)
+    parameter_type      = Column(String(50),  nullable=True)   # number | dropdown | table | date
+
+    current_value       = Column(Numeric, nullable=True)
+    unit                = Column(String(50), nullable=True)
+    condition           = Column(String(20), nullable=True)    # Good | Fair | Poor
+    status              = Column(String(20), nullable=True)    # NORMAL | ALERT | CRITICAL
+    score               = Column(Numeric(5, 2), nullable=True) # 0–100
+
+    trend               = Column(String(30), nullable=True)    # Increasing | Decreasing | Stable | Insufficient_Data
+    trend_slope         = Column(Numeric, nullable=True)       # units per day
+    trend_r_squared     = Column(Numeric(5, 4), nullable=True)
+    history_count       = Column(Integer, default=0)
+
+    annual_change       = Column(Numeric, nullable=True)
+    pct_change_annual   = Column(Numeric(8, 2), nullable=True)
+
+    breach_threshold    = Column(Numeric, nullable=True)
+    breach_predicted_at = Column(DateTime(timezone=True), nullable=True)
+    days_to_breach      = Column(Integer, nullable=True)
+
+    is_anomaly          = Column(Boolean, default=False)
+    anomaly_type        = Column(String(50), nullable=True)    # sudden_increase | sudden_decrease | outlier
+    anomaly_detail      = Column(Text, nullable=True)
+
+    calculated_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    equipment   = relationship("Equipment",  foreign_keys=[equipment_id])
+    test_result = relationship("TestResult", foreign_keys=[test_result_id])
+
+
+class EquipmentAnalytics(Base):
+    """Aggregated health analytics for an equipment asset.  One row per equipment_id."""
+    __tablename__ = "equipment_analytics"
+    __table_args__ = (
+        UniqueConstraint("equipment_id", name="uq_equipment_analytics"),
+        {"schema": "public"},
+    )
+
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id     = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id        = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=False)
+    department_id       = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+
+    health_score        = Column(Numeric(5, 2), nullable=True)
+    risk_level          = Column(String(20), nullable=True)
+    condition_summary   = Column(String(20), nullable=True)
+
+    test_type_scores    = Column(JSONB, default=dict)     # {template_key: {score, risk, tested_at}}
+    critical_findings   = Column(JSONB, default=list)
+    parameters_at_risk  = Column(Integer, default=0)
+
+    test_types_assessed = Column(Integer, default=0)
+    last_test_date      = Column(DateTime(timezone=True), nullable=True)
+    calculated_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    equipment   = relationship("Equipment",     foreign_keys=[equipment_id])
+    department  = relationship("OrgDepartment", foreign_keys=[department_id])
+    organization= relationship("Organization",  foreign_keys=[organization_id])
+
+
+class HierarchyAnalytics(Base):
+    """Aggregated analytics at any node in the department hierarchy.  One row per department_id."""
+    __tablename__ = "hierarchy_analytics"
+    __table_args__ = (
+        UniqueConstraint("department_id", name="uq_hierarchy_analytics_dept"),
+        {"schema": "public"},
+    )
+
+    id                   = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id      = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id",    ondelete="CASCADE"), nullable=False)
+    department_id        = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id",  ondelete="CASCADE"), nullable=False)
+    parent_department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id",  ondelete="SET NULL"), nullable=True)
+    level_type           = Column(String(50), nullable=True)   # substation | division | circle | zone
+
+    health_score         = Column(Numeric(5, 2), nullable=True)
+    risk_level           = Column(String(20), nullable=True)
+
+    equipment_count      = Column(Integer, default=0)
+    equipment_critical   = Column(Integer, default=0)
+    equipment_high       = Column(Integer, default=0)
+    equipment_medium     = Column(Integer, default=0)
+    equipment_low        = Column(Integer, default=0)
+
+    child_count          = Column(Integer, default=0)
+    child_breakdown      = Column(JSONB, default=dict)         # {child_dept_id: {name, score, risk}}
+
+    calculated_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    department        = relationship("OrgDepartment", foreign_keys=[department_id])
+    parent_department = relationship("OrgDepartment", foreign_keys=[parent_department_id])
+    organization      = relationship("Organization",  foreign_keys=[organization_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # NOTIFICATION ENGINE - EVENT QUEUE
 # ═══════════════════════════════════════════════════════════════════════════
 

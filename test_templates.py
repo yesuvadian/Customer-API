@@ -17,6 +17,50 @@ Multi-session support:
 - typical_total_sessions: Typical number of sessions for this test type
 """
 
+# ─── Shared evaluation severity maps (referenced by field/column definitions) ────
+# Template-driven: the code reads these from column_evaluation / dropdown_evaluation.
+# No test-type knowledge in evaluation_service.py — severity comes entirely from here.
+
+_EV_PF     = {"Pass": "NORMAL", "Fail": "CRITICAL"}
+_EV_PFNA   = {"Pass": "NORMAL", "Fail": "CRITICAL", "N/A": "NORMAL"}
+_EV_PFNT   = {"Pass": "NORMAL", "Fail": "CRITICAL", "Not Tested": "NORMAL"}
+_EV_PFCR   = {"Pass": "NORMAL", "Fail": "CRITICAL", "Conditional": "ALERT", "Retest": "ALERT"}
+_EV_PFC    = {"Pass": "NORMAL", "Fail": "CRITICAL", "Conditional": "ALERT"}
+_EV_PFM    = {"Pass": "NORMAL", "Fail": "CRITICAL", "Monitor": "ALERT", "Marginal": "ALERT"}
+_EV_PFTP   = {"Pass": "NORMAL", "Fail": "CRITICAL", "Topped Up - Pass": "NORMAL"}
+_EV_PFGR   = {"Pass": "NORMAL", "Fail": "CRITICAL", "Gas Replaced - Pass": "NORMAL"}
+_EV_PAF    = {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}
+_EV_PCF    = {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}
+_EV_NAC    = {
+    "Normal": "NORMAL", "Alert": "ALERT",
+    "Critical": "CRITICAL", "Critical / Abnormal": "CRITICAL", "Abnormal": "CRITICAL",
+}
+_EV_NHC    = {"Normal": "NORMAL", "High": "ALERT", "Low": "ALERT",
+              "Critical": "CRITICAL", "Critical Low": "CRITICAL"}
+_EV_GFP    = {"Good": "NORMAL", "Fair": "ALERT", "Poor": "CRITICAL", "Damaged": "CRITICAL"}
+_EV_SAT    = {
+    "Satisfactory": "NORMAL",
+    "Satisfactory with Observations": "ALERT",
+    "Unsatisfactory": "CRITICAL",
+    "Unsatisfactory — Rework Required": "CRITICAL",
+    "Action Required": "CRITICAL",
+}
+_EV_TRIP   = {"Trip": "NORMAL", "No Trip": "CRITICAL",
+              "Stable (No Trip)": "NORMAL", "Unstable (Tripped)": "CRITICAL"}
+_EV_COMPLY = {"Compliant": "NORMAL", "Partial": "ALERT", "Non-Compliant": "CRITICAL"}
+_EV_SFRA_ASSESS = {
+    "Normal": "NORMAL", "Slight Deviation": "ALERT",
+    "Marginal": "ALERT", "Abnormal": "CRITICAL",
+}
+_EV_MOISTURE = {
+    "As new": "NORMAL", "Dry": "NORMAL",
+    "Moderately Wet": "ALERT", "Wet": "CRITICAL", "Very Wet": "CRITICAL",
+}
+_EV_OIL_COND = {
+    "As new": "NORMAL", "Acceptable": "NORMAL", "Poor": "ALERT", "Bad": "CRITICAL",
+}
+
+
 TEST_TEMPLATES = {
     # ────────────────────────────────────────────────────────────
     # 1. Relay Testing Report (Feeder protection relays)
@@ -49,7 +93,7 @@ TEST_TEMPLATES = {
                     {"key": "oc_phase_tms", "label": "TMS Setting", "type": "number", "required": True},
                     {"key": "oc_phase_curve", "label": "Curve Type", "type": "dropdown", "options": ["Normal Inverse", "Very Inverse", "Extremely Inverse", "Definite Time"], "required": True},
                     {"key": "oc_phase_operating_time", "label": "Operating Time at 2x", "type": "number", "unit": "sec"},
-                    {"key": "oc_phase_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True},
+                    {"key": "oc_phase_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                 ]
             },
             {
@@ -59,7 +103,7 @@ TEST_TEMPLATES = {
                     {"key": "ef_pickup_actual", "label": "EF Pickup Current (Actual)", "type": "number", "unit": "A", "required": True},
                     {"key": "ef_tms", "label": "EF TMS Setting", "type": "number"},
                     {"key": "ef_operating_time", "label": "EF Operating Time", "type": "number", "unit": "sec"},
-                    {"key": "ef_result", "label": "EF Test Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True},
+                    {"key": "ef_result", "label": "EF Test Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                 ]
             },
             {
@@ -74,7 +118,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks / Observations", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -121,8 +165,8 @@ TEST_TEMPLATES = {
                             {"key": "hv_current", "label": "HV Current (A)", "type": "number"},
                             {"key": "lv_current", "label": "LV Current (A)", "type": "number"},
                             {"key": "diff_current", "label": "Diff Current (A)", "type": "number"},
-                            {"key": "relay_operation", "label": "Relay Op.", "type": "dropdown", "options": ["Trip", "No Trip"]},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "relay_operation", "label": "Relay Op.", "type": "dropdown", "options": ["Trip", "No Trip"], "column_evaluation": _EV_TRIP},
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -138,7 +182,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -175,7 +219,7 @@ TEST_TEMPLATES = {
                             {"key": "diff_current_pickup", "label": "Diff Pickup (A)", "type": "number"},
                             {"key": "expected_pickup", "label": "Expected Pickup (A)", "type": "number"},
                             {"key": "deviation", "label": "Deviation (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -192,7 +236,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -229,7 +273,7 @@ TEST_TEMPLATES = {
                             {"key": "set_value", "label": "Set Value", "type": "text"},
                             {"key": "measured_value", "label": "Measured Value", "type": "text"},
                             {"key": "tolerance", "label": "Tolerance (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -248,7 +292,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -293,7 +337,7 @@ TEST_TEMPLATES = {
                                 "type": "calculated",
                                 "formula": "ratio(ir_value_10min, ir_value_1min)"
                             },
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ],
                         "column_summaries": {
                             "ir_value_1min": "avg",
@@ -308,7 +352,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "min_acceptable_ir", "label": "Min Acceptable IR", "type": "number", "unit": "MOhm"},
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -346,7 +390,7 @@ TEST_TEMPLATES = {
                             {"key": "secondary_current", "label": "Secondary (A)", "type": "number"},
                             {"key": "measured_ratio", "label": "Measured Ratio", "type": "number"},
                             {"key": "error_percent", "label": "Error (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -362,7 +406,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -398,7 +442,7 @@ TEST_TEMPLATES = {
                             {"key": "core_id", "label": "Core ID", "type": "text"},
                             {"key": "test_voltage", "label": "Test Voltage (V)", "type": "number"},
                             {"key": "ir_value", "label": "IR Value (MOhm)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -407,7 +451,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -444,7 +488,7 @@ TEST_TEMPLATES = {
                             {"key": "relay_make_model", "label": "Relay Make/Model", "type": "text"},
                             {"key": "setting_verified", "label": "Setting Verified", "type": "dropdown", "options": ["Yes", "No"]},
                             {"key": "trip_test_ok", "label": "Trip Test OK", "type": "dropdown", "options": ["Yes", "No"]},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -463,7 +507,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -504,7 +548,7 @@ TEST_TEMPLATES = {
                             {"key": "reference_reading", "label": "Ref Reading", "type": "number"},
                             {"key": "meter_reading", "label": "Meter Reading", "type": "number"},
                             {"key": "error_percent", "label": "Error (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -513,7 +557,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -549,11 +593,11 @@ TEST_TEMPLATES = {
             {
                 "title": "External Condition",
                 "fields": [
-                    {"key": "body_condition", "label": "Body/Tank Condition", "type": "dropdown", "options": ["Good", "Fair", "Poor", "Damaged"], "required": True},
+                    {"key": "body_condition", "label": "Body/Tank Condition", "type": "dropdown", "options": ["Good", "Fair", "Poor", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_GFP}},
                     {"key": "paint_condition", "label": "Paint Condition", "type": "dropdown", "options": ["Good", "Faded", "Peeling", "Rusted"], "required": True},
                     {"key": "oil_leak", "label": "Oil Leakage Observed", "type": "boolean", "required": True},
                     {"key": "oil_leak_location", "label": "Leakage Location", "type": "text"},
-                    {"key": "oil_level", "label": "Oil Level", "type": "dropdown", "options": ["Normal", "Low", "Very Low", "Empty"], "required": True},
+                    {"key": "oil_level", "label": "Oil Level", "type": "dropdown", "options": ["Normal", "Low", "Very Low", "Empty"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Normal": "NORMAL", "Low": "ALERT", "Very Low": "CRITICAL", "Empty": "CRITICAL"}}},
                     {"key": "oil_color", "label": "Oil Color", "type": "dropdown", "options": ["Clear", "Light Yellow", "Dark Yellow", "Brown", "Black"]},
                     {"key": "silica_gel_condition", "label": "Silica Gel Condition", "type": "dropdown", "options": ["Blue (Good)", "Pink (Saturated)", "Not Available"]},
                 ]
@@ -561,9 +605,9 @@ TEST_TEMPLATES = {
             {
                 "title": "Bushings & Connections",
                 "fields": [
-                    {"key": "hv_bushing_condition", "label": "HV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True},
-                    {"key": "lv_bushing_condition", "label": "LV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True},
-                    {"key": "terminal_connections", "label": "Terminal Connections", "type": "dropdown", "options": ["Tight", "Loose", "Corroded"], "required": True},
+                    {"key": "hv_bushing_condition", "label": "HV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Cracked": "ALERT", "Chipped": "ALERT", "Damaged": "CRITICAL"}}},
+                    {"key": "lv_bushing_condition", "label": "LV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Cracked": "ALERT", "Chipped": "ALERT", "Damaged": "CRITICAL"}}},
+                    {"key": "terminal_connections", "label": "Terminal Connections", "type": "dropdown", "options": ["Tight", "Loose", "Corroded"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Tight": "NORMAL", "Loose": "ALERT", "Corroded": "CRITICAL"}}},
                     {"key": "earthing_ok", "label": "Earthing Proper", "type": "boolean", "required": True},
                 ]
             },
@@ -581,7 +625,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks / Observations", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -623,7 +667,7 @@ TEST_TEMPLATES = {
                             {"key": "phase_b", "label": "Phase B", "type": "number"},
                             {"key": "expected_ratio", "label": "Expected", "type": "number"},
                             {"key": "deviation_percent", "label": "Dev (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -633,7 +677,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "max_deviation", "label": "Max Deviation", "type": "number", "unit": "%"},
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -671,7 +715,7 @@ TEST_TEMPLATES = {
                             {"key": "secondary_current", "label": "Secondary (A)", "type": "number"},
                             {"key": "measured_ratio", "label": "Ratio", "type": "number"},
                             {"key": "error_percent", "label": "Error (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -680,7 +724,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -737,7 +781,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -790,7 +834,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -828,7 +872,7 @@ TEST_TEMPLATES = {
                             {"key": "voltage_phase_2", "label": "V Phase 2 (V)", "type": "number"},
                             {"key": "voltage_phase_3", "label": "V Phase 3 (V)", "type": "number"},
                             {"key": "balance_ratio", "label": "Balance (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -838,7 +882,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "max_imbalance", "label": "Max Imbalance", "type": "number", "unit": "%"},
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -1915,8 +1959,8 @@ TEST_TEMPLATES = {
                     {"key": "earth_connections_applied",   "label": "Earth connections applied before commencing work",     "type": "checkbox", "required": True},
                     {"key": "general_cleaning_done",       "label": "General cleaning and housekeeping completed",          "type": "checkbox", "required": True},
                     {"key": "lubrication_done",            "label": "Lubrication of mechanical moving parts done",          "type": "checkbox", "required": True},
-                    {"key": "open_close_trip_check",       "label": "Operational check – open / close / trip operations",   "type": "dropdown", "required": True,  "options": ["Pass", "Fail", "N/A"]},
-                    {"key": "alignment_check",             "label": "Alignment checks (isolators, CB mechanism)",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "N/A"]},
+                    {"key": "open_close_trip_check",       "label": "Operational check – open / close / trip operations",   "type": "dropdown", "required": True,  "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "alignment_check",             "label": "Alignment checks (isolators, CB mechanism)",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "indicators_lamps_ok",         "label": "Local / remote indicators and status lamps healthy",   "type": "checkbox", "required": True},
                     {"key": "annunciation_panel_ok",       "label": "Annunciation panel – all alarms healthy",              "type": "checkbox", "required": True},
                     {"key": "pressure_gauges_ok",          "label": "Pressure gauges reading normal",                       "type": "checkbox", "required": True},
@@ -1960,8 +2004,8 @@ TEST_TEMPLATES = {
                     {"key": "oltc_count_at_overhaul",    "label": "Cumulative OLTC operations at overhaul",     "type": "number",   "required": False},
                     {"key": "oltc_overhaul_scope",       "label": "Scope of OLTC overhaul",                     "type": "textarea", "required": False},
                     {"key": "oltc_parts_replaced",       "label": "Parts replaced during OLTC overhaul",        "type": "textarea", "required": False},
-                    {"key": "oltc_test_result_before",   "label": "OLTC test result before overhaul",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"]},
-                    {"key": "oltc_test_result_after",    "label": "OLTC test result after overhaul",            "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"]},
+                    {"key": "oltc_test_result_before",   "label": "OLTC test result before overhaul",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNT}},
+                    {"key": "oltc_test_result_after",    "label": "OLTC test result after overhaul",            "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNT}},
                     {"key": "active_part_drying_done",   "label": "Active part drying performed",               "type": "checkbox", "required": False},
                     {"key": "drying_method",             "label": "Drying Method",                              "type": "dropdown", "required": False, "options": ["Vapour Phase Drying", "Hot Air Circulation", "Oven Drying", "Other"]},
                     {"key": "drying_duration_hrs",       "label": "Drying Duration",                            "type": "number",   "required": False, "unit": "hours"},
@@ -1995,7 +2039,7 @@ TEST_TEMPLATES = {
                     {"key": "pi_ratio",                  "label": "Polarisation Index (PI)",          "type": "number",   "required": False},
                     {"key": "winding_resistance_hv_ohm", "label": "Winding Resistance — HV Phase",   "type": "number",   "required": False, "unit": "Ohm"},
                     {"key": "winding_resistance_lv_ohm", "label": "Winding Resistance — LV Phase",   "type": "number",   "required": False, "unit": "Ohm"},
-                    {"key": "ir_test_result",            "label": "IR Test Overall Result",           "type": "dropdown", "required": False, "options": ["Normal", "Alert", "Critical / Abnormal"]},
+                    {"key": "ir_test_result",            "label": "IR Test Overall Result",           "type": "dropdown", "required": False, "options": ["Normal", "Alert", "Critical / Abnormal"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_NAC}},
                 ],
             },
             # ── SRS §4.1.1: Post-Maintenance Verification ──
@@ -2008,7 +2052,7 @@ TEST_TEMPLATES = {
                     {"key": "ptw_closed",                "label": "Permit to Work closed",                      "type": "checkbox", "required": True},
                     {"key": "next_maintenance_due",      "label": "Next Maintenance Due Date",                  "type": "date",     "required": False},
                     {"key": "ad_hoc_maintenance_desc",   "label": "Any other ad-hoc maintenance (description)", "type": "textarea", "required": False},
-                    {"key": "post_maintenance_status",   "label": "Post-Maintenance Overall Status",            "type": "dropdown", "required": True, "options": ["All Healthy", "Punch Points Pending", "Deficiency — Action Required"]},
+                    {"key": "post_maintenance_status",   "label": "Post-Maintenance Overall Status",            "type": "dropdown", "required": True, "options": ["All Healthy", "Punch Points Pending", "Deficiency — Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": {"All Healthy": "NORMAL", "Punch Points Pending": "ALERT", "Deficiency — Action Required": "CRITICAL"}}},
                     {"key": "punch_points",              "label": "Open Punch Points (with target closure date)","type": "textarea", "required": False},
                     {"key": "responsible_officer",       "label": "Responsible Officer Sign-off",               "type": "text",     "required": True},
                 ],
@@ -2778,6 +2822,14 @@ TEST_TEMPLATES = {
                     "type": "dropdown",
                     "options": ["Normal — Gases within limits", "Alert — Monitor closely", "Abnormal / Critical — Investigate"],
                     "required": False,
+                    "dropdown_evaluation": {
+                        "enabled": True,
+                        "value_severities": {
+                            "Normal — Gases within limits":       "NORMAL",
+                            "Alert — Monitor closely":            "ALERT",
+                            "Abnormal / Critical — Investigate":  "CRITICAL",
+                        },
+                    },
                 },
                 {
                     "key": "dga_remarks",
@@ -2957,6 +3009,14 @@ TEST_TEMPLATES = {
                         "Abnormal / Critical — Investigate immediately",
                     ],
                     "required": False,
+                    "dropdown_evaluation": {
+                        "enabled": True,
+                        "value_severities": {
+                            "Normal — Gases within limits":             "NORMAL",
+                            "Alert — Monitor closely":                  "ALERT",
+                            "Abnormal / Critical — Investigate immediately": "CRITICAL",
+                        },
+                    },
                 },
                 {
                     "key": "key_gases_identified",
@@ -3553,7 +3613,7 @@ TEST_TEMPLATES = {
                             {"key": "reading_2",     "label": "Reading 2 (µΩ)", "type": "number"},
                             {"key": "average",       "label": "Average (µΩ)",   "type": "number"},
                             {"key": "max_limit",     "label": "Max Limit (µΩ)", "type": "number"},
-                            {"key": "result",        "label": "Result",         "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",        "label": "Result",         "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"pole": "R Phase"},
@@ -3567,7 +3627,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",         "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result",  "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result",  "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",       "type": "text",     "required": True},
                 ],
             },
@@ -3654,7 +3714,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -3708,7 +3768,7 @@ TEST_TEMPLATES = {
                             {"key": "pressure_bar",   "label": "Measured (bar)",      "type": "number"},
                             {"key": "temp_c",         "label": "Ambient Temp (°C)",   "type": "number"},
                             {"key": "corrected_bar",  "label": "Corrected to 20°C",   "type": "number"},
-                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Normal", "Low", "Critical"]},
+                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Normal", "Low", "Critical"], "column_evaluation": _EV_NHC},
                         ],
                         "default_rows": [
                             {"pole": "R Phase"},
@@ -3724,7 +3784,7 @@ TEST_TEMPLATES = {
                     {"key": "top_up_done",    "label": "Gas Top-up Done",    "type": "boolean"},
                     {"key": "top_up_qty_kg",  "label": "Gas Added",          "type": "number",   "unit": "kg"},
                     {"key": "remarks",        "label": "Remarks",            "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result",     "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Topped Up - Pass"]},
+                    {"key": "overall_result", "label": "Overall Result",     "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Topped Up - Pass"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFTP}},
                     {"key": "tested_by",      "label": "Tested By",          "type": "text",     "required": True},
                 ],
             },
@@ -3778,7 +3838,7 @@ TEST_TEMPLATES = {
                             {"key": "moisture_ppm",   "label": "Moisture (ppmv)",     "type": "number"},
                             {"key": "dew_point_c",    "label": "Dew Point (°C)",      "type": "number"},
                             {"key": "so2_ppm",        "label": "SO₂ (ppm)",           "type": "number"},
-                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"pole": "R Phase"},
@@ -3793,7 +3853,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "gas_replacement_done", "label": "Gas Replacement Done", "type": "boolean"},
                     {"key": "remarks",              "label": "Remarks",              "type": "textarea"},
-                    {"key": "overall_result",       "label": "Overall Result",       "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Gas Replaced - Pass"]},
+                    {"key": "overall_result",       "label": "Overall Result",       "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Gas Replaced - Pass"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFGR}},
                     {"key": "tested_by",            "label": "Tested By",            "type": "text",     "required": True},
                 ],
             },
@@ -3847,7 +3907,7 @@ TEST_TEMPLATES = {
                             {"key": "y_phase_ms",  "label": "Y Phase (ms)",     "type": "number"},
                             {"key": "b_phase_ms",  "label": "B Phase (ms)",     "type": "number"},
                             {"key": "limit_ms",    "label": "Max Limit (ms)",   "type": "number"},
-                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"operation": "Opening Time"},
@@ -3886,14 +3946,14 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "co_open_time_ms",  "label": "CO — Open Time",     "type": "number", "unit": "ms"},
                     {"key": "co_dead_time_ms",  "label": "CO — Dead Time",     "type": "number", "unit": "ms"},
-                    {"key": "co_result",        "label": "CO Result",          "type": "dropdown", "options": ["Pass", "Fail", "Not Tested"]},
+                    {"key": "co_result",        "label": "CO Result",          "type": "dropdown", "options": ["Pass", "Fail", "Not Tested"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNT}},
                 ],
             },
             {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -3950,7 +4010,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -3999,7 +4059,7 @@ TEST_TEMPLATES = {
                     {"key": "sf6_pressure_checked",    "label": "SF6 gas pressure checked",                "type": "checkbox", "required": True},
                     {"key": "general_cleaning",        "label": "General cleaning completed",              "type": "checkbox", "required": True},
                     {"key": "mechanism_lubricated",    "label": "Operating mechanism lubricated",          "type": "checkbox"},
-                    {"key": "trip_close_ops_checked",  "label": "Trip / close operations verified",        "type": "dropdown", "options": ["Pass", "Fail", "N/A"]},
+                    {"key": "trip_close_ops_checked",  "label": "Trip / close operations verified",        "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "heater_working",          "label": "Anti-condensation heater working",        "type": "checkbox"},
                     {"key": "control_cables_ok",       "label": "Control cables and connections intact",   "type": "checkbox"},
                     {"key": "earthing_ok",             "label": "Earthing connections intact",             "type": "checkbox"},
@@ -4011,7 +4071,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
                     {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
                     {"key": "maintained_by",  "label": "Maintained By",  "type": "text",     "required": True},
                 ],
@@ -4064,7 +4124,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -4125,7 +4185,7 @@ TEST_TEMPLATES = {
                             {"key": "leakage_ua",     "label": "Leakage Current (µA)", "type": "number"},
                             {"key": "prev_leakage_ua","label": "Previous Reading (µA)","type": "number"},
                             {"key": "deviation_pct",  "label": "Deviation (%)",        "type": "number"},
-                            {"key": "result",         "label": "Result",               "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",         "label": "Result",               "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"phase": "R Phase"},
@@ -4139,7 +4199,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -4211,7 +4271,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -4265,7 +4325,7 @@ TEST_TEMPLATES = {
                             {"key": "test_voltage_kv",   "label": "Test Voltage (kVrms)",    "type": "number"},
                             {"key": "duration_sec",      "label": "Duration (s)",            "type": "number"},
                             {"key": "flashover",         "label": "Flashover / Breakdown",   "type": "dropdown", "options": ["No", "Yes"]},
-                            {"key": "result",            "label": "Result",                  "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",            "label": "Result",                  "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"phase": "R Phase"},
@@ -4279,7 +4339,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -4334,7 +4394,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
                     {"key": "maintained_by",  "label": "Maintained By",  "type": "text",     "required": True},
                 ],
             },
@@ -4384,7 +4444,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -4440,7 +4500,7 @@ TEST_TEMPLATES = {
                             {"key": "cell_no",      "label": "Cell No.",               "type": "text"},
                             {"key": "sg_value",     "label": "SG Reading",             "type": "number"},
                             {"key": "sg_corrected", "label": "Temp-Corrected SG",      "type": "number"},
-                            {"key": "condition",    "label": "Condition",              "type": "dropdown", "options": ["Good", "Low", "Critical"]},
+                            {"key": "condition",    "label": "Condition",              "type": "dropdown", "options": ["Good", "Low", "Critical"], "column_evaluation": {"Good": "NORMAL", "Low": "ALERT", "Critical": "CRITICAL"}},
                         ],
                         "default_rows": [
                             {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
@@ -4457,7 +4517,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "water_added",    "label": "Distilled Water Added",  "type": "boolean"},
                     {"key": "remarks",        "label": "Remarks",                "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result",         "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"]},
+                    {"key": "overall_result", "label": "Overall Result",         "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFM}},
                     {"key": "tested_by",      "label": "Tested By",              "type": "text",     "required": True},
                 ],
             },
@@ -4506,7 +4566,7 @@ TEST_TEMPLATES = {
                             {"key": "cell_no",  "label": "Cell No.",         "type": "text"},
                             {"key": "voltage_v","label": "Voltage (V)",      "type": "number"},
                             {"key": "deviation","label": "Deviation from Rated (V)","type": "number"},
-                            {"key": "condition","label": "Condition",        "type": "dropdown", "options": ["Normal", "High", "Low"]},
+                            {"key": "condition","label": "Condition",        "type": "dropdown", "options": ["Normal", "High", "Low"], "column_evaluation": _EV_NHC},
                         ],
                         "default_rows": [
                             {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
@@ -4522,7 +4582,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFM}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -4590,7 +4650,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Marginal"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Marginal"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFM}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -4634,7 +4694,7 @@ TEST_TEMPLATES = {
                         "type": "table",
                         "columns": [
                             {"key": "cell_no",     "label": "Cell No.",      "type": "text"},
-                            {"key": "level",       "label": "Level",         "type": "dropdown", "options": ["Normal", "Low", "High", "Critical Low"]},
+                            {"key": "level",       "label": "Level",         "type": "dropdown", "options": ["Normal", "Low", "High", "Critical Low"], "column_evaluation": _EV_NHC},
                             {"key": "water_added_ml", "label": "Water Added (ml)", "type": "number"},
                             {"key": "remarks",     "label": "Remarks",       "type": "text"},
                         ],
@@ -4650,7 +4710,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Normal", "Low — Topped Up", "Critical — Action Required"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Normal", "Low — Topped Up", "Critical — Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Normal": "NORMAL", "Low — Topped Up": "ALERT", "Critical — Action Required": "CRITICAL"}}},
                     {"key": "checked_by",     "label": "Checked By",     "type": "text",     "required": True},
                 ],
             },
@@ -4702,7 +4762,7 @@ TEST_TEMPLATES = {
                         "columns": [
                             {"key": "cell_no",   "label": "Cell No.",    "type": "text"},
                             {"key": "voltage_v", "label": "Voltage (V)", "type": "number"},
-                            {"key": "condition", "label": "Condition",   "type": "dropdown", "options": ["Normal", "High", "Low"]},
+                            {"key": "condition", "label": "Condition",   "type": "dropdown", "options": ["Normal", "High", "Low"], "column_evaluation": _EV_NHC},
                         ],
                         "default_rows": [
                             {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
@@ -4715,7 +4775,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFM}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -4760,7 +4820,7 @@ TEST_TEMPLATES = {
                     {"key": "vent_plugs_ok",        "label": "Vent plugs / caps clean and intact",      "type": "checkbox"},
                     {"key": "tray_cleaned",         "label": "Battery tray / room cleaned",             "type": "checkbox"},
                     {"key": "earthing_ok",          "label": "Earthing connections checked",            "type": "checkbox"},
-                    {"key": "charger_output_ok",    "label": "Charger output voltage checked",          "type": "dropdown", "options": ["Normal", "High", "Low", "Not Checked"]},
+                    {"key": "charger_output_ok",    "label": "Charger output voltage checked",          "type": "dropdown", "options": ["Normal", "High", "Low", "Not Checked"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Normal": "NORMAL", "High": "ALERT", "Low": "ALERT", "Not Checked": "NORMAL"}}},
                     {"key": "electrolyte_checked",  "label": "Electrolyte level checked",               "type": "checkbox"},
                     {"key": "water_added",          "label": "Distilled water added if required",       "type": "checkbox"},
                     {"key": "sg_checked",           "label": "Specific gravity checked",                "type": "checkbox"},
@@ -4771,7 +4831,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
                     {"key": "maintained_by",  "label": "Maintained By",  "type": "text",     "required": True},
                 ],
             },
@@ -4822,7 +4882,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -4878,7 +4938,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -4931,7 +4991,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -4989,7 +5049,8 @@ TEST_TEMPLATES = {
                     {"key": "defects_found", "label": "Defects / Issues Found", "type": "textarea"},
                     {"key": "recommendations", "label": "Recommendations", "type": "textarea"},
                     {"key": "test_result", "label": "Overall Test Result", "type": "dropdown", "required": True,
-                     "options": ["Pass", "Fail", "Conditional", "Retest Required"]},
+                     "options": ["Pass", "Fail", "Conditional", "Retest Required"],
+                     "dropdown_evaluation": {"enabled": True, "value_severities": {"Pass": "NORMAL", "Fail": "CRITICAL", "Conditional": "ALERT", "Retest Required": "ALERT"}}},
                 ],
             },
         ],
@@ -6056,10 +6117,10 @@ TEST_TEMPLATES = {
                         "columns": [
                             {"key": "test_configuration",        "label": "Test Configuration",              "type": "readonly"},
                             {"key": "moisture_percent",          "label": "% Moisture",                      "type": "number"},
-                            {"key": "moisture_analysis",         "label": "Tr. Analysis (% Moisture)",       "type": "dropdown", "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]},
+                            {"key": "moisture_analysis",         "label": "Tr. Analysis (% Moisture)",       "type": "dropdown", "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"], "column_evaluation": _EV_MOISTURE},
                             {"key": "moisture_previous_test",    "label": "% Moisture Previous Test",        "type": "number"},
                             {"key": "oil_conductivity_psm",      "label": "Oil Conductivity (pS/m)",         "type": "number"},
-                            {"key": "oil_conductivity_analysis", "label": "Tr. Analysis (Oil Conductivity)", "type": "dropdown", "options": ["As new", "Acceptable", "Poor", "Bad"]},
+                            {"key": "oil_conductivity_analysis", "label": "Tr. Analysis (Oil Conductivity)", "type": "dropdown", "options": ["As new", "Acceptable", "Poor", "Bad"], "column_evaluation": _EV_OIL_COND},
                         ],
                         "default_rows": [
                             {"test_configuration": "HV-GND"},
@@ -6211,7 +6272,8 @@ TEST_TEMPLATES = {
                             {"key": "cc_mf",     "label": "CC — MF (100k–600kHz)", "type": "number"},
                             {"key": "cc_hf",     "label": "CC — HF (600k–1MHz)",   "type": "number"},
                             {"key": "assessment","label": "Assessment", "type": "dropdown",
-                             "options": ["Normal", "Slight Deviation", "Marginal", "Abnormal"]},
+                             "options": ["Normal", "Slight Deviation", "Marginal", "Abnormal"],
+                             "column_evaluation": _EV_SFRA_ASSESS},
                         ],
                         "default_rows": [
                             {"winding": "HV-N"}, {"winding": "LV-N"}, {"winding": "TV-N"},

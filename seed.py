@@ -1599,6 +1599,13 @@ def seed_modules(session):
                 "and equipment health trends.",
  "path": "surveillance-dashboard",
  "group_name": "Field Operations"},
+# ✅ AI ANALYTICS DASHBOARD MODULE
+{"name": "AI Analytics Dashboard",
+ "description": "Generic analytics engine dashboard — equipment health scores, trend analysis, "
+                "threshold breach forecasts, anomaly detection, and hierarchy roll-ups. "
+                "Department-scoped drill-down from zone → substation → individual equipment.",
+ "path": "analytics-dashboard",
+ "group_name": "Condition Monitoring"},
 # ✅ TEST SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
 {"name": "Test Schedule Templates",
  "rename_from": "Schedule Templates",
@@ -2085,6 +2092,9 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Senior Management Approver",  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "TRC Member",                  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
+
+        # ✅ AI ANALYTICS DASHBOARD — org-admin only
+        {"role": "Admin",                       "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
 
         # ✅ PRE-COMMISSION QAP — Request tickets (approval queue)
         # Asset Data Officer creates PCR tickets; approvers approve/reject.
