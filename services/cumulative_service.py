@@ -525,10 +525,13 @@ class CumulativeService:
         workflow_number = f"{prefix}{last_seq + 1:04d}"
 
         # ── 4. Create the RepairWorkflow row ──────────────────────────────────
+        _equipment = self.db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        _org_id = _equipment.organization_id if _equipment else None
         workflow = RepairWorkflow(
             workflow_number=workflow_number,
             workflow_code=OVERHAUL_WORKFLOW_CODE,
             equipment_id=equipment_id,
+            organization_id=_org_id,
             workflow_type="OVERHAUL",
             source="cumulative",
             current_stage_id=first_stage.id,

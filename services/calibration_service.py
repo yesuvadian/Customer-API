@@ -494,10 +494,13 @@ class CalibrationService:
             f"CAL-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{count + 1:04d}"
         )
 
+        _equipment = self.db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        _org_id = _equipment.organization_id if _equipment else None
         workflow = RepairWorkflow(
             workflow_number=workflow_number,
             workflow_code=CALIBRATION_WORKFLOW_CODE,
             equipment_id=equipment_id,
+            organization_id=_org_id,
             workflow_type="CALIBRATION",
             source="calibration",
             current_stage_id=first_stage.id,
