@@ -116,27 +116,32 @@ def get_analytics_dashboard(
         ).first()
         dept_obj = db.get(OrgDepartment, department_id)
 
-    # ── 4. Top critical equipment ────────────────────────────────────────────
+    # ── 4. Top critical equipment (only equipment with at least 1 test) ─────
+    _TERMINAL_STATUSES = ("completed", "closed")
+
+    # Count tests for ALL scoped equipment first so we can filter before limiting
+    if all_eq_ids:
+        test_count_rows = (
+            db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
+            .filter(
+                TestingRequest.equipment_id.in_(all_eq_ids),
+                TestingRequest.status.in_(_TERMINAL_STATUSES),
+            )
+            .group_by(TestingRequest.equipment_id)
+            .all()
+        )
+        test_count_map: dict = {row[0]: row[1] for row in test_count_rows}
+    else:
+        test_count_map = {}
+
     critical_ea = sorted(
-        [ea for ea in all_ea if ea.health_score is not None],
+        [ea for ea in all_ea if ea.health_score is not None
+         and test_count_map.get(ea.equipment_id, 0) > 0],
         key=lambda e: e.health_score,
     )[:10]
 
     eq_ids = [ea.equipment_id for ea in critical_ea]
     eq_map = {e.id: e for e in db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all()}
-
-    # Count completed testing requests per equipment
-    _TERMINAL_STATUSES = ("completed", "closed")
-    test_count_rows = (
-        db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
-        .filter(
-            TestingRequest.equipment_id.in_(eq_ids),
-            TestingRequest.status.in_(_TERMINAL_STATUSES),
-        )
-        .group_by(TestingRequest.equipment_id)
-        .all()
-    )
-    test_count_map: dict = {row[0]: row[1] for row in test_count_rows}
 
     type_ids = list({e.equipment_type_id for e in eq_map.values() if e.equipment_type_id})
     type_map = {
@@ -606,7 +611,12 @@ def get_parameter_analytics(
     if template_key:
         q = q.filter(ParameterAnalytics.template_key == template_key)
     rows = q.order_by(ParameterAnalytics.calculated_at.desc()).all()
-    return [_serialize_parameter_analytics(r) for r in rows]
+    result_ids = [r.test_result_id for r in rows]
+    tested_at_map = {
+        r.id: (r.tested_at or r.cts)
+        for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
+    }
+    return [_serialize_parameter_analytics(r, tested_at_map.get(r.test_result_id)) for r in rows]
 
 
 @router.get(
@@ -908,8 +918,9 @@ def _serialize_test_history_item(row: TestAnalytics, tested_at) -> dict:
     }
 
 
-def _serialize_parameter_analytics(row: ParameterAnalytics) -> dict:
+def _serialize_parameter_analytics(row: ParameterAnalytics, tested_at=None) -> dict:
     return {
+        "last_tested_at": tested_at.isoformat() if tested_at else None,
         "id":                   str(row.id),
         "equipment_id":         str(row.equipment_id),
         "test_result_id":       str(row.test_result_id),
