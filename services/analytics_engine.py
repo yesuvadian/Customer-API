@@ -601,7 +601,10 @@ class AnalyticsEngine:
         rows = (
             self.db.query(TestAnalytics)
             .filter(TestAnalytics.equipment_id == equipment_id)
-            .order_by(TestAnalytics.calculated_at.desc())
+            .order_by(
+                TestAnalytics.tested_at.desc().nullslast(),
+                TestAnalytics.calculated_at.desc(),
+            )
             .all()
         )
 
@@ -623,7 +626,7 @@ class AnalyticsEngine:
             r.template_key: {
                 "score":     float(r.health_score) if r.health_score is not None else None,
                 "risk":      r.risk_level,
-                "tested_at": r.calculated_at.isoformat() if r.calculated_at else None,
+                "tested_at": (r.tested_at or r.calculated_at).isoformat() if (r.tested_at or r.calculated_at) else None,
             }
             for r in latest_per_template
         }
@@ -939,6 +942,9 @@ class AnalyticsEngine:
         ta.critical_findings = critical_findings
         ta.parameter_count   = parameter_count
         ta.evaluated_count   = evaluated_count
+        # Resolve actual test date from the testing request
+        req = self.db.get(TestingRequest, testing_request_id) if testing_request_id else None
+        ta.tested_at         = (req.requested_date if req and req.requested_date else None)
         ta.calculated_at     = datetime.now(timezone.utc)
         return ta
 

@@ -4586,6 +4586,7 @@ class TestAnalytics(Base):
 
     parameter_count     = Column(Integer, default=0)
     evaluated_count     = Column(Integer, default=0)
+    tested_at           = Column(DateTime(timezone=True), nullable=True)   # actual test date
     calculated_at       = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships

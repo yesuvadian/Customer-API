@@ -1,0 +1,807 @@
+"""
+Reusable pipeline: KPTCL Transformer Oil Test PDF → DB seed.
+
+Usage:
+    # Extract PDFs, save JSON AND seed DB (default)
+    python seed_oil_tests_from_pdf.py --from-pdf report.pdf
+    python seed_oil_tests_from_pdf.py --from-pdf /folder/
+
+    # Extract PDFs, save JSON only — no DB writes
+    python seed_oil_tests_from_pdf.py --from-pdf /folder/ --emit-only
+
+    # Seed from a previously saved / edited JSON
+    python seed_oil_tests_from_pdf.py --from-json reports.json
+    python seed_oil_tests_from_pdf.py --from-json reports.json --dry-run
+
+    # Print a blank JSON template
+    python seed_oil_tests_from_pdf.py --template > reports.json
+
+Pipeline (--from-pdf):
+    1. PDF pages → PIL images       (fitz / PyMuPDF)
+    2. Images → raw text            (EasyOCR)
+    3. Raw text → structured JSON   (regex parser, always saved to data/)
+    4. JSON → DB records            (SQLAlchemy, status=closed) — skipped with --emit-only
+
+Supports any KPTCL R&D Centre oil test report layout.
+Idempotent — skips reports already seeded (matched by request_number).
+"""
+
+import argparse
+import io
+import json
+import re
+import sys
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+import fitz  # PyMuPDF
+from PIL import Image
+from database import VendorSessionLocal as _SessionLocal
+from sqlalchemy.exc import InvalidRequestError
+from models import (
+    CategoryDetails,
+    Equipment,
+    OrgDepartment,
+    Organization,
+    TestingRequest,
+    TestingRequestStatus,
+    TestResult,
+    User,
+)
+
+
+# ── EasyOCR extraction ────────────────────────────────────────────────────────
+
+REPORT_TEMPLATE = {
+    "sub_station": "",
+    "sample_no": "",
+    "test_date": "YYYY-MM-DD",
+    "capacity_mva": "",
+    "voltage_class": "",
+    "make": "",
+    "serial_number": "",
+    "date_of_commission": "YYYY-MM-DD",
+    "standard": "IS 10593:2017",
+    "oil_test": {
+        "acidity": None,
+        "resistivity": None,
+        "tan_delta": None,
+        "bdv_top": None,
+        "bdv_bottom": None,
+        "interfacial_tension": None,
+        "flash_point": None,
+        "water_content": None,
+        "remarks": {
+            "acidity": "", "resistivity": "", "tan_delta": "",
+            "bdv_top": "", "bdv_bottom": "", "interfacial_tension": "",
+            "flash_point": "", "water_content": ""
+        }
+    },
+    "dga": {
+        "methane": None, "ethane": None, "ethylene": None,
+        "acetylene": None, "hydrogen": None, "co2": None,
+        "co": None, "tgc": None,
+        "sample_location": "Bottom",
+        "overall": "Normal — Gases within limits",
+        "remarks": ""
+    }
+}
+
+
+# ── OCR helpers ───────────────────────────────────────────────────────────────
+
+def _num(s: str) -> float | None:
+    """Parse a number string, handling scientific notation like 121.32X10E12."""
+    if not s:
+        return None
+    s = s.strip().upper().replace(",", "").replace("O", "0")
+    # e.g. 121.32X10E12 ohm-cm → convert to G ohm m
+    m = re.match(r"([\d.]+)[X*](10E?(\d+))", s)
+    if m:
+        base = float(m.group(1))
+        exp  = int(m.group(3))
+        ohm_cm = base * (10 ** exp)
+        return round(ohm_cm / 100 / 1e9, 3)  # ohm-cm → G ohm m
+    try:
+        return float(re.sub(r"[^\d.\-]", "", s))
+    except ValueError:
+        return None
+
+
+def _find(pattern: str, text: str, group: int = 1) -> str | None:
+    m = re.search(pattern, text, re.IGNORECASE)
+    return m.group(group).strip() if m else None
+
+
+def _parse_date_str(s: str | None) -> str | None:
+    if not s:
+        return None
+    s = s.strip()
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d-%b-%y", "%d-%b-%Y",
+                "%d/%m/%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def parse_ocr_text(text: str) -> dict | None:
+    """Parse raw OCR text from one KPTCL oil test report page into a report dict."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    full  = "\n".join(lines)
+
+    # Must contain oil test indicators to be a valid report page
+    if not re.search(r"(acidity|break down|interfacial|dissolved gas)", full, re.I):
+        return None
+
+    report = {k: v for k, v in REPORT_TEMPLATE.items()}
+    report["oil_test"] = {k: v for k, v in REPORT_TEMPLATE["oil_test"].items()}
+    report["oil_test"]["remarks"] = dict(REPORT_TEMPLATE["oil_test"]["remarks"])
+    report["dga"] = {k: v for k, v in REPORT_TEMPLATE["dga"].items()}
+
+    # ── Header fields ──────────────────────────────────────────────────────────
+    report["sample_no"]  = _find(r"sample\s*no[:\.]?\s*(\d+)", full) or ""
+    report["sub_station"] = _find(r"sub[- ]?station\s*[:\.]?\s*(.+?)(?:\n|$)", full) or ""
+
+    # "Date of Test : 7/12/2023" — take first valid date after the label
+    date_str = _find(r"date\s*of\s*test\s*[:\.]?\s*([\d]{1,2}[/\-][\d]{1,2}[/\-][\d]{2,4})", full)
+    report["test_date"] = _parse_date_str(date_str) or ""
+
+    # Serial numbers: try label match first, then direct pattern (HT-1690/12569, KT-100000/51)
+    serial = _find(r"serial\s*(?:number|no\.?)\s*[:\.]?\s*([A-Za-z][A-Za-z0-9\-/]+)", full)
+    if not serial:
+        # Direct pattern: 2 uppercase letters, dash, digits, slash, digits
+        serial = _find(r"\b([A-Z]{2,3}[-\s]?\d{3,}[/\-]\d+)\b", full)
+    report["serial_number"] = serial or ""
+    report["make"]          = _find(r"\b(emco|bhel|abb|siemens|crompton)\b", full) or ""
+    report["capacity_mva"]  = _find(r"(\d+)\s*mva", full) or ""
+    report["voltage_class"] = _find(r"(\d+\s*/\s*\d+)\s*kv", full) or ""
+
+    doc_str = _find(r"date\s*of\s*comm[:\.]?\s*([\d/\-\w]+)", full)
+    report["date_of_commission"] = _parse_date_str(doc_str)
+
+    if re.search(r"10593.?2017", full):
+        report["standard"] = "IS 10593:2017"
+    elif re.search(r"10593.?2000", full):
+        report["standard"] = "IS 10593:2000"
+    elif re.search(r"60599", full):
+        report["standard"] = "IEC 60599:2022"
+    else:
+        report["standard"] = "IS 10593:2017"
+
+    # ── Oil test values ────────────────────────────────────────────────────────
+    # The test result value always appears immediately before Good/Fair/Poor/Ok
+    # Pattern: <label row text> ... <value>  Good|Fair|Poor|Ok
+    def result_before_rating(label: str) -> float | None:
+        m = re.search(
+            label + r"[\s\S]{0,300}?([\d.]+(?:[xX*]10E?\d+)?)\s*(?:Good|Fair|Poor|Ok)\b",
+            full, re.I
+        )
+        return _num(m.group(1)) if m else None
+
+    report["oil_test"]["acidity"]             = result_before_rating(r"acidity")
+    report["oil_test"]["resistivity"]         = result_before_rating(r"resistivity|specific\s*resistance")
+    report["oil_test"]["tan_delta"]           = result_before_rating(r"dielectric\s*dissipation|tan.?delta")
+    report["oil_test"]["bdv_bottom"]          = result_before_rating(r"break\s*down\s*voltage")
+    report["oil_test"]["interfacial_tension"] = result_before_rating(r"interfacial\s*tension")
+    report["oil_test"]["flash_point"]         = result_before_rating(r"flash\s*point")
+    report["oil_test"]["water_content"]       = result_before_rating(r"water\s*content")
+
+    # Remarks for BDV (e.g. "sampling error suspected")
+    bdv_remark = _find(r"break\s*down\s*voltage.*?(\bsampling\s*error[^\n]*)", full)
+    if bdv_remark:
+        report["oil_test"]["remarks"]["bdv_bottom"] = bdv_remark.strip()
+
+    # ── DGA values ─────────────────────────────────────────────────────────────
+    # Each gas row: <Gas Name> <Formula> <permissible limits...> <Top (empty)> <Bottom value>
+    # The Bottom value is the LAST number in the row before the next gas row starts.
+    # We match from the gas label up to the next gas label or end of DGA section,
+    # then take the last number found — this skips permissible limit numbers.
+    GAS_ANCHORS = (
+        r"methane", r"ethane", r"ethylene", r"acetylene",
+        r"hydrogen", r"carbon.?di.?oxide", r"carbon\s*monoxide", r"TGC",
+        r"remarks", r"note"
+    )
+    next_gas_pat = "(?:" + "|".join(GAS_ANCHORS) + ")"
+
+    def gas_bottom(label: str, next_labels: str) -> float | None:
+        # Find block from this gas label to the next
+        m = re.search(label + r"[\s\S]{0,200}?" + next_labels, full, re.I)
+        if not m:
+            # Last row — take everything after the label
+            m2 = re.search(label + r"([\s\S]{0,200})", full, re.I)
+            block = m2.group(1) if m2 else ""
+        else:
+            block = full[m.start():m.end()]
+        # ND / not detected → None
+        if re.search(r"\bND\b", block, re.I):
+            return None
+        # Top/Bottom columns appear AFTER all permissible limit columns.
+        # Strategy: take the last two numbers in the block — they map to Top, Bottom.
+        # If only one trailing number exists, it is the Bottom value.
+        # Permissible limit ranges (e.g. "50-70") are split into ints by findall;
+        # actual readings are either decimals (4.26) or 0.
+        all_nums = re.findall(r"\b(\d+(?:\.\d+)?)\b", block)
+        candidates = [_num(n) for n in all_nums if _num(n) is not None]
+        if not candidates:
+            return None
+        # If the last value is a decimal it is almost certainly the reading
+        if len(candidates) >= 1 and '.' in str(all_nums[-1]):
+            return candidates[-1]
+        # Otherwise take the last value (handles integer readings like 0, 52, 164)
+        return candidates[-1]
+
+    report["dga"]["methane"]   = gas_bottom(r"methane\s*(?:CH4)?",         next_gas_pat)
+    report["dga"]["ethane"]    = gas_bottom(r"ethane\s*(?:C2H6)?",          next_gas_pat)
+    report["dga"]["ethylene"]  = gas_bottom(r"ethylene\s*(?:C2H4)?",        next_gas_pat)
+    report["dga"]["acetylene"] = gas_bottom(r"acetylene\s*(?:C2H2)?",       next_gas_pat)
+    report["dga"]["hydrogen"]  = gas_bottom(r"hydrogen\s*(?:H2)?",          next_gas_pat)
+    report["dga"]["co2"]       = gas_bottom(r"carbon.?di.?oxide\s*(?:CO2)?",next_gas_pat)
+    report["dga"]["co"]        = gas_bottom(r"carbon\s*monoxide\s*(?:CO)?", next_gas_pat)
+    report["dga"]["tgc"]       = gas_bottom(r"TGC",                         next_gas_pat)
+
+    if re.search(r"within\s*limits?", full, re.I):
+        report["dga"]["overall"]  = "Normal — Gases within limits"
+        report["dga"]["remarks"]  = "The gases are within limits."
+    elif re.search(r"alert|monitor", full, re.I):
+        report["dga"]["overall"]  = "Alert — Monitor closely"
+
+    # Determine if DGA section exists
+    has_dga = any(report["dga"].get(k) is not None
+                  for k in ("methane", "ethane", "hydrogen", "co2"))
+    if not has_dga:
+        report["dga"] = None
+
+    # Skip page if no meaningful data extracted
+    if not report.get("serial_number") and not report.get("sample_no"):
+        return None
+
+    return report
+
+
+def pdf_to_pil_images(pdf_path: Path) -> list:
+    """Convert each PDF page to a PIL Image."""
+    doc = fitz.open(str(pdf_path))
+    images = []
+    for page in doc:
+        mat = fitz.Matrix(2.0, 2.0)
+        pix = page.get_pixmap(matrix=mat)
+        img = Image.open(io.BytesIO(pix.tobytes("png")))
+        images.append(img)
+    doc.close()
+    return images
+
+
+def extract_with_easyocr(images: list) -> list[dict]:
+    """Run EasyOCR on a list of PIL images and parse each into a report dict."""
+    import easyocr
+    print("  Loading EasyOCR model (first run downloads ~200MB)...", flush=True)
+    reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+
+    reports = []
+    for i, img in enumerate(images):
+        print(f"  Page {i + 1}/{len(images)}...", end=" ", flush=True)
+        import numpy as np
+        result = reader.readtext(np.array(img), detail=0, paragraph=True)
+        text = "\n".join(result)
+        parsed = parse_ocr_text(text)
+        if parsed:
+            reports.append(parsed)
+            print(f"OK — serial={parsed.get('serial_number')} sample={parsed.get('sample_no')}")
+        else:
+            print("no report data found, skipped.")
+    return reports
+
+
+# ── Template-driven data builder ──────────────────────────────────────────────
+# Mirrors the UI's _collectData() — walks the template sections/fields and
+# populates values from the extracted report dict, so the seeded test_data
+# always matches what the form would produce.
+
+# Oil test param name → report json key
+_OIL_PARAM_MAP = {
+    "acidity":             ("oil_test", "acidity"),
+    "resistivity":         ("oil_test", "resistivity"),
+    "tan delta":           ("oil_test", "tan_delta"),
+    "dielectric":          ("oil_test", "tan_delta"),
+    "break down voltage":  ("oil_test", "bdv_bottom"),
+    "bdv bottom":          ("oil_test", "bdv_bottom"),
+    "bdv top":             ("oil_test", "bdv_top"),
+    "interfacial tension": ("oil_test", "interfacial_tension"),
+    "flash point":         ("oil_test", "flash_point"),
+    "water content":       ("oil_test", "water_content"),
+}
+
+# DGA gas name → report dga key
+_DGA_GAS_MAP = {
+    "methane":         "methane",
+    "ethane":          "ethane",
+    "ethylene":        "ethylene",
+    "acetylene":       "acetylene",
+    "hydrogen":        "hydrogen",
+    "carbon dioxide":  "co2",
+    "carbon monoxide": "co",
+    "carbon-di-oxide": "co2",
+    "tgc":             "tgc",
+}
+
+
+def _oil_test_data(r: dict, eq=None) -> dict:
+    """Build test_data matching the UI form's _collectData() output exactly.
+
+    Rules mirrored from the Flutter form:
+    - All numeric cell values stored as strings (text controller output)
+    - Empty/None values stored as empty string "" not None
+    - Every table row includes ALL column keys (including calculated ones as null)
+    - Top-level scalar fields match what the form's _formData produces
+    """
+    from test_templates import TEST_TEMPLATES
+    template = TEST_TEMPLATES.get("transformer_oil_test", {})
+    oil     = r.get("oil_test") or {}
+    dga     = r.get("dga") or {}
+    remarks = oil.get("remarks") or {}
+    test_data: dict = {}
+
+    # Prefer equipment's voltage_class over whatever was extracted from the PDF
+    eq_vc = ""
+    if eq is not None and getattr(eq, "voltage_class", None):
+        eq_vc = eq.voltage_class.split("/")[0].strip()
+
+    def _str(v) -> str:
+        """Mirror UI text controller — numeric values are always stored as strings."""
+        if v is None:
+            return ""
+        return str(v)
+
+    def _empty_row(columns: list) -> dict:
+        """Mirror UI _emptyRow() — every column key present, defaulting to ''."""
+        return {c.get("key", ""): "" for c in columns if c.get("key")}
+
+    for section in template.get("sections", []):
+        for field in section.get("fields", []):
+            key   = field.get("key", "")
+            ftype = field.get("type", "text")
+
+            if ftype == "table":
+                columns      = field.get("columns", [])
+                default_rows = field.get("default_rows", [])
+                rows = []
+                for dr in default_rows:
+                    # Start with all columns initialised (mirrors _emptyRow + default_rows merge)
+                    row = _empty_row(columns)
+                    # Apply readonly/default column values from default_rows
+                    for k, v in dr.items():
+                        if k in row:
+                            row[k] = v or ""
+
+                    if key == "oil_test_results":
+                        test_name = dr.get("test_name", "").lower()
+                        for pat, (section_key, val_key) in _OIL_PARAM_MAP.items():
+                            if pat in test_name:
+                                val = (r.get(section_key) or {}).get(val_key)
+                                # UI stores number inputs as strings
+                                row["measured_value"] = _str(val) if val is not None else ""
+                                row["remarks"] = remarks.get(val_key, "")
+                                break
+                        # condition is a calculated column — null until EvaluationService runs
+                        row["condition"] = None
+
+                    elif key == "dga_results":
+                        gas_name = dr.get("gas", "").lower()
+                        dga_key  = _DGA_GAS_MAP.get(gas_name)
+                        if dga_key:
+                            val_bottom = dga.get(dga_key)
+                            # UI stores number inputs as strings; top not in PDF → ""
+                            row["value_top"]    = ""
+                            row["value_bottom"] = _str(val_bottom) if val_bottom is not None else ""
+                        row["remarks"]   = ""
+                        row["condition"] = None  # calculated column
+
+                    rows.append(row)
+                test_data[key] = rows
+
+            elif ftype in ("calculated", "readonly"):
+                pass  # computed by UI rule engine / EvaluationService
+
+            else:
+                # Regular scalar fields
+                if key == "dga_standard":
+                    test_data[key] = r.get("standard", field.get("default", "IS 10593:2017"))
+                elif key == "dga_sample_location":
+                    test_data[key] = dga.get("sample_location", "Bottom")
+                elif key == "dga_overall":
+                    test_data[key] = dga.get("overall", "")
+                elif key == "dga_remarks":
+                    test_data[key] = dga.get("remarks", "")
+                elif key == "transformer_voltage":
+                    test_data[key] = eq_vc or r.get("voltage_class", "").split("/")[0].strip()
+                elif field.get("default") is not None:
+                    test_data[key] = field["default"]
+
+    # Recommendation wizard fields (mirrors RecommendationData.toFormData)
+    dga_remarks = dga.get("remarks", "") or "Seeded from historical KPTCL report."
+    test_data.update({
+        "recommendation_type": "Pass",
+        "next_action":         "None",
+        "overall_result":      "pass",
+        "overall_remarks":     dga_remarks,
+    })
+
+    return test_data
+
+
+def _parse_date(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%b-%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+# ── DB seed ───────────────────────────────────────────────────────────────────
+
+def _find_org(session, reports: list[dict]):
+    """Resolve org — KPTCL is the organisation that owns these substations."""
+    for keyword in ("KPTCL", "Karnataka Power Transmission", "Karnataka"):
+        org = session.query(Organization).filter(Organization.name.ilike(f"%{keyword}%")).first()
+        if org:
+            return org
+    return None
+
+
+def seed_reports(session, reports: list[dict], dry_run: bool = False):
+    org = _find_org(session, reports)
+    if not org:
+        # Last resort: list orgs so user can identify correct one
+        orgs = session.query(Organization).limit(10).all()
+        print("[ERROR] Organisation not found. Available orgs:")
+        for o in orgs:
+            print(f"        {o.id}  {o.name}")
+        sys.exit(1)
+    print(f"[OK] Org: {org.name}")
+
+    system_user = (
+        session.query(User).filter(User.email.ilike("%admin%")).first()
+        or session.query(User).first()
+    )
+    if not system_user:
+        print("[ERROR] No users found.")
+        sys.exit(1)
+    print(f"[OK] Originator: {system_user.email}")
+
+    oil_type = session.query(CategoryDetails).filter(CategoryDetails.name == "Transformer Oil Test").first()
+    if not oil_type:
+        print("[ERROR] 'Transformer Oil Test' CategoryDetails not found. Run seed.py first.")
+        sys.exit(1)
+
+    # Department cache — sub_station name → OrgDepartment
+    _dept_cache: dict[str, OrgDepartment | None] = {}
+
+    def _resolve_dept(sub_station: str) -> OrgDepartment | None:
+        """Match sub_station string to the substation-level OrgDepartment (leaf node)."""
+        key = (sub_station or "").strip().lower()
+        if key in _dept_cache:
+            return _dept_cache[key]
+        dept = None
+        if key:
+            # The seeded substation names are like "220kV BIAL Begur" — match on key words
+            # Try exact name first, then partial
+            dept = (
+                session.query(OrgDepartment)
+                .filter(OrgDepartment.organization_id == org.id)
+                .filter(OrgDepartment.name.ilike(f"%{key[:40]}%"))
+                .first()
+            )
+            if not dept:
+                # Try individual significant words (skip short/common ones)
+                for word in key.split():
+                    if len(word) > 3:
+                        dept = (
+                            session.query(OrgDepartment)
+                            .filter(OrgDepartment.organization_id == org.id)
+                            .filter(OrgDepartment.name.ilike(f"%{word}%"))
+                            .first()
+                        )
+                        if dept:
+                            break
+        _dept_cache[key] = dept
+        if dept:
+            print(f"  [DEPT] '{sub_station}' → {dept.name}")
+        else:
+            print(f"  [WARN] '{sub_station}' — no matching department, department_id will be null.")
+        return dept
+
+    created_requests = 0
+    created_results  = 0
+
+    for r in reports:
+        serial    = r.get("serial_number", "").strip()
+        sample_no = r.get("sample_no", "").strip()
+        tested_at = _parse_date(r.get("test_date")) or datetime.now(timezone.utc)
+
+        eq = session.query(Equipment).filter(Equipment.factory_serial_number == serial).first()
+        if not eq:
+            print(f"  [SKIP] Equipment {serial} not found in DB.")
+            continue
+
+        dept = _resolve_dept(r.get("sub_station", ""))
+
+        # One request per report — transformer_oil_test template includes DGA section
+        req_number = f"TR-HIST-{tested_at.strftime('%Y%m%d')}-{sample_no}-OIL"
+
+        existing = (
+            session.query(TestingRequest)
+            .filter(TestingRequest.request_number == req_number)
+            .first()
+        )
+        if existing:
+            print(f"  [SKIP] {req_number} already seeded.")
+            continue
+
+        print(f"  {'[DRY]' if dry_run else '[SEED]'} {req_number} — {serial} {tested_at.date()}")
+        if dry_run:
+            continue
+
+        from services.testing_request_service import TestingRequestService
+        from services.testing_service import TestingService
+        from services.recommendation_service import RecommendationService
+
+        tr_svc  = TestingRequestService(session)
+        tst_svc = TestingService(session)
+        rec_svc = RecommendationService(session)
+
+        tr = tr_svc.create_request(
+            data={
+                "title":               f"Transformer Oil Test — {eq.factory_serial_number or eq.ueic} (Sample {sample_no})",
+                "description":         f"Historical KPTCL R&D Centre report. Sample No: {sample_no}.",
+                "equipment_id":        eq.id,
+                "equipment_type_id":   eq.equipment_type_id,
+                "test_type_id":        oil_type.id,
+                "organization_id":     org.id,
+                "department_id":       dept.id if dept else None,
+                "assigned_tester_id":  system_user.id,
+                "requested_date":      tested_at,
+                "scheduled_start_date": tested_at,
+                "notes":               f"Seeded from historical KPTCL report. Sample No: {sample_no}.",
+            },
+            originator_id=system_user.id,
+        )
+        # Override auto-generated number and backdate; set in_progress for downstream services.
+        tr.request_number = req_number
+        tr.completed_at   = tested_at
+        tr.status         = TestingRequestStatus.in_progress
+        session.flush()
+
+        result_data = _oil_test_data(r, eq)
+        remarks = result_data.get("overall_remarks") or "Seeded from historical KPTCL report."
+        try:
+            tst_svc.create_structured_result(
+                request_id=tr.id,
+                template_key="transformer_oil_test",
+                test_data=result_data,
+                overall_result="pass",
+                remarks=remarks,
+                tester_id=system_user.id,
+            )
+        except InvalidRequestError:
+            # create_structured_result commits before calling refresh() — the
+            # TestResult is persisted. The analytics engine can leave the session
+            # in a state where refresh() fails; reset and continue.
+            session.expire_all()
+
+        rec = rec_svc.create_recommendation(
+            testing_request_id=tr.id,
+            recommendation_type="pass",
+            summary="Pass — no further action (seeded from historical KPTCL report).",
+            submitted_by=system_user.id,
+            next_action="none",
+        )
+        # Services committed; finalize: close the request and mark recommendation approved.
+        tr.status         = TestingRequestStatus.closed
+        rec.approval_status = "approved"
+        rec.approved_by   = system_user.id
+        rec.approved_at   = tested_at
+        session.commit()
+        created_requests += 1
+        created_results  += 1
+
+    if not dry_run:
+        print(f"\nDone. {created_requests} TestingRequests + {created_results} TestResults seeded.")
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+def collect_pdfs(inputs: list[str]) -> list[Path]:
+    """Expand a mix of file paths and folder paths into a flat list of PDFs."""
+    pdfs = []
+    for inp in inputs:
+        p = Path(inp)
+        if p.is_dir():
+            found = sorted(p.glob("**/*.pdf"))
+            print(f"  Folder {p}: {len(found)} PDF(s) found.")
+            pdfs.extend(found)
+        elif p.is_file() and p.suffix.lower() == ".pdf":
+            pdfs.append(p)
+        else:
+            print(f"  [WARN] Skipping {inp} — not a PDF or folder.")
+    return pdfs
+
+
+REPORT_TEMPLATE = {
+    "sub_station": "",
+    "sample_no": "",
+    "test_date": "YYYY-MM-DD",
+    "capacity_mva": "",
+    "voltage_class": "",
+    "make": "",
+    "serial_number": "",
+    "date_of_commission": "YYYY-MM-DD",
+    "standard": "IS 10593:2017",
+    "oil_test": {
+        "acidity": None,
+        "resistivity": None,
+        "tan_delta": None,
+        "bdv_top": None,
+        "bdv_bottom": None,
+        "interfacial_tension": None,
+        "flash_point": None,
+        "water_content": None,
+        "remarks": {
+            "acidity": "",
+            "resistivity": "",
+            "tan_delta": "",
+            "bdv_top": "",
+            "bdv_bottom": "",
+            "interfacial_tension": "",
+            "flash_point": "",
+            "water_content": ""
+        }
+    },
+    "dga": {
+        "methane": None,
+        "ethane": None,
+        "ethylene": None,
+        "acetylene": None,
+        "hydrogen": None,
+        "co2": None,
+        "co": None,
+        "tgc": None,
+        "sample_location": "Bottom",
+        "overall": "Normal — Gases within limits",
+        "remarks": ""
+    }
+}
+
+
+def _save_json(reports: list[dict], output: str | None, source_hint: str, output_dir: Path | None = None) -> Path:
+    """Save reports to a JSON file. Auto-names if output is None."""
+    if output:
+        out_path = Path(output)
+    else:
+        stem = Path(source_hint).stem if source_hint else "extracted"
+        ts = datetime.now().strftime("%d%m%Y_%H%M%S")
+        folder = output_dir if output_dir else Path("data")
+        out_path = folder / f"{stem}_{ts}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(reports, f, indent=2, default=str, ensure_ascii=False)
+    return out_path
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Seed oil test results from KPTCL reports.",
+        epilog=(
+            "Modes:\n"
+            "  --from-pdf   Extract via EasyOCR → always saves JSON → seeds DB (default)\n"
+            "  --from-json  Seed directly from a previously saved JSON file\n"
+            "  --template   Print a blank JSON template to stdout\n\n"
+            "Examples:\n"
+            "  # Extract from folder, save JSON, AND seed DB\n"
+            "  python seed_oil_tests_from_pdf.py --from-pdf C:\\path\\to\\pdfs\\\n\n"
+            "  # Extract only — save JSON for review, no DB writes\n"
+            "  python seed_oil_tests_from_pdf.py --from-pdf C:\\path\\to\\pdfs\\ --emit-only\n\n"
+            "  # Seed from previously saved / edited JSON\n"
+            "  python seed_oil_tests_from_pdf.py --from-json data/report.json\n"
+            "  python seed_oil_tests_from_pdf.py --from-json data/report.json --dry-run\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--from-json", metavar="FILE",   help="Path to JSON file with report data")
+    group.add_argument("--from-pdf",  metavar="INPUT",  nargs="+", help="PDF file(s) or folder(s)")
+    group.add_argument("--template",  action="store_true", help="Print blank JSON template and exit")
+    parser.add_argument("--output",    metavar="FILE",  help="Save extracted JSON to this path (--from-pdf only)")
+    parser.add_argument("--emit-only", action="store_true", help="Extract and save JSON only, skip DB seed (--from-pdf only)")
+    parser.add_argument("--dry-run",   action="store_true", help="Parse/load without writing to DB")
+    args = parser.parse_args()
+
+    # ── Template mode ─────────────────────────────────────────────────────────
+    if args.template:
+        print(json.dumps([REPORT_TEMPLATE], indent=2))
+        return
+
+    # ── JSON mode ─────────────────────────────────────────────────────────────
+    if args.from_json:
+        json_path = Path(args.from_json)
+        if not json_path.exists():
+            print(f"[ERROR] Path not found: {json_path}")
+            sys.exit(1)
+        if json_path.is_dir():
+            json_files = sorted(json_path.glob("*.json"))
+            if not json_files:
+                print(f"[ERROR] No .json files found in {json_path}")
+                sys.exit(1)
+            print(f"[OK] Found {len(json_files)} JSON file(s) in {json_path.name}/")
+            all_reports = []
+            for jf in json_files:
+                with open(jf, encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, list):
+                    data = [data]
+                print(f"     {jf.name}: {len(data)} report(s)")
+                all_reports.extend(data)
+        else:
+            with open(json_path, encoding="utf-8") as f:
+                all_reports = json.load(f)
+            if not isinstance(all_reports, list):
+                all_reports = [all_reports]
+            print(f"[OK] Loaded {len(all_reports)} report(s) from {json_path.name}")
+        print(f"     Total: {len(all_reports)} report(s)")
+
+    # ── PDF mode ──────────────────────────────────────────────────────────────
+    elif args.from_pdf:
+        pdfs = collect_pdfs(args.from_pdf)
+        if not pdfs:
+            print("[ERROR] No PDF files found.")
+            sys.exit(1)
+        print(f"[1/3] {len(pdfs)} PDF file(s) to process.")
+
+        print("\n[2/3] Extracting data with EasyOCR...")
+        all_reports = []
+        for pdf_path in pdfs:
+            print(f"\n── {pdf_path.name} ──")
+            images = pdf_to_pil_images(pdf_path)
+            print(f"  {len(images)} page(s) found.")
+            reports = extract_with_easyocr(images)
+            all_reports.extend(reports)
+        print(f"\n      Total: {len(all_reports)} report(s) extracted across {len(pdfs)} file(s).")
+
+        if not all_reports:
+            print("[DONE] Nothing extracted.")
+            return
+
+        # Always save JSON after extraction — into <pdf_source>/data/
+        source_hint = args.from_pdf[0] if len(args.from_pdf) == 1 else "extracted"
+        pdf_root = Path(args.from_pdf[0]) if Path(args.from_pdf[0]).is_dir() else Path(args.from_pdf[0]).parent
+        out_path = _save_json(all_reports, args.output, source_hint, output_dir=pdf_root / "data")
+        print(f"\n[SAVED] Extracted data written to: {out_path}")
+        print(f"        Review/edit the file, then run:")
+        print(f"        python seed_oil_tests_from_pdf.py --from-json \"{out_path}\"")
+
+        if args.emit_only:
+            print("\n[--emit-only] JSON saved. Skipping DB seed.")
+            print(f"             To seed later: python seed_oil_tests_from_pdf.py --from-json \"{out_path}\"")
+            return
+
+    if not all_reports:
+        print("[DONE] Nothing to seed.")
+        return
+
+    if args.dry_run:
+        print("\n[DRY RUN] Report data:\n")
+        print(json.dumps(all_reports, indent=2, default=str))
+        return
+
+    print("\nSeeding to database...")
+    with _SessionLocal() as session:
+        seed_reports(session, all_reports, dry_run=False)
+
+
+if __name__ == "__main__":
+    main()
