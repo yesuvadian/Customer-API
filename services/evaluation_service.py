@@ -124,7 +124,7 @@ class EvaluationService:
                     result = EvaluationService._eval_table_field(field, test_data)
                     if result is None:
                         result = EvaluationService._eval_threshold_table(field, test_data)
-                elif field_type in ("dropdown", "radio"):
+                elif field_type in ("dropdown", "radio", "readonly"):
                     result = EvaluationService._eval_dropdown_field(field, test_data)
                 elif field_type == "date":
                     result = EvaluationService._eval_date_field(field, test_data)
