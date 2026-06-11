@@ -489,6 +489,9 @@ def _oil_test_data(r: dict, eq=None) -> dict:
                 elif field.get("default") is not None:
                     test_data[key] = field["default"]
 
+    # Inject context_bindings — not form fields so not covered by the field loop above
+    test_data["transformer_voltage"] = eq_vc
+
     # Recommendation wizard fields (mirrors RecommendationData.toFormData)
     dga_remarks = dga.get("remarks", "") or "Seeded from historical KPTCL report."
     test_data.update({
