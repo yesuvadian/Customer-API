@@ -312,10 +312,16 @@ def main():
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--from-excel", metavar="PATH", nargs="+", help="Path to .xlsx file(s) or folder(s)")
-    group.add_argument("--from-json",  metavar="FILE", help="Path to previously saved JSON")
     parser.add_argument("--output",    metavar="FILE", help="Save extracted JSON to this path")
+   
     parser.add_argument("--emit-only", action="store_true", help="Extract JSON only, skip DB seed")
     parser.add_argument("--dry-run",   action="store_true", help="Parse without writing to DB")
+    group.add_argument(
+    "--from-json",
+    metavar="PATH",
+    nargs="+",
+    help="JSON file(s) or folder(s)"
+)
     args = parser.parse_args()
 
     if args.from_excel:
@@ -359,15 +365,47 @@ def main():
             return
 
     else:
-        json_path = Path(args.from_json)
-        if not json_path.exists():
-            print(f"[ERROR] File not found: {json_path}")
+        json_files: list[Path] = []
+
+        for inp in args.from_json:
+            p = Path(inp)
+
+            if not p.exists():
+                print(f"[WARN] Path not found: {p}")
+                continue
+
+            if p.is_dir():
+                found = sorted(p.rglob("*.json"))
+                print(f"[FOLDER] {p}: {len(found)} JSON file(s) found.")
+                json_files.extend(found)
+
+            elif p.is_file() and p.suffix.lower() == ".json":
+                json_files.append(p)
+
+            else:
+                print(f"[WARN] Skipping {p} — not a JSON file or folder.")
+
+        if not json_files:
+            print("[ERROR] No JSON files found.")
             sys.exit(1)
-        with open(json_path, encoding="utf-8") as f:
-            all_reports = json.load(f)
-        if not isinstance(all_reports, list):
-            all_reports = [all_reports]
-        print(f"[OK] Loaded {len(all_reports)} report(s) from {json_path.name}")
+
+        all_reports = []
+
+        for json_file in json_files:
+            print(f"[LOAD] {json_file}")
+
+            with open(json_file, encoding="utf-8") as f:
+                data = json.load(f)
+
+            if isinstance(data, list):
+                all_reports.extend(data)
+            else:
+                all_reports.append(data)
+
+        print(
+            f"[OK] Loaded {len(all_reports)} report(s) "
+            f"from {len(json_files)} JSON file(s)"
+        )
 
     if not all_reports:
         print("[DONE] Nothing to seed.")
