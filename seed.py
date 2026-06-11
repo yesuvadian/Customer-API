@@ -5039,20 +5039,7 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         OrgDepartment.organization_id == uuid.UUID(org_id)
     ).all()
     dept_map = {d.name.strip().lower(): d.id for d in depts}
-    print(f"[DEBUG] {len(dept_map)} departments in dept_map")
-    if dept_map:
-        sample_keys = list(dept_map.keys())[:5]
-        print(f"[DEBUG] Sample dept names: {sample_keys}")
-
-    # Sample first few substation values from Excel
-    if len(df) > 0:
-        sample_subs = [str(df.iloc[i].get("substation") or "").strip() for i in range(min(5, len(df)))]
-        print(f"[DEBUG] Sample substation col values: {sample_subs}")
-
-    # Show any dept_map keys containing known-missing substation fragments
-    for fragment in ("kanakapura", "manyatha", "dhp", "edc"):
-        matches = [k for k in dept_map if fragment in k]
-        print(f"[DEBUG] dept_map keys containing '{fragment}': {matches}")
+    print(f"[INFO] {len(dept_map)} departments available for equipment lookup")
 
     created = skipped = 0
 
@@ -11813,6 +11800,53 @@ def run_seed():
                 session.rollback()
                 print(f"[WARN] Pre-commission role mapping failed: {_e}")
 
+        # Ensure RT substations that are in equipment_seed.xlsx but not in
+        # KPTCL_Substation_Mapping.xlsx exist before equipment seeding runs.
+        # Each dept is committed individually so a later rollback cannot remove them.
+        if kptcl_org:
+            _RT_EXTRA_SUBSTATIONS = [
+                # (name, 4-char-code, parent_division_name)
+                ("220kV Kanakapura",         "KANA", "RT South Division"),
+                ("400kV DHP",               "DHPX", "RT East Division"),
+                ("220kV EDC",               "EDCX", "RT East Division"),
+                ("220kV Manyatha Tech Park", "MANY", "RT North Division"),
+            ]
+            for sub_name, sub_code, parent_div_name in _RT_EXTRA_SUBSTATIONS:
+                try:
+                    # Find or create the parent division
+                    parent_div = session.query(OrgDepartment).filter_by(
+                        organization_id=kptcl_org.id,
+                        name=parent_div_name,
+                    ).first()
+                    if not parent_div:
+                        print(f"  [WARN] Parent division '{parent_div_name}' not found — skipping {sub_name}")
+                        continue
+                    existing = session.query(OrgDepartment).filter(
+                        OrgDepartment.organization_id == kptcl_org.id,
+                        OrgDepartment.name == sub_name,
+                    ).first()
+                    if existing:
+                        if existing.code != sub_code:
+                            existing.code = sub_code
+                            session.commit()
+                            print(f"  [INFO] Updated code for '{sub_name}' → {sub_code}")
+                        continue
+                    now = datetime.now()
+                    dept = OrgDepartment(
+                        organization_id=kptcl_org.id,
+                        name=sub_name,
+                        code=sub_code,
+                        parent_department_id=parent_div.id,
+                        is_active=True,
+                        cts=now, mts=now,
+                    )
+                    session.add(dept)
+                    session.commit()
+                    print(f"  [INFO] Created RT substation '{sub_name}' ({sub_code})")
+                except Exception as _e:
+                    session.rollback()
+                    print(f"  [WARN] Could not ensure RT substation '{sub_name}': {_e}")
+
         # Equipment + Annual Audit role mappings — after seed_dept_filter_users
         # so RT_EAST/RT_NORTH/BLR_CIRCLE depts exist for equipment lookup,
         # and after seed_seacms_roles_users so KPTCL OrgRoles exist for stage mapping
@@ -13122,6 +13156,10 @@ def _dft_get_or_create_dept(session, org_id, name, code,
         parent_department_id=parent_id,
     ).first()
     if d:
+        # Fix code if the existing dept has the wrong code (e.g. old long codes like RT_NORTH)
+        if d.code != code and len(code) <= 4:
+            d.code = code
+            session.flush()
         return d
     now = datetime.now()
     d = OrgDepartment(
@@ -13402,35 +13440,35 @@ def seed_dept_filter_users(session, org=None):
     print("\n[2] Department hierarchy")
     zone = _dft_get_or_create_dept(
         session, oid,
-        name="Bangalore Zone", code="BLR_ZONE",
+        name="Bangalore Zone", code="BN",
     )
     print(f"  Zone   : {zone.name}")
 
     circle = _dft_get_or_create_dept(
         session, oid,
-        name="Bangalore Transmission Circle", code="BLR_CIRCLE",
+        name="Bangalore Transmission Circle", code="BLRC",
         parent_id=zone.id,
     )
     print(f"  Circle : {circle.name}")
 
     div_north  = _dft_get_or_create_dept(
         session, oid,
-        name="RT North Division", code="RT_NORTH",
+        name="RT North Division", code="RTNR",
         parent_id=circle.id,
     )
     div_south  = _dft_get_or_create_dept(
         session, oid,
-        name="RT South Division", code="RT_SOUTH",
+        name="RT South Division", code="RTSO",
         parent_id=circle.id,
     )
     div_east   = _dft_get_or_create_dept(
         session, oid,
-        name="RT East Division", code="RT_EAST",
+        name="RT East Division", code="RTEA",
         parent_id=circle.id,
     )
     div_mysuru = _dft_get_or_create_dept(
         session, oid,
-        name="Mysuru Division", code="MYSURU",
+        name="Mysuru Division", code="MYSR",
         parent_id=circle.id,
     )
     dept_map = {"north": div_north, "south": div_south, "east": div_east, "mysuru": div_mysuru}
