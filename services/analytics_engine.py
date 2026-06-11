@@ -489,68 +489,85 @@ class AnalyticsEngine:
                     if not isinstance(table_data, list) or not table_data:
                         continue
 
-                    for col in field.get("columns", []):
+                    # Find the label/identifier column (first text/dropdown col)
+                    cols = field.get("columns", [])
+                    id_col = next(
+                        (c.get("key") for c in cols
+                         if c.get("type") in ("text", "dropdown", "readonly")
+                         and c.get("key") not in ("unit", "remarks", "formula")),
+                        None,
+                    )
+
+                    for col in cols:
                         if col.get("type") != "number":
                             continue
                         col_key   = col.get("key", "")
                         col_label = col.get("label") or col_key
+                        col_unit  = col.get("unit")
 
-                        # Collect all numeric values in this column
-                        col_vals = []
-                        for row in table_data:
-                            raw = row.get(col_key)
-                            if raw is None or raw == "":
-                                continue
-                            try:
-                                col_vals.append(float(raw))
-                            except (ValueError, TypeError):
-                                continue
-
-                        if not col_vals:
-                            continue
-
-                        # Use the last (most recent) row value as current
-                        current_val = col_vals[-1]
-
-                        # Status from evaluation_result col_results
-                        field_ev = ev_fields_map.get(field_key) or {}
+                        field_ev    = ev_fields_map.get(field_key) or {}
                         col_results = field_ev.get("col_results", []) if field_ev else []
-                        # Find latest col_result entry for this column
-                        col_statuses = [
-                            r.get("status") for r in col_results
-                            if r.get("column") == col_key and r.get("status")
-                        ]
-                        status    = col_statuses[-1] if col_statuses else None
-                        condition = _CONDITION.get(status, "Poor") if status else None
-                        score     = _SCORE.get(condition, 50.0) if condition else None
 
-                        # Synthetic field dict for parameter analytics
-                        synth_field = {
-                            "key":   f"{field_key}.{col_key}",
-                            "label": f"{field.get('label', field_key)} — {col_label}",
-                        }
-                        # Use column-level unit if available
-                        col_unit = col.get("unit")
-                        if col_unit:
-                            synth_field["unit"] = col_unit
+                        # Track per-row separately when a row-identifier exists
+                        rows_to_track = []
+                        if id_col:
+                            for row_idx, row in enumerate(table_data):
+                                row_id  = str(row.get(id_col, row_idx)).strip()
+                                raw     = row.get(col_key)
+                                if raw is None or raw == "":
+                                    continue
+                                try:
+                                    rows_to_track.append((row_id, float(raw), row_idx))
+                                except (ValueError, TypeError):
+                                    continue
+                        else:
+                            # No identifier — aggregate last non-null value
+                            for row_idx, row in enumerate(table_data):
+                                raw = row.get(col_key)
+                                if raw is None or raw == "":
+                                    continue
+                                try:
+                                    rows_to_track.append((str(row_idx), float(raw), row_idx))
+                                except (ValueError, TypeError):
+                                    continue
 
-                        history  = history_map.get(synth_field["key"], [])
-                        analysis = ParameterAnalyzer.analyse(history, {})
+                        for row_id, current_val, row_idx in rows_to_track:
+                            # Build a stable parameter key scoped to this row
+                            param_key = f"{field_key}.{row_id}.{col_key}"
+                            row_label = f"{field.get('label', field_key)} — {row_id} — {col_label}"
 
-                        pa = self._upsert_parameter_analytics(
-                            test_result_id  = test_result_id,
-                            equipment_id    = equipment_id,
-                            organization_id = organization_id,
-                            template_key    = template_key,
-                            field           = synth_field,
-                            current_value   = current_val,
-                            condition       = condition,
-                            status          = status,
-                            score           = score,
-                            analysis        = analysis,
-                        )
-                        if pa:
-                            param_rows.append(pa)
+                            # Per-row status from col_results
+                            row_statuses = [
+                                r.get("status") for r in col_results
+                                if r.get("column") == col_key
+                                and r.get("row") == row_idx
+                                and r.get("status")
+                            ]
+                            status    = row_statuses[-1] if row_statuses else None
+                            condition = _CONDITION.get(status, "Poor") if status else None
+                            score     = _SCORE.get(condition, 50.0) if condition else None
+
+                            synth_field = {"key": param_key, "label": row_label}
+                            if col_unit:
+                                synth_field["unit"] = col_unit
+
+                            history  = history_map.get(param_key, [])
+                            analysis = ParameterAnalyzer.analyse(history, {})
+
+                            pa = self._upsert_parameter_analytics(
+                                test_result_id  = test_result_id,
+                                equipment_id    = equipment_id,
+                                organization_id = organization_id,
+                                template_key    = template_key,
+                                field           = synth_field,
+                                current_value   = current_val,
+                                condition       = condition,
+                                status          = status,
+                                score           = score,
+                                analysis        = analysis,
+                            )
+                            if pa:
+                                param_rows.append(pa)
 
         # Upsert TestAnalytics
         ta = self._upsert_test_analytics(
@@ -782,17 +799,31 @@ class AnalyticsEngine:
                 except (ValueError, TypeError):
                     pass
 
-                # Table column: raw is a list of row dicts
+                # Table column: raw is a list of row dicts — key per row identifier
                 if isinstance(raw, list):
+                    # Determine the identifier column (first non-unit/remarks text col)
+                    _ID_SKIP = {"unit", "remarks", "formula"}
+                    id_col_hist = None
                     for row_dict in raw:
                         if not isinstance(row_dict, dict):
                             continue
+                        for k2, v2 in row_dict.items():
+                            if k2 not in _ID_SKIP and isinstance(v2, str) and v2.strip():
+                                id_col_hist = k2
+                                break
+                        if id_col_hist:
+                            break
+
+                    for row_idx, row_dict in enumerate(raw):
+                        if not isinstance(row_dict, dict):
+                            continue
+                        row_id = str(row_dict.get(id_col_hist, row_idx)).strip() if id_col_hist else str(row_idx)
                         for col_key, col_val in row_dict.items():
                             if col_val is None or col_val == "":
                                 continue
                             try:
                                 fval = float(col_val)
-                                composite = f"{key}.{col_key}"
+                                composite = f"{key}.{row_id}.{col_key}"
                                 history_map.setdefault(composite, []).append((dt, fval))
                             except (ValueError, TypeError):
                                 continue
