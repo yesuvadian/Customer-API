@@ -13435,10 +13435,10 @@ def seed_dept_filter_users(session, org=None):
     # Seed RT substations missing from KPTCL_Substation_Mapping.xlsx
     # so equipment_seed.xlsx rows for these substations resolve to a dept
     _rt_substations = [
-        ("220kV EDC",             "RT_EDC",       div_east.id),
-        ("400kV DHP",             "RT_DHP",       div_east.id),
-        ("220kV Kanakapura",      "RT_KANAKAPURA", div_south.id),
-        ("220kV Manyatha Tech Park", "RT_MANYATHA", div_north.id),
+        ("220kV EDC",             "EDCX", div_east.id),
+        ("400kV DHP",             "DHPX", div_east.id),
+        ("220kV Kanakapura",      "KANA", div_south.id),
+        ("220kV Manyatha Tech Park", "MANY", div_north.id),
     ]
     for sub_name, sub_code, parent_id in _rt_substations:
         _dft_get_or_create_dept(session, oid, name=sub_name, code=sub_code, parent_id=parent_id)
