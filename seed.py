@@ -13446,7 +13446,7 @@ def seed_dept_filter_users(session, org=None):
     ]
     for sub_name, sub_code, parent_id in _rt_substations:
         _dft_get_or_create_dept(session, oid, name=sub_name, code=sub_code, parent_id=parent_id)
-    session.flush()
+    session.commit()
 
     # 3. Roles  (org-scoped, shared across all 3 divisions)
     print("\n[3] Roles")
