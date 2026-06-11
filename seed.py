@@ -13117,10 +13117,6 @@ def _dft_get_or_create_dept(session, org_id, name, code,
         parent_department_id=parent_id,
     ).first()
     if d:
-        # Update code if the existing dept has a different (wrong) code
-        if d.code != code:
-            d.code = code
-            session.flush()
         return d
     now = datetime.now()
     d = OrgDepartment(
