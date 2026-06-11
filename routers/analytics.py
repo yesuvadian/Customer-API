@@ -30,7 +30,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import asc
+from sqlalchemy import asc, func
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_vendor_db
@@ -113,6 +113,18 @@ def get_analytics_dashboard(
     eq_ids = [ea.equipment_id for ea in critical_ea]
     eq_map = {e.id: e for e in db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all()}
 
+    # Count completed testing requests per equipment
+    test_count_rows = (
+        db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
+        .filter(
+            TestingRequest.equipment_id.in_(eq_ids),
+            TestingRequest.status == "completed",
+        )
+        .group_by(TestingRequest.equipment_id)
+        .all()
+    )
+    test_count_map: dict = {row[0]: row[1] for row in test_count_rows}
+
     type_ids = list({e.equipment_type_id for e in eq_map.values() if e.equipment_type_id})
     type_map = {
         c.id: c.name
@@ -137,6 +149,7 @@ def get_analytics_dashboard(
             "condition_summary":ea.condition_summary,
             "parameters_at_risk":ea.parameters_at_risk,
             "last_test_date":   ea.last_test_date.isoformat() if ea.last_test_date else None,
+            "test_count":       test_count_map.get(ea.equipment_id, 0),
             "links": {
                 "analytics":  f"/analytics/equipment/{ea.equipment_id}",
                 "tests":      f"/analytics/equipment/{ea.equipment_id}/tests",
