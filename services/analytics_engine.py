@@ -436,54 +436,121 @@ class AnalyticsEngine:
             len(s.get("fields", [])) for s in template_data.get("sections", [])
         )
 
+        # Build evaluation_result lookup: key → {status, ...}
+        ev_fields_map = {
+            f.get("key"): f
+            for f in evaluation_result.get("fields", [])
+        }
+
         # Per-parameter analytics
         param_rows: list[ParameterAnalytics] = []
         for section in template_data.get("sections", []):
             for field in section.get("fields", []):
                 field_type = field.get("type", "text")
-                if field_type != "number":
-                    continue  # trend analysis only for numeric fields currently
-                ev = field.get("evaluation") or {}
-                if not ev.get("enabled"):
-                    continue
+                field_key  = field.get("key", "")
+                ev         = field.get("evaluation") or {}
 
-                key   = field.get("key")
-                raw   = test_data.get(key)
-                if raw is None or raw == "":
-                    continue
+                if field_type == "number":
+                    # ── Scalar numeric field ────────────────────────────────
+                    raw = test_data.get(field_key)
+                    if raw is None or raw == "":
+                        continue
+                    try:
+                        current_val = float(raw)
+                    except (ValueError, TypeError):
+                        continue
 
-                try:
-                    current_val = float(raw)
-                except (ValueError, TypeError):
-                    continue
+                    field_ev  = ev_fields_map.get(field_key)
+                    status    = field_ev.get("status") if field_ev else None
+                    condition = _CONDITION.get(status, "Poor") if status else None
+                    score     = _SCORE.get(condition, 50.0) if condition else None
 
-                # Find status from evaluation_result
-                field_ev = next(
-                    (f for f in evaluation_result.get("fields", []) if f.get("key") == key),
-                    None,
-                )
-                status    = field_ev.get("status") if field_ev else None
-                condition = _CONDITION.get(status, "Poor") if status else None
-                score     = _SCORE.get(condition, 50.0) if condition else None
+                    history  = history_map.get(field_key, [])
+                    analysis = ParameterAnalyzer.analyse(history, ev)
 
-                # Historical data for trend
-                history = history_map.get(key, [])
-                analysis = ParameterAnalyzer.analyse(history, ev)
+                    pa = self._upsert_parameter_analytics(
+                        test_result_id  = test_result_id,
+                        equipment_id    = equipment_id,
+                        organization_id = organization_id,
+                        template_key    = template_key,
+                        field           = field,
+                        current_value   = current_val,
+                        condition       = condition,
+                        status          = status,
+                        score           = score,
+                        analysis        = analysis,
+                    )
+                    if pa:
+                        param_rows.append(pa)
 
-                pa = self._upsert_parameter_analytics(
-                    test_result_id  = test_result_id,
-                    equipment_id    = equipment_id,
-                    organization_id = organization_id,
-                    template_key    = template_key,
-                    field           = field,
-                    current_value   = current_val,
-                    condition       = condition,
-                    status          = status,
-                    score           = score,
-                    analysis        = analysis,
-                )
-                if pa:
-                    param_rows.append(pa)
+                elif field_type == "table":
+                    # ── Numeric table columns ───────────────────────────────
+                    table_data = test_data.get(field_key)
+                    if not isinstance(table_data, list) or not table_data:
+                        continue
+
+                    for col in field.get("columns", []):
+                        if col.get("type") != "number":
+                            continue
+                        col_key   = col.get("key", "")
+                        col_label = col.get("label") or col_key
+
+                        # Collect all numeric values in this column
+                        col_vals = []
+                        for row in table_data:
+                            raw = row.get(col_key)
+                            if raw is None or raw == "":
+                                continue
+                            try:
+                                col_vals.append(float(raw))
+                            except (ValueError, TypeError):
+                                continue
+
+                        if not col_vals:
+                            continue
+
+                        # Use the last (most recent) row value as current
+                        current_val = col_vals[-1]
+
+                        # Status from evaluation_result col_results
+                        field_ev = ev_fields_map.get(field_key) or {}
+                        col_results = field_ev.get("col_results", []) if field_ev else []
+                        # Find latest col_result entry for this column
+                        col_statuses = [
+                            r.get("status") for r in col_results
+                            if r.get("column") == col_key and r.get("status")
+                        ]
+                        status    = col_statuses[-1] if col_statuses else None
+                        condition = _CONDITION.get(status, "Poor") if status else None
+                        score     = _SCORE.get(condition, 50.0) if condition else None
+
+                        # Synthetic field dict for parameter analytics
+                        synth_field = {
+                            "key":   f"{field_key}.{col_key}",
+                            "label": f"{field.get('label', field_key)} — {col_label}",
+                        }
+                        # Use column-level unit if available
+                        col_unit = col.get("unit")
+                        if col_unit:
+                            synth_field["unit"] = col_unit
+
+                        history  = history_map.get(synth_field["key"], [])
+                        analysis = ParameterAnalyzer.analyse(history, {})
+
+                        pa = self._upsert_parameter_analytics(
+                            test_result_id  = test_result_id,
+                            equipment_id    = equipment_id,
+                            organization_id = organization_id,
+                            template_key    = template_key,
+                            field           = synth_field,
+                            current_value   = current_val,
+                            condition       = condition,
+                            status          = status,
+                            score           = score,
+                            analysis        = analysis,
+                        )
+                        if pa:
+                            param_rows.append(pa)
 
         # Upsert TestAnalytics
         ta = self._upsert_test_analytics(
@@ -710,9 +777,25 @@ class AnalyticsEngine:
                     continue
                 try:
                     val = float(raw)
-                except (ValueError, TypeError):
+                    history_map.setdefault(key, []).append((dt, val))
                     continue
-                history_map.setdefault(key, []).append((dt, val))
+                except (ValueError, TypeError):
+                    pass
+
+                # Table column: raw is a list of row dicts
+                if isinstance(raw, list):
+                    for row_dict in raw:
+                        if not isinstance(row_dict, dict):
+                            continue
+                        for col_key, col_val in row_dict.items():
+                            if col_val is None or col_val == "":
+                                continue
+                            try:
+                                fval = float(col_val)
+                                composite = f"{key}.{col_key}"
+                                history_map.setdefault(composite, []).append((dt, fval))
+                            except (ValueError, TypeError):
+                                continue
 
         return history_map
 
@@ -772,12 +855,16 @@ class AnalyticsEngine:
         pa.condition          = condition
         pa.status             = status
         pa.score              = score
+        def _clamp(v, lo, hi):
+            return None if v is None else max(lo, min(hi, v))
+
         pa.trend              = analysis.get("trend")
         pa.trend_slope        = analysis.get("trend_slope")
         pa.trend_r_squared    = analysis.get("trend_r_squared")
         pa.history_count      = analysis.get("history_count", 0)
         pa.annual_change      = analysis.get("annual_change")
-        pa.pct_change_annual  = analysis.get("pct_change_annual")
+        # NUMERIC(8,2) → max ±999999.99
+        pa.pct_change_annual  = _clamp(analysis.get("pct_change_annual"), -999999.99, 999999.99)
         pa.breach_threshold   = analysis.get("breach_threshold")
         pa.breach_predicted_at= analysis.get("breach_predicted_at")
         pa.days_to_breach     = analysis.get("days_to_breach")
