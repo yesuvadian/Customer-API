@@ -95,6 +95,18 @@ def get_analytics_dashboard(
         sum(float(ea.health_score) for ea in all_ea if ea.health_score is not None) / total, 1
     ) if total else None
 
+    # Total completed/closed tests across all scoped equipment
+    all_eq_ids = [ea.equipment_id for ea in all_ea if ea.equipment_id]
+    _TERMINAL_STATUSES_KPI = ("completed", "closed")
+    total_tests = (
+        db.query(func.count(TestingRequest.id))
+        .filter(
+            TestingRequest.equipment_id.in_(all_eq_ids),
+            TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
+        )
+        .scalar() or 0
+    ) if all_eq_ids else 0
+
     # ── 3. Hierarchy node ───────────────────────────────────────────────────
     ha_node = None
     dept_obj = None
@@ -236,6 +248,7 @@ def get_analytics_dashboard(
         "kpi_summary": {
             "total_equipment": total,
             "avg_health_score": avg_score,
+            "total_tests":   total_tests,
             "critical":  risk_counts["Critical"],
             "high":      risk_counts["High"],
             "medium":    risk_counts["Medium"],
@@ -329,6 +342,96 @@ def recompute_all_analytics(
             logger.warning("recompute_all: failed for %s: %s", tr.id, exc)
     db.commit()
     return {"status": "ok", "recomputed": done, "failed": failed}
+
+
+@router.get("/dashboard/equipment", summary="Paginated equipment list for dashboard")
+def get_dashboard_equipment(
+    department_id: Optional[uuid.UUID] = Query(None),
+    page:          int                 = Query(1, ge=1),
+    page_size:     int                 = Query(20, ge=1, le=100),
+    db:            Session             = Depends(get_vendor_db),
+    user:          dict                = Depends(get_current_user),
+):
+    """
+    Returns all equipment in scope (worst health first), paginated.
+    Equipment with no analytics appear at the end with null scores.
+    """
+    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+
+    # All equipment in scope
+    eq_q = db.query(Equipment)
+    if dept_ids:
+        eq_q = eq_q.filter(Equipment.department_id.in_(dept_ids))
+    all_eq: list[Equipment] = eq_q.all()
+
+    eq_ids = [e.id for e in all_eq]
+
+    # Analytics map
+    ea_rows = db.query(EquipmentAnalytics).filter(
+        EquipmentAnalytics.equipment_id.in_(eq_ids)
+    ).all()
+    ea_map = {r.equipment_id: r for r in ea_rows}
+
+    # Type names
+    type_ids = list({e.equipment_type_id for e in all_eq if e.equipment_type_id})
+    type_map = {
+        c.id: c.name
+        for c in db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
+    }
+
+    # Department names
+    dept_ids_for_names = list({e.department_id for e in all_eq if e.department_id})
+    dept_name_map = {
+        d.id: d.name
+        for d in db.query(OrgDepartment).filter(OrgDepartment.id.in_(dept_ids_for_names)).all()
+    }
+
+    # Test counts
+    test_count_rows = (
+        db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
+        .filter(
+            TestingRequest.equipment_id.in_(eq_ids),
+            TestingRequest.status.in_(("completed", "closed")),
+        )
+        .group_by(TestingRequest.equipment_id)
+        .all()
+    )
+    test_count_map = {row[0]: row[1] for row in test_count_rows}
+
+    def _sort_key(eq: Equipment):
+        ea = ea_map.get(eq.id)
+        if ea and ea.health_score is not None:
+            return (0, float(ea.health_score))   # tested: sort ascending (worst first)
+        return (1, 0.0)                           # untested: at the end
+
+    sorted_eq = sorted(all_eq, key=_sort_key)
+    total = len(sorted_eq)
+    start = (page - 1) * page_size
+    page_eq = sorted_eq[start: start + page_size]
+
+    items = []
+    for eq in page_eq:
+        ea = ea_map.get(eq.id)
+        items.append({
+            "equipment_id":      str(eq.id),
+            "ueic":              eq.ueic,
+            "equipment_type":    type_map.get(eq.equipment_type_id),
+            "department":        dept_name_map.get(eq.department_id),
+            "department_id":     str(eq.department_id) if eq.department_id else None,
+            "health_score":      float(ea.health_score) if ea and ea.health_score is not None else None,
+            "risk_level":        ea.risk_level if ea else "Unknown",
+            "parameters_at_risk":ea.parameters_at_risk if ea else 0,
+            "test_count":        test_count_map.get(eq.id, 0),
+            "tested":            ea is not None,
+        })
+
+    return {
+        "total":     total,
+        "page":      page,
+        "page_size": page_size,
+        "has_more":  start + page_size < total,
+        "items":     items,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
