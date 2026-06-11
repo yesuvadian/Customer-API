@@ -295,6 +295,28 @@ def run_equipment_analytics(
     }
 
 
+@router.post("/recompute-all", summary="Recompute analytics for every test result (admin)")
+def recompute_all_analytics(
+    db:   Session = Depends(get_vendor_db),
+    user: dict    = Depends(get_current_user),
+):
+    """Re-runs score_test + equipment aggregation for every TestResult in the DB.
+    Use after changing the scoring formula to backfill historical scores."""
+    from models import TestResult
+    results = db.query(TestResult).all()
+    engine  = AnalyticsEngine(db)
+    done, failed = 0, 0
+    for tr in results:
+        try:
+            engine.run_for_test(tr.id)
+            done += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("recompute_all: failed for %s: %s", tr.id, exc)
+    db.commit()
+    return {"status": "ok", "recomputed": done, "failed": failed}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Hierarchy drill-down
 # ─────────────────────────────────────────────────────────────────────────────

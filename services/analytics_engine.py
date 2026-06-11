@@ -52,7 +52,7 @@ ALERT    = "ALERT"
 CRITICAL = "CRITICAL"
 
 _CONDITION = {NORMAL: "Good", ALERT: "Fair", CRITICAL: "Poor"}
-_SCORE     = {"Good": 100.0, "Fair": 50.0, "Poor": 0.0}
+_SCORE     = {"Good": 100.0, "Fair": 50.0, "Poor": -100.0}  # negative so critical fields actively drag the score down
 _RANK      = {NORMAL: 0, ALERT: 1, CRITICAL: 2}
 
 _RISK_BANDS = [
@@ -378,7 +378,8 @@ class HealthScorer:
         if total_weight == 0:
             return None, critical_findings
 
-        return round(weighted_sum / total_weight, 2), critical_findings
+        raw = weighted_sum / total_weight
+        return round(max(0.0, raw), 2), critical_findings
 
 
 # ── Main analytics engine ─────────────────────────────────────────────────────
@@ -463,7 +464,7 @@ class AnalyticsEngine:
                     field_ev  = ev_fields_map.get(field_key)
                     status    = field_ev.get("status") if field_ev else None
                     condition = _CONDITION.get(status, "Poor") if status else None
-                    score     = _SCORE.get(condition, 50.0) if condition else None
+                    score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
 
                     history  = history_map.get(field_key, [])
                     analysis = ParameterAnalyzer.analyse(history, ev)
@@ -545,7 +546,7 @@ class AnalyticsEngine:
                             ]
                             status    = row_statuses[-1] if row_statuses else None
                             condition = _CONDITION.get(status, "Poor") if status else None
-                            score     = _SCORE.get(condition, 50.0) if condition else None
+                            score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
 
                             synth_field = {"key": param_key, "label": row_label}
                             if col_unit:
