@@ -115,16 +115,23 @@ def parse_excel(path: Path) -> list[dict]:
         if not rows:
             continue
 
-        # Detect transformer block start columns by scanning row 0 for "Name Of Station"
-        header_row = rows[0] if rows else ()
+        # Detect transformer block start columns by scanning for "Name Of Station"
+        # — may be on row 0 or row 1 depending on the sheet layout.
+        header_row_idx = None
+        for ri in range(min(3, len(rows))):
+            if any(v and "name of station" in str(v).lower() for v in rows[ri]):
+                header_row_idx = ri
+                break
+
+        if header_row_idx is None:
+            print(f"  [SKIP] Sheet '{sheet_name}' -- no transformer blocks found.")
+            continue
+
+        header_row = rows[header_row_idx]
         block_starts = [
             i for i, v in enumerate(header_row)
             if v and "name of station" in str(v).lower()
         ]
-
-        if not block_starts:
-            print(f"  [SKIP] Sheet '{sheet_name}' — no transformer blocks found.")
-            continue
 
         print(f"\n-- Sheet: {sheet_name} - {len(block_starts)} transformer(s) --")
 
@@ -132,18 +139,20 @@ def parse_excel(path: Path) -> list[dict]:
             b_end = block_starts[b_idx + 1] if b_idx + 1 < len(block_starts) else len(header_row)
 
             def cell(row_idx, col_offset):
-                """Get cell value at (row_idx, b_start + col_offset), bounds-safe."""
-                if row_idx >= len(rows):
+                """Get cell value at (header_row_idx + row_idx, b_start + col_offset), bounds-safe."""
+                ri = header_row_idx + row_idx
+                if ri >= len(rows):
                     return None
-                row = rows[row_idx]
+                row = rows[ri]
                 idx = b_start + col_offset
                 return row[idx] if idx < len(row) else None
 
-            def find_in_block(row_idx, keyword):
-                """Find cell in block row containing keyword; return parsed value after colon."""
-                if row_idx >= len(rows):
+            def find_in_block(row_offset, keyword):
+                """Find cell in block row (relative to header) containing keyword."""
+                ri = header_row_idx + row_offset
+                if ri >= len(rows):
                     return ""
-                row = rows[row_idx]
+                row = rows[ri]
                 for i in range(b_start, min(b_end, len(row))):
                     v = row[i]
                     if v and keyword.lower() in str(v).lower():
@@ -169,7 +178,8 @@ def parse_excel(path: Path) -> list[dict]:
 
             # ── Locate "Date of Test" row and find date columns ───────────────
             date_of_test_row_idx = None
-            for ri, row in enumerate(rows):
+            for ri in range(header_row_idx, len(rows)):
+                row = rows[ri]
                 v = row[b_start] if b_start < len(row) else None
                 if v and "date of test" in str(v).lower():
                     date_of_test_row_idx = ri
