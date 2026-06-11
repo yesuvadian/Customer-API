@@ -5049,6 +5049,11 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         sample_subs = [str(df.iloc[i].get("substation") or "").strip() for i in range(min(5, len(df)))]
         print(f"[DEBUG] Sample substation col values: {sample_subs}")
 
+    # Show any dept_map keys containing known-missing substation fragments
+    for fragment in ("kanakapura", "manyatha", "dhp", "edc"):
+        matches = [k for k in dept_map if fragment in k]
+        print(f"[DEBUG] dept_map keys containing '{fragment}': {matches}")
+
     created = skipped = 0
 
     for _, row in df.iterrows():
