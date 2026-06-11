@@ -11944,16 +11944,8 @@ def seed_sample_equipment(session, org):
         )
 
     if not substations:
-        # No departments at all — create a default one so sample equipment can be seeded
-        print("[INFO] No departments found — creating default 'Main Substation' department")
-        default_dept = OrgDepartment(
-            name="Main Substation",
-            organization_id=org.id,
-            is_active=True,
-        )
-        session.add(default_dept)
-        session.flush()
-        substations = [default_dept]
+        print("[WARN] No departments found — skipping equipment seeding")
+        return
 
     # Get equipment types
     equip_types = (
@@ -11962,7 +11954,7 @@ def seed_sample_equipment(session, org):
         .all()
     )
     if not equip_types:
-        print("[WARN] No equipment types found (CategoryMaster description='Testing Equipment') — skipping equipment seeding")
+        print("[WARN] No equipment types found — skipping equipment seeding")
         return
 
     # Map equipment type names to their IDs
@@ -11998,7 +11990,6 @@ def seed_sample_equipment(session, org):
 
         for type_name, voltage, bay, mfr, model, serial, year in configs_for_station:
             if type_name not in type_map:
-                print(f"[SKIP] Equipment type '{type_name}' not in DB — skipping")
                 continue
 
             try:
