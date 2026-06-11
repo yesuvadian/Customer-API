@@ -2743,6 +2743,7 @@ TEST_TEMPLATES = {
                             "key": "condition",
                             "label": "Status",
                             "type": "calculated",
+                            "hidden": True,
                             "rule": {
                                 "type": "THRESHOLD",
                                 "config": {
@@ -2921,6 +2922,7 @@ TEST_TEMPLATES = {
                             "key": "condition",
                             "label": "Status",
                             "type": "calculated",
+                            "hidden": True,
                             "rule": {
                                 "type": "THRESHOLD",
                                 "config": {
