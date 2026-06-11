@@ -518,7 +518,8 @@ class AnalyticsEngine:
                                 if raw is None or raw == "":
                                     continue
                                 try:
-                                    rows_to_track.append((row_id, float(raw), row_idx))
+                                    row_unit = row.get("unit") or None
+                                    rows_to_track.append((row_id, float(raw), row_idx, row_unit))
                                 except (ValueError, TypeError):
                                     continue
                         else:
@@ -528,11 +529,12 @@ class AnalyticsEngine:
                                 if raw is None or raw == "":
                                     continue
                                 try:
-                                    rows_to_track.append((str(row_idx), float(raw), row_idx))
+                                    row_unit = row.get("unit") or None
+                                    rows_to_track.append((str(row_idx), float(raw), row_idx, row_unit))
                                 except (ValueError, TypeError):
                                     continue
 
-                        for row_id, current_val, row_idx in rows_to_track:
+                        for row_id, current_val, row_idx, row_unit in rows_to_track:
                             # Build a stable parameter key scoped to this row
                             param_key = f"{field_key}.{row_id}.{col_key}"
                             row_label = f"{field.get('label', field_key)} — {row_id} — {col_label}"
@@ -548,9 +550,11 @@ class AnalyticsEngine:
                             condition = _CONDITION.get(status, "Poor") if status else None
                             score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
 
+                            # Unit: prefer column-level, fall back to per-row unit
+                            effective_unit = col_unit or row_unit
                             synth_field = {"key": param_key, "label": row_label}
-                            if col_unit:
-                                synth_field["unit"] = col_unit
+                            if effective_unit:
+                                synth_field["unit"] = effective_unit
 
                             history  = history_map.get(param_key, [])
                             analysis = ParameterAnalyzer.analyse(history, {})
