@@ -2820,9 +2820,21 @@ TEST_TEMPLATES = {
                 {
                     "key": "dga_overall",
                     "label": "DGA Overall Assessment",
-                    "type": "dropdown",
-                    "options": ["Normal — Gases within limits", "Alert — Monitor closely", "Abnormal / Critical — Investigate"],
+                    "type": "readonly",
                     "required": False,
+                    "rule": {
+                        "type": "AGGREGATE_STATUS",
+                        "config": {
+                            "sources": ["dga_results.condition"],
+                            "priority": ["Abnormal / Critical", "Alert", "Normal"],
+                            "value_map": {
+                                "Alert":               "Alert — Monitor closely",
+                                "Normal":              "Normal — Gases within limits",
+                                "Abnormal / Critical": "Abnormal / Critical — Investigate",
+                            },
+                            "default": "Normal — Gases within limits",
+                        },
+                    },
                     "dropdown_evaluation": {
                         "enabled": True,
                         "value_severities": {
