@@ -4852,16 +4852,25 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     # Track created departments by full path
     department_map: Dict[str, str] = {}
 
-    def generate_code(name: str) -> str:
+    _ZONE_CODE_MAP = {
+        "bagalkot zone":   "BK",
+        "bangalore zone":  "BN",
+        "hassan zone":     "HS",
+        "kalaburagi zone": "KL",
+        "mysuru zone":     "MY",
+        "tumkur zone":     "TK",
+    }
+
+    def generate_code(name: str, target_len: int = 3) -> str:
         """Generate a department code from the name."""
         clean_name = name.replace(' Zone', '').replace(' Circle', '').replace(' Division', '')
         clean_name = clean_name.replace(' Section', '').replace('kV', '').strip()
         words = clean_name.split()
         if len(words) > 1:
-            code = ''.join([w[0].upper() for w in words[:3]])
+            code = ''.join([w[0].upper() for w in words])
         else:
-            code = clean_name[:3].upper()
-        return code
+            code = clean_name.upper()
+        return (code[:target_len]).ljust(target_len, 'X')
 
     # No synthetic root — zones from the Excel are the top-level nodes (parent=None)
 
@@ -4918,7 +4927,14 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
                 continue
 
             # Generate code
-            code = generate_code(dept_name)
+            if level_idx == 0:
+                code = _ZONE_CODE_MAP.get(dept_name.strip().lower()) or generate_code(dept_name, 2)
+            elif level_idx == len(levels) - 1:
+                import re as _re
+                base = _re.sub(r"^\d+\s*kV\s*", "", dept_name, flags=_re.IGNORECASE).strip()
+                code = generate_code(base, 4)
+            else:
+                code = generate_code(dept_name, 3)
 
             # Create department - commit immediately to handle unique constraint
             dept_id = str(uuid.uuid4())
@@ -5023,6 +5039,15 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         OrgDepartment.organization_id == uuid.UUID(org_id)
     ).all()
     dept_map = {d.name.strip().lower(): d.id for d in depts}
+    print(f"[DEBUG] {len(dept_map)} departments in dept_map")
+    if dept_map:
+        sample_keys = list(dept_map.keys())[:5]
+        print(f"[DEBUG] Sample dept names: {sample_keys}")
+
+    # Sample first few substation values from Excel
+    if len(df) > 0:
+        sample_subs = [str(df.iloc[i].get("substation") or "").strip() for i in range(min(5, len(df)))]
+        print(f"[DEBUG] Sample substation col values: {sample_subs}")
 
     created = skipped = 0
 
@@ -13092,6 +13117,10 @@ def _dft_get_or_create_dept(session, org_id, name, code,
         parent_department_id=parent_id,
     ).first()
     if d:
+        # Update code if the existing dept has a different (wrong) code
+        if d.code != code:
+            d.code = code
+            session.flush()
         return d
     now = datetime.now()
     d = OrgDepartment(
