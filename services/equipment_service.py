@@ -17,29 +17,36 @@ class EquipmentService:
 
     # ── Equipment Type Code Mapping (from SRS Appendix A) ──
     EQUIPMENT_TYPE_CODES = {
-        "Power Transformer": "PT",
-        "Circuit Breaker": "CB",
-        "Current Transformer": "CT",
-        "Potential Transformer": "VT",
-        "Voltage Transformer": "VT",
-        "CVT": "CV",
-        "Capacitor Voltage Transformer": "CV",
-        "Surge Arrestor": "SA",
-        "Isolator": "IS",
-        "Disconnector": "IS",
-        "Control & Relay Panel": "CR",
-        "Battery Set": "BS",
-        "Battery Charger": "BC",
-        "Wave Trap": "WT",
+        "Power Transformer":             "PT",
+        "Circuit Breaker":               "CB",
+        "Current Transformer":           "CT",
+        "Potential Transformer":         "VT",
+        "Voltage Transformer":           "VT",
+        "Capacitor Voltage Transformer": "VT",
+        "CVT":                           "VT",
+        "Surge Arrestor":                "SA",
+        "Isolator":                      "IS",
+        "Isolator / Disconnector":       "IS",
+        "Disconnector":                  "IS",
+        "Control & Relay Panel":         "CR",
+        "Battery Set":                   "BS",
+        "Battery Charger":               "BC",
+        "Wave Trap":                     "WT",
         "Station Auxiliary Transformer": "AT",
-        "LTAC Panel": "LA",
-        "Fire Fighting System": "FF",
-        "PLCC Panel": "PL",
-        "Digital Communication Panel": "DC",
-        "Diesel Generator Set": "DG",
-        "Electronic Tri-vector Meter": "EM",
-        "ETV Meter": "EM",
-        "Protection Relay": "RL",
+        "LTAC Panel":                    "LP",
+        "Fire Fighting System":          "FF",
+        "PLCC Panel":                    "PL",
+        "Digital Communication Panel":   "DC",
+        "Diesel Generator Set":          "DG",
+        "Electronic Tri-vector Meter":   "EM",
+        "ETV Meter":                     "EM",
+        "Protection Relay":              "RL",
+        "Distribution Transformer":      "DT",
+        "Bus Bar":                       "BB",
+        "Cable":                         "CA",
+        "Capacitor Bank":                "CP",
+        "Reactor":                       "RC",
+        "Lightning Arrester":            "LA",
     }
 
     @classmethod
@@ -161,13 +168,28 @@ class EquipmentService:
     ) -> str:
         """
         Generate UEIC: {zone_code}-{substation_code}-{voltage}-{bay}-{type_code}-{serial}
-        Example: BZ-PNYA-220-01-CB-01
+        Example: BN-HEBL-220-04-PT-01
+
+        Requires:
+          - Zone department (depth=0) must have a 2-char code
+          - Substation department (depth=3) must have a 4-char code
         """
         zone_dept = cls._get_department_ancestor(db, department_id, target_level=0)
-        zone_code = (zone_dept.code or zone_dept.name[:2]).upper()[:2] if zone_dept else "XX"
+        if not zone_dept or not zone_dept.code or len(zone_dept.code) != 2:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Zone department has invalid code '{getattr(zone_dept, 'code', None)}' — must be exactly 2 characters. Update OrgDepartment.code before registering equipment.",
+            )
 
         substation = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
-        substation_code = (substation.code or substation.name[:4]).upper()[:4] if substation else "XXXX"
+        if not substation or not substation.code or len(substation.code) != 4:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Substation department '{getattr(substation, 'name', department_id)}' has invalid code '{getattr(substation, 'code', None)}' — must be exactly 4 characters. Update OrgDepartment.code before registering equipment.",
+            )
+
+        zone_code      = zone_dept.code.upper()
+        substation_code = substation.code.upper()
 
         type_code = cls.EQUIPMENT_TYPE_CODES.get(equipment_type_name, "XX")
 
