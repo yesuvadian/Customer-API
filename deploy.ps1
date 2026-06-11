@@ -11,12 +11,22 @@ if ($Environment -eq "main") {
     $ServerDR = "erp@192.168.0.100"
     $BASE_URL = "https://api.procurement.cogniwatt.com"
     $ServiceName = "api-procurement"
+    $DbHost = "192.168.0.162"        # Patroni primary
+    $DbUser = "relu_user"
+    $DbPassword = "StrongPassword123!"
+    $DbPort = "6432"
+    $DbName = "Relu_Vendor2"
 }
 else {
     $Server = "erp@192.168.0.109"
     $ServerDR = $null
     $BASE_URL = "https://devsupplier.cogniwatt.com"
     $ServiceName = "customer-api"
+    $DbHost = "localhost"            # Local VM DB
+    $DbUser = "relu_user"
+    $DbPassword = "StrongPassword123!"
+    $DbPort = "5432"
+    $DbName = "Relu_Vendor2"
 }
 
 $RemoteBasePath = "/apps/customer"
@@ -25,11 +35,12 @@ $ArchiveName    = "api_deploy.tar.gz"
 
 Write-Host "====================================="
 Write-Host "Starting Procurement API Deployment"
-Write-Host "Environment: $Environment"
+Write-Host "Environment  : $Environment"
 Write-Host "Primary Server: $Server"
 if ($ServerDR) {
-    Write-Host "DR Server: $ServerDR"
+    Write-Host "DR Server    : $ServerDR"
 }
+Write-Host "DB Host      : $DbHost"
 Write-Host "====================================="
 
 # Optional production confirmation
@@ -65,17 +76,17 @@ tar --exclude="venv" `
 # Remote command template
 # ---------------------------------
 function Get-RemoteCommand {
-    param($RemotePath, $ApiPath, $BaseUrl)
-    
+    param($RemotePath, $ApiPath, $BaseUrl, $DbHost, $DbUser, $DbPassword, $DbPort, $DbName, $ServiceName)
+
     return @"
 cd $RemotePath &&
 tar -xzf $ArchiveName -C api &&
 rm -f $ArchiveName &&
-sed -i 's|^DB_HOST=.*|DB_HOST=localhost|' $ApiPath/.env &&
-sed -i 's|^DB_USER=.*|DB_USER=relu_user|' $ApiPath/.env &&
-sed -i 's|^DB_PASSWORD=.*|DB_PASSWORD=StrongPassword123!|' $ApiPath/.env &&
-sed -i 's|^DB_PORT=.*|DB_PORT=5432|' $ApiPath/.env &&
-sed -i 's|^DB_NAME=.*|DB_NAME=Relu_Vendor2|' $ApiPath/.env &&
+sed -i 's|^DB_HOST=.*|DB_HOST=$DbHost|' $ApiPath/.env &&
+sed -i 's|^DB_USER=.*|DB_USER=$DbUser|' $ApiPath/.env &&
+sed -i 's|^DB_PASSWORD=.*|DB_PASSWORD=$DbPassword|' $ApiPath/.env &&
+sed -i 's|^DB_PORT=.*|DB_PORT=$DbPort|' $ApiPath/.env &&
+sed -i 's|^DB_NAME=.*|DB_NAME=$DbName|' $ApiPath/.env &&
 sed -i 's|^APP_NAME=.*|APP_NAME=Relu-Vendor-API|' $ApiPath/.env &&
 sed -i 's|^BASE_URL=.*|BASE_URL=$BaseUrl|' $ApiPath/.env &&
 sudo /usr/bin/systemctl restart $ServiceName
@@ -94,7 +105,16 @@ Write-Host "Uploading archive to PRIMARY..."
 scp $ArchiveName ${Server}:${RemoteBasePath}/
 
 Write-Host "Deploying on PRIMARY..."
-$primaryCommand = Get-RemoteCommand -RemotePath $RemoteBasePath -ApiPath $RemoteApiPath -BaseUrl $BASE_URL
+$primaryCommand = Get-RemoteCommand `
+    -RemotePath $RemoteBasePath `
+    -ApiPath $RemoteApiPath `
+    -BaseUrl $BASE_URL `
+    -DbHost $DbHost `
+    -DbUser $DbUser `
+    -DbPassword $DbPassword `
+    -DbPort $DbPort `
+    -DbName $DbName `
+    -ServiceName $ServiceName
 $primaryCommand = $primaryCommand -replace "`r",""
 ssh -tt $Server $primaryCommand
 
@@ -119,7 +139,16 @@ if ($ServerDR) {
     scp $ArchiveName ${ServerDR}:${RemoteBasePath}/
 
     Write-Host "Deploying on DR..."
-    $drCommand = Get-RemoteCommand -RemotePath $RemoteBasePath -ApiPath $RemoteApiPath -BaseUrl $BASE_URL
+    $drCommand = Get-RemoteCommand `
+        -RemotePath $RemoteBasePath `
+        -ApiPath $RemoteApiPath `
+        -BaseUrl $BASE_URL `
+        -DbHost $DbHost `
+        -DbUser $DbUser `
+        -DbPassword $DbPassword `
+        -DbPort $DbPort `
+        -DbName $DbName `
+        -ServiceName $ServiceName
     $drCommand = $drCommand -replace "`r",""
     ssh -tt $ServerDR $drCommand
 
