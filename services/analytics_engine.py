@@ -584,17 +584,22 @@ class AnalyticsEngine:
 
         return ea
 
-    def _collect_descendant_dept_ids(self, department_id: uuid.UUID) -> list:
-        """Return department_id plus all descendant IDs (breadth-first)."""
-        all_depts = self.db.query(OrgDepartment).all()
-        children_map: dict = {}
-        for d in all_depts:
-            if d.parent_department_id:
-                pid = str(d.parent_department_id)
-                children_map.setdefault(pid, []).append(d.id)
+    def _build_children_map(self) -> dict:
+        """Load all OrgDepartment rows once and return {parent_id_str: [child_id, ...]}."""
+        if not hasattr(self, '_children_map_cache'):
+            all_depts = self.db.query(OrgDepartment).all()
+            cm: dict = {}
+            for d in all_depts:
+                if d.parent_department_id:
+                    cm.setdefault(str(d.parent_department_id), []).append(d.id)
+            self._children_map_cache = cm
+        return self._children_map_cache
 
+    def _collect_descendant_dept_ids(self, department_id: uuid.UUID) -> list:
+        """Return department_id plus all descendant IDs (breadth-first), using cached map."""
+        children_map = self._build_children_map()
         result = [department_id]
-        queue = [department_id]
+        queue  = [department_id]
         while queue:
             current = queue.pop(0)
             for child_id in children_map.get(str(current), []):
@@ -613,7 +618,7 @@ class AnalyticsEngine:
 
         level_type = self._resolve_level_type(dept)
 
-        # Gather equipment from this department AND all descendants
+        # Gather equipment from this department AND all descendants (single query)
         all_dept_ids = self._collect_descendant_dept_ids(department_id)
         eq_rows = (
             self.db.query(EquipmentAnalytics)
@@ -640,7 +645,7 @@ class AnalyticsEngine:
 
         self.db.flush()
 
-        # Walk up the hierarchy
+        # Walk up the hierarchy (children_map already cached, no extra DB hit)
         if dept.parent_department_id:
             self.run_for_department(dept.parent_department_id)
 
