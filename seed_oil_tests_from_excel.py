@@ -301,7 +301,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--from-excel", metavar="FILE", help="Path to .xlsx file")
+    group.add_argument("--from-excel", metavar="PATH", nargs="+", help="Path to .xlsx file(s) or folder(s)")
     group.add_argument("--from-json",  metavar="FILE", help="Path to previously saved JSON")
     parser.add_argument("--output",    metavar="FILE", help="Save extracted JSON to this path")
     parser.add_argument("--emit-only", action="store_true", help="Extract JSON only, skip DB seed")
@@ -309,18 +309,37 @@ def main():
     args = parser.parse_args()
 
     if args.from_excel:
-        xl_path = Path(args.from_excel)
-        if not xl_path.exists():
-            print(f"[ERROR] File not found: {xl_path}")
+        # Expand files and folders into a flat list of .xlsx paths
+        xl_files: list[Path] = []
+        for inp in args.from_excel:
+            p = Path(inp)
+            if p.is_dir():
+                found = sorted(p.rglob("*.xlsx")) + sorted(p.rglob("*.xls"))
+                print(f"[FOLDER] {p}: {len(found)} Excel file(s) found.")
+                xl_files.extend(found)
+            elif p.is_file() and p.suffix.lower() in (".xlsx", ".xls"):
+                xl_files.append(p)
+            else:
+                print(f"[WARN] Skipping {inp} — not an Excel file or folder.")
+
+        if not xl_files:
+            print("[ERROR] No Excel files found.")
             sys.exit(1)
-        print(f"[1/3] Parsing Excel: {xl_path.name}")
-        all_reports = parse_excel(xl_path)
+
+        all_reports: list[dict] = []
+        for xl_path in xl_files:
+            print(f"\n[1/3] Parsing Excel: {xl_path.name}")
+            reports = parse_excel(xl_path)
+            all_reports.extend(reports)
+
+        print(f"\n[TOTAL] {len(all_reports)} record(s) across {len(xl_files)} file(s).")
 
         if not all_reports:
             print("[DONE] Nothing extracted.")
             return
 
-        out_path = _save_json(all_reports, args.output, str(xl_path))
+        source_hint = args.from_excel[0]
+        out_path = _save_json(all_reports, args.output, source_hint)
         print(f"\n[SAVED] {out_path}")
         print(f"        Review/edit, then run:")
         print(f"        python seed_oil_tests_from_excel.py --from-json \"{out_path}\"")
