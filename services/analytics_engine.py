@@ -942,9 +942,13 @@ class AnalyticsEngine:
         ta.critical_findings = critical_findings
         ta.parameter_count   = parameter_count
         ta.evaluated_count   = evaluated_count
-        # Resolve actual test date from the testing request
+        # Resolve actual test date: prefer test_result.tested_at, fall back to requested_date
+        tr = self.db.get(TestResult, test_result_id) if test_result_id else None
         req = self.db.get(TestingRequest, testing_request_id) if testing_request_id else None
-        ta.tested_at         = (req.requested_date if req and req.requested_date else None)
+        ta.tested_at = (
+            (tr.tested_at if tr and tr.tested_at else None)
+            or (req.requested_date if req and req.requested_date else None)
+        )
         ta.calculated_at     = datetime.now(timezone.utc)
         return ta
 

@@ -32,12 +32,14 @@ import json
 import re
 import sys
 import uuid
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
 import fitz  # PyMuPDF
 from PIL import Image
 from database import VendorSessionLocal as _SessionLocal
+from sqlalchemy import text
 from sqlalchemy.exc import InvalidRequestError
 from models import (
     CategoryDetails,
@@ -119,7 +121,7 @@ def _parse_date_str(s: str | None) -> str | None:
         return None
     s = s.strip()
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d-%b-%y", "%d-%b-%Y",
-                "%d/%m/%y", "%Y-%m-%d"):
+                "%d/%m/%y", "%d\\%m\\%y", "%d\\%m\\%Y", "%Y-%m-%d"):
         try:
             return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
         except ValueError:
@@ -145,15 +147,32 @@ def parse_ocr_text(text: str) -> dict | None:
     report["sample_no"]  = _find(r"sample\s*no[:\.]?\s*(\d+)", full) or ""
     report["sub_station"] = _find(r"sub[- ]?station\s*[:\.]?\s*(.+?)(?:\n|$)", full) or ""
 
-    # "Date of Test : 7/12/2023" — take first valid date after the label
-    date_str = _find(r"date\s*of\s*test\s*[:\.]?\s*([\d]{1,2}[/\-][\d]{1,2}[/\-][\d]{2,4})", full)
+    # Try multiple label variants for test date
+    _date_pat = r"([\d]{1,2}[/\-\\][\d]{1,2}[/\-\\][\d]{2,4})"
+    date_str = (
+        _find(r"date\s*of\s*test(?:ing)?\s*[:\.]?\s*" + _date_pat, full)
+        or _find(r"date\s*of\s*analys[ie]s\s*[:\.]?\s*" + _date_pat, full)
+        or _find(r"(?:^|\n)\s*date\s*[:\.]?\s*" + _date_pat, full)
+        or _find(r"\bdt[:\.]?\s*" + _date_pat, full)
+        or _find(r"tested\s*on\s*[:\.]?\s*" + _date_pat, full)
+        # fallback: grab first date-like token in the header (first 20 lines)
+        or _find(_date_pat, "\n".join(lines[:20]))
+    )
     report["test_date"] = _parse_date_str(date_str) or ""
+    if not report["test_date"]:
+        print("  [DEBUG] date not found. First 25 OCR lines:")
+        for i, l in enumerate(lines[:25]):
+            print(f"    {i:02d}: {l}")
 
-    # Serial numbers: try label match first, then direct pattern (HT-1690/12569, KT-100000/51)
-    serial = _find(r"serial\s*(?:number|no\.?)\s*[:\.]?\s*([A-Za-z][A-Za-z0-9\-/]+)", full)
+    # Serial numbers: try label match first, then known KPTCL serial patterns
+    serial = _find(r"serial\s*(?:number|no\.?)\s*[:\.]?\s*([A-Za-z]{2,3}[-\s]?\d{3,}[/\-]\d+)", full)
     if not serial:
-        # Direct pattern: 2 uppercase letters, dash, digits, slash, digits
-        serial = _find(r"\b([A-Z]{2,3}[-\s]?\d{3,}[/\-]\d+)\b", full)
+        # HT-1690/12569, KT-100000/51 — HT/KT prefix, optional dash, digits/slash/digits
+        serial = _find(r"\b((?:HT|KT)-?\d{3,}[/\-]\d+)\b", full)
+    # Normalise: insert dash if missing (HT1690/12569 → HT-1690/12569)
+    if serial:
+        import re as _re
+        serial = _re.sub(r'^(HT|KT)(\d)', r'\1-\2', serial)
     report["serial_number"] = serial or ""
     report["make"]          = _find(r"\b(emco|bhel|abb|siemens|crompton)\b", full) or ""
     report["capacity_mva"]  = _find(r"(\d+)\s*mva", full) or ""
@@ -274,25 +293,75 @@ def pdf_to_pil_images(pdf_path: Path) -> list:
     return images
 
 
-def extract_with_easyocr(images: list) -> list[dict]:
-    """Run EasyOCR on a list of PIL images and parse each into a report dict."""
+def _ocr_page_worker(args):
+    """Worker function: OCR a single page (runs in a subprocess)."""
+    import sys, io as _io, warnings
+    warnings.filterwarnings("ignore")
+    page_idx, img_bytes = args
     import easyocr
-    print("  Loading EasyOCR model (first run downloads ~200MB)...", flush=True)
-    reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+    import numpy as np
+    from PIL import Image
 
-    reports = []
-    for i, img in enumerate(images):
-        print(f"  Page {i + 1}/{len(images)}...", end=" ", flush=True)
-        import numpy as np
+    # Capture prints from parse_ocr_text so they surface in the main process
+    buf = _io.StringIO()
+    sys.stdout = buf
+    try:
+        reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        img = Image.open(io.BytesIO(img_bytes))
         result = reader.readtext(np.array(img), detail=0, paragraph=True)
         text = "\n".join(result)
         parsed = parse_ocr_text(text)
-        if parsed:
-            reports.append(parsed)
-            print(f"OK — serial={parsed.get('serial_number')} sample={parsed.get('sample_no')}")
-        else:
-            print("no report data found, skipped.")
-    return reports
+    finally:
+        sys.stdout = sys.__stdout__
+    logs = buf.getvalue().strip()
+    return page_idx, parsed, logs
+
+
+def extract_with_easyocr(images: list, workers: int = 1) -> list[dict]:
+    """Run EasyOCR on a list of PIL images and parse each into a report dict."""
+    import numpy as np
+
+    # Serialize images to bytes so they can be sent to subprocesses
+    page_args = []
+    for i, img in enumerate(images):
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        page_args.append((i, buf.getvalue()))
+
+    results = {}  # page_idx → parsed dict or None
+
+    if workers <= 1:
+        import warnings, easyocr
+        warnings.filterwarnings("ignore")
+        print("  Loading EasyOCR model (first run downloads ~200MB)...", flush=True)
+        reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        for i, img in enumerate(images):
+            print(f"  Page {i + 1}/{len(images)}...", end=" ", flush=True)
+            result = reader.readtext(np.array(img), detail=0, paragraph=True)
+            text = "\n".join(result)
+            parsed = parse_ocr_text(text)
+            results[i] = parsed
+            if parsed:
+                print(f"OK — serial={parsed.get('serial_number')} sample={parsed.get('sample_no')}")
+            else:
+                print("no report data found, skipped.")
+    else:
+        print(f"  Using {workers} parallel worker(s)...", flush=True)
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_ocr_page_worker, arg): arg[0] for arg in page_args}
+            completed = 0
+            for future in as_completed(futures):
+                page_idx, parsed, logs = future.result()
+                results[page_idx] = parsed
+                completed += 1
+                status = f"OK — serial={parsed.get('serial_number')} sample={parsed.get('sample_no')}" if parsed else "skipped"
+                print(f"  Page {page_idx + 1}/{len(images)} [{completed} done] {status}", flush=True)
+                if logs:
+                    for line in logs.splitlines():
+                        print(f"    {line}", flush=True)
+
+    # Return in original page order, filtered to valid reports
+    return [results[i] for i in sorted(results) if results[i]]
 
 
 # ── Template-driven data builder ──────────────────────────────────────────────
@@ -522,7 +591,10 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
     for r in reports:
         serial    = r.get("serial_number", "").strip()
         sample_no = r.get("sample_no", "").strip()
-        tested_at = _parse_date(r.get("test_date")) or datetime.now(timezone.utc)
+        raw_date  = r.get("test_date") or ""
+        tested_at = _parse_date(raw_date) or datetime.now(timezone.utc)
+        if not _parse_date(raw_date):
+            print(f"  [WARN] Could not parse test_date '{raw_date}' for sample {sample_no} — using today")
 
         eq = session.query(Equipment).filter(Equipment.factory_serial_number == serial).first()
         if not eq:
@@ -593,6 +665,13 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
             # TestResult is persisted. The analytics engine can leave the session
             # in a state where refresh() fails; reset and continue.
             session.expire_all()
+
+        # Backdate tested_at on the test result to the historical test date
+        session.execute(
+            text("UPDATE public.test_results SET tested_at = :d WHERE testing_request_id = :rid"),
+            {"d": tested_at, "rid": tr.id},
+        )
+        session.flush()
 
         rec = rec_svc.create_recommendation(
             testing_request_id=tr.id,
@@ -719,6 +798,8 @@ def main():
     parser.add_argument("--output",    metavar="FILE",  help="Save extracted JSON to this path (--from-pdf only)")
     parser.add_argument("--emit-only", action="store_true", help="Extract and save JSON only, skip DB seed (--from-pdf only)")
     parser.add_argument("--dry-run",   action="store_true", help="Parse/load without writing to DB")
+    parser.add_argument("--workers",   type=int, default=1, metavar="N",
+                        help="Parallel OCR workers (default 1). Use 2-4 to speed up large PDFs.")
     args = parser.parse_args()
 
     # ── Template mode ─────────────────────────────────────────────────────────
@@ -768,7 +849,7 @@ def main():
             print(f"\n── {pdf_path.name} ──")
             images = pdf_to_pil_images(pdf_path)
             print(f"  {len(images)} page(s) found.")
-            reports = extract_with_easyocr(images)
+            reports = extract_with_easyocr(images, workers=args.workers)
             all_reports.extend(reports)
         print(f"\n      Total: {len(all_reports)} report(s) extracted across {len(pdfs)} file(s).")
 
