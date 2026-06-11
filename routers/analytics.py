@@ -114,11 +114,12 @@ def get_analytics_dashboard(
     eq_map = {e.id: e for e in db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all()}
 
     # Count completed testing requests per equipment
+    _TERMINAL_STATUSES = ("completed", "closed", "approved", "outcome_active", "commissioned")
     test_count_rows = (
         db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
         .filter(
             TestingRequest.equipment_id.in_(eq_ids),
-            TestingRequest.status == "completed",
+            TestingRequest.status.in_(_TERMINAL_STATUSES),
         )
         .group_by(TestingRequest.equipment_id)
         .all()
