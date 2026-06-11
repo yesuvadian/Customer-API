@@ -403,16 +403,18 @@ class EvaluationService:
                     continue
 
                 # 4. Narrow to sub_key if the threshold is two-level (standard/band)
+                # Detect structure by inspecting the first value:
+                #   flat:      { band_name: [lo, hi] }      → first_val is a list
+                #   two-level: { sub_key: { band: [lo,hi] } } → first_val is a dict
                 first_val = next(iter(row_thresholds.values()), None) if row_thresholds else None
-                if isinstance(first_val, dict) and all(
-                    isinstance(v, (list, type(None))) for v in first_val.values()
-                ):
+                if isinstance(first_val, list):
                     bands = row_thresholds          # flat: { band_name: [lo, hi] }
                 else:
                     # Two-level: { sub_key: { band_name: [lo, hi] } }
                     if resolved_sub_key and resolved_sub_key in row_thresholds:
                         bands = row_thresholds[resolved_sub_key]
                     else:
+                        # fallback: use first sub_key's bands
                         bands = first_val if isinstance(first_val, dict) else {}
 
             # 5. Find which band the value falls into
