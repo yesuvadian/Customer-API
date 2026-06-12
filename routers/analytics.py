@@ -27,6 +27,7 @@ Drill-down chain:
 
 import uuid
 import logging
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -59,11 +60,9 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 @router.get("/dashboard", summary="AI Analytics Dashboard summary")
 def get_analytics_dashboard(
-    department_id: Optional[uuid.UUID] = Query(
-        None,
-        description="Scope results to a department (and sub-departments). "
-                    "Omit to return organisation-wide data.",
-    ),
+    department_id: Optional[uuid.UUID] = Query(None),
+    date_from:     Optional[date]      = Query(None, description="Filter completed_at >= this date (YYYY-MM-DD)"),
+    date_to:       Optional[date]      = Query(None, description="Filter completed_at <= this date (YYYY-MM-DD)"),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -98,14 +97,16 @@ def get_analytics_dashboard(
     # Total completed/closed tests across all scoped equipment
     all_eq_ids = [ea.equipment_id for ea in all_ea if ea.equipment_id]
     _TERMINAL_STATUSES_KPI = ("completed", "closed")
-    total_tests = (
+    total_tests_q = (
         db.query(func.count(TestingRequest.id))
         .filter(
             TestingRequest.equipment_id.in_(all_eq_ids),
             TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
         )
-        .scalar() or 0
-    ) if all_eq_ids else 0
+    ) if all_eq_ids else None
+    if total_tests_q is not None:
+        total_tests_q = _apply_completed_at_filter(total_tests_q, date_from, date_to)
+    total_tests = (total_tests_q.scalar() or 0) if total_tests_q is not None else 0
 
     # ── 3. Hierarchy node ───────────────────────────────────────────────────
     ha_node = None
@@ -121,15 +122,15 @@ def get_analytics_dashboard(
 
     # Count tests for ALL scoped equipment first so we can filter before limiting
     if all_eq_ids:
-        test_count_rows = (
+        tc_q = (
             db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
             .filter(
                 TestingRequest.equipment_id.in_(all_eq_ids),
                 TestingRequest.status.in_(_TERMINAL_STATUSES),
             )
-            .group_by(TestingRequest.equipment_id)
-            .all()
         )
+        tc_q = _apply_completed_at_filter(tc_q, date_from, date_to)
+        test_count_rows = tc_q.group_by(TestingRequest.equipment_id).all()
         test_count_map: dict = {row[0]: row[1] for row in test_count_rows}
     else:
         test_count_map = {}
@@ -354,6 +355,9 @@ def get_dashboard_equipment(
     department_id: Optional[uuid.UUID] = Query(None),
     page:          int                 = Query(1, ge=1),
     page_size:     int                 = Query(20, ge=1, le=100),
+    search:        Optional[str]       = Query(None, description="Filter by UEIC (partial match)"),
+    date_from:     Optional[date]      = Query(None),
+    date_to:       Optional[date]      = Query(None),
     db:            Session             = Depends(get_vendor_db),
     user:          dict                = Depends(get_current_user),
 ):
@@ -367,6 +371,8 @@ def get_dashboard_equipment(
     eq_q = db.query(Equipment)
     if dept_ids:
         eq_q = eq_q.filter(Equipment.department_id.in_(dept_ids))
+    if search:
+        eq_q = eq_q.filter(Equipment.ueic.ilike(f"%{search}%"))
     all_eq: list[Equipment] = eq_q.all()
 
     eq_ids = [e.id for e in all_eq]
@@ -391,17 +397,16 @@ def get_dashboard_equipment(
         for d in db.query(OrgDepartment).filter(OrgDepartment.id.in_(dept_ids_for_names)).all()
     }
 
-    # Test counts
-    test_count_rows = (
+    # Test counts (respects date filter)
+    tc_q = (
         db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
         .filter(
             TestingRequest.equipment_id.in_(eq_ids),
             TestingRequest.status.in_(("completed", "closed")),
         )
-        .group_by(TestingRequest.equipment_id)
-        .all()
     )
-    test_count_map = {row[0]: row[1] for row in test_count_rows}
+    tc_q = _apply_completed_at_filter(tc_q, date_from, date_to)
+    test_count_map = {row[0]: row[1] for row in tc_q.group_by(TestingRequest.equipment_id).all()}
 
     def _sort_key(eq: Equipment):
         ea = ea_map.get(eq.id)
@@ -754,6 +759,15 @@ def get_test_analytics_with_raw(
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _apply_completed_at_filter(q, date_from: Optional[date], date_to: Optional[date]):
+    """Filter a TestingRequest query by completed_at range (both bounds optional)."""
+    if date_from:
+        q = q.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        q = q.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+    return q
+
 
 def _collect_department_ids(root_id: uuid.UUID, db: Session) -> set:
     """BFS to collect root + all descendant department IDs."""
