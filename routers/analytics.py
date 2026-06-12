@@ -85,28 +85,43 @@ def get_analytics_dashboard(
     all_ea: list[EquipmentAnalytics] = eq_query.all()
 
     # ── 2. KPI summary ───────────────────────────────────────────────────────
-    risk_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Unknown": 0}
-    for ea in all_ea:
-        risk_counts[ea.risk_level or "Unknown"] = risk_counts.get(ea.risk_level or "Unknown", 0) + 1
-
-    total = len(all_ea)
-    avg_score = round(
-        sum(float(ea.health_score) for ea in all_ea if ea.health_score is not None) / total, 1
-    ) if total else None
-
-    # Total completed/closed tests across all scoped equipment
     all_eq_ids = [ea.equipment_id for ea in all_ea if ea.equipment_id]
     _TERMINAL_STATUSES_KPI = ("completed", "closed")
-    total_tests_q = (
-        db.query(func.count(TestingRequest.id))
-        .filter(
-            TestingRequest.equipment_id.in_(all_eq_ids),
-            TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
+
+    # Build per-equipment test count (respects date filter)
+    if all_eq_ids:
+        kpi_tc_q = (
+            db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
+            .filter(
+                TestingRequest.equipment_id.in_(all_eq_ids),
+                TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
+            )
         )
-    ) if all_eq_ids else None
-    if total_tests_q is not None:
-        total_tests_q = _apply_completed_at_filter(total_tests_q, date_from, date_to)
-    total_tests = (total_tests_q.scalar() or 0) if total_tests_q is not None else 0
+        kpi_tc_q = _apply_completed_at_filter(kpi_tc_q, date_from, date_to)
+        kpi_tc_rows = kpi_tc_q.group_by(TestingRequest.equipment_id).all()
+        kpi_test_count_map: dict = {row[0]: row[1] for row in kpi_tc_rows}
+    else:
+        kpi_test_count_map = {}
+
+    total_tests = sum(kpi_test_count_map.values())
+
+    # When a date filter is active, total_equipment = equipment with tests in that period.
+    # Without a date filter, count all equipment in scope.
+    if date_from or date_to:
+        active_eq_ids = {eq_id for eq_id, cnt in kpi_test_count_map.items() if cnt > 0}
+        active_ea     = [ea for ea in all_ea if ea.equipment_id in active_eq_ids]
+    else:
+        active_eq_ids = set(all_eq_ids)
+        active_ea     = all_ea
+
+    risk_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Unknown": 0}
+    for ea in active_ea:
+        risk_counts[ea.risk_level or "Unknown"] = risk_counts.get(ea.risk_level or "Unknown", 0) + 1
+
+    total = len(active_ea)
+    avg_score = round(
+        sum(float(ea.health_score) for ea in active_ea if ea.health_score is not None) / total, 1
+    ) if total else None
 
     # ── 3. Hierarchy node ───────────────────────────────────────────────────
     ha_node = None
@@ -120,23 +135,11 @@ def get_analytics_dashboard(
     # ── 4. Top critical equipment (only equipment with at least 1 test) ─────
     _TERMINAL_STATUSES = ("completed", "closed")
 
-    # Count tests for ALL scoped equipment first so we can filter before limiting
-    if all_eq_ids:
-        tc_q = (
-            db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
-            .filter(
-                TestingRequest.equipment_id.in_(all_eq_ids),
-                TestingRequest.status.in_(_TERMINAL_STATUSES),
-            )
-        )
-        tc_q = _apply_completed_at_filter(tc_q, date_from, date_to)
-        test_count_rows = tc_q.group_by(TestingRequest.equipment_id).all()
-        test_count_map: dict = {row[0]: row[1] for row in test_count_rows}
-    else:
-        test_count_map = {}
+    # Reuse the already-computed date-filtered test count map
+    test_count_map: dict = kpi_test_count_map
 
     critical_ea = sorted(
-        [ea for ea in all_ea if ea.health_score is not None
+        [ea for ea in active_ea if ea.health_score is not None
          and test_count_map.get(ea.equipment_id, 0) > 0],
         key=lambda e: e.health_score,
     )[:10]
@@ -407,6 +410,12 @@ def get_dashboard_equipment(
     )
     tc_q = _apply_completed_at_filter(tc_q, date_from, date_to)
     test_count_map = {row[0]: row[1] for row in tc_q.group_by(TestingRequest.equipment_id).all()}
+
+    # When a date filter is active, only show equipment that has tests in that period
+    # so pagination is correct (avoids empty pages when client filters testCount > 0)
+    if date_from or date_to:
+        active_ids = {eq_id for eq_id, cnt in test_count_map.items() if cnt > 0}
+        all_eq = [e for e in all_eq if e.id in active_ids]
 
     def _sort_key(eq: Equipment):
         ea = ea_map.get(eq.id)
