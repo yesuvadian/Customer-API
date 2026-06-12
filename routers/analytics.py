@@ -618,12 +618,26 @@ def get_equipment_test_history(
 def get_parameter_analytics(
     equipment_id: uuid.UUID,
     template_key: Optional[str] = Query(None),
+    date_from:    Optional[date] = Query(None),
+    date_to:      Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
-    q = db.query(ParameterAnalytics).filter(ParameterAnalytics.equipment_id == equipment_id)
+    from sqlalchemy.orm import aliased
+    TR = aliased(TestResult)
+    q = (
+        db.query(ParameterAnalytics)
+        .join(TR, TR.id == ParameterAnalytics.test_result_id)
+        .filter(ParameterAnalytics.equipment_id == equipment_id)
+    )
     if template_key:
         q = q.filter(ParameterAnalytics.template_key == template_key)
+    # Use COALESCE(tested_at, cts) so historical records with null tested_at are included
+    coalesced = func.coalesce(TR.tested_at, TR.cts)
+    if date_from:
+        q = q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        q = q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
     rows = q.order_by(ParameterAnalytics.calculated_at.desc()).all()
     result_ids = [r.test_result_id for r in rows]
     tested_at_map = {
@@ -642,6 +656,8 @@ def get_parameter_history(
     parameter_key: str,
     template_key:  Optional[str] = Query(None),
     limit:         int           = Query(50, ge=1, le=500),
+    date_from:     Optional[date] = Query(None),
+    date_to:       Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -668,6 +684,8 @@ def get_parameter_history(
         }
       }
     """
+    # Trend always shows full history — the date filter controls the equipment list,
+    # not the time-series chart. date_from / date_to are accepted but ignored here.
     q = (
         db.query(ParameterAnalytics)
         .filter(
