@@ -302,16 +302,18 @@ class ConsolidatedReportService:
     # ─── Helpers ───────────────────────────────────────────────────────────────
     @staticmethod
     def _dedup_results(results: list) -> list:
-        """Keep the latest result per (template_key, voltage_level) key.
-        Combined results and individual results for the same equipment+key
-        collapse to the most recent, preventing double-rendering.
+        """Deduplicate within the same testing request: keep the latest result
+        per (request_id, template_key, voltage_level). This collapses combined
+        and individual voltage-level results from the same request session, but
+        preserves all results across different testing requests so the date
+        range filter shows every session within the selected period.
         """
         latest: dict = {}
         for r in results:
             vlevel = ""
             if isinstance(r.test_data, dict):
                 vlevel = str(r.test_data.get("voltage_level", ""))
-            key = (r.template_key or r.test_name or "", vlevel)
+            key = (str(r.testing_request_id), r.template_key or r.test_name or "", vlevel)
             cur = latest.get(key)
             if cur is None or (r.tested_at or r.cts) > (cur.tested_at or cur.cts):
                 latest[key] = r
