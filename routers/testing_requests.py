@@ -275,6 +275,8 @@ def list_testing_requests(
     tester_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
     equipment_id: Optional[UUID] = None,
+    date_from: Optional[str] = Query(None, description="Filter completed_at >= YYYY-MM-DD"),
+    date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -299,6 +301,13 @@ def list_testing_requests(
             dept_ids = subtree
         # else: single leaf dept, use department_id directly (faster exact match)
 
+    from datetime import date as _date
+    def _parse_date(s):
+        try:
+            return _date.fromisoformat(s) if s else None
+        except ValueError:
+            return None
+
     requests = service.get_requests(
         skip=skip,
         limit=limit,
@@ -310,6 +319,8 @@ def list_testing_requests(
         department_id=department_id if dept_ids is None else None,
         department_ids=dept_ids,
         equipment_id=equipment_id,
+        date_from=_parse_date(date_from),
+        date_to=_parse_date(date_to),
     )
     return [_enrich(r) for r in requests]
 

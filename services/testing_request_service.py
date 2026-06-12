@@ -198,6 +198,8 @@ class TestingRequestService:
         department_id: Optional[UUID] = None,
         department_ids: Optional[List[UUID]] = None,  # subtree list (overrides department_id)
         equipment_id: Optional[UUID] = None,
+        date_from=None,
+        date_to=None,
     ) -> List[TestingRequest]:
         query = (
             self.db.query(TestingRequest)
@@ -224,6 +226,12 @@ class TestingRequestService:
             query = query.filter(TestingRequest.department_id.in_(department_ids))
         elif department_id:
             query = query.filter(TestingRequest.department_id == department_id)
+        if date_from:
+            from datetime import datetime
+            query = query.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            from datetime import datetime, timedelta
+            query = query.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
 
     def get_requests_for_user(
