@@ -8,7 +8,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from sqlalchemy.orm import Session, joinedload
 
-from models import TestingRequest, User
+from models import TestingRequest, TestResult, User
 
 
 class TestingRequestPDFService:
@@ -208,6 +208,163 @@ class TestingRequestPDFService:
             ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
         ]))
         story.append(status_table)
+
+        # ── Test Result Data (generic — works for any template) ──────────────
+        result = (
+            self.db.query(TestResult)
+            .filter(TestResult.testing_request_id == testing_request.id)
+            .order_by(TestResult.cts.desc())
+            .first()
+        )
+        if result and result.test_data:
+            story.append(Spacer(1, 0.2 * inch))
+            story.append(Paragraph("Test Data", heading_style))
+
+            td = result.test_data
+            navy   = colors.HexColor("#1B3A6B")
+            teal   = colors.HexColor("#006D7E")
+            light  = colors.HexColor("#f5f8ff")
+
+            cell_s = ParagraphStyle("C",  fontSize=9)
+            key_s  = ParagraphStyle("K",  fontSize=9, fontName="Helvetica-Bold")
+            th_s   = ParagraphStyle("TH", fontSize=9, textColor=colors.white, fontName="Helvetica-Bold")
+            sub_th = ParagraphStyle("STH",fontSize=8, textColor=colors.white, fontName="Helvetica-Bold")
+            sub_td = ParagraphStyle("STD",fontSize=8)
+
+            def _tbl(hdr_color=navy):
+                return TableStyle([
+                    ("BACKGROUND",    (0, 0), (-1, 0), hdr_color),
+                    ("FONTSIZE",      (0, 0), (-1, -1), 9),
+                    ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, light]),
+                    ("BOX",           (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+                    ("INNERGRID",     (0, 0), (-1, -1), 0.25, colors.HexColor("#DDDDDD")),
+                    ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+                    ("TOPPADDING",    (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+                ])
+
+            scalar_rows  = [[Paragraph("Field", th_s), Paragraph("Value", th_s)]]
+            table_fields = []
+            overall      = None
+
+            for k, v in td.items():
+                if k == "overall_result":
+                    overall = str(v).upper() if v else None
+                    continue
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    table_fields.append((k, v))
+                else:
+                    scalar_rows.append([
+                        Paragraph(k.replace("_", " ").title(), key_s),
+                        Paragraph(str(v) if v is not None else "—", cell_s),
+                    ])
+
+            if overall:
+                res_color = colors.HexColor("#1A7340") if overall == "PASS" \
+                    else colors.HexColor("#B71C1C") if overall == "FAIL" \
+                    else colors.black
+                scalar_rows.append([
+                    Paragraph("Overall Result", key_s),
+                    Paragraph(overall, ParagraphStyle("R", fontSize=9,
+                              textColor=res_color, fontName="Helvetica-Bold")),
+                ])
+
+            if len(scalar_rows) > 1:
+                t = Table(scalar_rows, colWidths=[2.2 * inch, 4.6 * inch])
+                t.setStyle(_tbl())
+                story += [t, Spacer(1, 0.1 * inch)]
+
+            for field_key, rows in table_fields:
+                story.append(Paragraph(
+                    field_key.replace("_", " ").title(),
+                    ParagraphStyle("SubH", parent=heading_style, fontSize=10, spaceBefore=8, spaceAfter=4)
+                ))
+                cols  = list(rows[0].keys())
+                col_w = (6.8 * inch) / max(len(cols), 1)
+                sub_header = [Paragraph(c.replace("_", " ").title(), sub_th) for c in cols]
+                sub_rows = [sub_header] + [
+                    [Paragraph(str(row.get(c, "—")) if row.get(c) is not None else "—", sub_td)
+                     for c in cols]
+                    for row in rows
+                ]
+                sub_t = Table(sub_rows, colWidths=[col_w] * len(cols), repeatRows=1)
+                sub_t.setStyle(_tbl(hdr_color=teal))
+                story += [sub_t, Spacer(1, 0.12 * inch)]
+
+        # ── Evaluation ──────────────────────────────────────────────────────
+        if result and result.evaluation_result:
+            ev_fields = (result.evaluation_result or {}).get("fields", [])
+            if ev_fields:
+                story.append(Spacer(1, 0.1 * inch))
+                story.append(Paragraph("Evaluation", heading_style))
+
+                STATUS_CLR = {
+                    "normal":   colors.HexColor("#1A7340"),
+                    "alert":    colors.HexColor("#C75B00"),
+                    "critical": colors.HexColor("#B71C1C"),
+                }
+
+                ev_th  = ParagraphStyle("EvTH", fontSize=9, textColor=colors.white, fontName="Helvetica-Bold")
+                ev_key = ParagraphStyle("EvK",  fontSize=9)
+                ev_val = ParagraphStyle("EvV",  fontSize=9)
+
+                ev_rows = [[
+                    Paragraph("Parameter", ev_th),
+                    Paragraph("Value",     ev_th),
+                    Paragraph("Status",    ev_th),
+                ]]
+                for f in ev_fields:
+                    s = (f.get("status") or "").lower()
+                    s_clr = STATUS_CLR.get(s, colors.HexColor("#555555"))
+                    if f.get("type") == "table":
+                        agg = f.get("aggregate_result")
+                        if agg is not None:
+                            val_str = str(agg)
+                        else:
+                            col_results = f.get("column_results") or []
+                            flagged = [r for r in col_results if r.get("status") in ("ALERT", "CRITICAL")]
+                            source = flagged if flagged else col_results
+                            by_col: dict = {}
+                            for r in source:
+                                col = r.get("column", "")
+                                val = r.get("value")
+                                if val is not None:
+                                    by_col.setdefault(col, []).append(val)
+                            if by_col:
+                                parts = []
+                                for col, vals in by_col.items():
+                                    lbl = " ".join(w.capitalize() for w in col.split("_"))
+                                    parts.append(f"{lbl}: {', '.join(str(v) for v in vals)}")
+                                val_str = " | ".join(parts)
+                            else:
+                                val_str = "—"
+                    else:
+                        raw = f.get("value")
+                        unit = (f.get("unit") or "").strip()
+                        val_str = f"{raw} {unit}".strip() if raw is not None else "—"
+
+                    ev_rows.append([
+                        Paragraph(f.get("label", f.get("key", "")), ev_key),
+                        Paragraph(val_str, ev_val),
+                        Paragraph(s.upper() if s else "—",
+                                  ParagraphStyle("EvS", fontSize=9, fontName="Helvetica-Bold",
+                                                 textColor=s_clr)),
+                    ])
+
+                ev_t = Table(ev_rows, colWidths=[3.2 * inch, 2.0 * inch, 1.6 * inch], repeatRows=1)
+                ev_t.setStyle(TableStyle([
+                    ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#1B3A6B")),
+                    ("FONTSIZE",      (0, 0), (-1, -1), 9),
+                    ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f8ff")]),
+                    ("BOX",           (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+                    ("INNERGRID",     (0, 0), (-1, -1), 0.25, colors.HexColor("#DDDDDD")),
+                    ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING",    (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+                ]))
+                story += [ev_t, Spacer(1, 0.15 * inch)]
 
         # Build PDF
         doc.build(story)

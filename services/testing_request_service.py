@@ -204,7 +204,11 @@ class TestingRequestService:
             .filter(TestingRequest.is_schedule_template.is_(False))
         )
         if status_filter:
-            query = query.filter(TestingRequest.status == status_filter)
+            statuses = [s.strip() for s in status_filter.split(',') if s.strip()]
+            if len(statuses) == 1:
+                query = query.filter(TestingRequest.status == statuses[0])
+            else:
+                query = query.filter(TestingRequest.status.in_(statuses))
         if category_filter:
             query = query.filter(TestingRequest.request_category == category_filter)
         if originator_id:

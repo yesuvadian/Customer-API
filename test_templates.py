@@ -2593,25 +2593,42 @@ TEST_TEMPLATES = {
     # overall_condition aggregates oil_test_results.condition via AGGREGATE_STATUS.
     # ────────────────────────────────────────────────────────────────────────────
     "transformer_oil_test": {
-    "key": "transformer_oil_test",
-    "name": "Transformer Oil Test",
-    "equipment_type": "Power Transformer",
-    "description": "Insulating oil sample analysis as per IS 1866:2017.",
-    "supports_multi_session": False,
-    "typical_session_interval_days": 365,
-    "typical_total_sessions": 1,
-    # Automatically inject equipment fields into the form context.
-    # Keys are form field names; values are "namespace.field" paths.
-    # Supported namespaces: "equipment" (top-level), "nameplate" (nameplate_data JSONB).
-    "context_bindings": {
-        "transformer_voltage": "equipment.voltage_class",
-    },
-    "sections": [
+        "key": "transformer_oil_test",
+        "name": "Transformer Oil Test",
+        "equipment_type": "Power Transformer",
+        "description": "Insulating oil sample analysis as per IS 1866:2017.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": 365,
+        "typical_total_sessions": 1,
+        "context_bindings": {
+            "sub_station":         "equipment.department_name",
+            "make":                "equipment.manufacturer",
+            "serial_number":       "equipment.factory_serial_number",
+            "capacity_mva":        "nameplate.rated_mva",
+            "year_of_manufacture": "equipment.year_of_manufacture",
+            "vector_group":        "equipment.vector_group",
+            "transformer_voltage": "equipment.voltage_class",
+        },
+        "sections": [
+            # ── Equipment Details (auto-filled) ──────────────────────────────
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "sub_station",          "label": "Sub Station",         "type": "readonly"},
+                    {"key": "make",                "label": "Manufacturer",        "type": "readonly"},
+                    {"key": "serial_number",        "label": "Serial Number",       "type": "readonly"},
+                    {"key": "capacity_mva",         "label": "Rated MVA",           "type": "readonly"},
+                    {"key": "year_of_manufacture",  "label": "Year of Manufacture", "type": "readonly"},
+                    {"key": "vector_group",         "label": "Vector Group",        "type": "readonly"},
+                    {"key": "transformer_voltage",  "label": "Voltage Class (kV)",  "type": "readonly"},
+                ],
+            },
 
-        # ── Oil Test Results ─────────────────────────────────────────────────
-        {
-            "title": "Oil Test Measurements",
-            "fields": [
+            # ── Oil Test Results ─────────────────────────────────────────────
+            {
+                "title": "Oil Test Measurements",
+                "fields": [
                 {
                     "key": "oil_test_results",
                     "label": "Test Results as per IS 1866:2017",
@@ -2853,6 +2870,28 @@ TEST_TEMPLATES = {
             ],
         },
 
+        # ── Overall Assessment ────────────────────────────────────────────────
+        {
+            "title": "Overall Assessment",
+            "fields": [
+                {
+                    "key": "overall_result",
+                    "label": "Overall Result",
+                    "type": "dropdown",
+                    "options": ["PASS", "CONDITIONAL", "FAIL"],
+                    "required": True,
+                    "dropdown_evaluation": {
+                        "enabled": True,
+                        "value_severities": {
+                            "PASS":        "NORMAL",
+                            "CONDITIONAL": "ALERT",
+                            "FAIL":        "CRITICAL",
+                        },
+                    },
+                },
+                {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+            ],
+        },
     ],
 },
     # ────────────────────────────────────────────────────────────────────────────
@@ -3079,500 +3118,316 @@ TEST_TEMPLATES = {
 },
 
     # ────────────────────────────────────────────────────────────────────────────
-    # Capacitance & Tan Delta Test (Transformer)
-    # Point-in-time insulation quality measurement — no multi-session.
-    # Measurements: C(pF), tan δ, temperature → auto-calculates expected current,
-    # temperature-corrected tan δ, and trend change from previous reading.
+    # Capacitance & Tan Delta Test (Transformer) — KPTCL R&D Centre format
+    # Covers: winding C/tanδ + 220kV bushing + 66kV bushing + IDAX insulation diagnostics.
+    # ITC correction factor stored at section level (one factor per section, not per row).
+    # df_corrected_20c is a manual number entry (not auto-calculated) to match PDF workflow.
     # ────────────────────────────────────────────────────────────────────────────
     "capacitance_tandelta_transformer": {
-  "key": "capacitance_tandelta_transformer",
-  "name": "Capacitance & Tan Delta Test (Transformer)",
-  "equipment_type": "Power Transformer",
-  "description": "Capacitance and tan delta insulation quality test per IEC 60450",
-  "supports_multi_session": False,
-  "typical_session_interval_days": None,
-  "typical_total_sessions": 1,
-  "sections": [
-    {
-      "title": "Test Conditions",
-      "fields": [
-        {
-          "key": "test_voltage_kv",
-          "label": "Applied Test Voltage",
-          "type": "number",
-          "unit": "kV",
-          "required": True
+        "key": "capacitance_tandelta_transformer",
+        "name": "Capacitance & Tan Delta Test (Transformer)",
+        "equipment_type": "Power Transformer",
+        "description": "Combined Tan-Delta/Capacitance and IDAX insulation diagnostics per KPTCL R&D Centre format — winding, 220kV bushing, 66kV bushing, and moisture/oil conductivity measurements.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {
+            "sub_station":         "equipment.department_name",
+            "make":                "equipment.manufacturer",
+            "capacity_mva":        "nameplate.rated_mva",
+            "serial_number":       "equipment.factory_serial_number",
+            "year_of_manufacture": "equipment.year_of_manufacture",
+            "vector_group":        "equipment.vector_group",
+            "voltage_ratio":       "equipment.voltage_class",
         },
-        {
-          "key": "frequency_hz",
-          "label": "Supply Frequency",
-          "type": "number",
-          "unit": "Hz",
-          "required": True,
-          "default": "50"
-        },
-        {
-          "key": "ambient_temp_c",
-          "label": "Ambient Temperature",
-          "type": "number",
-          "unit": "°C",
-          "required": True
-        },
-        {
-          "key": "oil_temp_c",
-          "label": "Oil Temperature",
-          "type": "number",
-          "unit": "°C",
-          "required": False
-        },
-        {
-          "key": "test_mode",
-          "label": "Test Mode",
-          "type": "dropdown",
-          "options": [
-            "UST (Ungrounded Specimen)",
-            "GST (Grounded Specimen)",
-            "GST-Guard"
-          ],
-          "required": True
-        },
-        {
-          "key": "instrument_make",
-          "label": "Instrument Make/Model",
-          "type": "text",
-          "required": False
-        }
-      ]
-    },
-
-    {
-      "title": "Winding Test Results",
-      "fields": [
-        {
-          "key": "winding_test_results",
-          "label": "Winding Test Data",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
+        "sections": [
+            # ── Equipment Details (auto-filled) ──────────────────────────────
             {
-              "key": "sl_no",
-              "label": "Sl. No.",
-              "type": "readonly"
-            },
-            {
-              "key": "test_configuration",
-              "label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)",
-              "type": "readonly"
-            },
-            {
-              "key": "voltage_kv",
-              "label": "KV",
-              "type": "number"
-            },
-            {
-              "key": "capacitance_pf",
-              "label": "Capacitance Measured C(pF)",
-              "type": "number"
-            },
-            {
-              "key": "df_measured",
-              "label": "% D.F Measured",
-              "type": "number"
-            },
-            {
-              "key": "df_measured_on_date",
-              "label": "% D.F After Temp Correction at 20°C",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "FORMULA",
-                "config": {
-                  "formula": "TEMP_CORRECTED_TAND",
-                  "inputs": {
-                    "tan_delta": "df_measured",
-                    "temperature": "$form.oil_temp_c"
-                  },
-                  "precision": 4
-                }
-              },
-              "alert": {
-                "thresholds": [
-                  { "operator": ">", "value": 1.0, "result": "FAIL" },
-                  { "operator": ">", "value": 0.5, "result": "ALERT" }
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "sub_station",          "label": "Sub Station",         "type": "readonly"},
+                    {"key": "make",                "label": "Manufacturer",        "type": "readonly"},
+                    {"key": "serial_number",        "label": "Serial Number",       "type": "readonly"},
+                    {"key": "capacity_mva",         "label": "Rated MVA",           "type": "readonly"},
+                    {"key": "year_of_manufacture",  "label": "Year of Manufacture", "type": "readonly"},
+                    {"key": "vector_group",         "label": "Vector Group",        "type": "readonly"},
+                    {"key": "voltage_ratio",        "label": "Voltage Ratio",       "type": "readonly"},
                 ],
-                "default": "PASS"
-              }
             },
+            # ── Test Conditions ───────────────────────────────────────────────
             {
-              "key": "df_previous_date",
-              "label": "% D.F After Temp Correction at 20°C (Previous Test)",
-              "type": "number",
-            },
-            {
-              "key": "condition",
-              "label": "Condition",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "THRESHOLD",
-                "config": {
-                  "input_field": "df_measured_on_date",
-                  "thresholds": {
-                    "Winding % D.F @ 20°C": {
-                      "Good": [None, 0.5],
-                      "Fair": [0.5,  1.0],
-                      "Poor": [1.0,  None],
-                    }
-                  }
-                }
-              }
-            },
-          ],
-          "default_rows": [
-            { "sl_no": "1", "test_configuration": "HV-GND" },
-            { "sl_no": "2", "test_configuration": "HV-LV" },
-            { "sl_no": "3", "test_configuration": "LV-GND" },
-            { "sl_no": "4", "test_configuration": "LV-TV" },
-            { "sl_no": "5", "test_configuration": "TV-GND" },
-            { "sl_no": "6", "test_configuration": "TV-HV" }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "HV Bushing Details",
-      "fields": [
-        {
-          "key": "hv_bushing_details",
-          "label": "HV Bushing Details",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "detail",  "label": "Details",       "type": "readonly" },
-            { "key": "r_phase", "label": "HV 'R' Phase",  "type": "text" },
-            { "key": "y_phase", "label": "HV 'Y' Phase",  "type": "text" },
-            { "key": "b_phase", "label": "HV 'B' Phase",  "type": "text" }
-          ],
-          "default_rows": [
-            { "detail": "Make" },
-            { "detail": "Sl. No." },
-            { "detail": "Y.O. Mfg." }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "HV Bushing Test Results",
-      "fields": [
-        {
-          "key": "hv_bushing_test_results",
-          "label": "HV Bushing Test Data",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "sl_no",   "label": "Sl. No.",  "type": "readonly" },
-            { "key": "bushing", "label": "Bushing",  "type": "readonly" },
-            {
-              "key": "voltage_kv",
-              "label": "KV",
-              "type": "number"
-            },
-            {
-              "key": "capacitance_pf",
-              "label": "Capacitance Measured C(pF)",
-              "type": "number"
-            },
-            {
-              "key": "df_measured",
-              "label": "% D.F Measured",
-              "type": "number"
-            },
-            {
-              "key": "df_corrected_20c",
-              "label": "% D.F Corrected at 20°C (IEC)",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "FORMULA",
-                "config": {
-                  "formula": "TEMP_CORRECTED_TAND",
-                  "inputs": {
-                    "tan_delta": "df_measured",
-                    "temperature": "$form.ambient_temp_c"
-                  },
-                  "precision": 4
-                }
-              },
-              "alert": {
-                "thresholds": [
-                  { "operator": ">", "value": 1.0, "result": "FAIL" },
-                  { "operator": ">", "value": 0.5, "result": "ALERT" }
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_voltage_kv",   "label": "Applied Test Voltage",   "type": "number", "unit": "kV", "required": True},
+                    {"key": "frequency_hz",      "label": "Supply Frequency",       "type": "number", "unit": "Hz", "required": True, "default": "50"},
+                    {"key": "ambient_temp_c",    "label": "Ambient Temperature",    "type": "number", "unit": "°C", "required": True},
+                    {"key": "oil_temp_c",        "label": "Oil Temperature",        "type": "number", "unit": "°C"},
+                    {"key": "weather_condition", "label": "Weather Condition",      "type": "text",   "placeholder": "e.g. Cloudy, Sunny"},
+                    {"key": "bushing_condition", "label": "Condition of Bushings",  "type": "text",   "placeholder": "e.g. Clean & Dry"},
+                    {"key": "instrument_make",   "label": "Instrument Make/Model",  "type": "text",   "placeholder": "e.g. Megger"},
                 ],
-                "default": "PASS"
-              }
             },
+            # ── Winding Test Results ──────────────────────────────────────────
             {
-              "key": "df_previous_date",
-              "label": "% D.F Corrected at 20°C (Previous Test)",
-              "type": "number"
-            },
-            {
-              "key": "condition",
-              "label": "Condition",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "THRESHOLD",
-                "config": {
-                  "input_field": "df_corrected_20c",
-                  "thresholds": {
-                    "HV Bushing % D.F @ 20°C": {
-                      "Good":  [None, 0.5],
-                      "Alert": [0.5,  0.7],
-                      "Poor":  [0.7,  None],
-                    }
-                  }
-                }
-              }
-            },
-          ],
-          "default_rows": [
-            { "sl_no": "1", "bushing": "R Phase" },
-            { "sl_no": "2", "bushing": "Y Phase" },
-            { "sl_no": "3", "bushing": "B Phase" }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "DFR Test Results for HV 'Y' Phase Bushing",
-      "fields": [
-        {
-          "key": "dfr_test_voltage",
-          "label": "Test Voltage",
-          "type": "text"
-        },
-        {
-          "key": "dfr_test_results",
-          "label": "DFR Test Data",
-          "type": "table",
-          "allow_add_rows": True,
-          "allow_delete_rows": True,
-          "lock_default_rows": False,
-          "columns": [
-            {
-              "key": "test_frequency",
-              "label": "Test Frequency (Hz)",
-              "type": "number"
-            },
-            {
-              "key": "df_percent",
-              "label": "HV Y Phase Bushing (%DF)",
-              "type": "number"
-            }
-          ],
-          "default_rows": [
-            { "test_frequency": "470" },
-            { "test_frequency": "220" },
-            { "test_frequency": "110" },
-            { "test_frequency": "70" },
-            { "test_frequency": "40" },
-            { "test_frequency": "20" },
-            { "test_frequency": "10" },
-            { "test_frequency": "5" },
-            { "test_frequency": "2" },
-            { "test_frequency": "1" }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "LV Bushing Details",
-      "fields": [
-        {
-          "key": "lv_bushing_details",
-          "label": "LV Bushing Details",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "detail",  "label": "Details",       "type": "readonly" },
-            { "key": "r_phase", "label": "LV 'R' Phase",  "type": "text" },
-            { "key": "y_phase", "label": "LV 'Y' Phase",  "type": "text" },
-            { "key": "b_phase", "label": "LV 'B' Phase",  "type": "text" }
-          ],
-          "default_rows": [
-            { "detail": "Make" },
-            { "detail": "Sl. No." },
-            { "detail": "Y.O. Mfg." }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "LV Bushing Test Results",
-      "fields": [
-        {
-          "key": "lv_bushing_test_results",
-          "label": "LV Bushing Test Data",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "sl_no",   "label": "Sl. No.",  "type": "readonly" },
-            { "key": "bushing", "label": "Bushing",  "type": "readonly" },
-            {
-              "key": "voltage_kv",
-              "label": "KV",
-              "type": "number"
-            },
-            {
-              "key": "capacitance_pf",
-              "label": "Capacitance Measured C(pF)",
-              "type": "number"
-            },
-            {
-              "key": "df_measured",
-              "label": "% D.F Measured",
-              "type": "number"
-            },
-            {
-              "key": "df_corrected_20c",
-              "label": "% D.F Corrected at 20°C (IEC)",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "FORMULA",
-                "config": {
-                  "formula": "TEMP_CORRECTED_TAND",
-                  "inputs": {
-                    "tan_delta": "df_measured",
-                    "temperature": "$form.ambient_temp_c"
-                  },
-                  "precision": 4
-                }
-              },
-              "alert": {
-                "thresholds": [
-                  { "operator": ">", "value": 1.0, "result": "FAIL" },
-                  { "operator": ">", "value": 0.5, "result": "ALERT" }
+                "title": "Winding Test Results",
+                "fields": [
+                    {"key": "winding_itc_factor", "label": "ITC Correction Factor (Winding)", "type": "number"},
+                    {
+                        "key": "winding_test_results",
+                        "label": "Winding Test Data",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_configuration", "label": "Test Configuration\n(HV–220kV / LV–66kV / TV–11kV)", "type": "readonly"},
+                            {"key": "voltage_kv",          "label": "kV",                              "type": "number", "unit": "kV"},
+                            {"key": "capacitance_nf",      "label": "Capacitance C (nF)",              "type": "number", "unit": "nF"},
+                            {"key": "df_measured",         "label": "% D.F Measured",                  "type": "number", "unit": "%"},
+                            {"key": "df_corrected_20c",    "label": "% D.F @ 20°C (ITC Corrected)",   "type": "number", "unit": "%"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "df_corrected_20c",
+                                        "thresholds": {
+                                            "Winding % D.F @ 20°C (IEEE/IEC)": {
+                                                "Good": [None, 0.5],
+                                                "Fair": [0.5,  1.0],
+                                                "Poor": [1.0,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "HV-TV"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "df_corrected_20c": {
+                                    "normal_min": None, "normal_max": 0.5,
+                                    "alert_min":  None, "alert_max":  None,
+                                    "critical_below": None, "critical_above": 1.0,
+                                    "trend_watch": True,
+                                    "weight": 2.0,
+                                    "remedial_action_text": "Winding insulation deteriorating — schedule drying or oil reconditioning.",
+                                },
+                            },
+                        },
+                    },
+                    {"key": "winding_observations", "label": "Observations (Winding)", "type": "textarea"},
                 ],
-                "default": "PASS"
-              }
             },
+            # ── 220kV Bushing Test Results ────────────────────────────────────
             {
-              "key": "df_previous_date",
-              "label": "% D.F Corrected at 20°C (Previous Test)",
-              "type": "number"
-            },
-            {
-              "key": "df_change_pct",
-              "label": "% Change from Previous",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "FORMULA",
-                "config": {
-                  "formula": "TREND_CHANGE",
-                  "inputs": {
-                    "current":  "df_corrected_20c",
-                    "previous": "df_previous_date"
-                  },
-                  "precision": 2
-                }
-              },
-              "alert": {
-                "thresholds": [
-                  { "operator": ">", "value": 20, "result": "FAIL" },
-                  { "operator": ">", "value": 10, "result": "ALERT" }
+                "title": "220kV Bushing Test Results",
+                "fields": [
+                    {"key": "hv_bushing_itc_factor", "label": "ITC Correction Factor (220kV Bushing)", "type": "number"},
+                    {
+                        "key": "hv_bushing_test_results",
+                        "label": "220kV Bushing Test Data",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "bushing",          "label": "Bushing",                          "type": "readonly"},
+                            {"key": "voltage_kv",        "label": "kV",                               "type": "number", "unit": "kV"},
+                            {"key": "capacitance_pf",    "label": "Capacitance C (pF)",               "type": "number", "unit": "pF"},
+                            {"key": "df_measured",       "label": "% D.F Measured",                   "type": "number", "unit": "%"},
+                            {"key": "df_corrected_20c",  "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number", "unit": "%"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "df_corrected_20c",
+                                        "thresholds": {
+                                            "220kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                                "Good":  [None, 0.5],
+                                                "Alert": [0.5,  0.7],
+                                                "Poor":  [0.7,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        ],
+                        "default_rows": [
+                            {"bushing": "'R' Phase"},
+                            {"bushing": "'Y' Phase"},
+                            {"bushing": "'B' Phase"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "df_corrected_20c": {
+                                    "normal_min": None, "normal_max": 0.5,
+                                    "alert_min":  0.5,  "alert_max":  0.7,
+                                    "critical_below": None, "critical_above": 0.7,
+                                    "trend_watch": True,
+                                    "weight": 1.5,
+                                    "remedial_action_text": "220kV bushing insulation degraded — inspect and consider replacement.",
+                                },
+                            },
+                        },
+                    },
                 ],
-                "default": "PASS"
-              }
             },
+            # ── 66kV Bushing Test Results ─────────────────────────────────────
             {
-              "key": "condition",
-              "label": "Condition",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "THRESHOLD",
-                "config": {
-                  "input_field": "df_corrected_20c",
-                  "thresholds": {
-                    "LV Bushing % D.F @ 20°C": {
-                      "Good":  [None, 0.5],
-                      "Alert": [0.5,  0.7],
-                      "Poor":  [0.7,  None],
-                    }
-                  }
-                }
-              }
+                "title": "66kV Bushing Test Results",
+                "fields": [
+                    {"key": "lv_bushing_itc_factor", "label": "ITC Correction Factor (66kV Bushing)", "type": "number"},
+                    {
+                        "key": "lv_bushing_test_results",
+                        "label": "66kV Bushing Test Data",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "bushing",          "label": "Bushing",                          "type": "readonly"},
+                            {"key": "voltage_kv",        "label": "kV",                               "type": "number", "unit": "kV"},
+                            {"key": "capacitance_pf",    "label": "Capacitance C (pF)",               "type": "number", "unit": "pF"},
+                            {"key": "df_measured",       "label": "% D.F Measured",                   "type": "number", "unit": "%"},
+                            {"key": "df_corrected_20c",  "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number", "unit": "%"},
+                            {
+                                "key": "condition",
+                                "label": "Condition",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "df_corrected_20c",
+                                        "thresholds": {
+                                            "66kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                                "Good":  [None, 0.7],
+                                                "Alert": [0.7,  1.0],
+                                                "Poor":  [1.0,  None],
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        ],
+                        "default_rows": [
+                            {"bushing": "'R' Phase"},
+                            {"bushing": "'Y' Phase"},
+                            {"bushing": "'B' Phase"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "df_corrected_20c": {
+                                    "normal_min": None, "normal_max": 0.7,
+                                    "alert_min":  0.7,  "alert_max":  1.0,
+                                    "critical_below": None, "critical_above": 1.0,
+                                    "trend_watch": True,
+                                    "weight": 1.5,
+                                    "remedial_action_text": "66kV bushing insulation degraded — inspect and consider replacement.",
+                                },
+                            },
+                        },
+                    },
+                ],
             },
-          ],
-          "default_rows": [
-            { "sl_no": "1", "bushing": "R Phase" },
-            { "sl_no": "2", "bushing": "Y Phase" },
-            { "sl_no": "3", "bushing": "B Phase" }
-          ]
-        }
-      ]
+            # ── IDAX Insulation Diagnostics ───────────────────────────────────
+            # Rows use Megger IDAX notation: CHG/CHL/CLG/CLT/CTG/CTH
+            {
+                "title": "IDAX Test Results (Insulation Diagnostics)",
+                "fields": [
+                    {"key": "idax_testing_kit", "label": "Testing Kit Used", "type": "text", "placeholder": "e.g. Megger IDAX 300"},
+                    {
+                        "key": "idax_test_results",
+                        "label": "IDAX Test Data",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_configuration",   "label": "Test Configuration",                    "type": "readonly"},
+                            {"key": "moisture_percent",     "label": "% Moisture",                            "type": "number", "unit": "%"},
+                            {"key": "tr_analysis_moisture", "label": "Tr. Analysis (% Moisture)",            "type": "dropdown",
+                             "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]},
+                            {"key": "oil_conductivity_psm", "label": "Oil Conductivity (pS/m)",               "type": "number", "unit": "pS/m"},
+                            {"key": "tr_analysis_oil",      "label": "Tr. Analysis (Oil Conductivity)",       "type": "dropdown",
+                             "options": ["As new", "Acceptable", "Poor", "Bad"]},
+                        ],
+                        "default_rows": [
+                            {"test_configuration": "CHG"},
+                            {"test_configuration": "CHL"},
+                            {"test_configuration": "CLG"},
+                            {"test_configuration": "CLT"},
+                            {"test_configuration": "CTG"},
+                            {"test_configuration": "CTH"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "moisture_percent": {
+                                    "normal_min": None, "normal_max": 2.0,
+                                    "alert_min":  None, "alert_max":  None,
+                                    "critical_below": None, "critical_above": 3.0,
+                                    "trend_watch": True,
+                                    "weight": 2.0,
+                                    "remedial_action_text": "High moisture content — arrange drying treatment.",
+                                },
+                                "oil_conductivity_psm": {
+                                    "normal_min": None, "normal_max": 0.1,
+                                    "alert_min":  None, "alert_max":  None,
+                                    "critical_below": None, "critical_above": 1.0,
+                                    "trend_watch": True,
+                                    "weight": 1.0,
+                                    "remedial_action_text": "High oil conductivity — arrange oil reconditioning or replacement.",
+                                },
+                            },
+                        },
+                    },
+                    {"key": "idax_observation", "label": "Observation", "type": "textarea"},
+                ],
+            },
+            # ── Overall Assessment ────────────────────────────────────────────
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result",
+                        "label": "Overall Result",
+                        "type": "dropdown",
+                        "options": ["PASS", "CONDITIONAL", "FAIL"],
+                        "required": True,
+                        "dropdown_evaluation": {
+                            "enabled": True,
+                            "value_severities": {
+                                "PASS":        "NORMAL",
+                                "CONDITIONAL": "ALERT",
+                                "FAIL":        "CRITICAL",
+                            },
+                        },
+                    },
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
     },
-
-    {
-      "title": "IDAX Test Results (Insulation Diagnostics)",
-      "fields": [
-        {
-          "key": "idax_testing_kit",
-          "label": "Testing Kit Used",
-          "type": "text"
-        },
-        {
-          "key": "idax_test_results",
-          "label": "IDAX Test Data",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "sl_no",             "label": "Sl. No.",                                              "type": "readonly" },
-            { "key": "test_configuration","label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)", "type": "readonly" },
-            { "key": "moisture_percent",  "label": "% Moisture",                                           "type": "number" },
-            { "key": "tr_analysis_moisture","label": "Tr. Analysis on Basis of % Moisture",               "type": "text" },
-            { "key": "oil_conductivity",  "label": "Oil Conductivity (pS/m)",                              "type": "number" },
-            { "key": "moisture_percent_oil","label": "% Moisture (from Oil)",                              "type": "number" },
-            { "key": "tr_analysis_oil",   "label": "Tr. Analysis on Basis of Oil Conductivity",           "type": "text" }
-          ],
-          "default_rows": [
-            { "sl_no": "1", "test_configuration": "HV-GND" },
-            { "sl_no": "2", "test_configuration": "HV-LV" },
-            { "sl_no": "3", "test_configuration": "LV-GND" },
-            { "sl_no": "4", "test_configuration": "LV-TV" },
-            { "sl_no": "5", "test_configuration": "TV-GND" },
-            { "sl_no": "6", "test_configuration": "TV-HV" }
-          ]
-        },
-        {
-          "key": "idax_observation",
-          "label": "Observation",
-          "type": "textarea"
-        }
-      ]
-    }
-  ]
-},
     # ════════════════════════════════════════════════════════════════════════════
     # CIRCUIT BREAKER TEMPLATES
     # ════════════════════════════════════════════════════════════════════════════

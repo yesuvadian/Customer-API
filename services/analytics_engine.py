@@ -507,7 +507,7 @@ class AnalyticsEngine:
                         col_unit  = col.get("unit")
 
                         field_ev    = ev_fields_map.get(field_key) or {}
-                        col_results = field_ev.get("col_results", []) if field_ev else []
+                        col_results = field_ev.get("column_results", []) if field_ev else []
 
                         # Track per-row separately when a row-identifier exists
                         rows_to_track = []

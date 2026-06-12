@@ -398,3 +398,64 @@ def approve_testing_results(
 
 # NOTE: Tester workflow endpoints (accept, start, submit_results)
 # are in routers/testing.py under the /testing prefix.
+
+
+@router.get("/{request_id}/report/preview", response_class=None)
+def request_report_preview(request_id: UUID, db: Session = Depends(get_db)):
+    """HTML report for a test request — uses latest session if present, else TestResult directly."""
+    from fastapi.responses import HTMLResponse
+    from models import TestSession
+    from services.testing_request_html_service import TestingRequestHTMLService
+
+    req = db.query(__import__('models').TestingRequest).filter(
+        __import__('models').TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # Prefer session-based report (multi-session workflow)
+    session = (
+        db.query(TestSession)
+        .filter(TestSession.testing_request_id == request_id)
+        .order_by(TestSession.session_number.desc())
+        .first()
+    )
+    if session:
+        from routers.test_sessions import preview_session
+        return preview_session(request_id=request_id, session_id=session.id, db=db)
+
+    # Fallback: use service (historical / seeded records with no session)
+    html = TestingRequestHTMLService(db).generate_html(str(request_id))
+    return HTMLResponse(content=html)
+
+
+@router.get("/{request_id}/report/pdf")
+def request_report_pdf(request_id: UUID, db: Session = Depends(get_db)):
+    """PDF report for a test request — uses latest session if present, else TestResult directly."""
+    from fastapi.responses import Response
+    from models import TestSession, TestResult as TR
+
+    req = db.query(__import__('models').TestingRequest).filter(
+        __import__('models').TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # Prefer session-based PDF
+    session = (
+        db.query(TestSession)
+        .filter(TestSession.testing_request_id == request_id)
+        .order_by(TestSession.session_number.desc())
+        .first()
+    )
+    if session:
+        from routers.test_sessions import download_session_pdf
+        return download_session_pdf(request_id=request_id, session_id=session.id, db=db)
+
+    # Fallback: use the existing TestingRequestPDFService (now extended with test_data)
+    from fastapi.responses import Response
+    from services.testing_request_pdf_service import TestingRequestPDFService
+
+    req_num = getattr(req, "request_number", str(request_id))
+    buf = TestingRequestPDFService(db).generate_pdf(str(request_id))
+    safe_name = f"report_{req_num}.pdf".replace(" ", "_")
+    return Response(content=buf.read(), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{safe_name}"'})

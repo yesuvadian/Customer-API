@@ -269,6 +269,10 @@ class EvaluationService:
                     if _STATUS_RANK.get(col_status, 0) > _STATUS_RANK[agg_status]:
                         agg_status = col_status
 
+        # If no cells were evaluatable (all blank), treat the section as unentered
+        if not col_results and agg_result is None:
+            return None
+
         return {
             "key": key,
             "label": field.get("label", key),

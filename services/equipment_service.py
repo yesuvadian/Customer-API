@@ -2,6 +2,7 @@
 Equipment Asset Register Service
 Handles UEIC generation, CRUD, lifecycle management, and department-based querying.
 """
+import re
 from uuid import UUID
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -182,14 +183,21 @@ class EquipmentService:
             )
 
         substation = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
-        if not substation or not substation.code or len(substation.code) != 4:
+        if not substation:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Substation department '{getattr(substation, 'name', department_id)}' has invalid code '{getattr(substation, 'code', None)}' — must be exactly 4 characters. Update OrgDepartment.code before registering equipment.",
+                detail=f"Department '{department_id}' not found.",
             )
 
-        zone_code      = zone_dept.code.upper()
-        substation_code = substation.code.upper()
+        zone_code = zone_dept.code.upper()
+
+        if substation.code and len(substation.code) == 4:
+            substation_code = substation.code.upper()
+        else:
+            base = re.sub(r"^\d+\s*kV\s*", "", substation.name or "", flags=re.IGNORECASE).strip()
+            cleaned = re.sub(r"[^A-Za-z0-9 ]", "", base)
+            letters = re.sub(r"\s+", "", cleaned)
+            substation_code = (letters[:4]).upper().ljust(4, "X")
 
         type_code = cls.EQUIPMENT_TYPE_CODES.get(equipment_type_name, "XX")
 

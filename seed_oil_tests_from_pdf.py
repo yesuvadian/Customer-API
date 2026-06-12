@@ -492,6 +492,10 @@ def _oil_test_data(r: dict, eq=None) -> dict:
     # Inject context_bindings — not form fields so not covered by the field loop above
     test_data["transformer_voltage"] = eq_vc
 
+    # sub_station: from equipment's department (matches context_binding in template)
+    _dept_obj = getattr(eq, "department", None) if eq else None
+    test_data["sub_station"] = (getattr(_dept_obj, "name", None) or "").strip() or r.get("sub_station", "")
+
     # Recommendation wizard fields (mirrors RecommendationData.toFormData)
     dga_remarks = dga.get("remarks", "") or "Seeded from historical KPTCL report."
     test_data.update({
@@ -604,7 +608,8 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
             print(f"  [SKIP] Equipment {serial} not found in DB.")
             continue
 
-        dept = _resolve_dept(r.get("sub_station", ""))
+        # Prefer the equipment's own department; fall back to OCR sub_station text
+        dept = eq.department or _resolve_dept(r.get("sub_station", ""))
 
         # One request per report — transformer_oil_test template includes DGA section
         req_number = f"TR-HIST-{tested_at.strftime('%Y%m%d')}-{sample_no}-OIL"
