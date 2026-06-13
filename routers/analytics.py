@@ -47,6 +47,7 @@ from models import (
     TestResult,
     TestingRequest,
 )
+from services.condition_recommendation_service import evaluate_for_equipment
 from services.analytics_engine import AnalyticsEngine
 
 logger = logging.getLogger(__name__)
@@ -1018,3 +1019,19 @@ def _serialize_parameter_history_point(row: ParameterAnalytics, tr: Optional[Tes
             "testing_request": f"/testing-requests/{tr.testing_request_id}" if tr and tr.testing_request_id else None,
         },
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Condition Monitoring Recommendations — evaluate for one equipment
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/equipment/{equipment_id}/recommendations",
+    summary="Condition monitoring recommendations for one equipment based on health score",
+)
+def get_equipment_recommendations(
+    equipment_id: uuid.UUID,
+    db:   Session = Depends(get_vendor_db),
+    user: dict    = Depends(get_current_user),
+):
+    return evaluate_for_equipment(db, equipment_id)

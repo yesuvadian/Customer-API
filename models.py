@@ -4733,6 +4733,57 @@ class EquipmentTypeKitMapping(Base):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# CONDITION MONITORING RECOMMENDATIONS
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ConditionMonitoringRecommendation(Base):
+    """Score-band recommendation config: which test to schedule, how often, for what score range."""
+    __tablename__ = "condition_monitoring_recommendations"
+    __table_args__ = ({"schema": "public"},)
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id   = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id",   ondelete="CASCADE"),   nullable=True)
+    equipment_type_id = Column(Integer,             ForeignKey("public.CategoryMaster.id",  ondelete="CASCADE"),   nullable=False, index=True)
+    score_from        = Column(Numeric(5, 2), nullable=False)
+    score_to          = Column(Numeric(5, 2), nullable=False)
+    test_type_id      = Column(Integer,             ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"),   nullable=False)
+    frequency         = Column(Enum(ScheduleFrequency), nullable=False)
+    is_active         = Column(Boolean, default=True,  nullable=False)
+    display_order     = Column(Integer, default=0,     nullable=False)
+    created_by        = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    cts               = Column(DateTime(timezone=True), server_default=func.now())
+    mts               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment_type = relationship("CategoryMaster",  foreign_keys=[equipment_type_id])
+    test_type      = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    organization   = relationship("Organization",    foreign_keys=[organization_id])
+
+
+class ConditionRecommendationActivation(Base):
+    """Tracks which recommendations have been activated (schedule created) per equipment."""
+    __tablename__ = "condition_recommendation_activations"
+    __table_args__ = (
+        UniqueConstraint("recommendation_id", "equipment_id", name="uq_rec_activation"),
+        {"schema": "public"},
+    )
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    recommendation_id = Column(UUID(as_uuid=True), ForeignKey("public.condition_monitoring_recommendations.id", ondelete="CASCADE"),  nullable=False, index=True)
+    equipment_id      = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",                           ondelete="CASCADE"),  nullable=False, index=True)
+    schedule_id       = Column(UUID(as_uuid=True), ForeignKey("public.test_request_schedules.id",              ondelete="SET NULL"), nullable=True)
+    status            = Column(String(20), default="recommended", nullable=False)
+    activated_by      = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    activated_at      = Column(DateTime(timezone=True), nullable=True)
+    organization_id   = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=True)
+    cts               = Column(DateTime(timezone=True), server_default=func.now())
+    mts               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    recommendation = relationship("ConditionMonitoringRecommendation", foreign_keys=[recommendation_id])
+    schedule       = relationship("TestRequestSchedule",               foreign_keys=[schedule_id])
+    equipment      = relationship("Equipment",                         foreign_keys=[equipment_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # NOTIFICATION ENGINE - EVENT QUEUE
 # ═══════════════════════════════════════════════════════════════════════════
 
