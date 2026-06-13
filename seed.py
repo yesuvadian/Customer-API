@@ -9678,26 +9678,31 @@ def _seed_notification_templates(session) -> int:
 
     _tmpl("tester_assigned",
         _e(
-            "Test Request Assigned to You — {{request.number}}",
-            "<h3>You Have Been Assigned a Test Request</h3>"
-            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Assigned To</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.assigned_to}}</td></tr>"
+            "Testing Assignment: {request_number}",
+            "<h2 style='color:#1E3C72;margin-bottom:4px;'>Testing Request Assigned to You</h2>"
+            "<p style='color:#555;margin-top:0;'>Hi {tester_name}, you have been assigned to carry out a field test.</p>"
+            "<table width='100%' cellpadding='0' cellspacing='0' style='border-collapse:collapse;font-size:13px;margin-bottom:16px;'>"
+            "<tr><td style='padding:8px 0;color:#888;width:160px;'>Request Number</td><td style='padding:8px 0;font-weight:600;color:#0F172A;'>{request_number}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Equipment</td><td style='padding:8px 0;font-weight:600;color:#0F172A;'>{equipment}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Equipment Type</td><td style='padding:8px 0;color:#0F172A;'>{equipment.type}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Station</td><td style='padding:8px 0;color:#0F172A;'>{dept.name}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Test Type</td><td style='padding:8px 0;color:#0F172A;'>{tr.test_type}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Priority</td><td style='padding:8px 0;color:#0F172A;'>{request.priority}</td></tr>"
             "</table>"
-            "<p>Please log in to SEACMS to accept or decline this assignment.</p>",
-            ["Test Engineer", "Maintenance Officer"],
+            "{kit_availability_html}"
+            "<p style='margin-top:20px;'>Please log in to the SEACMS app to acknowledge and begin testing. "
+            "Collect any required kits before proceeding to the site.</p>",
+            ["@assignee", "Test Engineer", "Maintenance Officer"],
         ),
         _s(
             "[KPTCL-SEACMS] You are assigned test req {{request.number}}"
             " for {{equipment.ueic}}. Due: {{request.due_date}}. Login SEACMS.",
-            ["Test Engineer"],
+            ["@assignee", "Test Engineer"],
         ),
         _i(
             "Assigned — {{request.number}}",
             "You have been assigned {{request.number}} for {{equipment.ueic}}. Due: {{request.due_date}}.",
-            ["Test Engineer", "Maintenance Officer"],
+            ["@assignee", "Test Engineer", "Maintenance Officer"],
         ),
     )
 
@@ -11873,6 +11878,24 @@ def run_seed():
             print(f"[OK] Renamed {renamed} duplicate templates")
         except Exception as _e:
             print(f"[WARN] Template renaming failed (non-fatal): {_e}")
+
+        # ── Testing Kit module ────────────────────────────────────────────────
+        print("\n--- Testing Kit Module Seeding ---")
+        try:
+            from seed_testing_kit import (
+                ensure_table,
+                run as seed_testing_kit_run,
+                seed_module_and_privileges,
+                update_tester_assigned_email_template,
+            )
+            ensure_table()
+            seed_testing_kit_run(session)
+            seed_module_and_privileges()
+            update_tester_assigned_email_template()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Testing kit seed failed (non-fatal): {_e}")
+            traceback.print_exc()
 
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")

@@ -4707,6 +4707,32 @@ class HierarchyAnalytics(Base):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# TESTING KIT MAPPING
+# ═══════════════════════════════════════════════════════════════════════════
+
+class EquipmentTypeKitMapping(Base):
+    """Maps which testing kit types are required/optional for each equipment type."""
+    __tablename__ = "equipment_type_kit_mappings"
+    __table_args__ = (
+        UniqueConstraint("equipment_type_id", "kit_type_id", name="uq_eq_type_kit_type"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
+    kit_type_id       = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"), nullable=False)
+    is_required       = Column(Boolean, default=True)   # True = required, False = optional/recommended
+    notes             = Column(Text, nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment_type = relationship("CategoryMaster",  foreign_keys=[equipment_type_id])
+    kit_type       = relationship("CategoryDetails", foreign_keys=[kit_type_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # NOTIFICATION ENGINE - EVENT QUEUE
 # ═══════════════════════════════════════════════════════════════════════════
 

@@ -102,6 +102,7 @@ from routers import organizations, org_departments, org_users, org_roles
 
 # Equipment Asset Register
 from routers import equipment
+from routers import equipment_type_kit_mappings
 
 # Notification & Alert Engine
 from routers import notifications as notifications_router
@@ -1015,6 +1016,7 @@ app.include_router(precommission_router.router)  # Pre-Commission QAP
 
 # Equipment Asset Register
 app.include_router(equipment.router)
+app.include_router(equipment_type_kit_mappings.router)
 
 # Notification & Alert Engine
 app.include_router(notifications_router.router)

@@ -42,13 +42,13 @@ from typing import List, Optional
 from uuid import UUID
 from fastapi.responses import JSONResponse
 from fastapi import Response
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
 from auth_utils import get_current_user
-from models import Equipment, Module, User
+from models import CategoryMaster, Equipment, EquipmentTypeKitMapping, Module, OrgDepartment, User
 from middleware.org_auth import check_org_permission
 from schemas import (
     EquipmentCreate,
@@ -792,6 +792,99 @@ def get_zones(
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
     return _get_departments_at_depth(db, org_id, depth=0)
+
+
+# ── Testing Kits availability ─────────────────────────────────────────────────
+@router.get("/testing-kits")
+def get_testing_kits(
+    org_id: UUID = Query(..., description="Organization ID"),
+    department_id: Optional[UUID] = Query(None, description="Station dept to check first"),
+    equipment_type_id: Optional[int] = Query(None, description="Filter kits required for this equipment type"),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Return testing kits (equipment with type 'Testing Kit') available at a station.
+    If department_id is provided, kits are grouped as:
+      - at_station  : kits whose department_id matches exactly
+      - nearby      : kits in parent/sibling departments (one level up)
+    If equipment_type_id is provided, only kits mapped to that type are returned.
+    """
+    # Resolve the "Testing Kit" CategoryMaster
+    kit_master = db.query(CategoryMaster).filter(
+        CategoryMaster.name == "Testing Kit",
+        CategoryMaster.is_active == True,
+    ).first()
+    if not kit_master:
+        return {"at_station": [], "nearby": [], "all": []}
+
+    # If filtering by equipment type, get the required kit sub-type ids
+    required_kit_type_ids: Optional[list] = None
+    if equipment_type_id:
+        mappings = db.query(EquipmentTypeKitMapping).filter(
+            EquipmentTypeKitMapping.equipment_type_id == equipment_type_id,
+        ).all()
+        required_kit_type_ids = [m.kit_type_id for m in mappings]
+        if not required_kit_type_ids:
+            return {"at_station": [], "nearby": [], "required_mappings": []}
+
+    def _kit_row(eq: Equipment, location_label: str) -> dict:
+        return {
+            "id": str(eq.id),
+            "ueic": eq.ueic,
+            "kit_type": eq.equipment_type.name if eq.equipment_type else "Testing Kit",
+            "manufacturer": eq.manufacturer,
+            "model_number": eq.model_number,
+            "factory_serial_number": eq.factory_serial_number,
+            "status": eq.status.value if eq.status else "active",
+            "department_id": str(eq.department_id),
+            "department_name": eq.department.name if eq.department else "",
+            "location_label": location_label,
+            "nameplate_data": eq.nameplate_data or {},
+        }
+
+    def _query_kits(dept_ids: list) -> list:
+        q = db.query(Equipment).filter(
+            Equipment.organization_id == org_id,
+            Equipment.equipment_type_id == kit_master.id,
+            Equipment.status == "active",
+            Equipment.department_id.in_(dept_ids),
+        )
+        if required_kit_type_ids:
+            # Filter to kits whose sub-type matches the required mappings
+            # kit sub-type is stored as nameplate_data['kit_type_id'] or matched by equipment_type detail
+            q = q.join(CategoryMaster, Equipment.equipment_type_id == CategoryMaster.id)
+        return q.all()
+
+    if not department_id:
+        # Return all kits org-wide
+        all_kits = db.query(Equipment).filter(
+            Equipment.organization_id == org_id,
+            Equipment.equipment_type_id == kit_master.id,
+            Equipment.status == "active",
+        ).all()
+        return {"all": [_kit_row(k, k.department.name if k.department else "") for k in all_kits]}
+
+    # At-station kits
+    at_station = _query_kits([department_id])
+
+    # Nearby: find parent department and its direct children (siblings)
+    dept = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
+    nearby_dept_ids = []
+    if dept and dept.parent_department_id:
+        siblings = db.query(OrgDepartment).filter(
+            OrgDepartment.parent_department_id == dept.parent_department_id,
+            OrgDepartment.id != department_id,
+            OrgDepartment.is_active == True,
+        ).all()
+        nearby_dept_ids = [dept.parent_department_id] + [s.id for s in siblings]
+
+    nearby = _query_kits(nearby_dept_ids) if nearby_dept_ids else []
+
+    return {
+        "at_station": [_kit_row(k, "at_station") for k in at_station],
+        "nearby": [_kit_row(k, k.department.name if k.department else "") for k in nearby],
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

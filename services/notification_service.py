@@ -728,6 +728,84 @@ def _resolve_recipients_by_roles(
     return users
 
 
+# ── Kit availability HTML renderer ────────────────────────────────────────────
+
+def _build_kit_html(kit_data: dict) -> str:
+    """
+    Convert _build_kit_availability() output into an HTML fragment suitable
+    for embedding in the tester-assigned email body.
+    Returns an empty string when no kit requirements exist.
+    """
+    kits = kit_data.get("required_kits", [])
+    if not kits:
+        return ""
+
+    rows = ""
+    for k in kits:
+        kit_type    = k.get("kit_type", "")
+        is_required = k.get("is_required", True)
+        at_station  = k.get("available_at_station", False)
+        count       = k.get("count_at_station", 0)
+        nearest     = k.get("nearest_location")
+
+        if at_station:
+            avail_cell = (
+                f'<span style="color:#16A34A;font-weight:600;">&#10003; Available at station</span>'
+                f'<br/><span style="color:#555;font-size:12px;">{count} unit(s) at your station</span>'
+            )
+        elif nearest:
+            avail_cell = (
+                f'<span style="color:#D97706;font-weight:600;">&#9888; Not at station</span>'
+                f'<br/><span style="color:#555;font-size:12px;">Nearest: {nearest}</span>'
+            )
+        else:
+            avail_cell = (
+                '<span style="color:#DC2626;font-weight:600;">&#10007; Not available nearby</span>'
+            )
+
+        req_badge = (
+            '<span style="background:#EFF4FF;color:#1A56DB;padding:2px 8px;'
+            'border-radius:10px;font-size:11px;font-weight:600;">Required</span>'
+            if is_required else
+            '<span style="background:#F1F5F9;color:#64748B;padding:2px 8px;'
+            'border-radius:10px;font-size:11px;">Optional</span>'
+        )
+
+        rows += (
+            "<tr>"
+            f'<td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;">'
+            f"{kit_type}</td>"
+            f'<td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;text-align:center;">'
+            f"{req_badge}</td>"
+            f'<td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;">'
+            f"{avail_cell}</td>"
+            "</tr>"
+        )
+
+    return (
+        '<h3 style="margin:24px 0 10px;font-size:15px;color:#1E3C72;">'
+        "Testing Kit Availability</h3>"
+        '<table width="100%" cellpadding="0" cellspacing="0" '
+        'style="border-collapse:collapse;font-size:13px;'
+        'border:1px solid #DDE3EE;border-radius:6px;overflow:hidden;">'
+        "<thead>"
+        "<tr>"
+        '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
+        'text-align:left;font-weight:600;">Kit Type</th>'
+        '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
+        'text-align:center;font-weight:600;">Requirement</th>'
+        '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
+        'text-align:left;font-weight:600;">Availability</th>'
+        "</tr>"
+        "</thead>"
+        f"<tbody>{rows}</tbody>"
+        "</table>"
+        '<p style="margin:8px 0 0;font-size:12px;color:#888;">'
+        "Availability shown as of notification time. "
+        "Check the app for real-time status before heading to the site.</p>"
+    )
+
+
 # ── Full HTML email wrapper ───────────────────────────────────────────────────
 
 def _wrap_email_html(body_content: str, subject: str = "", org_name: str = "SEACMS") -> str:
@@ -1808,6 +1886,7 @@ class NotificationService:
         activity_type: Optional[str] = None,    # specific test name, e.g. "Short Circuit Test HV-IV"
         status_from: Optional[str] = None,      # e.g. "submitted"
         status_to: Optional[str] = None,        # e.g. "under_review"
+        extra_data: Optional[dict] = None,      # arbitrary structured payload (e.g. kit availability)
     ) -> None:
         """
         Resolve routing rules + templates for event_type, resolve recipients by
@@ -2013,6 +2092,7 @@ class NotificationService:
                         source_id=source_id, source_type=source_type, severity=severity,
                         org_name=_org_name,
                         resolved_ctx=user_ctx,
+                        extra_data=extra_data,
                     )
 
                 # If inapp channel: mark batch log sent right away
@@ -2319,12 +2399,33 @@ class NotificationService:
             request.equipment.ueic if request.equipment else
             (request.equipment_type.name if request.equipment_type else "Equipment")
         )
+        kit_data = self._build_kit_availability(request)
+        tester_name = ""
+        if request.assigned_tester:
+            tester_name = (
+                f"{request.assigned_tester.firstname or ''} "
+                f"{request.assigned_tester.lastname or ''}".strip()
+                or request.assigned_tester.email or ""
+            )
+        # Resolve test type display name: prefer CategoryDetails.name via relationship,
+        # fall back to request_category enum value so the template never shows raw {tr.test_type}.
+        _tt_rel = getattr(request, "test_type", None)
+        if _tt_rel and getattr(_tt_rel, "name", None):
+            _test_type_label = _tt_rel.name
+        else:
+            _rc = getattr(request, "request_category", None)
+            _test_type_label = (_rc.value if hasattr(_rc, "value") else str(_rc or "")).capitalize()
         self.fire(
             event_type="tester_assigned",
             context={
                 "equipment": equipment_label,
                 "request_number": getattr(request, "request_number", ""),
                 "tester": request.assigned_tester.email if request.assigned_tester else "",
+                "tester_name": tester_name,
+                "kit_availability_html": _build_kit_html(kit_data),
+                # Explicit fallbacks so templates render even when test_type_id is unset
+                "tr.test_type":    _test_type_label,
+                "equipment.type":  self._equipment_type(request) or "",
             },
             organization_id=getattr(request, "organization_id", None),
             department_id=self._dept(request),
@@ -2335,7 +2436,85 @@ class NotificationService:
             equipment_type=self._equipment_type(request),
             test_type=self._test_type(request),
             status_to="assigned",
+            extra_data=self._build_kit_availability(request),
         )
+
+    def _build_kit_availability(self, request) -> dict:
+        """Build kit availability data for tester assignment notification."""
+        try:
+            from models import CategoryMaster, Equipment, EquipmentTypeKitMapping, OrgDepartment
+            from sqlalchemy import and_
+
+            kit_master = self.db.query(CategoryMaster).filter(
+                CategoryMaster.name == "Testing Kit",
+                CategoryMaster.is_active == True,
+            ).first()
+            if not kit_master:
+                return {}
+
+            eq_type_id = getattr(request.equipment_type, "id", None) if request.equipment_type else None
+            dept_id = self._dept(request)
+
+            # Required kit types for this equipment type
+            mappings = []
+            if eq_type_id:
+                mappings = self.db.query(EquipmentTypeKitMapping).filter(
+                    EquipmentTypeKitMapping.equipment_type_id == eq_type_id,
+                ).all()
+
+            if not mappings:
+                return {}
+
+            # Gather sibling/parent dept ids for nearby lookup
+            nearby_dept_ids = []
+            if dept_id:
+                dept = self.db.query(OrgDepartment).filter(OrgDepartment.id == dept_id).first()
+                if dept and dept.parent_department_id:
+                    siblings = self.db.query(OrgDepartment).filter(
+                        OrgDepartment.parent_department_id == dept.parent_department_id,
+                        OrgDepartment.id != dept_id,
+                        OrgDepartment.is_active == True,
+                    ).all()
+                    nearby_dept_ids = [str(dept.parent_department_id)] + [str(s.id) for s in siblings]
+
+            kit_availability = []
+            for m in mappings:
+                kit_type = m.kit_type
+                kit_type_name = kit_type.name if kit_type else f"Kit #{m.kit_type_id}"
+
+                # Check at station
+                at_station = []
+                if dept_id:
+                    at_station = self.db.query(Equipment).filter(
+                        Equipment.equipment_type_id == kit_master.id,
+                        Equipment.department_id == dept_id,
+                        Equipment.status == "active",
+                    ).all()
+
+                # Check nearby
+                nearest_location = None
+                if not at_station and nearby_dept_ids:
+                    from uuid import UUID as _UUID
+                    nearby_kits = self.db.query(Equipment).filter(
+                        Equipment.equipment_type_id == kit_master.id,
+                        Equipment.department_id.in_([_UUID(d) for d in nearby_dept_ids]),
+                        Equipment.status == "active",
+                    ).first()
+                    if nearby_kits and nearby_kits.department:
+                        nearest_location = nearby_kits.department.name
+
+                kit_availability.append({
+                    "kit_type": kit_type_name,
+                    "is_required": m.is_required,
+                    "available_at_station": len(at_station) > 0,
+                    "count_at_station": len(at_station),
+                    "nearest_location": nearest_location,
+                })
+
+            return {"required_kits": kit_availability}
+        except Exception as e:
+            logger.warning(f"[kit_availability] Failed to build kit data: {e}")
+            return {}
 
     def notify_test_submitted(self, request) -> None:
         """Triggered when tester submits test results."""
@@ -3117,6 +3296,7 @@ class NotificationService:
         severity: Optional[str],
         org_name: str = "SEACMS",
         resolved_ctx: Optional[Dict[str, Any]] = None,
+        extra_data: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Create a NotificationLogRecipient row under batch_log for one user.
@@ -3182,6 +3362,8 @@ class NotificationService:
             if source_type == "report_definition":
                 _extra = {k: v for k, v in _ctx.items()
                           if k in ("download_url", "format", "report_name", "report_period")}
+            if extra_data:
+                _extra = {**(_extra or {}), **extra_data}
             _create_inapp(
                 db=self.db,
                 user_id=user.id,
