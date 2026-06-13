@@ -46,6 +46,41 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     return result
 
 
+@router.get("/me")
+def get_me(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return fresh user profile including department_id (no re-login needed)."""
+    from models import OrgUserRole
+    roles = db.query(OrgUserRole).filter(
+        OrgUserRole.user_id == current_user.id,
+        OrgUserRole.is_active == True,
+    ).all()
+    role_names = [r.org_role.name for r in roles if r.org_role]
+    primary_dept_id = None
+    if roles:
+        primary_dept_id = roles[0].department_id
+    if primary_dept_id is None and getattr(current_user, 'department_id', None):
+        primary_dept_id = current_user.department_id
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "firstname": current_user.firstname,
+        "lastname": current_user.lastname,
+        "phone_number": current_user.phone_number,
+        "is_active": current_user.isactive,
+        "email_confirmed": current_user.email_confirmed,
+        "phone_confirmed": current_user.phone_confirmed,
+        "usertype": current_user.usertype,
+        "organization_id": str(current_user.organization_id) if current_user.organization_id else None,
+        "department_id": str(primary_dept_id) if primary_dept_id else None,
+        "roles": role_names,
+        "cts": current_user.cts,
+        "mts": current_user.mts,
+    }
+
+
 @router.get("/privileges")
 def get_privileges(
     db: Session = Depends(get_db),

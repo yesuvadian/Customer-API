@@ -326,10 +326,12 @@ def login_user(db: Session, email: str, password: str):
         # Step 8: Build privileges
         filtered_privileges = build_user_privileges(db, user.id)
 
-        # Step 9: Primary department
+        # Step 9: Primary department — prefer role-assignment dept, fall back to user record
         primary_department_id = None
         if org_user_roles:
             primary_department_id = org_user_roles[0].department_id
+        if primary_department_id is None and getattr(user, 'department_id', None):
+            primary_department_id = user.department_id
 
         # Step 10: Plan info
         plan = None
