@@ -8,7 +8,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from sqlalchemy.orm import Session, joinedload
 
-from models import TestingRequest, TestResult, User
+from models import TestingRequest, TestResult, User, OrgDepartment
 
 
 class TestingRequestPDFService:
@@ -63,6 +63,66 @@ class TestingRequestPDFService:
 
         # Title
         story.append(Paragraph("Testing Request Form", title_style))
+        story.append(Spacer(1, 0.1*inch))
+
+        # Equipment Nameplate Header
+        eq = testing_request.equipment
+        np_data = (eq.nameplate_data or {}) if eq else {}
+        capacity = (
+            np_data.get('rated_mva') or np_data.get('capacity_mva') or
+            np_data.get('mva_rating') or np_data.get('capacity') or ''
+        )
+        if capacity and 'MVA' not in str(capacity).upper() and 'KVA' not in str(capacity).upper():
+            capacity = str(capacity) + ' MVA'
+        station = (testing_request.department.name if testing_request.department else '') or '-'
+        serial  = (eq.factory_serial_number if eq else '') or '-'
+        make    = (eq.manufacturer if eq else '') or '-'
+        yom     = str(eq.year_of_manufacture) if eq and eq.year_of_manufacture else '-'
+        voltage = (eq.voltage_class if eq else '') or '-'
+        doc_date = '-'
+        if eq and eq.commissioned_date:
+            doc_date = eq.commissioned_date.strftime('%d-%b-%y')
+        capacity_str = str(capacity) if capacity else '-'
+
+        ssmd = zone = '-'
+        if testing_request.department and testing_request.department.parent_department_id:
+            _parent = self.db.query(OrgDepartment).filter(
+                OrgDepartment.id == testing_request.department.parent_department_id).first()
+            if _parent:
+                ssmd = _parent.name or '-'
+                if _parent.parent_department_id:
+                    _gp = self.db.query(OrgDepartment).filter(
+                        OrgDepartment.id == _parent.parent_department_id).first()
+                    zone = (_gp.name if _gp else '-') or '-'
+
+        np_table_data = [
+            ['Name Of Station', station,     'Capacity',      capacity_str, 'Serial Number', serial],
+            ['SSMD',           ssmd,         'Voltage Class', voltage,      'Date Of Commission', doc_date],
+            ['Zone',           zone,         'Make',          make,         'YOM',           yom],
+        ]
+        col_w = [1.0*inch, 1.4*inch, 1.0*inch, 1.0*inch, 1.3*inch, 0.8*inch]
+        np_tbl = Table(np_table_data, colWidths=col_w)
+        np_tbl.setStyle(TableStyle([
+            ('FONTNAME',   (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME',   (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME',   (2, 0), (2, -1), 'Helvetica-Bold'),
+            ('FONTNAME',   (4, 0), (4, -1), 'Helvetica-Bold'),
+            ('FONTSIZE',   (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#dde6f5')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#dde6f5')),
+            ('BACKGROUND', (4, 0), (4, -1), colors.HexColor('#dde6f5')),
+            ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#f0f4ff')),
+            ('BACKGROUND', (3, 0), (3, -1), colors.HexColor('#f0f4ff')),
+            ('BACKGROUND', (5, 0), (5, -1), colors.HexColor('#f0f4ff')),
+            ('GRID',       (0, 0), (-1, -1), 0.5, colors.HexColor('#c5d3f0')),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('TEXTCOLOR',  (0, 0), (0, -1), colors.HexColor('#1b3a6b')),
+            ('TEXTCOLOR',  (2, 0), (2, -1), colors.HexColor('#1b3a6b')),
+            ('TEXTCOLOR',  (4, 0), (4, -1), colors.HexColor('#1b3a6b')),
+        ]))
+        story.append(np_tbl)
         story.append(Spacer(1, 0.2*inch))
 
         # Document Info Table
