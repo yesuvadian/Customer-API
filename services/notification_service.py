@@ -121,17 +121,68 @@ def _enrich_context_from_source(
                     ctx.setdefault("eval.test_type",   cat.name or "")
                     ctx.setdefault("tr.test_type",     cat.name or "")
                     ctx.setdefault("tr.category_type", cat.category_type or "")
+            # Equipment (asset register) context — load first so type fallback is available
+            _resolved_eq_type_id = tr.equipment_type_id   # may be None for schedule-created TRs
+            if tr.equipment_id:
+                from models import Equipment as _EqModel
+                from sqlalchemy.orm import joinedload as _jl
+                eq = (
+                    db.query(_EqModel)
+                    .options(_jl(_EqModel.department))
+                    .filter(_EqModel.id == tr.equipment_id)
+                    .first()
+                )
+                if eq:
+                    ctx.setdefault("equipment.ueic", getattr(eq, "ueic", "") or "")
+                    ctx.setdefault("equipment.name", getattr(eq, "name", "") or "")
+                    _eq_dept = getattr(eq, "department", None)
+                    if _eq_dept:
+                        ctx.setdefault("equipment.department", _eq_dept.name or "")
+                    # Fall back to equipment's own type when TR doesn't carry it
+                    if not _resolved_eq_type_id and getattr(eq, "equipment_type_id", None):
+                        _resolved_eq_type_id = eq.equipment_type_id
+                # Performance + last execution — set both flat key (for alias cache)
+                # and dot key directly (alias resolution runs before this enrichment)
+                _perf = _build_performance_html(db, tr.equipment_id)
+                _last = _build_last_execution_html(db, tr.equipment_id)
+                ctx.setdefault("performance_table_html", _perf)
+                ctx.setdefault("table.performance",      _perf)
+                ctx.setdefault("last_execution_html",    _last)
+                ctx.setdefault("report.lastexecution",   _last)
+                # Store last TestResult ID so attachment_vars can attach its PDF
+                try:
+                    from models import TestResult as _TestRes
+                    _last_res = (
+                        db.query(_TestRes)
+                        .join(TestingRequest, _TestRes.testing_request_id == TestingRequest.id)
+                        .filter(TestingRequest.equipment_id == tr.equipment_id)
+                        .order_by(_TestRes.cts.desc())
+                        .first()
+                    )
+                    if _last_res:
+                        ctx.setdefault("report.lastexecution.test_result_id", str(_last_res.id))
+                except Exception:
+                    pass
             # CategoryMaster → equipment type display name (e.g. "Power Transformer")
-            if tr.equipment_type_id:
+            if _resolved_eq_type_id:
                 eq_type = db.query(CategoryMaster).filter(
-                    CategoryMaster.id == tr.equipment_type_id
+                    CategoryMaster.id == _resolved_eq_type_id
                 ).first()
                 if eq_type:
                     ctx.setdefault("equipment.type", eq_type.name or "")
-            # Department context from TR
-            if tr.department_id:
+            # Department context — TR dept first, fall back to equipment's dept
+            _resolved_dept_id = tr.department_id
+            if not _resolved_dept_id and tr.equipment_id:
+                try:
+                    from models import Equipment as _EqDept
+                    _edq = db.query(_EqDept).filter(_EqDept.id == tr.equipment_id).first()
+                    if _edq:
+                        _resolved_dept_id = getattr(_edq, "department_id", None)
+                except Exception:
+                    pass
+            if _resolved_dept_id:
                 dept = db.query(OrgDepartment).filter(
-                    OrgDepartment.id == tr.department_id
+                    OrgDepartment.id == _resolved_dept_id
                 ).first()
                 if dept:
                     ctx.setdefault("dept.name", dept.name or "")
@@ -148,23 +199,28 @@ def _enrich_context_from_source(
                     ctx.setdefault("request.submitted_by", _orig_name)
                     ctx.setdefault("originator",           _orig_name)
                     ctx.setdefault("originator.email",     orig.email or "")
-            # Equipment (asset register) context
-            if tr.equipment_id:
-                from models import Equipment as _EqModel
-                from sqlalchemy.orm import joinedload as _jl
-                eq = (
-                    db.query(_EqModel)
-                    .options(_jl(_EqModel.department))
-                    .filter(_EqModel.id == tr.equipment_id)
-                    .first()
-                )
-                if eq:
-                    ctx.setdefault("equipment.ueic", getattr(eq, "ueic", "") or "")
-                    ctx.setdefault("equipment.name", getattr(eq, "name", "") or "")
-                    # Use the already-loaded relationship — avoids a second query
-                    _eq_dept = getattr(eq, "department", None)
-                    if _eq_dept:
-                        ctx.setdefault("equipment.department", _eq_dept.name or "")
+            # Assigned tester — needed for {tester_name} and dot-notation aliases
+            if tr.assigned_tester_id:
+                from models import User as _User5
+                _at = db.query(_User5).filter(_User5.id == tr.assigned_tester_id).first()
+                if _at:
+                    _atname = (
+                        f"{_at.firstname or ''} {_at.lastname or ''}".strip()
+                        or _at.email or ""
+                    )
+                    ctx.setdefault("tester_name",         _atname)
+                    ctx.setdefault("request.assigned_to", _atname)
+                    ctx.setdefault("tester.name",         _atname)
+                    ctx.setdefault("tester.email",        _at.email or "")
+            # Kit availability — flat key for alias cache AND dot key for direct resolution
+            _kit_data = _build_kit_data(db, _resolved_eq_type_id, _resolved_dept_id)
+            _kit_html  = _build_kit_html(_kit_data)
+            ctx.setdefault("kit_availability_html", _kit_html)
+            ctx.setdefault("table.testkit",         _kit_html)
+            # Legacy flat-key compat for templates that use {request_number} / {equipment}
+            ctx.setdefault("request_number", tr.request_number or str(tr.id)[:8])
+            ctx.setdefault("equipment",
+                           ctx.get("equipment.ueic") or ctx.get("equipment.name") or "")
 
         elif source_type == "test_result":
             from models import TestResult, TestingRequest, OrgDepartment, CategoryDetails, CategoryMaster
@@ -249,6 +305,13 @@ def _enrich_context_from_source(
                             _eq2_dept = getattr(eq2, "department", None)
                             if _eq2_dept:
                                 ctx.setdefault("equipment.department", _eq2_dept.name or "")
+                        # Performance + last execution — dot keys set directly (post-alias timing)
+                        _perf2 = _build_performance_html(db, tr.equipment_id)
+                        _last2 = _build_last_execution_html(db, tr.equipment_id)
+                        ctx.setdefault("performance_table_html", _perf2)
+                        ctx.setdefault("table.performance",      _perf2)
+                        ctx.setdefault("last_execution_html",    _last2)
+                        ctx.setdefault("report.lastexecution",   _last2)
 
         elif source_type == "equipment":
             from models import Equipment, OrgDepartment, CategoryMaster
@@ -273,6 +336,13 @@ def _enrich_context_from_source(
                         ctx.setdefault("dept.name",            dept.name or "")
                         ctx.setdefault("dept.code",            dept.code or "")
                         ctx.setdefault("department",           dept.name or "")
+                # Performance + last execution — dot keys set directly (post-alias timing)
+                _perf3 = _build_performance_html(db, source_id)
+                _last3 = _build_last_execution_html(db, source_id)
+                ctx.setdefault("performance_table_html", _perf3)
+                ctx.setdefault("table.performance",      _perf3)
+                ctx.setdefault("last_execution_html",    _last3)
+                ctx.setdefault("report.lastexecution",   _last3)
 
         elif source_type == "recommendation":
             from models import Recommendation
@@ -732,8 +802,8 @@ def _resolve_recipients_by_roles(
 
 def _build_kit_html(kit_data: dict) -> str:
     """
-    Convert _build_kit_availability() output into an HTML fragment suitable
-    for embedding in the tester-assigned email body.
+    Convert _build_kit_availability() output into a 2-column HTML table:
+    Kit Type | Availability (with full ancestor list when not at station).
     Returns an empty string when no kit requirements exist.
     """
     kits = kit_data.get("required_kits", [])
@@ -742,42 +812,37 @@ def _build_kit_html(kit_data: dict) -> str:
 
     rows = ""
     for k in kits:
-        kit_type    = k.get("kit_type", "")
-        is_required = k.get("is_required", True)
-        at_station  = k.get("available_at_station", False)
-        count       = k.get("count_at_station", 0)
-        nearest     = k.get("nearest_location")
+        kit_type       = k.get("kit_type", "")
+        at_station     = k.get("available_at_station", False)
+        count          = k.get("count_at_station", 0)
+        avail_at_depts: list = k.get("available_at_depts", [])
 
         if at_station:
             avail_cell = (
                 f'<span style="color:#16A34A;font-weight:600;">&#10003; Available at station</span>'
                 f'<br/><span style="color:#555;font-size:12px;">{count} unit(s) at your station</span>'
             )
-        elif nearest:
+        elif avail_at_depts:
+            dept_lines = "".join(
+                f'<span style="display:inline-block;margin:1px 0;color:#555;font-size:11px;">'
+                f'&#8627; {d}</span><br/>'
+                for d in avail_at_depts
+            )
             avail_cell = (
-                f'<span style="color:#D97706;font-weight:600;">&#9888; Not at station</span>'
-                f'<br/><span style="color:#555;font-size:12px;">Nearest: {nearest}</span>'
+                '<span style="color:#D97706;font-weight:600;">&#9888; Not at station</span>'
+                f'<br/><span style="color:#555;font-size:11px;">Available at:</span><br/>'
+                f'{dept_lines}'
             )
         else:
             avail_cell = (
-                '<span style="color:#DC2626;font-weight:600;">&#10007; Not available nearby</span>'
+                '<span style="color:#DC2626;font-weight:600;">&#10007; Not available in hierarchy</span>'
             )
-
-        req_badge = (
-            '<span style="background:#EFF4FF;color:#1A56DB;padding:2px 8px;'
-            'border-radius:10px;font-size:11px;font-weight:600;">Required</span>'
-            if is_required else
-            '<span style="background:#F1F5F9;color:#64748B;padding:2px 8px;'
-            'border-radius:10px;font-size:11px;">Optional</span>'
-        )
 
         rows += (
             "<tr>"
-            f'<td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;">'
+            f'<td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;vertical-align:top;">'
             f"{kit_type}</td>"
-            f'<td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;text-align:center;">'
-            f"{req_badge}</td>"
-            f'<td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;">'
+            f'<td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;vertical-align:top;">'
             f"{avail_cell}</td>"
             "</tr>"
         )
@@ -793,8 +858,6 @@ def _build_kit_html(kit_data: dict) -> str:
         '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
         'text-align:left;font-weight:600;">Kit Type</th>'
         '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
-        'text-align:center;font-weight:600;">Requirement</th>'
-        '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
         'text-align:left;font-weight:600;">Availability</th>'
         "</tr>"
         "</thead>"
@@ -804,6 +867,178 @@ def _build_kit_html(kit_data: dict) -> str:
         "Availability shown as of notification time. "
         "Check the app for real-time status before heading to the site.</p>"
     )
+
+
+def _build_performance_html(db: Session, equipment_id) -> str:
+    """HTML table of EquipmentAnalytics scores for {{table.performance}}."""
+    try:
+        from models import EquipmentAnalytics
+        ea = db.query(EquipmentAnalytics).filter(
+            EquipmentAnalytics.equipment_id == equipment_id
+        ).first()
+        if not ea or ea.health_score is None:
+            return ""
+        score    = f"{float(ea.health_score):.1f}"
+        risk     = ea.risk_level or "—"
+        cond     = ea.condition_summary or "—"
+        assessed = str(ea.test_types_assessed or 0)
+        last_test = str(ea.last_test_date)[:10] if ea.last_test_date else "—"
+        calc_at   = str(ea.calculated_at)[:10] if ea.calculated_at else "—"
+        rows_html = "".join(
+            f'<tr><td style="padding:6px 12px;border-bottom:1px solid #EEF2F7;">'
+            f"<b>{lbl}</b></td>"
+            f'<td style="padding:6px 12px;border-bottom:1px solid #EEF2F7;">{val}</td></tr>'
+            for lbl, val in [
+                ("Health Score",      f"{score} / 100"),
+                ("Risk Level",        risk),
+                ("Condition",         cond),
+                ("Tests Assessed",    assessed),
+                ("Last Test Date",    last_test),
+                ("Analytics Updated", calc_at),
+            ]
+        )
+        return (
+            '<h3 style="margin:24px 0 10px;font-size:15px;color:#1E3C72;">'
+            "Equipment Performance Summary</h3>"
+            '<table width="100%" cellpadding="0" cellspacing="0" '
+            'style="border-collapse:collapse;font-size:13px;'
+            'border:1px solid #DDE3EE;border-radius:6px;overflow:hidden;">'
+            "<thead><tr>"
+            '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
+            'text-align:left;font-weight:600;">Metric</th>'
+            '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
+            'text-align:left;font-weight:600;">Value</th>'
+            "</tr></thead>"
+            f"<tbody>{rows_html}</tbody></table>"
+        )
+    except Exception:
+        return ""
+
+
+def _build_last_execution_html(db: Session, equipment_id) -> str:
+    """HTML summary of the last completed TestingRequest for {{report.lastexecution}}."""
+    try:
+        from models import TestingRequest
+        tr = (
+            db.query(TestingRequest)
+            .filter(
+                TestingRequest.equipment_id == equipment_id,
+                TestingRequest.status.in_([
+                    "test_submitted", "under_approval", "approved",
+                    "completed", "outcome_active", "commissioned",
+                ]),
+            )
+            .order_by(TestingRequest.mts.desc())
+            .first()
+        )
+        if not tr:
+            return ""
+        test_type = ""
+        if tr.test_type_id:
+            from models import CategoryDetails as _CD
+            cat = db.query(_CD).filter(_CD.id == tr.test_type_id).first()
+            if cat:
+                test_type = cat.name or ""
+        status_val = tr.status.value if tr.status else "—"
+        due_date   = str(tr.due_date)[:10] if tr.due_date else "—"
+        submitted  = str(tr.cts)[:10] if tr.cts else "—"
+        rows_html = "".join(
+            f'<tr><td style="padding:6px 12px;border-bottom:1px solid #EEF2F7;">'
+            f"<b>{lbl}</b></td>"
+            f'<td style="padding:6px 12px;border-bottom:1px solid #EEF2F7;">{val}</td></tr>'
+            for lbl, val in [
+                ("Request No.", tr.request_number or "—"),
+                ("Title",       tr.title or "—"),
+                ("Test Type",   test_type or "—"),
+                ("Status",      status_val),
+                ("Submitted",   submitted),
+                ("Due Date",    due_date),
+            ]
+        )
+        return (
+            '<h3 style="margin:24px 0 10px;font-size:15px;color:#1E3C72;">'
+            "Last Executed Test</h3>"
+            '<table width="100%" cellpadding="0" cellspacing="0" '
+            'style="border-collapse:collapse;font-size:13px;'
+            'border:1px solid #DDE3EE;border-radius:6px;overflow:hidden;">'
+            "<thead><tr>"
+            '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
+            'text-align:left;font-weight:600;">Field</th>'
+            '<th style="padding:8px 12px;background:#1E3C72;color:#fff;'
+            'text-align:left;font-weight:600;">Value</th>'
+            "</tr></thead>"
+            f"<tbody>{rows_html}</tbody></table>"
+        )
+    except Exception:
+        return ""
+
+
+def _build_kit_data(db: Session, equipment_type_id, department_id) -> dict:
+    """Build kit availability dict from raw IDs (mirrors NotificationService._build_kit_availability)."""
+    try:
+        from models import CategoryMaster, Equipment, EquipmentTypeKitMapping, OrgDepartment
+        if not equipment_type_id:
+            return {}
+        kit_master = db.query(CategoryMaster).filter(
+            CategoryMaster.name == "Testing Kit",
+            CategoryMaster.is_active == True,
+        ).first()
+        if not kit_master:
+            return {}
+        mappings = db.query(EquipmentTypeKitMapping).filter(
+            EquipmentTypeKitMapping.equipment_type_id == equipment_type_id,
+        ).all()
+        if not mappings:
+            return {}
+        # Build ordered ancestor chain: [parent, grandparent, ...]
+        ancestor_chain: list = []
+        if department_id:
+            _walk = department_id
+            _seen: set = set()
+            while _walk and _walk not in _seen:
+                _seen.add(_walk)
+                _d = db.query(OrgDepartment).filter(OrgDepartment.id == _walk).first()
+                if not _d:
+                    break
+                if _d.parent_department_id and _d.parent_department_id not in _seen:
+                    ancestor_chain.append(_d.parent_department_id)
+                _walk = _d.parent_department_id
+
+        kit_availability = []
+        for m in mappings:
+            kit_type      = m.kit_type
+            kit_type_name = kit_type.name if kit_type else f"Kit #{m.kit_type_id}"
+            at_station: list = []
+            if department_id:
+                at_station = db.query(Equipment).filter(
+                    Equipment.equipment_type_id == kit_master.id,
+                    Equipment.department_id == department_id,
+                    Equipment.status == "active",
+                ).all()
+            nearest_location = None
+            avail_at_depts: list = []
+            if not at_station:
+                for anc_id in ancestor_chain:
+                    anc_kit = db.query(Equipment).filter(
+                        Equipment.equipment_type_id == kit_master.id,
+                        Equipment.department_id == anc_id,
+                        Equipment.status == "active",
+                    ).first()
+                    if anc_kit:
+                        anc_dept = db.query(OrgDepartment).filter(
+                            OrgDepartment.id == anc_id
+                        ).first()
+                        avail_at_depts.append(anc_dept.name if anc_dept else str(anc_id))
+            kit_availability.append({
+                "kit_type":              kit_type_name,
+                "is_required":           m.is_required,
+                "available_at_station":  len(at_station) > 0,
+                "count_at_station":      len(at_station),
+                "available_at_depts":    avail_at_depts,
+            })
+        return {"required_kits": kit_availability}
+    except Exception:
+        return {}
 
 
 # ── Full HTML email wrapper ───────────────────────────────────────────────────
@@ -2019,17 +2254,28 @@ class NotificationService:
                 if tmpl.channel == "email" and tmpl.attachment_vars and resolved_ctx:
                     for av in (tmpl.attachment_vars or []):
                         if isinstance(av, dict):
-                            var_key  = av.get("var_key", "")
-                            att_type = (av.get("type") or "").lower()
+                            var_key      = av.get("var_key", "")
+                            att_type     = (av.get("type") or "").lower()
+                            av_src_type  = av.get("source_type", "")
                         else:
-                            var_key  = str(av)
-                            att_type = ""
+                            var_key      = str(av)
+                            att_type     = ""
+                            av_src_type  = ""
                         url = resolved_ctx.get(var_key, "")
-                        if url:
+                        if url and not _is_uuid_str(url):
+                            # Real URL → fetch and attach
                             entry: Dict[str, str] = {"url": url, "var_key": var_key}
                             if att_type:
                                 entry["type"] = att_type
                             _resolved_att_urls.append(entry)
+                        elif url and _is_uuid_str(url) and att_type:
+                            # Context held a UUID → generate from that source record
+                            _resolved_att_urls.append({
+                                "type":        att_type,
+                                "var_key":     var_key,
+                                "source_type": av_src_type or (str(source_type) if source_type else "testing_request"),
+                                "source_id":   url,
+                            })
                         elif att_type in ("pdf", "excel", "xlsx") and source_type and source_id:
                             _resolved_att_urls.append({
                                 "type":        att_type,
@@ -2269,8 +2515,11 @@ class NotificationService:
         """Return the equipment type name from a TestingRequest (or None)."""
         if getattr(request, "equipment_type", None):
             return getattr(request.equipment_type, "name", None)
-        if getattr(request, "equipment", None):
-            return getattr(getattr(request, "equipment", None), "equipment_type", None)
+        _eq = getattr(request, "equipment", None)
+        if _eq:
+            _eq_type = getattr(_eq, "equipment_type", None)
+            if _eq_type:
+                return getattr(_eq_type, "name", None)
         return None
 
     def notify_eval_critical(self, request, result, evaluation_result: dict) -> None:
@@ -2415,18 +2664,24 @@ class NotificationService:
         else:
             _rc = getattr(request, "request_category", None)
             _test_type_label = (_rc.value if hasattr(_rc, "value") else str(_rc or "")).capitalize()
+        _eq_type_label = self._equipment_type(request) or ""
+        _kit_html      = _build_kit_html(kit_data)
+        _ctx: dict = {
+            "equipment":      equipment_label,
+            "request_number": getattr(request, "request_number", ""),
+            "tester":         request.assigned_tester.email if request.assigned_tester else "",
+            "tester_name":    tester_name,
+            "tr.test_type":   _test_type_label,
+        }
+        # Only pre-seed non-empty values — empty strings would block setdefault
+        # in _enrich_context_from_source from filling them in via DB lookup
+        if _eq_type_label:
+            _ctx["equipment.type"] = _eq_type_label
+        if _kit_html:
+            _ctx["kit_availability_html"] = _kit_html
         self.fire(
             event_type="tester_assigned",
-            context={
-                "equipment": equipment_label,
-                "request_number": getattr(request, "request_number", ""),
-                "tester": request.assigned_tester.email if request.assigned_tester else "",
-                "tester_name": tester_name,
-                "kit_availability_html": _build_kit_html(kit_data),
-                # Explicit fallbacks so templates render even when test_type_id is unset
-                "tr.test_type":    _test_type_label,
-                "equipment.type":  self._equipment_type(request) or "",
-            },
+            context=_ctx,
             organization_id=getattr(request, "organization_id", None),
             department_id=self._dept(request),
             source_id=request.id,
@@ -2452,7 +2707,12 @@ class NotificationService:
             if not kit_master:
                 return {}
 
+            # Resolve equipment type ID — fall back to equipment's own type
             eq_type_id = getattr(request.equipment_type, "id", None) if request.equipment_type else None
+            if not eq_type_id:
+                _eq = getattr(request, "equipment", None)
+                if _eq:
+                    eq_type_id = getattr(_eq, "equipment_type_id", None)
             dept_id = self._dept(request)
 
             # Required kit types for this equipment type
@@ -2465,24 +2725,26 @@ class NotificationService:
             if not mappings:
                 return {}
 
-            # Gather sibling/parent dept ids for nearby lookup
-            nearby_dept_ids = []
+            # Build ordered ancestor chain: [station, parent, grandparent, ...]
+            ancestor_chain: list = []
             if dept_id:
-                dept = self.db.query(OrgDepartment).filter(OrgDepartment.id == dept_id).first()
-                if dept and dept.parent_department_id:
-                    siblings = self.db.query(OrgDepartment).filter(
-                        OrgDepartment.parent_department_id == dept.parent_department_id,
-                        OrgDepartment.id != dept_id,
-                        OrgDepartment.is_active == True,
-                    ).all()
-                    nearby_dept_ids = [str(dept.parent_department_id)] + [str(s.id) for s in siblings]
+                _walk = dept_id
+                _seen: set = set()
+                while _walk and _walk not in _seen:
+                    _seen.add(_walk)
+                    _d = self.db.query(OrgDepartment).filter(OrgDepartment.id == _walk).first()
+                    if not _d:
+                        break
+                    if _d.parent_department_id and _d.parent_department_id not in _seen:
+                        ancestor_chain.append(_d.parent_department_id)
+                    _walk = _d.parent_department_id
 
             kit_availability = []
             for m in mappings:
                 kit_type = m.kit_type
                 kit_type_name = kit_type.name if kit_type else f"Kit #{m.kit_type_id}"
 
-                # Check at station
+                # Check at station first
                 at_station = []
                 if dept_id:
                     at_station = self.db.query(Equipment).filter(
@@ -2491,24 +2753,27 @@ class NotificationService:
                         Equipment.status == "active",
                     ).all()
 
-                # Check nearby
-                nearest_location = None
-                if not at_station and nearby_dept_ids:
-                    from uuid import UUID as _UUID
-                    nearby_kits = self.db.query(Equipment).filter(
-                        Equipment.equipment_type_id == kit_master.id,
-                        Equipment.department_id.in_([_UUID(d) for d in nearby_dept_ids]),
-                        Equipment.status == "active",
-                    ).first()
-                    if nearby_kits and nearby_kits.department:
-                        nearest_location = nearby_kits.department.name
+                # Walk entire ancestor chain — collect ALL depts that have this kit
+                avail_at_depts: list = []
+                if not at_station:
+                    for anc_id in ancestor_chain:
+                        anc_kit = self.db.query(Equipment).filter(
+                            Equipment.equipment_type_id == kit_master.id,
+                            Equipment.department_id == anc_id,
+                            Equipment.status == "active",
+                        ).first()
+                        if anc_kit:
+                            anc_dept = self.db.query(OrgDepartment).filter(
+                                OrgDepartment.id == anc_id
+                            ).first()
+                            avail_at_depts.append(anc_dept.name if anc_dept else str(anc_id))
 
                 kit_availability.append({
                     "kit_type": kit_type_name,
                     "is_required": m.is_required,
                     "available_at_station": len(at_station) > 0,
                     "count_at_station": len(at_station),
-                    "nearest_location": nearest_location,
+                    "available_at_depts": avail_at_depts,
                 })
 
             return {"required_kits": kit_availability}

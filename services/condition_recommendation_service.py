@@ -19,6 +19,10 @@ from models import (
     ScheduleFrequency,
     TestRequestSchedule,
 )
+from services.test_request_schedule_service import (
+    TestRequestScheduleService,
+    _advance_date,
+)
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
@@ -172,18 +176,31 @@ def evaluate_for_equipment(db: Session, equipment_id: UUID) -> dict:
 
     items = []
     for cfg in configs:
+        # Step 1: check activation tracking record
         activation = db.query(ConditionRecommendationActivation).filter(
             ConditionRecommendationActivation.recommendation_id == cfg.id,
             ConditionRecommendationActivation.equipment_id      == equipment_id,
         ).first()
 
-        schedule     = None
-        schedule_info = None
+        schedule = None
+
+        # Step 2: resolve schedule from activation link
         if activation and activation.schedule_id:
             schedule = db.query(TestRequestSchedule).filter(
                 TestRequestSchedule.id == activation.schedule_id
             ).first()
 
+        # Step 3: if no activation link, check whether an active schedule already
+        # exists for this equipment + test type (e.g. created from master template
+        # or a previous condition monitoring run without an activation record)
+        if schedule is None:
+            schedule = db.query(TestRequestSchedule).filter(
+                TestRequestSchedule.equipment_id == equipment_id,
+                TestRequestSchedule.test_type_id == cfg.test_type_id,
+                TestRequestSchedule.is_active    == True,
+            ).first()
+
+        schedule_info = None
         if schedule:
             schedule_info = {
                 "schedule_id":   str(schedule.id),
@@ -193,13 +210,21 @@ def evaluate_for_equipment(db: Session, equipment_id: UUID) -> dict:
                 "is_active":     schedule.is_active,
             }
 
+        # Derive status: prefer activation record; fall back to schedule existence
+        if activation:
+            status = activation.status
+        elif schedule:
+            status = "activated"
+        else:
+            status = "recommended"
+
         items.append({
             "recommendation_id": str(cfg.id),
             "test_type_id":      cfg.test_type_id,
             "test_name":         cfg.test_type.name if cfg.test_type else "",
             "frequency":         cfg.frequency.value,
             "frequency_label":   cfg.frequency.value.replace("_", "-").capitalize(),
-            "status":            activation.status if activation else "recommended",
+            "status":            status,
             "schedule":          schedule_info,
         })
 
@@ -265,24 +290,67 @@ def activate(
         # Reactivate dormant schedule
         existing.is_active     = True
         existing.start_date    = start
-        existing.next_run_date = start
+        existing.next_run_date = _advance_date(start, rec.frequency)
         existing.frequency     = rec.frequency
         schedule = existing
     else:
-        test_type = rec.test_type
-        schedule  = TestRequestSchedule(
-            organization_id   = eq.organization_id,
-            equipment_id      = equipment_id,
-            equipment_type_id = eq.equipment_type_id,
-            department_id     = eq.department_id,
-            test_type_id      = rec.test_type_id,
-            title             = f"Condition Monitoring — {test_type.name if test_type else 'Test'}",
-            frequency         = rec.frequency,
-            start_date        = start,
-            next_run_date     = start,
-            is_active         = True,
-            advance_days      = 15,
-        )
+        # Try to find a master template to copy fields (request_category, priority,
+        # assigned_tester_id, zone fields, etc.) rather than creating a bare record.
+        master_template = db.query(TestRequestSchedule).filter(
+            TestRequestSchedule.equipment_id.is_(None),
+            TestRequestSchedule.equipment_type_id == eq.equipment_type_id,
+            TestRequestSchedule.test_type_id      == rec.test_type_id,
+            TestRequestSchedule.is_active         == True,
+        ).first()
+
+        test_type     = rec.test_type
+        next_run_date = _advance_date(start, rec.frequency)
+
+        if master_template:
+            schedule = TestRequestSchedule(
+                organization_id          = eq.organization_id,
+                equipment_id             = equipment_id,
+                equipment_type_id        = eq.equipment_type_id,
+                department_id            = eq.department_id,
+                test_type_id             = rec.test_type_id,
+                title                    = master_template.title,
+                description              = master_template.description,
+                request_category         = master_template.request_category,
+                priority                 = master_template.priority,
+                notes                    = master_template.notes,
+                assigned_tester_id       = master_template.assigned_tester_id,
+                transformer_type         = master_template.transformer_type,
+                transformer_rating       = master_template.transformer_rating,
+                zone                     = master_template.zone,
+                ce_circle                = master_template.ce_circle,
+                se_division              = master_template.se_division,
+                ee_subdivision           = master_template.ee_subdivision,
+                aee_section              = master_template.aee_section,
+                ae_je                    = master_template.ae_je,
+                frequency                = rec.frequency,
+                start_date               = start,
+                next_run_date            = next_run_date,
+                advance_days             = master_template.advance_days or 15,
+                revised_periodicity_days = master_template.revised_periodicity_days,
+                oem_reference            = master_template.oem_reference,
+                is_active                = True,
+                created_by               = activated_by,
+            )
+        else:
+            schedule = TestRequestSchedule(
+                organization_id   = eq.organization_id,
+                equipment_id      = equipment_id,
+                equipment_type_id = eq.equipment_type_id,
+                department_id     = eq.department_id,
+                test_type_id      = rec.test_type_id,
+                title             = f"Condition Monitoring — {test_type.name if test_type else 'Test'}",
+                frequency         = rec.frequency,
+                start_date        = start,
+                next_run_date     = next_run_date,
+                is_active         = True,
+                advance_days      = 15,
+                created_by        = activated_by,
+            )
         db.add(schedule)
 
     db.flush()
@@ -312,6 +380,14 @@ def activate(
 
     db.commit()
     db.refresh(schedule)
+
+    # Trigger immediate ticket creation following the same pattern as
+    # TestRequestScheduleService.instantiate_equipment_schedules()
+    now = datetime.now(timezone.utc)
+    try:
+        TestRequestScheduleService.create_one_ticket(db, schedule, now)
+    except Exception as e:
+        print(f"[WARN] condition monitoring create_one_ticket failed for schedule {schedule.id}: {e}")
 
     return {
         "created":  True,

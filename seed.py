@@ -1628,6 +1628,13 @@ def seed_modules(session):
                 "substation, and compliance band. Accessible to EE TLSS, AEE, org-admin.",
  "path": "schedule_compliance",
  "group_name": "Condition Monitoring"},
+# ✅ DATA IMPORT MODULE
+{"name": "Data Import",
+ "description": "Bulk import historical test reports from PDF/Excel — OCR/Excel extraction, "
+                "multi-record review grid, and one-click submission as closed Testing Requests.",
+ "path": "import-data",
+ "group_name": "Condition Monitoring",
+ "is_menu": True},
     ]
 
     module_ids = {}
@@ -8653,6 +8660,14 @@ def _seed_notification_variables(session) -> int:
     # Replaces the hardcoded VariableResolver._ALIASES dict.
     _VARIABLES = [
         # ── Reports ──────────────────────────────────────────────────────────
+        dict(var_key="report.lastexecution", label="Last Executed Test Summary",
+             group_name="Reports",          resolver_key="last_execution_html",
+             fallback_keys=["last_execution_html"],
+             description="HTML table summarising the last completed test request for the equipment "
+                         "(request number, title, test type, status, submitted date, due date). "
+                         "Resolved automatically when equipment is the notification source.",
+             sample_value="<table>...</table>",
+             role_template_names=[]),
         dict(var_key="report.retriexls",   label="Report — Excel Download URL",
              group_name="Reports",         resolver_key="report.retriexls",
              fallback_keys=["report_xls_url", "xls_url"],
@@ -8702,6 +8717,14 @@ def _seed_notification_variables(session) -> int:
              fallback_keys=["equipment_status"],
              description="Current operational status of the equipment.",
              sample_value="active",
+             role_template_names=[]),
+        dict(var_key="table.performance",     label="Equipment Performance Table",
+             group_name="Equipment",           resolver_key="performance_table_html",
+             fallback_keys=["performance_table_html"],
+             description="HTML table showing the equipment's analytics health score, risk level, "
+                         "condition summary, tests assessed, and last test date. "
+                         "Resolved automatically when equipment is the notification source.",
+             sample_value="<table>...</table>",
              role_template_names=[]),
         dict(var_key="equipment.manufacturer", label="Manufacturer",
              group_name="Equipment",            resolver_key="manufacturer",
@@ -8783,6 +8806,13 @@ def _seed_notification_variables(session) -> int:
              description="Email / name of the tester the request was assigned to.",
              sample_value="tester@utility.com",
              role_template_names=["Test & Work Coordinator", "Reviewing Officer"]),
+        dict(var_key="table.testkit",        label="Test Kit Availability Table",
+             group_name="Test Request",       resolver_key="kit_availability_html",
+             fallback_keys=["kit_availability_html"],
+             description="HTML table showing kit availability for the assigned test type and department. "
+                         "Populated automatically for tester-assignment notifications.",
+             sample_value="<table>...</table>",
+             role_template_names=[]),
         # ── Evaluation / test result ───────────────────────────────────────────
         dict(var_key="eval.overall",     label="Overall Result (NORMAL / ALERT / CRITICAL)",
              group_name="Evaluation",    resolver_key="eval_overall",
@@ -9042,7 +9072,8 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a test request is assigned to a field/lab tester.",
             context_vars=["request.number", "request.title", "request.assigned_to",
-                          "request.due_date", "equipment.ueic"],
+                          "request.due_date", "equipment.ueic",
+                          "table.testkit", "table.performance", "report.lastexecution"],
             default_roles=["AE_JE", "AEE_MAINTENANCE"],
         ),
         dict(
@@ -9689,7 +9720,9 @@ def _seed_notification_templates(session) -> int:
             "<tr><td style='padding:8px 0;color:#888;'>Test Type</td><td style='padding:8px 0;color:#0F172A;'>{tr.test_type}</td></tr>"
             "<tr><td style='padding:8px 0;color:#888;'>Priority</td><td style='padding:8px 0;color:#0F172A;'>{request.priority}</td></tr>"
             "</table>"
-            "{kit_availability_html}"
+            "{{table.testkit}}"
+            "{{table.performance}}"
+            "{{report.lastexecution}}"
             "<p style='margin-top:20px;'>Please log in to the SEACMS app to acknowledge and begin testing. "
             "Collect any required kits before proceeding to the site.</p>",
             ["@assignee", "Test Engineer", "Maintenance Officer"],
@@ -11886,11 +11919,15 @@ def run_seed():
                 ensure_table,
                 run as seed_testing_kit_run,
                 seed_module_and_privileges,
+                seed_kit_mappings,
+                seed_kit_equipment_records,
                 update_tester_assigned_email_template,
             )
             ensure_table()
             seed_testing_kit_run(session)
             seed_module_and_privileges()
+            seed_kit_mappings(session)
+            seed_kit_equipment_records(session)
             update_tester_assigned_email_template()
         except Exception as _e:
             import traceback

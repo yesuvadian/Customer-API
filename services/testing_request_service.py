@@ -319,6 +319,10 @@ class TestingRequestService:
             from services.notification_service import NotificationService
             ns = NotificationService(self.db)
             ns.notify_request_submitted(request)
+            # If we jumped straight to 'assigned' (tester was pre-set at creation),
+            # also fire the tester-assigned notification.
+            if request.status == TestingRequestStatus.assigned:
+                ns.notify_tester_assigned(request)
             ns.fire(
                 event_type="status_changed",
                 context={

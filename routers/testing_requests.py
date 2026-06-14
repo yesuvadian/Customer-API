@@ -165,6 +165,29 @@ def list_equipment_types(db: Session = Depends(get_db)):
     return TestingRequestService(db).list_equipment_types()
 
 
+# ─── Kit Sub-Types (Testing Kit CategoryDetails) ────────────
+@router.get("/kit-subtypes")
+def list_kit_subtypes(db: Session = Depends(get_db)):
+    """Returns Testing Kit sub-categories for the kit-type dropdown."""
+    from models import CategoryMaster, CategoryDetails
+    kit_master = db.query(CategoryMaster).filter(
+        CategoryMaster.name == "Testing Kit",
+        CategoryMaster.is_active.is_(True),
+    ).first()
+    if not kit_master:
+        return []
+    subs = (
+        db.query(CategoryDetails)
+        .filter(
+            CategoryDetails.category_master_id == kit_master.id,
+            CategoryDetails.is_active.is_(True),
+        )
+        .order_by(CategoryDetails.name)
+        .all()
+    )
+    return [{"id": s.id, "name": s.name} for s in subs]
+
+
 # ─── Lifecycle Types (calibration + cumulative, separate masters) ────────────
 @router.get("/lifecycle-types")
 def list_lifecycle_types(db: Session = Depends(get_db)):

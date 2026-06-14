@@ -829,10 +829,16 @@ def get_testing_kits(
             return {"at_station": [], "nearby": [], "required_mappings": []}
 
     def _kit_row(eq: Equipment, location_label: str) -> dict:
+        _np = eq.nameplate_data or {}
+        _kit_type = (
+            _np.get("kit_subtype")
+            or eq.bay_number
+            or (eq.equipment_type.name if eq.equipment_type else "Testing Kit")
+        )
         return {
             "id": str(eq.id),
             "ueic": eq.ueic,
-            "kit_type": eq.equipment_type.name if eq.equipment_type else "Testing Kit",
+            "kit_type": _kit_type,
             "manufacturer": eq.manufacturer,
             "model_number": eq.model_number,
             "factory_serial_number": eq.factory_serial_number,
@@ -840,7 +846,7 @@ def get_testing_kits(
             "department_id": str(eq.department_id),
             "department_name": eq.department.name if eq.department else "",
             "location_label": location_label,
-            "nameplate_data": eq.nameplate_data or {},
+            "nameplate_data": _np,
         }
 
     def _query_kits(dept_ids: list) -> list:

@@ -118,6 +118,7 @@ from routers import dashboard_role_kpi
 from routers import reporting as reporting_router
 # Analytics Engine
 from routers import analytics as analytics_router
+from routers import data_import as data_import_router  # Import Data module
 
 # Workflow Engine
 from routers import workflows
@@ -1033,6 +1034,7 @@ app.include_router(dashboard_role_kpi.router)
 app.include_router(reporting_router.router)
 # Analytics Engine
 app.include_router(analytics_router.router)
+app.include_router(data_import_router.router)  # Import Data module
 
 # Organization Multi-Tenancy
 app.include_router(organizations.router)

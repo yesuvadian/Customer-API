@@ -1,8 +1,9 @@
 """
 Router: /condition-recommendations
 
-Admin CRUD for score-band recommendation configs and the activation endpoint
-used by the Analytics Dashboard to schedule a test from a recommendation.
+Config CRUD and activation endpoint for the condition monitoring recommendation module.
+Access gate: any authenticated user with access to the AI module (get_current_user).
+Module-level visibility is enforced by the frontend permission system.
 All DB logic lives in services/condition_recommendation_service.py.
 """
 from typing import List, Optional
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_vendor_db
+from models import User
 from services.condition_recommendation_service import (
     activate,
     create_config,
@@ -78,7 +80,7 @@ def get_configs(
     equipment_type_id: Optional[int]  = Query(None),
     is_active:         Optional[bool] = Query(None),
     db:   Session = Depends(get_vendor_db),
-    user: dict    = Depends(get_current_user),
+    user: User    = Depends(get_current_user),
 ):
     rows = list_configs(db, equipment_type_id=equipment_type_id, is_active=is_active)
     return [
@@ -102,9 +104,8 @@ def get_configs(
 def post_config(
     body: RecommendationConfigCreate,
     db:   Session = Depends(get_vendor_db),
-    user: dict    = Depends(get_current_user),
+    user: User    = Depends(get_current_user),
 ):
-    user_id = UUID(user["id"]) if user.get("id") else None
     rec = create_config(
         db,
         organization_id   = body.organization_id,
@@ -115,7 +116,7 @@ def post_config(
         frequency         = body.frequency,
         display_order     = body.display_order,
         is_active         = body.is_active,
-        created_by        = user_id,
+        created_by        = user.id if user else None,
     )
     return RecommendationConfigResponse(
         id=rec.id,
@@ -136,7 +137,7 @@ def put_config(
     rec_id: UUID,
     body:   RecommendationConfigUpdate,
     db:     Session = Depends(get_vendor_db),
-    user:   dict    = Depends(get_current_user),
+    user:   User    = Depends(get_current_user),
 ):
     rec = update_config(
         db, rec_id,
@@ -162,7 +163,7 @@ def put_config(
 def delete_config(
     rec_id: UUID,
     db:     Session = Depends(get_vendor_db),
-    user:   dict    = Depends(get_current_user),
+    user:   User    = Depends(get_current_user),
 ):
     deactivate_config(db, rec_id)
 
@@ -172,7 +173,6 @@ def activate_recommendation(
     rec_id: UUID,
     body:   ActivateRequest,
     db:     Session = Depends(get_vendor_db),
-    user:   dict    = Depends(get_current_user),
+    user:   User    = Depends(get_current_user),
 ):
-    user_id = UUID(user["id"]) if user.get("id") else None
-    return activate(db, rec_id, body.equipment_id, body.start_date, user_id)
+    return activate(db, rec_id, body.equipment_id, body.start_date, user.id if user else None)

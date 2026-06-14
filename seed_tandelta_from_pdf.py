@@ -248,7 +248,11 @@ def parse_ocr_text(text: str) -> dict | None:
     report = copy.deepcopy(REPORT_TEMPLATE)
 
     # ── Equipment / Header ─────────────────────────────────────────────────────
-    report["sub_station"] = _find(r"sub[- ]?station\s*[:\.]?\s*(.+?)(?:\n|$)", full) or ""
+    report["sub_station"] = (
+        _find(r"sub[- ]?station\s*[:\.]?\s*(.+?)(?:\n|$)", full)
+        or _find(r"\bR/S\s+([A-Za-z][A-Za-z\s]{2,30?})(?:\s+in\b|\n|$)", full)
+        or ""
+    )
 
     # Date separators: / - .  (KPTCL uses DD.MM.YYYY in table headers)
     _date_pat    = r"([\d]{1,2}[/\-\.][\d]{1,2}[/\-\.][\d]{2,4})"
@@ -277,6 +281,9 @@ def parse_ocr_text(text: str) -> dict | None:
     serial = _find(r"serial\s*(?:number|no\.?)\s*[:\.]?\s*([A-Za-z]{2,3}[-\s]?\d{3,}[/\-]\d+)", full)
     if not serial:
         serial = _find(r"\b((?:HT|KT)-?\d{3,}[/\-]\d+)\b", full)
+    if not serial:
+        # Manufacturer serial: "Sl. No. 13068-005" or "S1. No.\n13068-005"
+        serial = _find(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*(\d{4,}[-/]\d+)", full)
     if serial:
         serial = re.sub(r"^(HT|KT)(\d)", r"\1-\2", serial)
     report["serial_number"] = serial or ""
@@ -383,14 +390,15 @@ def parse_ocr_text(text: str) -> dict | None:
     )
     winding_block = winding_block_m.group(0) if winding_block_m else full
 
-    # Config labels: OCR may use "Ground" instead of "GND", or spaces around dash
+    # Config labels: normalise GND variants (Ground/Grd/Grnd), IV=LV, TV-HV=HV-TV
+    _GND = r"(?:GND|Grd|Grnd|Ground)"
     _CFG_PAT = {
-        "HV-GND": r"HV\s*[-–]\s*(?:GND|Ground)",
-        "HV-LV":  r"HV\s*[-–]\s*LV",
-        "LV-GND": r"LV\s*[-–]\s*(?:GND|Ground)",
-        "LV-TV":  r"LV\s*[-–]\s*TV",
-        "TV-GND": r"TV\s*[-–]\s*(?:GND|Ground)",
-        "HV-TV":  r"HV\s*[-–]\s*TV",
+        "HV-GND": rf"HV\s*[-–]\s*{_GND}",
+        "HV-LV":  r"HV\s*[-–]\s*(?:LV|IV)",
+        "LV-GND": rf"(?:LV|IV)\s*[-–]\s*{_GND}",
+        "LV-TV":  r"(?:LV|IV)\s*[-–]\s*TV",
+        "TV-GND": rf"TV\s*[-–]\s*{_GND}",
+        "HV-TV":  r"(?:HV|TV)\s*[-–]\s*(?:TV|HV)",  # HV-TV or TV-HV (reversed notation)
     }
 
     for row in report["winding"]:
@@ -569,18 +577,27 @@ def _ocr_page_worker(args):
     return page_idx, parsed, logs
 
 
+def _has_serial(text: str) -> bool:
+    """True if the text contains any recognisable transformer serial number."""
+    # KPTCL asset format:  HT-1234/56, KT-001/2
+    if re.search(r"\b(?:HT|KT)\s*[-]?\s*\d{3,}[/\-]\d+", text, re.I):
+        return True
+    # Manufacturer format: 13068-005, 12345/006 (4+ digits, dash/slash, 2+ digits)
+    if re.search(r"\bS[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*\d{4,}[-/]\d+", text, re.I):
+        return True
+    return False
+
+
 def _is_primary_page(text: str) -> bool:
     """True if page has a transformer serial number AND winding/tan-delta test."""
-    has_serial  = bool(re.search(r"\b(?:HT|KT)\s*[-]?\s*\d{3,}[/\-]\d+", text, re.I))
     has_content = bool(re.search(r"winding\s*test|tan[- ]?delta|dissipation\s*factor", text, re.I))
-    return has_serial and has_content
+    return _has_serial(text) and has_content
 
 
 def _is_secondary_page(text: str) -> bool:
     """True if page has bushing/IDAX test data but no transformer serial."""
-    has_serial  = bool(re.search(r"\b(?:HT|KT)\s*[-]?\s*\d{3,}[/\-]\d+", text, re.I))
     has_bushing = bool(re.search(r"bushing\s*test|(?:220|66)\s*kv.*bushing|idax\s*test", text, re.I))
-    return has_bushing and not has_serial
+    return has_bushing and not _has_serial(text)
 
 
 def _group_pages(page_texts: list[str]) -> list[str]:
