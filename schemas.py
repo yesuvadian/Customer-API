@@ -1059,6 +1059,8 @@ class TestingRequestResponse(BaseModel):
     # Equipment Asset Register
     equipment_id: Optional[UUID] = None
     equipment_ueic: Optional[str] = None  # Computed from equipment relationship
+    bay_number: Optional[str] = None      # Computed from equipment.bay_number
+    serial_in_bay: Optional[str] = None   # Computed from equipment.serial_in_bay
 
     # Request category
     request_category: Optional[str] = "test"
