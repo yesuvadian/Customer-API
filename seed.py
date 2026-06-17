@@ -5000,7 +5000,7 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
 
     if excel_path is None:
         project_root = os.path.dirname(os.path.abspath(__file__))
-        excel_path = os.path.join(project_root, "equipment_seed.xlsx")
+        excel_path = os.path.join(project_root, "equipment_seed_with_all_data.xlsx")
 
     if not os.path.exists(excel_path):
         raise FileNotFoundError(f"Equipment seed file not found: {excel_path}")
