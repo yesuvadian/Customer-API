@@ -26,6 +26,12 @@ reportlab
 apscheduler
 python-dateutil
 python-docx
-PyMuPDF
-Pillow
+
+# OCR / PDF Processing
+
 easyocr
+Pillow
+PyMuPDF
+numpy
+torch
+torchvision
