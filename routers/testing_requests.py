@@ -1,5 +1,6 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -15,6 +16,8 @@ from schemas import (
 )
 from services.testing_request_service import TestingRequestService
 from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
+
+_DEFAULT_PAGE_SIZE = int(os.getenv("TR_PAGE_SIZE", "20"))
 
 router = APIRouter(
     prefix="/testing_requests",
@@ -46,11 +49,15 @@ def _enrich(req):
 
     # Equipment asset register fields
     if req.equipment:
-        req.equipment_ueic = req.equipment.ueic
-        req.equipment_name = req.equipment.ueic
+        req.equipment_ueic  = req.equipment.ueic
+        req.equipment_name  = req.equipment.ueic
+        req.bay_number      = req.equipment.bay_number
+        req.serial_in_bay   = req.equipment.serial_in_bay
     else:
-        req.equipment_ueic = None
-        req.equipment_name = None
+        req.equipment_ueic  = None
+        req.equipment_name  = None
+        req.bay_number      = None
+        req.serial_in_bay   = None
 
     # Originator
     if req.originator:
@@ -288,10 +295,11 @@ def list_request_categories():
     ]
 
 
-@router.get("/", response_model=List[TestingRequestResponse])
+@router.get("/")
 def list_testing_requests(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(None, ge=1, le=2000),
+    search: Optional[str] = Query(None, description="Search by UEIC or bay number"),
     status: Optional[str] = None,
     category: Optional[str] = None,
     originator_id: Optional[UUID] = None,
@@ -302,27 +310,23 @@ def list_testing_requests(
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> Dict[str, Any]:
+    ps = page_size or _DEFAULT_PAGE_SIZE
+    skip = (page - 1) * ps
+
     organization_id = current_user.organization_id
     service = TestingRequestService(db)
 
-    # Auto-apply department scope from the user's OrgUserRole unless:
-    #   (a) an explicit department_id filter was already passed, or
-    #   (b) the user holds an is_org_admin role (org-wide scope)
     if department_id is None and organization_id:
         is_admin, scoped_dept = service.get_user_scope(current_user.id, organization_id)
         if not is_admin and scoped_dept:
             department_id = scoped_dept
 
-    # Expand department_id to the full subtree (zone/circle users see all child depts).
-    # Leaf-level users see only their exact dept.
     dept_ids = None
     if department_id:
         subtree = get_dept_subtree_ids(db, department_id)
         if len(subtree) > 1:
-            # Parent dept — expand to include all children
             dept_ids = subtree
-        # else: single leaf dept, use department_id directly (faster exact match)
 
     from datetime import date as _date
     def _parse_date(s):
@@ -331,9 +335,7 @@ def list_testing_requests(
         except ValueError:
             return None
 
-    requests = service.get_requests(
-        skip=skip,
-        limit=limit,
+    common = dict(
         status_filter=status,
         category_filter=category,
         originator_id=originator_id,
@@ -344,8 +346,23 @@ def list_testing_requests(
         equipment_id=equipment_id,
         date_from=_parse_date(date_from),
         date_to=_parse_date(date_to),
+        search=search,
     )
-    return [_enrich(r) for r in requests]
+
+    total = service.count_requests(**common)
+    items = service.get_requests(skip=skip, limit=ps, **common)
+    serialized = [
+        TestingRequestResponse.model_validate(_enrich(r), from_attributes=True).model_dump(mode='json')
+        for r in items
+    ]
+
+    return {
+        "items": serialized,
+        "total": total,
+        "page": page,
+        "page_size": ps,
+        "has_more": (skip + len(serialized)) < total,
+    }
 
 
 @router.get("/{request_id}", response_model=TestingRequestResponse)
