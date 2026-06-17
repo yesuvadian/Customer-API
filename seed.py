@@ -11617,9 +11617,6 @@ def run_seed():
             # etc. divisions exist for the substation→division fallback lookup
             pass
 
-        # Sample Equipment (after departments + equipment types exist)
-        seed_sample_equipment(session, kptcl_org)
-
         # Master Schedules — blueprint templates for each equipment type
         print("\n--- Master Schedule Seeding ---")
         try:
@@ -11906,17 +11903,8 @@ def run_seed():
                     session.rollback()
                     print(f"  [WARN] Could not ensure RT substation '{sub_name}': {_e}")
 
-        # Equipment + Annual Audit role mappings — after seed_dept_filter_users
-        # so RT_EAST/RT_NORTH/BLR_CIRCLE depts exist for equipment lookup,
-        # and after seed_seacms_roles_users so KPTCL OrgRoles exist for stage mapping
+        # Annual Audit role mappings — after seed_dept_filter_users
         if kptcl_org:
-            try:
-                seed_kptcl_equipment(session, str(kptcl_org.id))
-            except FileNotFoundError:
-                print("[WARN] equipment_seed.xlsx not found. Skipping equipment seeding.")
-            except Exception as e:
-                print(f"[WARN] KPTCL equipment seeding failed: {e}")
-
             try:
                 session.rollback()
                 from seed_annual_audit import seed_annual_audit_role_mappings
@@ -13662,10 +13650,6 @@ def seed_kptcl_only(org_id: str):
         print("=" * 80 + "\n")
         seed_kptcl_departments(session, org_id)
         print("\n" + "=" * 80)
-        print("  KPTCL EQUIPMENT SEEDING")
-        print("=" * 80 + "\n")
-        seed_kptcl_equipment(session, org_id)
-        print("\n" + "=" * 80)
         print("  [OK] KPTCL SEEDING COMPLETED SUCCESSFULLY")
         print("=" * 80 + "\n")
 
@@ -13686,10 +13670,9 @@ if __name__ == "__main__":
             # --with-kptcl <org_id>  → also seed KPTCL departments after full seed
             if len(sys.argv) > 2 and sys.argv[1] == "--with-kptcl":
                 org_id = sys.argv[2]
-                print("\n[INFO] Seeding KPTCL departments + equipment...")
+                print("\n[INFO] Seeding KPTCL departments...")
                 with get_db_session() as session:
                     seed_kptcl_departments(session, org_id)
-                    seed_kptcl_equipment(session, org_id)
 
     except Exception as e:
         import traceback
