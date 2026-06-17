@@ -333,14 +333,16 @@ def parse_ocr_text(text: str) -> dict | None:
     winding_block = winding_block_m.group(0) if winding_block_m else full
 
     # Config labels: normalise GND variants (Ground/Grd/Grnd), IV=LV, TV-HV=HV-TV
+    # Also match IDAX-style abbreviations: CHG=HV-GND, CHL=HV-LV, CLG=LV-GND,
+    #   CLT=LV-TV, CTG=TV-GND, CTH=HV-TV (C=capacitance, H=HV, L=LV, T=TV, G=GND)
     _GND = r"(?:GND|Grd|Grnd|Ground)"
     _CFG_PAT = {
-        "HV-GND": rf"HV\s*[-–]\s*{_GND}",
-        "HV-LV":  r"HV\s*[-–]\s*(?:LV|IV)",
-        "LV-GND": rf"(?:LV|IV)\s*[-–]\s*{_GND}",
-        "LV-TV":  r"(?:LV|IV)\s*[-–]\s*TV",
-        "TV-GND": rf"TV\s*[-–]\s*{_GND}",
-        "HV-TV":  r"(?:HV|TV)\s*[-–]\s*(?:TV|HV)",  # HV-TV or TV-HV (reversed notation)
+        "HV-GND": rf"(?:CHG\b|HV\s*[-–]\s*{_GND})",
+        "HV-LV":  r"(?:CHL\b|HV\s*[-–]\s*(?:LV|IV))",
+        "LV-GND": rf"(?:CLG\b|(?:LV|IV)\s*[-–]\s*{_GND})",
+        "LV-TV":  r"(?:CLT\b|(?:LV|IV)\s*[-–]\s*TV)",
+        "TV-GND": rf"(?:CTG\b|TV\s*[-–]\s*{_GND})",
+        "HV-TV":  r"(?:CTH\b|(?:HV|TV)\s*[-–]\s*(?:TV|HV))",
     }
 
     for row in report["winding"]:
