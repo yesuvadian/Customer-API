@@ -26,3 +26,6 @@ reportlab
 apscheduler
 python-dateutil
 python-docx
+PyMuPDF
+Pillow
+easyocr

@@ -157,6 +157,8 @@ def get_test_results(
             cts=r.cts,
             mts=r.mts,
             table_columns=table_cols or None,
+            testing_kit_id=r.testing_kit_id,
+            testing_kit=_kit_dict(r.testing_kit) if r.testing_kit_id else None,
         )
         response.append(resp)
     return response
@@ -703,7 +705,8 @@ def create_structured_result(
         remarks=data.remarks,
         tester_id=current_user.id,
         replacement_products=data.replacement_products,
-        test_session_id=data.test_session_id,  # Pass session_id for multi-session support
+        test_session_id=data.test_session_id,
+        testing_kit_id=data.testing_kit_id,
     )
     # Build response with images list
     return _build_structured_response(result)
@@ -749,6 +752,24 @@ def download_result_image(
     )
 
 
+def _kit_dict(kit) -> Optional[dict]:
+    """Serialize an Equipment testing-kit row to a plain dict for API responses."""
+    if kit is None:
+        return None
+    np = kit.nameplate_data or {}
+    kit_type = np.get("kit_subtype") or kit.bay_number or (kit.equipment_type.name if kit.equipment_type else "Testing Kit")
+    return {
+        "id": str(kit.id),
+        "ueic": kit.ueic,
+        "kit_type": kit_type,
+        "manufacturer": kit.manufacturer,
+        "model_number": kit.model_number,
+        "factory_serial_number": kit.factory_serial_number,
+        "department_name": kit.department.name if kit.department else "",
+        "location_label": "at_station",
+    }
+
+
 def _build_structured_response(result) -> TestResultStructuredResponse:
     """Build a structured response with image metadata."""
     images = [
@@ -779,6 +800,8 @@ def _build_structured_response(result) -> TestResultStructuredResponse:
         images=images,
         cts=result.cts,
         mts=result.mts,
+        testing_kit_id=result.testing_kit_id,
+        testing_kit=_kit_dict(result.testing_kit) if result.testing_kit_id else None,
     )
 
 
@@ -960,6 +983,26 @@ def preview_test_result(
         fields_html += '<div class="section"><h3>Test Data</h3>'
         fields_html += render_test_data_structure(test_data)
         fields_html += '</div>'
+
+    # ── Testing Kit Used ────────────────────────────────────────────────────────
+    if result.testing_kit_id and result.testing_kit:
+        kit = result.testing_kit
+        np = kit.nameplate_data or {}
+        kit_type = np.get("kit_subtype") or kit.bay_number or (kit.equipment_type.name if kit.equipment_type else "Testing Kit")
+        kit_loc = kit.department.name if kit.department else "-"
+        fields_html += f'''
+        <div class="section">
+            <h3>Testing Kit Used</h3>
+            <div class="fields">
+                <div class="field"><label>UEIC</label><div class="value">{kit.ueic or "-"}</div></div>
+                <div class="field"><label>Kit Type</label><div class="value">{kit_type}</div></div>
+                <div class="field"><label>Manufacturer</label><div class="value">{kit.manufacturer or "-"}</div></div>
+                <div class="field"><label>Model</label><div class="value">{kit.model_number or "-"}</div></div>
+                <div class="field"><label>Serial No.</label><div class="value">{kit.factory_serial_number or "-"}</div></div>
+                <div class="field"><label>Location</label><div class="value">{kit_loc}</div></div>
+            </div>
+        </div>
+        '''
 
     # Add remarks if present
     if result.remarks:

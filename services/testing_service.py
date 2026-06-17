@@ -580,6 +580,7 @@ class TestingService:
         overall_result: Optional[str], remarks: Optional[str], tester_id: UUID,
         replacement_products: Optional[list] = None,
         test_session_id: Optional[UUID] = None,
+        testing_kit_id: Optional[UUID] = None,
     ) -> TestResult:
         """Create a structured test result with JSONB data."""
         from test_templates import get_template_by_key
@@ -628,6 +629,8 @@ class TestingService:
             existing.remarks = remarks
             existing.replacement_products = replacement_products
             existing.test_session_id = test_session_id  # Update session link
+            if testing_kit_id is not None:
+                existing.testing_kit_id = testing_kit_id
             existing.tested_by = tester_id
             existing.tested_at = UTCDateTimeMixin._utc_now()
             existing.modified_by = tester_id
@@ -643,6 +646,7 @@ class TestingService:
                 overall_result=overall_result,
                 remarks=remarks,
                 replacement_products=replacement_products,
+                testing_kit_id=testing_kit_id,
                 tested_by=tester_id,
                 tested_at=UTCDateTimeMixin._utc_now(),
                 created_by=tester_id,

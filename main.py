@@ -102,6 +102,8 @@ from routers import organizations, org_departments, org_users, org_roles
 
 # Equipment Asset Register
 from routers import equipment
+from routers import equipment_type_kit_mappings
+from routers import condition_monitoring_recommendations
 
 # Notification & Alert Engine
 from routers import notifications as notifications_router
@@ -116,6 +118,7 @@ from routers import dashboard_role_kpi
 from routers import reporting as reporting_router
 # Analytics Engine
 from routers import analytics as analytics_router
+from routers import data_import as data_import_router  # Import Data module
 
 # Workflow Engine
 from routers import workflows
@@ -1015,6 +1018,8 @@ app.include_router(precommission_router.router)  # Pre-Commission QAP
 
 # Equipment Asset Register
 app.include_router(equipment.router)
+app.include_router(equipment_type_kit_mappings.router)
+app.include_router(condition_monitoring_recommendations.router)
 
 # Notification & Alert Engine
 app.include_router(notifications_router.router)
@@ -1029,6 +1034,7 @@ app.include_router(dashboard_role_kpi.router)
 app.include_router(reporting_router.router)
 # Analytics Engine
 app.include_router(analytics_router.router)
+app.include_router(data_import_router.router)  # Import Data module
 
 # Organization Multi-Tenancy
 app.include_router(organizations.router)

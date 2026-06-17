@@ -3036,6 +3036,9 @@ class TestResult(Base):
     # {overall: "NORMAL"|"ALERT"|"CRITICAL", evaluated_at, fields: [{key, label, value, unit, status, thresholds}]}
     evaluation_result = Column(JSONB, nullable=True)
 
+    # Testing kit used for this result (optional — links to Equipment record of type "Testing Kit")
+    testing_kit_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True)
+
     tested_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     tested_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -3049,6 +3052,7 @@ class TestResult(Base):
     test_session = relationship("TestSession", foreign_keys=[test_session_id])
     organization = relationship("Organization", foreign_keys=[organization_id])
     images = relationship("TestResultImage", back_populates="test_result", cascade="all, delete-orphan")
+    testing_kit = relationship("Equipment", foreign_keys=[testing_kit_id])
     tester = relationship("User", foreign_keys=[tested_by])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
@@ -4704,6 +4708,83 @@ class HierarchyAnalytics(Base):
     department        = relationship("OrgDepartment", foreign_keys=[department_id])
     parent_department = relationship("OrgDepartment", foreign_keys=[parent_department_id])
     organization      = relationship("Organization",  foreign_keys=[organization_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TESTING KIT MAPPING
+# ═══════════════════════════════════════════════════════════════════════════
+
+class EquipmentTypeKitMapping(Base):
+    """Maps which testing kit types are required/optional for each equipment type."""
+    __tablename__ = "equipment_type_kit_mappings"
+    __table_args__ = (
+        UniqueConstraint("equipment_type_id", "kit_type_id", name="uq_eq_type_kit_type"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
+    kit_type_id       = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"), nullable=False)
+    is_required       = Column(Boolean, default=True)   # True = required, False = optional/recommended
+    notes             = Column(Text, nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment_type = relationship("CategoryMaster",  foreign_keys=[equipment_type_id])
+    kit_type       = relationship("CategoryDetails", foreign_keys=[kit_type_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONDITION MONITORING RECOMMENDATIONS
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ConditionMonitoringRecommendation(Base):
+    """Score-band recommendation config: which test to schedule, how often, for what score range."""
+    __tablename__ = "condition_monitoring_recommendations"
+    __table_args__ = ({"schema": "public"},)
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id   = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id",   ondelete="CASCADE"),   nullable=True)
+    equipment_type_id = Column(Integer,             ForeignKey("public.CategoryMaster.id",  ondelete="CASCADE"),   nullable=False, index=True)
+    score_from        = Column(Numeric(5, 2), nullable=False)
+    score_to          = Column(Numeric(5, 2), nullable=False)
+    test_type_id      = Column(Integer,             ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"),   nullable=False)
+    frequency         = Column(Enum(ScheduleFrequency), nullable=False)
+    is_active         = Column(Boolean, default=True,  nullable=False)
+    display_order     = Column(Integer, default=0,     nullable=False)
+    created_by        = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    cts               = Column(DateTime(timezone=True), server_default=func.now())
+    mts               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment_type = relationship("CategoryMaster",  foreign_keys=[equipment_type_id])
+    test_type      = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    organization   = relationship("Organization",    foreign_keys=[organization_id])
+
+
+class ConditionRecommendationActivation(Base):
+    """Tracks which recommendations have been activated (schedule created) per equipment."""
+    __tablename__ = "condition_recommendation_activations"
+    __table_args__ = (
+        UniqueConstraint("recommendation_id", "equipment_id", name="uq_rec_activation"),
+        {"schema": "public"},
+    )
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    recommendation_id = Column(UUID(as_uuid=True), ForeignKey("public.condition_monitoring_recommendations.id", ondelete="CASCADE"),  nullable=False, index=True)
+    equipment_id      = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",                           ondelete="CASCADE"),  nullable=False, index=True)
+    schedule_id       = Column(UUID(as_uuid=True), ForeignKey("public.test_request_schedules.id",              ondelete="SET NULL"), nullable=True)
+    status            = Column(String(20), default="recommended", nullable=False)
+    activated_by      = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    activated_at      = Column(DateTime(timezone=True), nullable=True)
+    organization_id   = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=True)
+    cts               = Column(DateTime(timezone=True), server_default=func.now())
+    mts               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    recommendation = relationship("ConditionMonitoringRecommendation", foreign_keys=[recommendation_id])
+    schedule       = relationship("TestRequestSchedule",               foreign_keys=[schedule_id])
+    equipment      = relationship("Equipment",                         foreign_keys=[equipment_id])
 
 
 # ═══════════════════════════════════════════════════════════════════════════

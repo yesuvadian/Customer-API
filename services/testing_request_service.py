@@ -200,11 +200,23 @@ class TestingRequestService:
         equipment_id: Optional[UUID] = None,
         date_from=None,
         date_to=None,
+        search: Optional[str] = None,
     ) -> List[TestingRequest]:
+        from models import Equipment as EquipmentModel
         query = (
             self.db.query(TestingRequest)
             .filter(TestingRequest.is_schedule_template.is_(False))
         )
+        if search:
+            term = f"%{search.strip()}%"
+            query = (
+                query
+                .outerjoin(EquipmentModel, TestingRequest.equipment_id == EquipmentModel.id)
+                .filter(
+                    (EquipmentModel.ueic.ilike(term)) |
+                    (EquipmentModel.bay_number.ilike(term))
+                )
+            )
         if status_filter:
             statuses = [s.strip() for s in status_filter.split(',') if s.strip()]
             if len(statuses) == 1:
@@ -233,6 +245,64 @@ class TestingRequestService:
             from datetime import datetime, timedelta
             query = query.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
+
+    def count_requests(
+        self,
+        status_filter: Optional[str] = None,
+        category_filter: Optional[str] = None,
+        originator_id: Optional[UUID] = None,
+        tester_id: Optional[UUID] = None,
+        organization_id: Optional[UUID] = None,
+        department_id: Optional[UUID] = None,
+        department_ids: Optional[List[UUID]] = None,
+        equipment_id: Optional[UUID] = None,
+        date_from=None,
+        date_to=None,
+        search: Optional[str] = None,
+        **_ignored,
+    ) -> int:
+        from models import Equipment as EquipmentModel
+        query = (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.is_schedule_template.is_(False))
+        )
+        if search:
+            term = f"%{search.strip()}%"
+            query = (
+                query
+                .outerjoin(EquipmentModel, TestingRequest.equipment_id == EquipmentModel.id)
+                .filter(
+                    (EquipmentModel.ueic.ilike(term)) |
+                    (EquipmentModel.bay_number.ilike(term))
+                )
+            )
+        if status_filter:
+            statuses = [s.strip() for s in status_filter.split(',') if s.strip()]
+            if len(statuses) == 1:
+                query = query.filter(TestingRequest.status == statuses[0])
+            else:
+                query = query.filter(TestingRequest.status.in_(statuses))
+        if category_filter:
+            query = query.filter(TestingRequest.request_category == category_filter)
+        if originator_id:
+            query = query.filter(TestingRequest.originator_id == originator_id)
+        if tester_id:
+            query = query.filter(TestingRequest.assigned_tester_id == tester_id)
+        if organization_id:
+            query = query.filter(TestingRequest.organization_id == organization_id)
+        if equipment_id:
+            query = query.filter(TestingRequest.equipment_id == equipment_id)
+        if department_ids is not None:
+            query = query.filter(TestingRequest.department_id.in_(department_ids))
+        elif department_id:
+            query = query.filter(TestingRequest.department_id == department_id)
+        if date_from:
+            from datetime import datetime
+            query = query.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            from datetime import datetime, timedelta
+            query = query.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        return query.scalar() or 0
 
     def get_requests_for_user(
         self,
@@ -319,6 +389,10 @@ class TestingRequestService:
             from services.notification_service import NotificationService
             ns = NotificationService(self.db)
             ns.notify_request_submitted(request)
+            # If we jumped straight to 'assigned' (tester was pre-set at creation),
+            # also fire the tester-assigned notification.
+            if request.status == TestingRequestStatus.assigned:
+                ns.notify_tester_assigned(request)
             ns.fire(
                 event_type="status_changed",
                 context={
