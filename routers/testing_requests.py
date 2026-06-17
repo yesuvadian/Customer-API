@@ -3,6 +3,7 @@ from uuid import UUID
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from models import RepairWorkflow
 from auth_utils import get_current_user
@@ -450,11 +451,11 @@ def approve_testing_results(
 # NOTE: Tester workflow endpoints (accept, start, submit_results)
 # are in routers/testing.py under the /testing prefix.
 
+ # move to top of file
 
-@router.get("/{request_id}/report/preview", response_class=None)
+@router.get("/{request_id}/report/preview", response_class=HTMLResponse)
 def request_report_preview(request_id: UUID, db: Session = Depends(get_db)):
     """HTML report for a test request — uses latest session if present, else TestResult directly."""
-    from fastapi.responses import HTMLResponse
     from models import TestSession
     from services.testing_request_html_service import TestingRequestHTMLService
 
@@ -463,7 +464,6 @@ def request_report_preview(request_id: UUID, db: Session = Depends(get_db)):
     if not req:
         raise HTTPException(status_code=404, detail="Not found")
 
-    # Prefer session-based report (multi-session workflow)
     session = (
         db.query(TestSession)
         .filter(TestSession.testing_request_id == request_id)
@@ -474,11 +474,8 @@ def request_report_preview(request_id: UUID, db: Session = Depends(get_db)):
         from routers.test_sessions import preview_session
         return preview_session(request_id=request_id, session_id=session.id, db=db)
 
-    # Fallback: use service (historical / seeded records with no session)
     html = TestingRequestHTMLService(db).generate_html(str(request_id))
     return HTMLResponse(content=html)
-
-
 @router.get("/{request_id}/report/pdf")
 def request_report_pdf(request_id: UUID, db: Session = Depends(get_db)):
     """PDF report for a test request — uses latest session if present, else TestResult directly."""
