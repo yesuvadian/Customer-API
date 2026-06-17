@@ -344,6 +344,19 @@ def login_user(db: Session, email: str, password: str):
                     "plan_description": plan_obj.plan_description,
                     "plan_limit": plan_obj.plan_limit,
                 }
+
+        from models import Organization
+
+        organization_name = None
+
+        if user.organization_id:
+            org = db.query(Organization).filter(
+                Organization.id == user.organization_id
+            ).first()
+
+            if org:
+                organization_name = org.name
+
         # Create tokens
         access_token = create_access_token({"sub": str(user.id)})
         refresh_token = create_refresh_token(str(user.id))
@@ -374,6 +387,7 @@ def login_user(db: Session, email: str, password: str):
                 "phone_confirmed": user.phone_confirmed,
                 "usertype": user.usertype,
                 "organization_id": str(user.organization_id) if user.organization_id else None,
+                "organization_name": organization_name,
                 "department_id": str(primary_department_id) if primary_department_id else None,
                 "cts": UTCDateTimeMixin._make_aware(user.cts),
                 "mts": UTCDateTimeMixin._make_aware(user.mts),

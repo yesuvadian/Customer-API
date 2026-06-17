@@ -582,9 +582,12 @@ class UserResponse(BaseModel):
     phone_confirmed: bool
 
     usertype: Optional[str] = None
+
     organization_id: Optional[str] = None
-    department_id: Optional[str] = None  # User's assigned department
-    default_module_path: Optional[str] = None  # Default module path to navigate on login
+    organization_name: Optional[str] = None   # <-- ADD THIS
+
+    department_id: Optional[str] = None
+    default_module_path: Optional[str] = None
 
     cts: datetime
     mts: datetime
