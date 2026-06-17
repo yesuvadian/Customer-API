@@ -5122,7 +5122,7 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         doc_raw = row.get("doc")
         doc_date = None
         try:
-            parsed = pd.to_datetime(doc_raw, dayfirst=True)
+            parsed = pd.to_datetime(doc_raw, dayfirst=False)
             if not pd.isna(parsed):
                 doc_date = parsed.date()
         except Exception:

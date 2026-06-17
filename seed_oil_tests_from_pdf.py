@@ -396,6 +396,30 @@ def _oil_test_data(r: dict, eq=None) -> dict:
                 default_rows = field.get("default_rows", [])
                 src_key      = report_list_key(key)
                 source_rows  = r.get(src_key) or []
+
+                # Excel extractor returns oil_test as a flat dict — convert to row list
+                if isinstance(source_rows, dict) and src_key == "oil_test":
+                    _flat = source_rows
+                    _remarks = _flat.get("remarks") or {}
+                    _key_map = [
+                        ("Acidity",             "acidity"),
+                        ("Resistivity at 90C",  "resistivity"),
+                        ("Tan Delta at 90C",    "tan_delta"),
+                        ("BDV Top (T)",         "bdv_top"),
+                        ("BDV Bottom (B)",      "bdv_bottom"),
+                        ("Interfacial Tension", "interfacial_tension"),
+                        ("Flash Point",         "flash_point"),
+                        ("Water Content",       "water_content"),
+                    ]
+                    source_rows = [
+                        {
+                            "test_name":     tname,
+                            "measured_value": _flat.get(fkey),
+                            "remarks":        _remarks.get(fkey, ""),
+                        }
+                        for tname, fkey in _key_map
+                    ]
+
                 # first readonly column is the identity key (test_name / gas)
                 mk = next((c["key"] for c in columns if c.get("type") == "readonly"), "")
                 rows = []
