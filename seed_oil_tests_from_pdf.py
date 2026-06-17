@@ -51,44 +51,27 @@ from models import (
     TestResult,
     User,
 )
+from report_skeleton import build_report_skeleton, resolve_context_binding
 
 
-# ── EasyOCR extraction ────────────────────────────────────────────────────────
+# ── Template-derived skeleton ──────────────────────────────────────────────────
 
-REPORT_TEMPLATE = {
-    "sub_station": "",
-    "sample_no": "",
-    "test_date": "YYYY-MM-DD",
-    "capacity_mva": "",
-    "voltage_class": "",
-    "make": "",
-    "serial_number": "",
-    "date_of_commission": "YYYY-MM-DD",
-    "standard": "IS 10593:2017",
-    "oil_test": {
-        "acidity": None,
-        "resistivity": None,
-        "tan_delta": None,
-        "bdv_top": None,
-        "bdv_bottom": None,
-        "interfacial_tension": None,
-        "flash_point": None,
-        "water_content": None,
-        "remarks": {
-            "acidity": "", "resistivity": "", "tan_delta": "",
-            "bdv_top": "", "bdv_bottom": "", "interfacial_tension": "",
-            "flash_point": "", "water_content": ""
-        }
-    },
-    "dga": {
-        "methane": None, "ethane": None, "ethylene": None,
-        "acetylene": None, "hydrogen": None, "co2": None,
-        "co": None, "tgc": None,
-        "sample_location": "Bottom",
-        "overall": "Normal — Gases within limits",
-        "remarks": ""
-    }
-}
+def _load_template() -> dict:
+    from test_templates import TEST_TEMPLATES
+    return TEST_TEMPLATES.get("transformer_oil_test", {})
+
+_TEMPLATE = _load_template()
+
+# The skeleton is fully derived from the template.
+# oil_test_results → report_list_key strips "_test_results" → list key "oil"
+# dga_results      → report_list_key strips "_results"      → list key "dga"
+# The OCR parser fills measured_value / value_bottom directly into those rows.
+_SKELETON = build_report_skeleton(_TEMPLATE)
+_SKELETON.update({"sample_no": "", "standard": "IS 10593:2017"})
+
+def _empty_report() -> dict:
+    import copy
+    return copy.deepcopy(_SKELETON)
 
 
 # ── OCR helpers ───────────────────────────────────────────────────────────────
@@ -138,10 +121,7 @@ def parse_ocr_text(text: str) -> dict | None:
     if not re.search(r"(acidity|break down|interfacial|dissolved gas)", full, re.I):
         return None
 
-    report = {k: v for k, v in REPORT_TEMPLATE.items()}
-    report["oil_test"] = {k: v for k, v in REPORT_TEMPLATE["oil_test"].items()}
-    report["oil_test"]["remarks"] = dict(REPORT_TEMPLATE["oil_test"]["remarks"])
-    report["dga"] = {k: v for k, v in REPORT_TEMPLATE["dga"].items()}
+    report = _empty_report()
 
     # ── Header fields ──────────────────────────────────────────────────────────
     report["sample_no"]  = _find(r"sample\s*no[:\.]?\s*(\d+)", full) or ""
@@ -200,18 +180,27 @@ def parse_ocr_text(text: str) -> dict | None:
         )
         return _num(m.group(1)) if m else None
 
-    report["oil_test"]["acidity"]             = result_before_rating(r"acidity")
-    report["oil_test"]["resistivity"]         = result_before_rating(r"resistivity|specific\s*resistance")
-    report["oil_test"]["tan_delta"]           = result_before_rating(r"dielectric\s*dissipation|tan.?delta")
-    report["oil_test"]["bdv_bottom"]          = result_before_rating(r"break\s*down\s*voltage")
-    report["oil_test"]["interfacial_tension"] = result_before_rating(r"interfacial\s*tension")
-    report["oil_test"]["flash_point"]         = result_before_rating(r"flash\s*point")
-    report["oil_test"]["water_content"]       = result_before_rating(r"water\s*content")
+    # Fill directly into the template-derived row list (report["oil"]).
+    def _set_oil(name_fragment: str, ocr_pat: str, remark: str = "") -> None:
+        val = result_before_rating(ocr_pat)
+        for row in report.get("oil", []):
+            if name_fragment.lower() in row.get("test_name", "").lower():
+                row["measured_value"] = val
+                if remark:
+                    row["remarks"] = remark
+                break
 
-    # Remarks for BDV (e.g. "sampling error suspected")
+    _set_oil("Acidity",             r"acidity")
+    _set_oil("Resistivity",         r"resistivity|specific\s*resistance")
+    _set_oil("Tan Delta",           r"dielectric\s*dissipation|tan.?delta")
+    _set_oil("BDV Bottom",          r"break\s*down\s*voltage")
+    _set_oil("Interfacial Tension", r"interfacial\s*tension")
+    _set_oil("Flash Point",         r"flash\s*point")
+    _set_oil("Water Content",       r"water\s*content")
+
     bdv_remark = _find(r"break\s*down\s*voltage.*?(\bsampling\s*error[^\n]*)", full)
     if bdv_remark:
-        report["oil_test"]["remarks"]["bdv_bottom"] = bdv_remark.strip()
+        _set_oil("BDV Bottom", r"break\s*down\s*voltage", bdv_remark.strip())
 
     # ── DGA values ─────────────────────────────────────────────────────────────
     # Each gas row: <Gas Name> <Formula> <permissible limits...> <Top (empty)> <Bottom value>
@@ -252,24 +241,32 @@ def parse_ocr_text(text: str) -> dict | None:
         # Otherwise take the last value (handles integer readings like 0, 52, 164)
         return candidates[-1]
 
-    report["dga"]["methane"]   = gas_bottom(r"methane\s*(?:CH4)?",         next_gas_pat)
-    report["dga"]["ethane"]    = gas_bottom(r"ethane\s*(?:C2H6)?",          next_gas_pat)
-    report["dga"]["ethylene"]  = gas_bottom(r"ethylene\s*(?:C2H4)?",        next_gas_pat)
-    report["dga"]["acetylene"] = gas_bottom(r"acetylene\s*(?:C2H2)?",       next_gas_pat)
-    report["dga"]["hydrogen"]  = gas_bottom(r"hydrogen\s*(?:H2)?",          next_gas_pat)
-    report["dga"]["co2"]       = gas_bottom(r"carbon.?di.?oxide\s*(?:CO2)?",next_gas_pat)
-    report["dga"]["co"]        = gas_bottom(r"carbon\s*monoxide\s*(?:CO)?", next_gas_pat)
-    report["dga"]["tgc"]       = gas_bottom(r"TGC",                         next_gas_pat)
+    # Fill directly into the template-derived row list (report["dga"]).
+    def _set_dga(gas_fragment: str, ocr_pat: str) -> None:
+        val = gas_bottom(ocr_pat, next_gas_pat)
+        for row in report.get("dga", []):
+            if gas_fragment.lower() in row.get("gas", "").lower():
+                row["value_bottom"] = val
+                break
 
+    _set_dga("Methane",         r"methane\s*(?:CH4)?")
+    _set_dga("Ethane",          r"ethane\s*(?:C2H6)?")
+    _set_dga("Ethylene",        r"ethylene\s*(?:C2H4)?")
+    _set_dga("Acetylene",       r"acetylene\s*(?:C2H2)?")
+    _set_dga("Hydrogen",        r"hydrogen\s*(?:H2)?")
+    _set_dga("Carbon Dioxide",  r"carbon.?di.?oxide\s*(?:CO2)?")
+    _set_dga("Carbon Monoxide", r"carbon\s*monoxide\s*(?:CO)?")
+    _set_dga("TGC",             r"TGC")
+
+    # DGA scalar fields (stored at top level, not in rows)
     if re.search(r"within\s*limits?", full, re.I):
-        report["dga"]["overall"]  = "Normal — Gases within limits"
-        report["dga"]["remarks"]  = "The gases are within limits."
+        report["dga_overall"]  = "Normal — Gases within limits"
+        report["dga_remarks"]  = "The gases are within limits."
     elif re.search(r"alert|monitor", full, re.I):
-        report["dga"]["overall"]  = "Alert — Monitor closely"
+        report["dga_overall"]  = "Alert — Monitor closely"
 
     # Determine if DGA section exists
-    has_dga = any(report["dga"].get(k) is not None
-                  for k in ("methane", "ethane", "hydrogen", "co2"))
+    has_dga = any(row.get("value_bottom") is not None for row in report.get("dga", []))
     if not has_dga:
         report["dga"] = None
 
@@ -369,135 +366,81 @@ def extract_with_easyocr(images: list, workers: int = 1) -> list[dict]:
 # populates values from the extracted report dict, so the seeded test_data
 # always matches what the form would produce.
 
-# Oil test param name → report json key
-_OIL_PARAM_MAP = {
-    "acidity":             ("oil_test", "acidity"),
-    "resistivity":         ("oil_test", "resistivity"),
-    "tan delta":           ("oil_test", "tan_delta"),
-    "dielectric":          ("oil_test", "tan_delta"),
-    "break down voltage":  ("oil_test", "bdv_bottom"),
-    "bdv bottom":          ("oil_test", "bdv_bottom"),
-    "bdv top":             ("oil_test", "bdv_top"),
-    "interfacial tension": ("oil_test", "interfacial_tension"),
-    "flash point":         ("oil_test", "flash_point"),
-    "water content":       ("oil_test", "water_content"),
-}
-
-# DGA gas name → report dga key
-_DGA_GAS_MAP = {
-    "methane":         "methane",
-    "ethane":          "ethane",
-    "ethylene":        "ethylene",
-    "acetylene":       "acetylene",
-    "hydrogen":        "hydrogen",
-    "carbon dioxide":  "co2",
-    "carbon monoxide": "co",
-    "carbon-di-oxide": "co2",
-    "tgc":             "tgc",
-}
-
-
 def _oil_test_data(r: dict, eq=None) -> dict:
     """Build test_data matching the UI form's _collectData() output exactly.
 
-    Rules mirrored from the Flutter form:
-    - All numeric cell values stored as strings (text controller output)
-    - Empty/None values stored as empty string "" not None
-    - Every table row includes ALL column keys (including calculated ones as null)
-    - Top-level scalar fields match what the form's _formData produces
+    The report dict uses the same structure as the template (flat row lists),
+    so tables are merged generically by matching the first readonly column.
     """
-    from test_templates import TEST_TEMPLATES
-    template = TEST_TEMPLATES.get("transformer_oil_test", {})
-    oil     = r.get("oil_test") or {}
-    dga     = r.get("dga") or {}
-    remarks = oil.get("remarks") or {}
+    from report_skeleton import report_list_key
+    template  = _TEMPLATE
     test_data: dict = {}
 
-    # Prefer equipment's voltage_class over whatever was extracted from the PDF
     eq_vc = ""
     if eq is not None and getattr(eq, "voltage_class", None):
         eq_vc = eq.voltage_class.split("/")[0].strip()
 
     def _str(v) -> str:
-        """Mirror UI text controller — numeric values are always stored as strings."""
-        if v is None:
-            return ""
-        return str(v)
-
-    def _empty_row(columns: list) -> dict:
-        """Mirror UI _emptyRow() — every column key present, defaulting to ''."""
-        return {c.get("key", ""): "" for c in columns if c.get("key")}
+        return "" if v is None else str(v)
 
     for section in template.get("sections", []):
         for field in section.get("fields", []):
             key   = field.get("key", "")
             ftype = field.get("type", "text")
 
+            if ftype in ("calculated", "readonly"):
+                continue
+
             if ftype == "table":
                 columns      = field.get("columns", [])
                 default_rows = field.get("default_rows", [])
+                src_key      = report_list_key(key)
+                source_rows  = r.get(src_key) or []
+                # first readonly column is the identity key (test_name / gas)
+                mk = next((c["key"] for c in columns if c.get("type") == "readonly"), "")
                 rows = []
                 for dr in default_rows:
-                    # Start with all columns initialised (mirrors _emptyRow + default_rows merge)
-                    row = _empty_row(columns)
-                    # Apply readonly/default column values from default_rows
+                    row = {c["key"]: "" for c in columns if c.get("key") and c.get("type") != "calculated"}
                     for k, v in dr.items():
                         if k in row:
                             row[k] = v or ""
-
-                    if key == "oil_test_results":
-                        test_name = dr.get("test_name", "").lower()
-                        for pat, (section_key, val_key) in _OIL_PARAM_MAP.items():
-                            if pat in test_name:
-                                val = (r.get(section_key) or {}).get(val_key)
-                                # UI stores number inputs as strings
-                                row["measured_value"] = _str(val) if val is not None else ""
-                                row["remarks"] = remarks.get(val_key, "")
+                    # mark calculated columns null
+                    for col in columns:
+                        if col.get("type") == "calculated":
+                            row[col["key"]] = None
+                    # merge matching source row
+                    if mk:
+                        match_val = dr.get(mk, "")
+                        for src in source_rows:
+                            if src.get(mk) == match_val:
+                                for col in columns:
+                                    ck = col.get("key", "")
+                                    if col.get("type") in ("calculated", "readonly") or not ck:
+                                        continue
+                                    if src.get(ck) is not None:
+                                        row[ck] = _str(src[ck])
                                 break
-                        # condition is a calculated column — null until EvaluationService runs
-                        row["condition"] = None
-
-                    elif key == "dga_results":
-                        gas_name = dr.get("gas", "").lower()
-                        dga_key  = _DGA_GAS_MAP.get(gas_name)
-                        if dga_key:
-                            val_bottom = dga.get(dga_key)
-                            # UI stores number inputs as strings; top not in PDF → ""
-                            row["value_top"]    = ""
-                            row["value_bottom"] = _str(val_bottom) if val_bottom is not None else ""
-                        row["remarks"]   = ""
-                        row["condition"] = None  # calculated column
-
                     rows.append(row)
                 test_data[key] = rows
 
-            elif ftype in ("calculated", "readonly"):
-                pass  # computed by UI rule engine / EvaluationService
-
             else:
-                # Regular scalar fields
-                if key == "dga_standard":
-                    test_data[key] = r.get("standard", field.get("default", "IS 10593:2017"))
-                elif key == "dga_sample_location":
-                    test_data[key] = dga.get("sample_location", "Bottom")
-                elif key == "dga_overall":
-                    test_data[key] = dga.get("overall", "")
-                elif key == "dga_remarks":
-                    test_data[key] = dga.get("remarks", "")
-                elif key == "transformer_voltage":
-                    test_data[key] = eq_vc or r.get("voltage_class", "").split("/")[0].strip()
+                val = r.get(key)
+                if val is not None:
+                    test_data[key] = _str(val)
                 elif field.get("default") is not None:
                     test_data[key] = field["default"]
 
-    # Inject context_bindings — not form fields so not covered by the field loop above
-    test_data["transformer_voltage"] = eq_vc
+    # transformer_voltage: first voltage level only (e.g. "220" from "220/66/11")
+    test_data["transformer_voltage"] = eq_vc or r.get("transformer_voltage", "").split("/")[0].strip()
 
-    # sub_station: from equipment's department (matches context_binding in template)
-    _dept_obj = getattr(eq, "department", None) if eq else None
-    test_data["sub_station"] = (getattr(_dept_obj, "name", None) or "").strip() or r.get("sub_station", "")
+    # Context-bound readonly fields
+    for field_key, binding_path in template.get("context_bindings", {}).items():
+        test_data[field_key] = resolve_context_binding(binding_path, eq, r, field_key)
+    if eq_vc:
+        test_data["transformer_voltage"] = eq_vc
 
-    # Recommendation wizard fields (mirrors RecommendationData.toFormData)
-    dga_remarks = dga.get("remarks", "") or "Seeded from historical KPTCL report."
+    # Recommendation wizard fields
+    dga_remarks = r.get("dga_remarks", "") or "Seeded from historical KPTCL report."
     test_data.update({
         "recommendation_type": "Pass",
         "next_action":         "None",

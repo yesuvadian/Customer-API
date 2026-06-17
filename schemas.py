@@ -1240,6 +1240,9 @@ class TestResultResponse(BaseModel):
     images: List["TestResultImageResponse"] = []
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    testing_kit_id: Optional[UUID] = None
+    testing_kit: Optional[dict] = None  # {ueic, kit_type, manufacturer, model_number, factory_serial_number, department_name, location_label}
+    table_columns: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -1257,6 +1260,7 @@ class TestResultStructuredCreate(BaseModel):
     replacement_products: Optional[list] = None
     organization_id: Optional[UUID] = None
     test_session_id: Optional[UUID] = None  # Link result to specific session
+    testing_kit_id: Optional[UUID] = None   # Testing kit used for this result
 
 class TestResultImageResponse(BaseModel):
     id: UUID
@@ -1287,6 +1291,8 @@ class TestResultStructuredResponse(BaseModel):
     images: List[TestResultImageResponse] = []
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    testing_kit_id: Optional[UUID] = None
+    testing_kit: Optional[dict] = None  # {ueic, kit_type, manufacturer, model_number, factory_serial_number, department_name, location_label}
     # Template column definitions per table field — used by Flutter approval/review
     # screens to render table data with correct column order and labels.
     # { "dfr_measurements": [{key, label, type}, ...], "analysis_results": [...] }
@@ -1852,6 +1858,33 @@ class OrgUserWithRoles(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==========================================
+# Bulk User Import Schemas
+# ==========================================
+
+class BulkUserImportRow(BaseModel):
+    email: EmailStr
+    firstname: str
+    lastname: Optional[str] = None
+    phone_number: str
+    employee_id: Optional[str] = None
+    department_name: str
+    role_name: str
+
+class BulkUserImportRowResult(BaseModel):
+    row: int
+    email: str
+    status: str  # "created" | "updated" | "failed"
+    error: Optional[str] = None
+
+class BulkUserImportResponse(BaseModel):
+    total: int
+    created: int
+    updated: int
+    failed: int
+    results: List[BulkUserImportRowResult]
 
 
 # ==========================================

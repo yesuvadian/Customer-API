@@ -28,7 +28,6 @@ Template used: capacitance_tandelta_transformer
 """
 
 import argparse
-import copy
 import io
 import json
 import re
@@ -51,74 +50,17 @@ from models import (
     TestingRequestStatus,
     User,
 )
+from report_skeleton import empty_report, resolve_context_binding
 
 
-# ── Report template ────────────────────────────────────────────────────────────
+# ── Template-derived report skeleton ──────────────────────────────────────────
+# Loaded once at import time; empty_report() returns a fresh deep copy per run.
 
-REPORT_TEMPLATE = {
-    # Equipment / header
-    "sub_station":          "",
-    "test_date":            "YYYY-MM-DD",
-    "make":                 "",
-    "serial_number":        "",
-    "capacity_mva":         "",
-    "voltage_class":        "",
-    "vector_group":         "",
-    "date_of_commission":   "YYYY-MM-DD",
+def _load_template() -> dict:
+    from test_templates import TEST_TEMPLATES
+    return TEST_TEMPLATES.get("capacitance_tandelta_transformer", {})
 
-    # Test conditions
-    "test_voltage_kv":      None,
-    "frequency_hz":         50,
-    "ambient_temp_c":       None,
-    "oil_temp_c":           None,
-    "weather_condition":    "",
-    "bushing_condition":    "",
-    "instrument_make":      "",
-
-    # Winding test results
-    "winding_itc_factor":   None,
-    "winding": [
-        {"test_configuration": "HV-GND", "voltage_kv": None, "capacitance_nf": None, "df_measured": None, "df_corrected_20c": None},
-        {"test_configuration": "HV-LV",  "voltage_kv": None, "capacitance_nf": None, "df_measured": None, "df_corrected_20c": None},
-        {"test_configuration": "LV-GND", "voltage_kv": None, "capacitance_nf": None, "df_measured": None, "df_corrected_20c": None},
-        {"test_configuration": "LV-TV",  "voltage_kv": None, "capacitance_nf": None, "df_measured": None, "df_corrected_20c": None},
-        {"test_configuration": "TV-GND", "voltage_kv": None, "capacitance_nf": None, "df_measured": None, "df_corrected_20c": None},
-        {"test_configuration": "HV-TV",  "voltage_kv": None, "capacitance_nf": None, "df_measured": None, "df_corrected_20c": None},
-    ],
-    "winding_observations": "",
-
-    # 220kV bushing test results
-    "hv_bushing_itc_factor": None,
-    "hv_bushing": [
-        {"bushing": "'R' Phase", "voltage_kv": None, "capacitance_pf": None, "df_measured": None, "df_corrected_20c": None},
-        {"bushing": "'Y' Phase", "voltage_kv": None, "capacitance_pf": None, "df_measured": None, "df_corrected_20c": None},
-        {"bushing": "'B' Phase", "voltage_kv": None, "capacitance_pf": None, "df_measured": None, "df_corrected_20c": None},
-    ],
-
-    # 66kV bushing test results
-    "lv_bushing_itc_factor": None,
-    "lv_bushing": [
-        {"bushing": "'R' Phase", "voltage_kv": None, "capacitance_pf": None, "df_measured": None, "df_corrected_20c": None},
-        {"bushing": "'Y' Phase", "voltage_kv": None, "capacitance_pf": None, "df_measured": None, "df_corrected_20c": None},
-        {"bushing": "'B' Phase", "voltage_kv": None, "capacitance_pf": None, "df_measured": None, "df_corrected_20c": None},
-    ],
-
-    # IDAX insulation diagnostics
-    "idax_testing_kit": "",
-    "idax": [
-        {"test_configuration": "CHG", "moisture_percent": None, "tr_analysis_moisture": "", "oil_conductivity_psm": None, "tr_analysis_oil": ""},
-        {"test_configuration": "CHL", "moisture_percent": None, "tr_analysis_moisture": "", "oil_conductivity_psm": None, "tr_analysis_oil": ""},
-        {"test_configuration": "CLG", "moisture_percent": None, "tr_analysis_moisture": "", "oil_conductivity_psm": None, "tr_analysis_oil": ""},
-        {"test_configuration": "CLT", "moisture_percent": None, "tr_analysis_moisture": "", "oil_conductivity_psm": None, "tr_analysis_oil": ""},
-        {"test_configuration": "CTG", "moisture_percent": None, "tr_analysis_moisture": "", "oil_conductivity_psm": None, "tr_analysis_oil": ""},
-        {"test_configuration": "CTH", "moisture_percent": None, "tr_analysis_moisture": "", "oil_conductivity_psm": None, "tr_analysis_oil": ""},
-    ],
-    "idax_observation": "",
-
-    # Overall assessment
-    "overall_result":  "PASS",
-    "recommendation":  "",
-}
+_TEMPLATE = _load_template()
 
 
 # ── OCR helpers ────────────────────────────────────────────────────────────────
@@ -245,7 +187,7 @@ def parse_ocr_text(text: str) -> dict | None:
     ):
         return None
 
-    report = copy.deepcopy(REPORT_TEMPLATE)
+    report = empty_report(_TEMPLATE)
 
     # ── Equipment / Header ─────────────────────────────────────────────────────
     report["sub_station"] = (
@@ -299,7 +241,7 @@ def parse_ocr_text(text: str) -> dict | None:
                or _find(r"(\d{2,}(?:\.\d+)?)\s*mva", full)
     report["capacity_mva"] = _cap_raw if (_cap_raw and float(_cap_raw) >= 1) else ""
 
-    report["voltage_class"] = _find(r"(\d+\s*/\s*\d+(?:\s*/\s*\d+)?)\s*kv", full) or ""
+    report["voltage_ratio"] = _find(r"(\d+\s*/\s*\d+(?:\s*/\s*\d+)?)\s*kv", full) or ""
 
     # vector group: valid formats start with Y/D/Z and contain digits (e.g. YNyn0d11, Dyn11)
     # OCR often reads '0' as 'O' — replace capital O in vector group with 0
@@ -469,20 +411,29 @@ def parse_ocr_text(text: str) -> dict | None:
     idax_m = re.search(r"IDAX[\s\S]{0,3000}?(?=overall|assessment|recommendation|$)", full, re.I)
     if idax_m:
         idax_block = idax_m.group(0)
+
+        def _cfg_pat(cfg: str) -> str:
+            """Build a search pattern for a test_configuration value.
+            Normalises GND since OCR renders it as Grd / Grnd / Ground,
+            and LV since OCR sometimes reads it as IV.
+            """
+            pat = re.escape(cfg)
+            pat = pat.replace(r"GND", r"(?:GND|Grd|Grnd|Ground)")
+            pat = pat.replace(r"LV",  r"(?:LV|IV)")
+            return pat
+
+        _all_cfg_pat = "|".join(_cfg_pat(row["test_configuration"]) for row in report["idax"])
+
         for row in report["idax"]:
             cfg = row["test_configuration"]
-            # Scan 300-char window after config label (paragraph=False may put
-            # values on separate lines); stop at next IDAX config label
-            win_m = re.search(re.escape(cfg) + r"([\s\S]{0,300})", idax_block, re.I)
+            # Scan 300-char window after config label; stop at next config label
+            win_m = re.search(_cfg_pat(cfg) + r"([\s\S]{0,300})", idax_block, re.I)
             if not win_m:
                 continue
             window = win_m.group(1)
-            _IDAX_CFGS = ["CHG", "CHL", "CLG", "CLT", "CTG", "CTH"]
-            for other in _IDAX_CFGS:
-                if other != cfg:
-                    stop = re.search(re.escape(other), window, re.I)
-                    if stop:
-                        window = window[:stop.start()]
+            stop_m = re.search(_all_cfg_pat, window, re.I)
+            if stop_m:
+                window = window[:stop_m.start()]
 
             # Moisture %
             moisture_m = re.search(r"(\d+(?:\.\d+)?)\s*%", window)
@@ -698,32 +649,21 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
     def _empty_row(columns: list) -> dict:
         return {c.get("key", ""): "" for c in columns if c.get("key")}
 
-    # Table key → (report list key, row match key)
-    _TABLE_MAP = {
-        "winding_test_results":   ("winding",   "test_configuration"),
-        "hv_bushing_test_results":("hv_bushing","bushing"),
-        "lv_bushing_test_results":("lv_bushing","bushing"),
-        "idax_test_results":      ("idax",      "test_configuration"),
-    }
+    def _report_list_key(field_key: str) -> str:
+        """Derive report list key from template table field key by convention.
+        e.g. 'idax_test_results' → 'idax', 'hv_bushing_test_results' → 'hv_bushing'
+        """
+        for suffix in ("_test_results", "_results"):
+            if field_key.endswith(suffix):
+                return field_key[: -len(suffix)]
+        return field_key
 
-    # Scalar fields: template key → report key (None = same)
-    _SCALAR_MAP = {
-        "test_voltage_kv":       "test_voltage_kv",
-        "frequency_hz":          "frequency_hz",
-        "ambient_temp_c":        "ambient_temp_c",
-        "oil_temp_c":            "oil_temp_c",
-        "weather_condition":     "weather_condition",
-        "bushing_condition":     "bushing_condition",
-        "instrument_make":       "instrument_make",
-        "winding_itc_factor":    "winding_itc_factor",
-        "winding_observations":  "winding_observations",
-        "hv_bushing_itc_factor": "hv_bushing_itc_factor",
-        "lv_bushing_itc_factor": "lv_bushing_itc_factor",
-        "idax_testing_kit":      "idax_testing_kit",
-        "idax_observation":      "idax_observation",
-        "overall_result":        "overall_result",
-        "recommendation":        "recommendation",
-    }
+    def _match_key(columns: list) -> str:
+        """First readonly column is the row identity key (e.g. test_configuration, bushing)."""
+        for col in columns:
+            if col.get("type") == "readonly":
+                return col.get("key", "")
+        return ""
 
     for section in template.get("sections", []):
         for field in section.get("fields", []):
@@ -733,27 +673,28 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
             if ftype == "table":
                 columns      = field.get("columns", [])
                 default_rows = field.get("default_rows", [])
-                rows = []
+                rows         = []
 
-                if key in _TABLE_MAP:
-                    r_list_key, match_key = _TABLE_MAP[key]
-                    source_rows = r.get(r_list_key, [])
+                r_list_key = _report_list_key(key)
+                mk         = _match_key(columns)
+                source_rows = r.get(r_list_key, [])
 
-                    for dr in default_rows:
-                        row = _empty_row(columns)
-                        # Apply readonly defaults first
-                        for k, v in dr.items():
-                            if k in row:
-                                row[k] = v or ""
-                        # Mark calculated columns as None
-                        for col in columns:
-                            if col.get("type") == "calculated":
-                                row[col["key"]] = None
+                for dr in default_rows:
+                    row = _empty_row(columns)
+                    # Apply readonly defaults first
+                    for k, v in dr.items():
+                        if k in row:
+                            row[k] = v or ""
+                    # Mark calculated columns as None
+                    for col in columns:
+                        if col.get("type") == "calculated":
+                            row[col["key"]] = None
 
-                        # Merge data from source
-                        match_val = dr.get(match_key, "")
+                    # Merge matching source row if one exists
+                    if mk and source_rows:
+                        match_val = dr.get(mk, "")
                         for src in source_rows:
-                            if src.get(match_key) == match_val:
+                            if src.get(mk) == match_val:
                                 for col in columns:
                                     ck = col.get("key", "")
                                     if col.get("type") in ("calculated", "readonly"):
@@ -761,14 +702,8 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
                                     if ck in src and src[ck] is not None:
                                         row[ck] = _str(src[ck])
                                 break
-                        rows.append(row)
-                else:
-                    for dr in default_rows:
-                        row = _empty_row(columns)
-                        for k, v in dr.items():
-                            if k in row:
-                                row[k] = v or ""
-                        rows.append(row)
+
+                    rows.append(row)
 
                 test_data[key] = rows
 
@@ -776,27 +711,18 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
                 pass  # computed by EvaluationService
 
             else:
-                if key in _SCALAR_MAP:
-                    val = r.get(_SCALAR_MAP[key])
-                    test_data[key] = _str(val) if val is not None else ""
+                # Template field key matches report key by convention;
+                # fall back to field default when not present in report.
+                val = r.get(key)
+                if val is not None:
+                    test_data[key] = _str(val)
                 elif field.get("default") is not None:
                     test_data[key] = field["default"]
 
-    # Equipment-bound readonly fields (mirrors context_bindings)
-    eq_vc   = ""
-    eq_dept = ""
-    if eq is not None:
-        eq_vc   = (getattr(eq, "voltage_class", None) or "").strip()
-        dept_obj = getattr(eq, "department", None)
-        eq_dept  = (getattr(dept_obj, "name", None) or "").strip() if dept_obj else ""
-
-    test_data["sub_station"]         = eq_dept or r.get("sub_station", "")
-    test_data["make"]                = getattr(eq, "manufacturer",        None) or r.get("make", "")
-    test_data["serial_number"]       = getattr(eq, "factory_serial_number", None) or r.get("serial_number", "")
-    test_data["capacity_mva"]        = r.get("capacity_mva", "")
-    test_data["year_of_manufacture"] = _str(getattr(eq, "year_of_manufacture", None))
-    test_data["vector_group"]        = getattr(eq, "vector_group", None) or r.get("vector_group", "")
-    test_data["voltage_ratio"]       = eq_vc or r.get("voltage_class", "")
+    # Resolve readonly/context fields from equipment + report fallback.
+    # Driven by context_bindings so no manual updates needed when the template changes.
+    for field_key, binding_path in template.get("context_bindings", {}).items():
+        test_data[field_key] = resolve_context_binding(binding_path, eq, r, field_key)
 
     return test_data
 

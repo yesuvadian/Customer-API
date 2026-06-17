@@ -270,6 +270,29 @@ class TestingRequestHTMLService:
                     f'<tbody>{trows}</tbody></table>'
                 )
 
+        if result and result.testing_kit_id and result.testing_kit:
+            kit = result.testing_kit
+            np = kit.nameplate_data or {}
+            kit_type = np.get("kit_subtype") or kit.bay_number or (kit.equipment_type.name if kit.equipment_type else "Testing Kit")
+            kit_loc = kit.department.name if kit.department else "—"
+            body_sections += (
+                '<div class="section-title">Testing Kit Used</div>'
+                '<table class="data"><tbody>'
+                f"<tr><td style='padding:6px 10px;border:1px solid #e0e0e0;color:#555;font-size:12px;width:35%'>UEIC</td>"
+                f"<td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:13px'>{kit.ueic or '—'}</td></tr>"
+                f"<tr><td style='padding:6px 10px;border:1px solid #e0e0e0;color:#555;font-size:12px'>Kit Type</td>"
+                f"<td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:13px'>{kit_type}</td></tr>"
+                f"<tr><td style='padding:6px 10px;border:1px solid #e0e0e0;color:#555;font-size:12px'>Manufacturer</td>"
+                f"<td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:13px'>{kit.manufacturer or '—'}</td></tr>"
+                f"<tr><td style='padding:6px 10px;border:1px solid #e0e0e0;color:#555;font-size:12px'>Model Number</td>"
+                f"<td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:13px'>{kit.model_number or '—'}</td></tr>"
+                f"<tr><td style='padding:6px 10px;border:1px solid #e0e0e0;color:#555;font-size:12px'>Serial Number</td>"
+                f"<td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:13px'>{kit.factory_serial_number or '—'}</td></tr>"
+                f"<tr><td style='padding:6px 10px;border:1px solid #e0e0e0;color:#555;font-size:12px'>Location</td>"
+                f"<td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:13px'>{kit_loc}</td></tr>"
+                '</tbody></table>'
+            )
+
         if result and result.evaluation_result:
             er = result.evaluation_result
             fields = er.get("fields", [])

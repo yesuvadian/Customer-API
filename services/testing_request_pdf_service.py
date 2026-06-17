@@ -352,6 +352,43 @@ class TestingRequestPDFService:
                 sub_t.setStyle(_tbl(hdr_color=teal))
                 story += [sub_t, Spacer(1, 0.12 * inch)]
 
+        # ── Testing Kit Used ────────────────────────────────────────────────
+        if result and result.testing_kit_id and result.testing_kit:
+            kit = result.testing_kit
+            np = kit.nameplate_data or {}
+            kit_type = (
+                np.get("kit_subtype")
+                or kit.bay_number
+                or (kit.equipment_type.name if kit.equipment_type else "Testing Kit")
+            )
+            _th_s  = ParagraphStyle("KTH", fontSize=9, textColor=colors.white, fontName="Helvetica-Bold")
+            _key_s = ParagraphStyle("KK",  fontSize=9, fontName="Helvetica-Bold")
+            _cel_s = ParagraphStyle("KC",  fontSize=9)
+            story.append(Spacer(1, 0.1 * inch))
+            story.append(Paragraph("Testing Kit Used", heading_style))
+            kit_rows = [
+                [Paragraph("Field", _th_s), Paragraph("Value", _th_s)],
+                [Paragraph("UEIC", _key_s), Paragraph(kit.ueic or "—", _cel_s)],
+                [Paragraph("Kit Type", _key_s), Paragraph(kit_type, _cel_s)],
+                [Paragraph("Manufacturer", _key_s), Paragraph(kit.manufacturer or "—", _cel_s)],
+                [Paragraph("Model Number", _key_s), Paragraph(kit.model_number or "—", _cel_s)],
+                [Paragraph("Serial Number", _key_s), Paragraph(kit.factory_serial_number or "—", _cel_s)],
+                [Paragraph("Location", _key_s), Paragraph(kit.department.name if kit.department else "—", _cel_s)],
+            ]
+            kit_t = Table(kit_rows, colWidths=[2.2 * inch, 4.6 * inch])
+            kit_t.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#1A5276")),
+                ("FONTSIZE",      (0, 0), (-1, -1), 9),
+                ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.HexColor("#EBF5FB"), colors.white]),
+                ("BOX",           (0, 0), (-1, -1), 0.5, colors.HexColor("#AED6F1")),
+                ("INNERGRID",     (0, 0), (-1, -1), 0.25, colors.HexColor("#AED6F1")),
+                ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING",    (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+            ]))
+            story += [kit_t, Spacer(1, 0.12 * inch)]
+
         # ── Evaluation ──────────────────────────────────────────────────────
         if result and result.evaluation_result:
             ev_fields = (result.evaluation_result or {}).get("fields", [])

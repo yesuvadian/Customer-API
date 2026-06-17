@@ -606,6 +606,42 @@ class TestResultPDFService:
             story.append(Spacer(1, 0.3*inch))
 
         # ============================================================
+        # TESTING KIT USED
+        # ============================================================
+        if result.testing_kit_id and result.testing_kit:
+            kit = result.testing_kit
+            np = kit.nameplate_data or {}
+            kit_type = (
+                np.get("kit_subtype")
+                or kit.bay_number
+                or (kit.equipment_type.name if kit.equipment_type else "Testing Kit")
+            )
+            story.append(Paragraph("Testing Kit Used", heading_style))
+            kit_data = [
+                ['UEIC:', kit.ueic or '-'],
+                ['Kit Type:', kit_type],
+                ['Manufacturer:', kit.manufacturer or '-'],
+                ['Model Number:', kit.model_number or '-'],
+                ['Serial Number:', kit.factory_serial_number or '-'],
+                ['Location:', kit.department.name if kit.department else '-'],
+            ]
+            kit_table = Table(kit_data, colWidths=[2*inch, 4.5*inch])
+            kit_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#EBF5FB')),
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1A5276')),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#AED6F1')),
+            ]))
+            story.append(kit_table)
+            story.append(Spacer(1, 0.3*inch))
+
+        # ============================================================
         # TEST DATA
         # ============================================================
         story.append(Paragraph("Test Data", heading_style))

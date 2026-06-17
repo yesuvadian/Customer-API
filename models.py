@@ -3036,6 +3036,9 @@ class TestResult(Base):
     # {overall: "NORMAL"|"ALERT"|"CRITICAL", evaluated_at, fields: [{key, label, value, unit, status, thresholds}]}
     evaluation_result = Column(JSONB, nullable=True)
 
+    # Testing kit used for this result (optional — links to Equipment record of type "Testing Kit")
+    testing_kit_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True)
+
     tested_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     tested_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -3049,6 +3052,7 @@ class TestResult(Base):
     test_session = relationship("TestSession", foreign_keys=[test_session_id])
     organization = relationship("Organization", foreign_keys=[organization_id])
     images = relationship("TestResultImage", back_populates="test_result", cascade="all, delete-orphan")
+    testing_kit = relationship("Equipment", foreign_keys=[testing_kit_id])
     tester = relationship("User", foreign_keys=[tested_by])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])

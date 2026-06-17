@@ -3372,12 +3372,12 @@ TEST_TEMPLATES = {
                              "options": ["As new", "Acceptable", "Poor", "Bad"]},
                         ],
                         "default_rows": [
-                            {"test_configuration": "CHG"},
-                            {"test_configuration": "CHL"},
-                            {"test_configuration": "CLG"},
-                            {"test_configuration": "CLT"},
-                            {"test_configuration": "CTG"},
-                            {"test_configuration": "CTH"},
+                            {"test_configuration": "HV-GND"},
+                            {"test_configuration": "HV-LV"},
+                            {"test_configuration": "LV-GND"},
+                            {"test_configuration": "LV-TV"},
+                            {"test_configuration": "TV-GND"},
+                            {"test_configuration": "HV-TV"},
                         ],
                         "table_evaluation": {
                             "enabled": True,
