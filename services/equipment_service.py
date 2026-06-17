@@ -365,6 +365,7 @@ class EquipmentService:
         if search:
             query = query.filter(
                 (Equipment.ueic.ilike(f"%{search}%")) |
+                (Equipment.bay_number.ilike(f"%{search}%")) |
                 (Equipment.manufacturer.ilike(f"%{search}%")) |
                 (Equipment.model_number.ilike(f"%{search}%")) |
                 (Equipment.factory_serial_number.ilike(f"%{search}%"))

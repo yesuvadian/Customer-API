@@ -613,6 +613,64 @@ def get_equipment_test_history(
 
 
 @router.get(
+    "/equipment/{equipment_id}/test-types",
+    summary="Per-test-type AI analysis for one equipment (latest result per template)",
+)
+def get_equipment_test_types(
+    equipment_id: uuid.UUID,
+    db:   Session = Depends(get_vendor_db),
+    user: dict    = Depends(get_current_user),
+):
+    """
+    Returns the latest TestAnalytics row per template_key for this equipment,
+    with AI narrative fields (condition_summary, trend_summary, critical_findings,
+    recommendations) so the dashboard can show per-test-type AI analysis.
+    """
+    # Latest row per template_key — one subquery rank or just fetch all and dedupe in Python
+    rows = (
+        db.query(TestAnalytics)
+        .filter(TestAnalytics.equipment_id == equipment_id)
+        .order_by(TestAnalytics.template_key, TestAnalytics.calculated_at.desc())
+        .all()
+    )
+
+    # Dedupe: keep only the latest per template_key
+    seen: set[str] = set()
+    latest: list[TestAnalytics] = []
+    for row in rows:
+        if row.template_key not in seen:
+            seen.add(row.template_key)
+            latest.append(row)
+
+    # Bulk-fetch test names from TestResult
+    result_ids = [r.test_result_id for r in latest]
+    tr_map = {
+        r.id: r
+        for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
+    }
+
+    result = []
+    for row in latest:
+        tr = tr_map.get(row.test_result_id)
+        result.append({
+            "template_key":      row.template_key,
+            "test_name":         tr.test_name     if tr else row.template_key,
+            "test_category":     tr.test_category if tr else None,
+            "health_score":      float(row.health_score) if row.health_score is not None else None,
+            "risk_level":        row.risk_level,
+            "condition_summary": row.condition_summary,
+            "trend_summary":     row.trend_summary,
+            "critical_findings": row.critical_findings or [],
+            "recommendations":   row.recommendations  or [],
+            "parameter_count":   row.parameter_count,
+            "tested_at":         (tr.tested_at or tr.cts).isoformat() if tr and (tr.tested_at or tr.cts) else None,
+            "calculated_at":     row.calculated_at.isoformat() if row.calculated_at else None,
+        })
+
+    return result
+
+
+@router.get(
     "/equipment/{equipment_id}/parameters",
     summary="Latest parameter analytics for all tracked parameters on an equipment",
 )
