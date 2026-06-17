@@ -5061,12 +5061,19 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
 
     created = skipped = 0
 
+    def _safe_str(val):
+        """Convert pandas NaN / float / None to a clean string."""
+        if val is None:
+            return ""
+        s = str(val).strip()
+        return "" if s.lower() in ("nan", "none", "null") else s
+
     for _, row in df.iterrows():
-        substation_name = (row.get("substation") or "").strip()
+        substation_name = _safe_str(row.get("substation"))
         dept_id = dept_map.get(substation_name.lower())
         if not dept_id:
             # Fallback: try parent division name from the row
-            division_name = (row.get("division") or "").strip()
+            division_name = _safe_str(row.get("division"))
             if division_name:
                 dept_id = dept_map.get(division_name.lower())
             if not dept_id:
@@ -5076,7 +5083,7 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             else:
                 print(f"  [INFO] Substation '{substation_name}' mapped to parent division '{division_name}'")
 
-        raw_type = (row.get("equipment_type") or "").strip()
+        raw_type = _safe_str(row.get("equipment_type"))
         equip_type_id = None
         for key in (raw_type.lower(), raw_type.split("(")[0].strip().lower()):
             equip_type_id = type_map.get(key)
