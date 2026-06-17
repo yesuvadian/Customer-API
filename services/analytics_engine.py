@@ -500,7 +500,7 @@ class AnalyticsEngine:
                     )
 
                     for col in cols:
-                        if col.get("type") != "number":
+                        if col.get("type") not in ("number", "calculated"):
                             continue
                         col_key   = col.get("key", "")
                         col_label = col.get("label") or col_key

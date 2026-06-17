@@ -3121,7 +3121,7 @@ TEST_TEMPLATES = {
     # Capacitance & Tan Delta Test (Transformer) — KPTCL R&D Centre format
     # Covers: winding C/tanδ + 220kV bushing + 66kV bushing + IDAX insulation diagnostics.
     # ITC correction factor stored at section level (one factor per section, not per row).
-    # df_corrected_20c is a manual number entry (not auto-calculated) to match PDF workflow.
+    # df_corrected_20c is auto-calculated via FORMULA rule (PRODUCT of df_measured * form-level ITC factor).
     # ────────────────────────────────────────────────────────────────────────────
     "capacitance_tandelta_transformer": {
         "key": "capacitance_tandelta_transformer",
@@ -3185,7 +3185,8 @@ TEST_TEMPLATES = {
                             {"key": "voltage_kv",          "label": "kV",                              "type": "number", "unit": "kV"},
                             {"key": "capacitance_nf",      "label": "Capacitance C (nF)",              "type": "number", "unit": "nF"},
                             {"key": "df_measured",         "label": "% D.F Measured",                  "type": "number", "unit": "%"},
-                            {"key": "df_corrected_20c",    "label": "% D.F @ 20°C (ITC Corrected)",   "type": "number", "unit": "%"},
+                            {"key": "df_corrected_20c",    "label": "% D.F @ 20°C (ITC Corrected)",   "type": "calculated", "read_only": True,
+                             "rule": {"type": "FORMULA", "config": {"formula": "PRODUCT", "inputs": {"a": "df_measured", "b": "$form.winding_itc_factor"}, "precision": 4}}},
                             {
                                 "key": "condition",
                                 "label": "Condition",
@@ -3248,7 +3249,8 @@ TEST_TEMPLATES = {
                             {"key": "voltage_kv",        "label": "kV",                               "type": "number", "unit": "kV"},
                             {"key": "capacitance_pf",    "label": "Capacitance C (pF)",               "type": "number", "unit": "pF"},
                             {"key": "df_measured",       "label": "% D.F Measured",                   "type": "number", "unit": "%"},
-                            {"key": "df_corrected_20c",  "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number", "unit": "%"},
+                            {"key": "df_corrected_20c",  "label": "% D.F @ 20°C (ITC Corrected)",    "type": "calculated", "read_only": True,
+                             "rule": {"type": "FORMULA", "config": {"formula": "PRODUCT", "inputs": {"a": "df_measured", "b": "$form.hv_bushing_itc_factor"}, "precision": 4}}},
                             {
                                 "key": "condition",
                                 "label": "Condition",
@@ -3307,7 +3309,8 @@ TEST_TEMPLATES = {
                             {"key": "voltage_kv",        "label": "kV",                               "type": "number", "unit": "kV"},
                             {"key": "capacitance_pf",    "label": "Capacitance C (pF)",               "type": "number", "unit": "pF"},
                             {"key": "df_measured",       "label": "% D.F Measured",                   "type": "number", "unit": "%"},
-                            {"key": "df_corrected_20c",  "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number", "unit": "%"},
+                            {"key": "df_corrected_20c",  "label": "% D.F @ 20°C (ITC Corrected)",    "type": "calculated", "read_only": True,
+                             "rule": {"type": "FORMULA", "config": {"formula": "PRODUCT", "inputs": {"a": "df_measured", "b": "$form.lv_bushing_itc_factor"}, "precision": 4}}},
                             {
                                 "key": "condition",
                                 "label": "Condition",
@@ -5513,7 +5516,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",      "label": "Capacitance C (pF)",              "type": "number"},
                             {"key": "df_measured",         "label": "% D.F Measured",                  "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",          "type": "number"},
-                            {"key": "df_corrected_20c",    "label": "% D.F @ 20°C (ITC Corrected)",   "type": "number"},
+                            {"key": "df_corrected_20c",    "label": "% D.F @ 20°C (ITC Corrected)",   "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",    "label": "% D.F Previous Test",             "type": "number"},
                             {
                                 "key": "condition",
@@ -5560,7 +5563,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",               "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                   "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",            "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",              "type": "number"},
                             {
                                 "key": "condition",
@@ -5602,7 +5605,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",               "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                   "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",            "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",              "type": "number"},
                             {
                                 "key": "condition",
@@ -5738,7 +5741,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
                             {
                                 "key": "condition",
@@ -5826,7 +5829,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
                             {
                                 "key": "condition",
@@ -5907,7 +5910,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
                             {
                                 "key": "condition",
