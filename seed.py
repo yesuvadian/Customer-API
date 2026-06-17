@@ -11903,6 +11903,15 @@ def run_seed():
                     session.rollback()
                     print(f"  [WARN] Could not ensure RT substation '{sub_name}': {_e}")
 
+        # Equipment seeding from equipment_seed.xlsx — after dept hierarchy exists
+        if kptcl_org:
+            try:
+                seed_kptcl_equipment(session, str(kptcl_org.id))
+            except FileNotFoundError:
+                print("[WARN] equipment_seed.xlsx not found. Skipping equipment seeding.")
+            except Exception as e:
+                print(f"[WARN] KPTCL equipment seeding failed: {e}")
+
         # Annual Audit role mappings — after seed_dept_filter_users
         if kptcl_org:
             try:
@@ -11929,14 +11938,12 @@ def run_seed():
                 run as seed_testing_kit_run,
                 seed_module_and_privileges,
                 seed_kit_mappings,
-                seed_kit_equipment_records,
                 update_tester_assigned_email_template,
             )
             ensure_table()
             seed_testing_kit_run(session)
             seed_module_and_privileges()
             seed_kit_mappings(session)
-            seed_kit_equipment_records(session)
             update_tester_assigned_email_template()
         except Exception as _e:
             import traceback
@@ -13603,13 +13610,6 @@ def seed_dept_filter_users(session, org=None):
             _dft_assign_role(session, u.id, r.id, dept_obj.id)
         print(f"  {email:48s}  {role_name:22s}  {dept_obj.name}")
 
-    # ── 6. Sample equipment in each division ────────────────────────────────
-    # Without this, originator/tester users see no equipment in the TR form
-    # because seed_sample_equipment() only seeds into the Excel-based KPTCL
-    # substations, which are in a different branch of the dept tree.
-    print("\n[6] Sample equipment per division")
-    _seed_dft_equipment(session, org, dept_map)
-
     session.commit()
 
     print("\n" + "=" * 72)
@@ -13650,6 +13650,10 @@ def seed_kptcl_only(org_id: str):
         print("=" * 80 + "\n")
         seed_kptcl_departments(session, org_id)
         print("\n" + "=" * 80)
+        print("  KPTCL EQUIPMENT SEEDING")
+        print("=" * 80 + "\n")
+        seed_kptcl_equipment(session, org_id)
+        print("\n" + "=" * 80)
         print("  [OK] KPTCL SEEDING COMPLETED SUCCESSFULLY")
         print("=" * 80 + "\n")
 
@@ -13670,9 +13674,10 @@ if __name__ == "__main__":
             # --with-kptcl <org_id>  → also seed KPTCL departments after full seed
             if len(sys.argv) > 2 and sys.argv[1] == "--with-kptcl":
                 org_id = sys.argv[2]
-                print("\n[INFO] Seeding KPTCL departments...")
+                print("\n[INFO] Seeding KPTCL departments + equipment...")
                 with get_db_session() as session:
                     seed_kptcl_departments(session, org_id)
+                    seed_kptcl_equipment(session, org_id)
 
     except Exception as e:
         import traceback
