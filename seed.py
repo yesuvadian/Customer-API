@@ -1477,8 +1477,8 @@ def seed_modules(session):
 {"name": "Testing Requests", "description": "Create and manage transformer testing requests", "path": "testing_requests", "group_name": "Testing"},
 {"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
 {"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
-{"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 {"name": "Testing Request Approvals", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
+{"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 # Removed: Validation Requests (not implemented)
 # Removed: Tester Mapping (no longer used)
 {"name": "Test Template Management", "description": "Design and customise per-org test form templates", "path": "test_templates", "group_name": "Testing"},
