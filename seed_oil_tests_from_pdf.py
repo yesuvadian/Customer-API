@@ -395,10 +395,11 @@ def _oil_test_data(r: dict, eq=None) -> dict:
                 columns      = field.get("columns", [])
                 default_rows = field.get("default_rows", [])
                 src_key      = report_list_key(key)
-                source_rows  = r.get(src_key) or []
+                # Excel extractor stores oil data under "oil_test"; report_list_key returns "oil"
+                source_rows  = r.get(src_key) or r.get("oil_test") or []
 
                 # Excel extractor returns oil_test as a flat dict — convert to row list
-                if isinstance(source_rows, dict) and src_key == "oil_test":
+                if isinstance(source_rows, dict):
                     _flat = source_rows
                     _remarks = _flat.get("remarks") or {}
                     _key_map = [
