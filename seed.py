@@ -5114,21 +5114,22 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
                 return None
             return str(val).strip() if val else None
 
-        voltage_class = row.get("voltage_class") or ""
+        voltage_class = _safe_str(row.get("voltage_class"))
         # Strip trailing "kV" suffix if present for storage consistency
         voltage_class = voltage_class.replace("kV", "").replace("KV", "").strip() or None
 
         yom = _int(row.get("yom"))
         doc_raw = row.get("doc")
         doc_date = None
-        if doc_raw:
-            try:
-                doc_date = pd.to_datetime(doc_raw, dayfirst=True).date()
-            except Exception:
-                doc_date = None
+        try:
+            parsed = pd.to_datetime(doc_raw, dayfirst=True)
+            if not pd.isna(parsed):
+                doc_date = parsed.date()
+        except Exception:
+            doc_date = None
 
         # Determine status enum  (values: active, retired, scrapped, under_repair)
-        raw_status = (row.get("status") or "In-service").strip().lower()
+        raw_status = (_safe_str(row.get("status")) or "In-service").lower()
         from models import EquipmentStatus
         status_map = {
             "in-service": EquipmentStatus.active,
