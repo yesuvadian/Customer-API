@@ -11634,6 +11634,16 @@ def run_seed():
             print(f"[WARN] Master schedule seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
+        # Condition Monitoring Recommendations — score-band master data
+        print("\n--- Condition Monitoring Recommendations Seeding ---")
+        try:
+            from seed_condition_recommendations import run as seed_condition_recommendations
+            seed_condition_recommendations(session)
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Condition monitoring recommendations seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
         # Test & Maintenance Schedule Templates — full access for org-admin roles
         print("\n--- Schedule Templates Module Permissions ---")
         try:
