@@ -298,7 +298,9 @@ def patch_stage(
         if val is not None:
             setattr(stage, field, val)
 
-    if body.template_id is not None:
+    if body.remove_template:
+        db.query(RepairStageTemplate).filter_by(stage_id=stage_id).delete()
+    elif body.template_id is not None:
         existing_tmpl = db.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
         if existing_tmpl:
             existing_tmpl.template_id = body.template_id
