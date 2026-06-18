@@ -16,6 +16,7 @@ from routers import (
     surveillance_dashboard,
     websocket_routes,
     workflow_dashboard,
+    workflow_config,
 )
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.test_request_schedule_service import TestRequestScheduleService
@@ -1054,6 +1055,9 @@ app.include_router(surveillance_dashboard.router)
 
 # Unified Workflow Operations Dashboard
 app.include_router(workflow_dashboard.router)
+
+# Workflow Configuration (super_admin only)
+app.include_router(workflow_config.router)
 
 # WebSocket
 app.include_router(websocket_routes.router)
