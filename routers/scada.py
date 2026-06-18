@@ -218,6 +218,7 @@ def ingest_readings_batch(
 def list_readings(
     equipment_id: Optional[UUID] = None,
     scada_tag: Optional[str] = None,
+    alarm_only: bool = False,
     limit: int = Query(100, le=1000),
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -228,6 +229,8 @@ def list_readings(
         q = q.filter(ScadaReading.equipment_id == equipment_id)
     if scada_tag:
         q = q.filter(ScadaReading.scada_tag == scada_tag)
+    if alarm_only:
+        q = q.filter(ScadaReading.alarm_condition != "NORMAL")
     return q.order_by(ScadaReading.recorded_at.desc()).offset(offset).limit(limit).all()
 
 
@@ -236,28 +239,47 @@ def fleet_overview(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    # Latest reading per (equipment, tag) — then aggregate tags per equipment
     rows = db.execute(text("""
-        SELECT DISTINCT ON (sr.equipment_id)
-               sr.equipment_id,
-               e.name            AS equipment_name,
-               e.ueic,
-               sr.scada_tag,
-               sr.alarm_condition AS worst_condition,
-               sr.recorded_at    AS last_reading_at,
-               sr.value,
-               sr.unit
-        FROM   public.scada_readings sr
-        JOIN   public.equipment e ON e.id = sr.equipment_id
-        WHERE  sr.organization_id = :org_id
-          AND  sr.equipment_id IS NOT NULL
-        ORDER  BY sr.equipment_id,
-                  CASE sr.alarm_condition
-                      WHEN 'CRITICAL' THEN 1
-                      WHEN 'ALARM'    THEN 2
-                      WHEN 'WARNING'  THEN 3
-                      ELSE 4
-                  END,
-                  sr.recorded_at DESC
+        WITH latest AS (
+            SELECT DISTINCT ON (equipment_id, scada_tag)
+                   equipment_id, scada_tag, parameter_name,
+                   value, unit, alarm_condition, recorded_at
+            FROM   public.scada_readings
+            WHERE  organization_id = :org_id
+              AND  equipment_id IS NOT NULL
+            ORDER  BY equipment_id, scada_tag, recorded_at DESC
+        )
+        SELECT
+            l.equipment_id::text,
+            e.name   AS equipment_name,
+            e.ueic,
+            (
+                SELECT alarm_condition
+                FROM   latest l2
+                WHERE  l2.equipment_id = l.equipment_id
+                ORDER  BY CASE alarm_condition
+                              WHEN 'CRITICAL' THEN 1
+                              WHEN 'ALARM'    THEN 2
+                              WHEN 'WARNING'  THEN 3
+                              ELSE 4 END
+                LIMIT 1
+            ) AS worst_condition,
+            json_agg(
+                json_build_object(
+                    'scada_tag',       l.scada_tag,
+                    'parameter_name',  l.parameter_name,
+                    'value',           l.value::float8,
+                    'unit',            l.unit,
+                    'alarm_condition', l.alarm_condition,
+                    'recorded_at',     l.recorded_at
+                )
+                ORDER BY l.scada_tag
+            ) AS tags
+        FROM   latest l
+        JOIN   public.equipment e ON e.id = l.equipment_id
+        GROUP  BY l.equipment_id, e.name, e.ueic
+        ORDER  BY e.name
     """), {"org_id": str(current_user.organization_id)}).fetchall()
 
     return [dict(r._mapping) for r in rows]
@@ -273,7 +295,25 @@ def equipment_analytics(
         ScadaParameterAnalytics.organization_id == current_user.organization_id,
         ScadaParameterAnalytics.equipment_id == equipment_id,
     ).all()
-    return rows
+    # Coerce Decimal columns to float so JSON serialization is numeric not string
+    def _row(r):
+        return {
+            "scada_tag":          r.scada_tag,
+            "parameter_name":     r.parameter_name,
+            "computed_at":        r.computed_at,
+            "trend":              r.trend,
+            "trend_slope":        float(r.trend_slope)        if r.trend_slope        is not None else None,
+            "trend_r_squared":    float(r.trend_r_squared)    if r.trend_r_squared    is not None else None,
+            "annual_change":      float(r.annual_change)      if r.annual_change      is not None else None,
+            "pct_change_annual":  float(r.pct_change_annual)  if r.pct_change_annual  is not None else None,
+            "is_anomaly":         r.is_anomaly,
+            "anomaly_type":       r.anomaly_type,
+            "anomaly_detail":     r.anomaly_detail,
+            "breach_threshold":   float(r.breach_threshold)   if r.breach_threshold   is not None else None,
+            "days_to_breach":     float(r.days_to_breach)     if r.days_to_breach     is not None else None,
+            "breach_predicted_at": r.breach_predicted_at,
+        }
+    return [_row(r) for r in rows]
 
 
 @router.get("/equipment/{equipment_id}/trend")
@@ -285,7 +325,7 @@ def equipment_trend(
     current_user=Depends(get_current_user),
 ):
     rows = db.execute(text("""
-        SELECT recorded_at, value, alarm_condition
+        SELECT recorded_at AS ts, value::float8 AS value, alarm_condition
         FROM   public.scada_readings
         WHERE  organization_id = :org_id
           AND  equipment_id    = :eid
@@ -308,10 +348,28 @@ def list_alert_rules(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return db.query(ScadaAlertRule).filter(
+    rules = db.query(ScadaAlertRule).filter(
         ScadaAlertRule.organization_id == current_user.organization_id,
         ScadaAlertRule.is_active == True,
     ).all()
+    def _f(v):
+        return float(v) if v is not None else None
+    def _rule(r):
+        return {
+            "id":                str(r.id),
+            "scada_tag":         r.scada_tag,
+            "parameter_name":    r.parameter_name,
+            "unit":              r.unit,
+            "equipment_id":      str(r.equipment_id) if r.equipment_id else None,
+            "equipment_type_id": r.equipment_type_id,
+            "warning_min":       _f(r.warning_min),
+            "warning_max":       _f(r.warning_max),
+            "alarm_min":         _f(r.alarm_min),
+            "alarm_max":         _f(r.alarm_max),
+            "critical_min":      _f(r.critical_min),
+            "critical_max":      _f(r.critical_max),
+        }
+    return [_rule(r) for r in rules]
 
 
 @router.post("/alert-rules", status_code=201)
@@ -408,7 +466,9 @@ def create_tag_mapping(
             unresolved.resolved    = True
             unresolved.resolved_at = datetime.now(timezone.utc)
             unresolved.resolved_by = current_user.id
-            db.commit()
+        _backfill_readings(db, current_user.organization_id, payload.scada_tag,
+                           payload.equipment_id)
+        db.commit()
         return existing
 
     mapping = ScadaTagMap(
@@ -430,7 +490,23 @@ def create_tag_mapping(
 
     db.commit()
     db.refresh(mapping)
+
+    # Back-fill last 7 days of readings that arrived before the mapping existed
+    _backfill_readings(db, current_user.organization_id, payload.scada_tag,
+                       payload.equipment_id)
+    db.commit()
     return mapping
+
+
+def _backfill_readings(db: Session, organization_id, scada_tag: str, equipment_id) -> None:
+    db.execute(text("""
+        UPDATE public.scada_readings
+        SET    equipment_id = :eid
+        WHERE  organization_id = :org_id
+          AND  scada_tag       = :tag
+          AND  equipment_id IS NULL
+          AND  recorded_at     > now() - interval '7 days'
+    """), {"eid": str(equipment_id), "org_id": str(organization_id), "tag": scada_tag})
 
 
 @router.get("/unresolved")
