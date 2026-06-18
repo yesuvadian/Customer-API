@@ -4788,6 +4788,133 @@ class ConditionRecommendationActivation(Base):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# SCADA INTEGRATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ScadaTagMap(Base):
+    """Maps a SCADA device tag to an equipment record."""
+    __tablename__ = "scada_tag_map"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "scada_tag", name="uq_scada_tag_map_org_tag"),
+        {"schema": "public"},
+    )
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    scada_tag       = Column(String(120), nullable=False)
+    equipment_id    = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="CASCADE"), nullable=False)
+    parameter_name  = Column(String(120), nullable=True)
+    unit            = Column(String(30),  nullable=True)
+    is_active       = Column(Boolean, default=True, nullable=False)
+    created_by      = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    cts             = Column(DateTime(timezone=True), server_default=func.now())
+
+    equipment    = relationship("Equipment",    foreign_keys=[equipment_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+
+
+class ScadaUnresolved(Base):
+    """Staging table for SCADA tags that cannot be resolved to an equipment record."""
+    __tablename__ = "scada_unresolved"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "scada_tag", name="uq_scada_unresolved_org_tag"),
+        {"schema": "public"},
+    )
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    scada_tag       = Column(String(120), nullable=False)
+    sample_payload  = Column(JSONB, nullable=True)
+    first_seen_at   = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at    = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    resolved        = Column(Boolean, default=False, nullable=False)
+    resolved_at     = Column(DateTime(timezone=True), nullable=True)
+    resolved_by     = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
+
+
+class ScadaAlertRule(Base):
+    """Threshold configuration per scada_tag / equipment / equipment_type."""
+    __tablename__ = "scada_alert_rules"
+    __table_args__ = {"schema": "public"}
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id   = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id      = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=True)
+    equipment_type_id = Column(Integer,             ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=True)
+    scada_tag         = Column(String(120), nullable=False)
+    parameter_name    = Column(String(120), nullable=True)
+    unit              = Column(String(30),  nullable=True)
+    warning_min       = Column(Numeric(18, 6), nullable=True)
+    warning_max       = Column(Numeric(18, 6), nullable=True)
+    alarm_min         = Column(Numeric(18, 6), nullable=True)
+    alarm_max         = Column(Numeric(18, 6), nullable=True)
+    critical_min      = Column(Numeric(18, 6), nullable=True)
+    critical_max      = Column(Numeric(18, 6), nullable=True)
+    is_active         = Column(Boolean, default=True, nullable=False)
+    created_by        = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    cts               = Column(DateTime(timezone=True), server_default=func.now())
+    mts               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment      = relationship("Equipment",      foreign_keys=[equipment_id])
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    organization   = relationship("Organization",   foreign_keys=[organization_id])
+
+
+class ScadaReading(Base):
+    """Time-series table storing every SCADA reading with its evaluated alarm condition."""
+    __tablename__ = "scada_readings"
+    __table_args__ = {"schema": "public"}
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id    = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="SET NULL"), nullable=True)
+    scada_tag       = Column(String(120), nullable=False)
+    parameter_name  = Column(String(120), nullable=True)
+    value           = Column(Numeric(18, 6), nullable=False)
+    unit            = Column(String(30),  nullable=True)
+    alarm_condition = Column(String(20),  nullable=False, default="NORMAL")
+    recorded_at     = Column(DateTime(timezone=True), nullable=False)
+    received_at     = Column(DateTime(timezone=True), server_default=func.now())
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+
+    equipment    = relationship("Equipment",    foreign_keys=[equipment_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+
+
+class ScadaParameterAnalytics(Base):
+    """Scheduled analytics output per (equipment, scada_tag) — updated hourly/daily."""
+    __tablename__ = "scada_parameter_analytics"
+    __table_args__ = (
+        UniqueConstraint("equipment_id", "scada_tag", name="uq_scada_param_analytics"),
+        {"schema": "public"},
+    )
+
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id     = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id        = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=False)
+    scada_tag           = Column(String(120), nullable=False)
+    parameter_name      = Column(String(120), nullable=True)
+    computed_at         = Column(DateTime(timezone=True), server_default=func.now())
+    history_count       = Column(Integer,      nullable=True)
+    trend               = Column(String(30),   nullable=True)
+    trend_slope         = Column(Numeric(18,8), nullable=True)
+    trend_r_squared     = Column(Numeric(6,4),  nullable=True)
+    annual_change       = Column(Numeric(18,6), nullable=True)
+    pct_change_annual   = Column(Numeric(8,2),  nullable=True)
+    is_anomaly          = Column(Boolean, default=False)
+    anomaly_type        = Column(String(50),  nullable=True)
+    anomaly_detail      = Column(Text,        nullable=True)
+    breach_threshold    = Column(Numeric(18,6), nullable=True)
+    breach_predicted_at = Column(DateTime(timezone=True), nullable=True)
+    days_to_breach      = Column(Numeric(8,2),  nullable=True)
+
+    equipment    = relationship("Equipment",    foreign_keys=[equipment_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # NOTIFICATION ENGINE - EVENT QUEUE
 # ═══════════════════════════════════════════════════════════════════════════
 

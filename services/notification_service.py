@@ -351,6 +351,31 @@ def _enrich_context_from_source(
                 ctx.setdefault("recommendation.id",     str(rec.id))
                 ctx.setdefault("recommendation.status", rec.approval_status or "")
 
+        elif source_type == "scada_reading":
+            from models import ScadaReading, Equipment as _ScadaEq
+            reading = db.query(ScadaReading).filter(ScadaReading.id == source_id).first()
+            if reading:
+                ctx.setdefault("scada.tag",        reading.scada_tag or "")
+                ctx.setdefault("scada.parameter",  reading.parameter_name or "")
+                ctx.setdefault("scada.value",      str(reading.value))
+                ctx.setdefault("scada.unit",       reading.unit or "")
+                ctx.setdefault("scada.condition",  reading.alarm_condition or "")
+                ctx.setdefault("scada.timestamp",  str(reading.recorded_at)[:19] if reading.recorded_at else "")
+                if reading.equipment_id:
+                    from sqlalchemy.orm import joinedload as _jl_scada
+                    eq = (
+                        db.query(_ScadaEq)
+                        .options(_jl_scada(_ScadaEq.department))
+                        .filter(_ScadaEq.id == reading.equipment_id)
+                        .first()
+                    )
+                    if eq:
+                        ctx.setdefault("equipment.name", getattr(eq, "name", "") or "")
+                        ctx.setdefault("equipment.ueic", getattr(eq, "ueic", "") or "")
+                        _eq_dept = getattr(eq, "department", None)
+                        if _eq_dept:
+                            ctx.setdefault("equipment.department", _eq_dept.name or "")
+
     except Exception as _exc:
         logger.warning(f"[Notif] _enrich_context_from_source({source_type}): {_exc}")
 
