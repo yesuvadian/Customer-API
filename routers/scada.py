@@ -43,6 +43,7 @@ from models import (
     ScadaReading,
     ScadaTagMap,
     ScadaUnresolved,
+    User,
 )
 from services import scada_alarm_evaluator as evaluator
 
@@ -202,10 +203,10 @@ def ingest_reading(
     body:               ReadingIn,
     background_tasks:   BackgroundTasks,
     db:                 Session = Depends(get_db),
-    user: dict          = Depends(get_current_user),
+    user: User          = Depends(get_current_user),
 ):
-    org_id  = UUID(user["organization_id"])
-    user_id = UUID(user["id"])
+    org_id  = UUID(user.organization_id)
+    user_id = UUID(user.id)
     reading = _ingest_one(db, org_id, user_id, body, background_tasks)
     return ReadingOut(
         id              = reading.id,
@@ -224,10 +225,10 @@ def ingest_readings_batch(
     body:             BatchReadingsIn,
     background_tasks: BackgroundTasks,
     db:               Session = Depends(get_db),
-    user: dict        = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
-    org_id  = UUID(user["organization_id"])
-    user_id = UUID(user["id"])
+    org_id  = UUID(user.organization_id)
+    user_id = UUID(user.id)
     results = []
     for r in body.readings:
         try:
@@ -249,9 +250,9 @@ def list_readings(
     limit:           int              = Query(50, le=500),
     offset:          int              = Query(0),
     db:              Session          = Depends(get_db),
-    user: dict       = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user["organization_id"])
+    org_id = UUID(user.organization_id)
     q = db.query(ScadaReading).filter(ScadaReading.organization_id == org_id)
     if equipment_id:
         q = q.filter(ScadaReading.equipment_id == equipment_id)
@@ -282,11 +283,11 @@ def list_readings(
 @router.get("/fleet")
 def fleet_overview(
     db:        Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
     """Latest alarm status per equipment — for Fleet Overview UI."""
     from sqlalchemy import text
-    org_id = user["organization_id"]
+    org_id = user.organization_id
     rows = db.execute(text("""
         SELECT DISTINCT ON (equipment_id)
                equipment_id,
@@ -327,10 +328,10 @@ def fleet_overview(
 def equipment_analytics(
     equipment_id: UUID,
     db:           Session = Depends(get_db),
-    user: dict    = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
     """Analytics summary for all tags of one equipment."""
-    org_id = UUID(user["organization_id"])
+    org_id = UUID(user.organization_id)
     rows = (
         db.query(ScadaParameterAnalytics)
         .filter(
@@ -366,11 +367,11 @@ def equipment_trend(
     scada_tag:    str   = Query(...),
     hours:        int   = Query(168, le=8760),  # default 7 days, max 1 year
     db:           Session = Depends(get_db),
-    user: dict    = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
     """Raw time-series for one tag — for Equipment Trend View chart."""
     from sqlalchemy import text
-    org_id = user["organization_id"]
+    org_id = user.organization_id
     rows = db.execute(text("""
         SELECT recorded_at, value, alarm_condition
         FROM   public.scada_readings
@@ -401,9 +402,9 @@ def equipment_trend(
 def list_alert_rules(
     equipment_id: Optional[UUID] = Query(None),
     db:           Session        = Depends(get_db),
-    user: dict    = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user["organization_id"])
+    org_id = UUID(user.organization_id)
     q = db.query(ScadaAlertRule).filter(
         ScadaAlertRule.organization_id == org_id,
         ScadaAlertRule.is_active == True,
@@ -433,9 +434,9 @@ def list_alert_rules(
 def create_alert_rule(
     body:      AlertRuleIn,
     db:        Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user["organization_id"])
+    org_id = UUID(user.organization_id)
     if not body.equipment_id and not body.equipment_type_id:
         raise HTTPException(400, "Provide equipment_id or equipment_type_id")
     rule = ScadaAlertRule(
@@ -452,7 +453,7 @@ def create_alert_rule(
         alarm_max         = body.alarm_max,
         critical_min      = body.critical_min,
         critical_max      = body.critical_max,
-        created_by        = UUID(user["id"]),
+        created_by        = UUID(user.id),
     )
     db.add(rule)
     db.commit()
@@ -465,9 +466,9 @@ def update_alert_rule(
     rule_id:   UUID,
     body:      AlertRuleIn,
     db:        Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user["organization_id"])
+    org_id = UUID(user.organization_id)
     rule = db.query(ScadaAlertRule).filter(
         ScadaAlertRule.id == rule_id,
         ScadaAlertRule.organization_id == org_id,
@@ -486,9 +487,9 @@ def update_alert_rule(
 def deactivate_alert_rule(
     rule_id:   UUID,
     db:        Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user["organization_id"])
+    org_id = UUID(user.organization_id)
     rule = db.query(ScadaAlertRule).filter(
         ScadaAlertRule.id == rule_id,
         ScadaAlertRule.organization_id == org_id,
@@ -505,9 +506,9 @@ def deactivate_alert_rule(
 @router.get("/tag-map")
 def list_tag_map(
     db:        Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user["organization_id"])
+    org_id = UUID(user.organization_id)
     rows = db.query(ScadaTagMap).filter(
         ScadaTagMap.organization_id == org_id,
         ScadaTagMap.is_active == True,
@@ -528,10 +529,10 @@ def list_tag_map(
 def create_tag_mapping(
     body:      TagMapIn,
     db:        Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
-    org_id  = UUID(user["organization_id"])
-    user_id = UUID(user["id"])
+    org_id  = UUID(user.organization_id)
+    user_id = UUID(user.id)
 
     existing = db.query(ScadaTagMap).filter(
         ScadaTagMap.organization_id == org_id,
@@ -581,9 +582,9 @@ def create_tag_mapping(
 @router.get("/unresolved")
 def list_unresolved(
     db:        Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user["organization_id"])
+    org_id = UUID(user.organization_id)
     rows = db.query(ScadaUnresolved).filter(
         ScadaUnresolved.organization_id == org_id,
         ScadaUnresolved.resolved == False,
@@ -606,10 +607,10 @@ def list_unresolved(
 def trigger_analytics_run(
     background_tasks: BackgroundTasks,
     db:               Session = Depends(get_db),
-    user: dict        = Depends(get_current_user),
+    user: User         = Depends(get_current_user),
 ):
     """Manually trigger the scheduled analytics runner for this org."""
-    org_id = UUID(user["organization_id"])
+    org_id = UUID(user.organization_id)
 
     def _run():
         from database import get_vendor_db
