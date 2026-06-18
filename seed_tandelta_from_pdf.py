@@ -414,11 +414,22 @@ def parse_ocr_text(text: str) -> dict | None:
     if idax_m:
         idax_block = idax_m.group(0)
 
+        # Same abbreviation map used by the winding section — CHG=HV-GND, CHL=HV-LV, etc.
+        _idax_GND = r"(?:GND|Grd|Grnd|Ground)"
+        _IDAX_CFG_PAT = {
+            "HV-GND": rf"(?:CHG\b|HV\s*[-–]\s*{_idax_GND})",
+            "HV-LV":  r"(?:CHL\b|HV\s*[-–]\s*(?:LV|IV))",
+            "LV-GND": rf"(?:CLG\b|(?:LV|IV)\s*[-–]\s*{_idax_GND})",
+            "LV-TV":  r"(?:CLT\b|(?:LV|IV)\s*[-–]\s*TV)",
+            "TV-GND": rf"(?:CTG\b|TV\s*[-–]\s*{_idax_GND})",
+            "HV-TV":  r"(?:CTH\b|(?:HV|TV)\s*[-–]\s*(?:TV|HV))",
+        }
+
         def _cfg_pat(cfg: str) -> str:
-            """Build a search pattern for a test_configuration value.
-            Normalises GND since OCR renders it as Grd / Grnd / Ground,
-            and LV since OCR sometimes reads it as IV.
-            """
+            """Return regex matching both abbreviated (CHG…) and long-form (HV-GND…) labels."""
+            if cfg in _IDAX_CFG_PAT:
+                return _IDAX_CFG_PAT[cfg]
+            # Fallback: normalise GND/LV variants for any unexpected config key
             pat = re.escape(cfg)
             pat = pat.replace(r"GND", r"(?:GND|Grd|Grnd|Ground)")
             pat = pat.replace(r"LV",  r"(?:LV|IV)")
