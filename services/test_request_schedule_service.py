@@ -571,9 +571,9 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     new_request.request_number,
                 )
             except Exception as _wf_err:
-                logger.warning(
-                    "[ScheduleService] WF enrollment failed for ticket %s (non-fatal): %s",
-                    new_request.request_number, _wf_err,
+                logger.error(
+                    "[ScheduleService] WF enrollment FAILED for ticket %s: %s",
+                    new_request.request_number, _wf_err, exc_info=True,
                 )
 
             log_entry = TestRequestScheduleLog(
