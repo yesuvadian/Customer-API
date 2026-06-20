@@ -197,11 +197,14 @@ def _get_or_create_stage_role(session, stage, role,
 
 def _get_or_create_transition(session, from_stage, to_stage, action_code,
                                requires_comment=False, is_rejection=False,
-                               terminal_status=None):
+                               terminal_status=None, post_action=None):
     exists = session.query(TrWfStageTransition).filter_by(
         from_stage_id=from_stage.id, action_code=action_code
     ).first()
-    if not exists:
+    if exists:
+        if post_action is not None and exists.post_action != post_action:
+            exists.post_action = post_action
+    else:
         session.add(TrWfStageTransition(
             id=uuid.uuid4(),
             from_stage_id=from_stage.id,
@@ -210,6 +213,7 @@ def _get_or_create_transition(session, from_stage, to_stage, action_code,
             requires_comment=requires_comment,
             is_rejection=is_rejection,
             terminal_status_id=terminal_status.id if terminal_status else None,
+            post_action=post_action,
         ))
 
 
@@ -348,7 +352,7 @@ def seed_tr_wf_workflow(session):
     _get_or_create_transition(session, sg_l4, sg_l3rev, "complete")
     _get_or_create_transition(session, sg_l4, sg_l3a,   "return",  requires_comment=True)
     # L3 review
-    _get_or_create_transition(session, sg_l3rev, None,  "approve", terminal_status=st_completed)
+    _get_or_create_transition(session, sg_l3rev, None,  "approve", terminal_status=st_completed, post_action="recommendation_finalize")
     _get_or_create_transition(session, sg_l3rev, sg_l4, "reject",  requires_comment=True, is_rejection=True)
     _get_or_create_transition(session, sg_l3rev, None,  "cancel",  requires_comment=True, terminal_status=st_cancelled)
     session.flush()

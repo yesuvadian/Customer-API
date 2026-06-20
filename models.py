@@ -881,6 +881,7 @@ class TrWfStageTransition(Base):
     requires_comment = Column(Boolean, default=False)
     is_rejection = Column(Boolean, default=False)
     terminal_status_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_statuses.id", ondelete="SET NULL"), nullable=True)
+    post_action = Column(String(100), nullable=True)  # key into BaseWfAction registry, fired after transition
 
     __table_args__ = (
         UniqueConstraint("from_stage_id", "action_code", name="uq_tr_wf_transition_action"),

@@ -590,6 +590,8 @@ class TestingService:
             TestingRequestStatus.in_progress,
             TestingRequestStatus.accepted,
             TestingRequestStatus.test_submitted,
+            TestingRequestStatus.pending_assignment,  # tr_wf: L2 approved, tester filling results
+            TestingRequestStatus.scheduled,
         )
         if request.status not in allowed:
             raise HTTPException(
@@ -654,8 +656,12 @@ class TestingService:
             )
             self.db.add(result)
 
-        # Auto-transition to in_progress if still accepted
-        if request.status == TestingRequestStatus.accepted:
+        # Auto-transition to in_progress if still accepted/pending_assignment/scheduled
+        if request.status in (
+            TestingRequestStatus.accepted,
+            TestingRequestStatus.pending_assignment,
+            TestingRequestStatus.scheduled,
+        ):
             request.status = TestingRequestStatus.in_progress
             request.modified_by = tester_id
 

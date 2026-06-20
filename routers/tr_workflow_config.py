@@ -91,6 +91,7 @@ def _stage_out(s: TrWfStage) -> dict:
                 "terminal_status_id": str(t.terminal_status_id) if t.terminal_status_id else None,
                 "to_stage_name": t.to_stage.name if t.to_stage else None,
                 "terminal_status_code": t.terminal_status.status_code if t.terminal_status else None,
+                "post_action": t.post_action,
             }
             for t in s.transitions
         ],
@@ -505,6 +506,7 @@ def replace_stage_transitions(
             requires_comment=t.get("requires_comment", False),
             is_rejection=t.get("is_rejection", False),
             terminal_status_id=t.get("terminal_status_id"),
+            post_action=t.get("post_action") or None,
         ))
     db.commit()
     return _stage_out(_load_stage(db, stage_id))
@@ -728,6 +730,18 @@ def get_action_codes(
     ]
 
 
+@router.get("/options/post-actions")
+def get_post_actions(
+    current_user: User = Depends(get_current_user),
+):
+    """Return all available post-transition actions discovered via reflection."""
+    from services.tr_wf_post_actions import BaseWfAction  # noqa: F401 — triggers subclass registration
+    return [
+        {"key": cls.key, "label": cls.label}
+        for cls in BaseWfAction.__subclasses__()
+    ]
+
+
 @router.get("/picker-options")
 def get_picker_options(
     db: Session = Depends(get_db),
@@ -735,6 +749,7 @@ def get_picker_options(
 ):
     """Combined picker options for admin config forms."""
     from services.tr_workflow_routing_service import ACTION_CODE_LABELS
+    from services.tr_wf_post_actions import BaseWfAction  # noqa: F401
     return {
         "equipment_types": get_equipment_types(db, current_user),
         "test_types": get_test_types(db, current_user),
@@ -742,5 +757,9 @@ def get_picker_options(
         "action_codes": [
             {"code": code, "label": label}
             for code, label in ACTION_CODE_LABELS.items()
+        ],
+        "post_actions": [
+            {"key": cls.key, "label": cls.label}
+            for cls in BaseWfAction.__subclasses__()
         ],
     }

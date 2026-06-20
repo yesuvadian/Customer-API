@@ -455,6 +455,22 @@ def submit_test_results(
             replacement_products=repl_prods or None,
         )
 
+    # ── TR WF engine: advance l4_test_execution → l3_review_result ──────────────
+    if getattr(req, "wf_instance_id", None):
+        try:
+            from services.testing_request_workflow_service import TestingRequestWorkflowService
+            wf_svc = TestingRequestWorkflowService(db)
+            ok, msg = wf_svc.tr_wf_advance(req, current_user, action_code="complete")
+            if ok:
+                db.commit()
+                db.refresh(req)
+            else:
+                import logging
+                logging.getLogger(__name__).warning(f"tr_wf_advance complete failed: {msg}")
+        except Exception as _wf:
+            import logging
+            logging.getLogger(__name__).warning(f"tr_wf_advance complete error: {_wf}")
+
     # ── Fire test_submitted notification (both rec_type and non-rec_type paths) ─
     try:
         from services.notification_service import NotificationService

@@ -456,6 +456,23 @@ class WorkflowRoutingService:
             to_stage.id if to_stage else None, to_status_code,
         )
 
+        # ── Post-transition action (reflection-discovered registry) ────────────
+        if transition.post_action:
+            from services.tr_wf_post_actions import dispatch as _dispatch
+            _dispatch(
+                transition.post_action,
+                self.db,
+                testing_request,
+                {
+                    "action_code": action_code,
+                    "performed_by_id": performed_by_id,
+                    "role_id": role_id,
+                    "comment": comment,
+                    "is_terminal": is_terminal,
+                    "to_status_code": to_status_code,
+                },
+            )
+
         # ── Notification ───────────────────────────────────────────────────
         # Single tr_wf_status_changed event covers every stage transition.
         # Recipients: @originator always + @assignee if set + active stage roles.
