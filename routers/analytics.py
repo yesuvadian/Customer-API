@@ -436,12 +436,10 @@ def get_dashboard_equipment(
 
     def _sort_key(eq: Equipment):
         ea = ea_map.get(eq.id)
-        if ea is None:
-            return (0, 0.0)
-        # Primary: latest test date first; secondary: highest health score first
-        ts    = ea.last_test_date.timestamp() if ea.last_test_date else 0
-        score = float(ea.health_score) if ea.health_score is not None else -1.0
-        return (-ts, -score)
+        if ea is not None and ea.risk_level and ea.risk_level in _risk_order:
+            score = float(ea.health_score) if ea.health_score is not None else 999.0
+            return (0, _risk_order[ea.risk_level], score)
+        return (1, 99, 999.0)
 
     sorted_eq = sorted(all_eq, key=_sort_key)
     total = len(sorted_eq)
