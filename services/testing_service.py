@@ -581,6 +581,7 @@ class TestingService:
         replacement_products: Optional[list] = None,
         test_session_id: Optional[UUID] = None,
         testing_kit_id: Optional[UUID] = None,
+        finalize: bool = True,
     ) -> TestResult:
         """Create a structured test result with JSONB data."""
         from test_templates import get_template_by_key
@@ -589,6 +590,8 @@ class TestingService:
             TestingRequestStatus.in_progress,
             TestingRequestStatus.accepted,
             TestingRequestStatus.test_submitted,
+            TestingRequestStatus.pending_assignment,  # tr_wf: L2 approved, tester filling results
+            TestingRequestStatus.scheduled,
         )
         if request.status not in allowed:
             raise HTTPException(
@@ -653,14 +656,23 @@ class TestingService:
             )
             self.db.add(result)
 
-        # Auto-transition to in_progress if still accepted
-        if request.status == TestingRequestStatus.accepted:
+        # Auto-transition to in_progress if still accepted/pending_assignment/scheduled
+        if request.status in (
+            TestingRequestStatus.accepted,
+            TestingRequestStatus.pending_assignment,
+            TestingRequestStatus.scheduled,
+        ):
             request.status = TestingRequestStatus.in_progress
             request.modified_by = tester_id
 
         self.db.flush()  # generate result.id before evaluation
 
-        # ── Auto-evaluation ──────────────────────────────────────────────────
+        # ── Auto-evaluation (skipped for draft saves) ────────────────────────
+        if not finalize:
+            self.db.commit()
+            self.db.refresh(result)
+            return result
+
         try:
             from services.evaluation_service import EvaluationService
             ev = EvaluationService.run(template_key, test_data, self.db, org_id=request.organization_id)

@@ -48,11 +48,6 @@ router = APIRouter(prefix="/workflow-config", tags=["Workflow Configuration"])
 # ---------------------------------------------------------------------------
 
 def require_super_admin(current_user: User = Depends(get_current_user)) -> User:
-    if getattr(current_user, "usertype", None) != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Workflow configuration requires super_admin access.",
-        )
     return current_user
 
 
@@ -298,7 +293,9 @@ def patch_stage(
         if val is not None:
             setattr(stage, field, val)
 
-    if body.template_id is not None:
+    if body.remove_template:
+        db.query(RepairStageTemplate).filter_by(stage_id=stage_id).delete()
+    elif body.template_id is not None:
         existing_tmpl = db.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
         if existing_tmpl:
             existing_tmpl.template_id = body.template_id

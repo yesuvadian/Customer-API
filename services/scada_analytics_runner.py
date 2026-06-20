@@ -61,19 +61,18 @@ def run_for_equipment_tag(
 ) -> None:
     """Run analytics for one (equipment, scada_tag) pair."""
     # 1. Downsample to hourly averages
-    rows = db.execute(text("""
+    rows = db.execute(text(f"""
         SELECT date_trunc('hour', recorded_at) AS hour,
                AVG(value)                      AS avg_val
         FROM   public.scada_readings
         WHERE  equipment_id = :eid
           AND  scada_tag    = :tag
-          AND  recorded_at  > now() - interval ':days days'
+          AND  recorded_at  > now() - interval '{HISTORY_DAYS} days'
         GROUP  BY 1
         ORDER  BY 1
     """), {
-        "eid":  str(equipment_id),
-        "tag":  scada_tag,
-        "days": HISTORY_DAYS,
+        "eid": str(equipment_id),
+        "tag": scada_tag,
     }).fetchall()
 
     if not rows:

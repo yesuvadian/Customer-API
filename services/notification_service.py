@@ -363,12 +363,8 @@ def _enrich_context_from_source(
                 ctx.setdefault("scada.timestamp",  str(reading.recorded_at)[:19] if reading.recorded_at else "")
                 if reading.equipment_id:
                     from sqlalchemy.orm import joinedload as _jl_scada
-                    eq = (
-                        db.query(_ScadaEq)
-                        .options(_jl_scada(_ScadaEq.department))
-                        .filter(_ScadaEq.id == reading.equipment_id)
-                        .first()
-                    )
+                    eq = (db.query(_ScadaEq).options(_jl_scada(_ScadaEq.department))
+                          .filter(_ScadaEq.id == reading.equipment_id).first())
                     if eq:
                         ctx.setdefault("equipment.name", getattr(eq, "name", "") or "")
                         ctx.setdefault("equipment.ueic", getattr(eq, "ueic", "") or "")
@@ -2139,6 +2135,7 @@ class NotificationService:
         source_type: Optional[str] = None,
         severity: Optional[str] = None,
         extra_recipients: Optional[List[User]] = None,
+        recipient_roles_override: Optional[List[str]] = None,  # overrides template roles when provided
         # ── Routing context (used by NotificationRoutingRule matching) ────────
         workflow_type: Optional[str] = None,    # "direct_test"|"failure_register"|"taqc"|"multisession"|"schedule"
         equipment_type: Optional[str] = None,   # e.g. "Power Transformer", "CT"
@@ -2238,8 +2235,12 @@ class NotificationService:
                     )
                     continue
 
-                # ── Recipient roles: routing override wins if set ─────────────
-                effective_roles = roles_override or list(tmpl.recipient_roles or [])
+                # ── Recipient roles: caller override → routing rule override → template ─
+                effective_roles = (
+                    recipient_roles_override
+                    or roles_override
+                    or list(tmpl.recipient_roles or [])
+                )
 
                 # ── Recipient resolution ─────────────────────────────────────
                 # Handles both @system-tokens (resolved from source record)

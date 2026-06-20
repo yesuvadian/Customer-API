@@ -1477,7 +1477,7 @@ def seed_modules(session):
 {"name": "Testing Requests", "description": "Create and manage transformer testing requests", "path": "testing_requests", "group_name": "Testing"},
 {"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
 {"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
-{"name": "Testing Request Approvals", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
+{"name": "Test Request Approval", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 # Removed: Validation Requests (not implemented)
 # Removed: Tester Mapping (no longer used)
@@ -1497,7 +1497,7 @@ def seed_modules(session):
 # ✅ DASHBOARD KPI MODULES - Role-specific dashboards
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
 {"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
-{"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
+{"name": "Test Monitoring Status", "rename_from": "Test Coordinator Dashboard", "description": "Test Monitoring Status operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
 {"name": "AE Dashboard",    "path": "ae_dashboard",    "description": "Field officer daily work overview — tests due, overdue maintenance, remedial actions", "group_name": "Testing", "is_menu": False},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
@@ -1634,6 +1634,27 @@ def seed_modules(session):
                 "multi-record review grid, and one-click submission as closed Testing Requests.",
  "path": "import-data",
  "group_name": "Condition Monitoring",
+ "is_menu": True},
+# ✅ CONFIGURABLE TEST-REQUEST WORKFLOW ENGINE (tr_wf_*) MODULES
+{"name": "TR Approval Queue",
+ "description": "Stage-aware testing request approval queue for L2 routing and L3 tester assignment (Configurable Workflow Engine).",
+ "path": "tr-wf/approval-queue",
+ "group_name": "Testing",
+ "is_menu": True},
+{"name": "TR Result Review",
+ "description": "L3 reviewer queue — approve or reject test result recommendations routed via the Configurable Workflow Engine.",
+ "path": "tr-wf/result-review",
+ "group_name": "Testing",
+ "is_menu": True},
+{"name": "TR Workflow Config",
+ "description": "Admin: define workflow definitions, stages, statuses, roles and transitions for the Configurable Test-Request Workflow Engine.",
+ "path": "config/tr-workflow",
+ "group_name": "Administration",
+ "is_menu": True},
+{"name": "TR Routing Config",
+ "description": "Admin: configure routing rules (equipment type, test type, request type) to map test requests to the correct workflow definition.",
+ "path": "config/tr-routing",
+ "group_name": "Administration",
  "is_menu": True},
     ]
 
@@ -2100,8 +2121,23 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "TRC Member",                  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
 
-        # ✅ AI ANALYTICS DASHBOARD — org-admin only
-        {"role": "Admin",                       "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        # ✅ AI ANALYTICS DASHBOARD — all operational roles
+        {"role": "Admin",                             "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",                     "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Reviewing Officer",                 "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",               "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver",        "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Maintenance Officer",               "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Asset Data Officer",                "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Inspection Engineer",               "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Auditor",                           "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "TRC Member",                        "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Test & Work Coordinator",           "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Transformer Repair Coordinator",    "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "QA Team",                           "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Finance Officer",                   "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Procurement Officer",               "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Operator",                          "module": "AI Analytics Dashboard", "can_view": True},
 
         # ✅ PRE-COMMISSION QAP — Request tickets (approval queue)
         # Asset Data Officer creates PCR tickets; approvers approve/reject.
@@ -3358,7 +3394,7 @@ def seed_role_templates(session):
     # Role-specific dashboard module IDs
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
     asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
-    test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
+    test_coordinator_dashboard_module_id = modules_by_name.get("Test Monitoring Status")
     aee_dashboard_module_id    = modules_by_name.get("AEE Dashboard")
     see_dashboard_module_id    = modules_by_name.get("SEE Dashboard")
     cee_dashboard_module_id    = modules_by_name.get("CEE Dashboard")
@@ -11827,6 +11863,26 @@ def run_seed():
         except Exception as _e:
             import traceback
             print(f"[WARN] Notification defaults seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── TR Configurable Workflow Engine — DDL + Seed ─────────────────────────
+        # Must run after seed_seacms_roles_users so EE_TLSS role exists.
+        print("\n" + "=" * 80)
+        print("  TR CONFIGURABLE WORKFLOW ENGINE")
+        print("=" * 80)
+        run_migration_from_file(
+            session,
+            "migrations/029_tr_wf_engine.sql",
+            "Migration 029: TR Configurable Workflow Engine Tables",
+        )
+        try:
+            from seed_tr_wf_workflow import seed_tr_wf_workflow
+            seed_tr_wf_workflow(session)
+            session.commit()
+        except Exception as _e:
+            session.rollback()
+            import traceback
+            print(f"[WARN] TR workflow engine seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
         # ── All workflow role mappings — after seed_seacms_roles_users ───────────

@@ -396,6 +396,26 @@ def equipment_trend(
     }
 
 
+# ── Equipment Types (SCADA-instrumented) ─────────────────────────────────────
+
+@router.get("/equipment-types")
+def list_scada_equipment_types(
+    db:   Session = Depends(get_db),
+    user: User    = Depends(get_current_user),
+):
+    """Distinct equipment types that have at least one SCADA-tagged equipment."""
+    from sqlalchemy import text
+    rows = db.execute(text("""
+        SELECT DISTINCT cm.id, cm.name
+        FROM   public.equipment e
+        JOIN   public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+        WHERE  e.organization_id = :org
+        AND    e.scada_tag IS NOT NULL
+        ORDER  BY cm.name
+    """), {"org": str(user.organization_id)}).fetchall()
+    return [{"id": str(r[0]), "name": r[1]} for r in rows]
+
+
 # ── Alert Rules ───────────────────────────────────────────────────────────────
 
 @router.get("/alert-rules")

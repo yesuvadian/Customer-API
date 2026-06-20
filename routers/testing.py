@@ -455,6 +455,25 @@ def submit_test_results(
             replacement_products=repl_prods or None,
         )
 
+    # ── TR WF engine: advance l4_test_execution → l3_review_result ──────────────
+    _wf_advance_ok: Optional[bool] = None
+    _wf_advance_msg: str = ""
+    if getattr(req, "wf_instance_id", None):
+        try:
+            from services.testing_request_workflow_service import TestingRequestWorkflowService
+            wf_svc = TestingRequestWorkflowService(db)
+            _wf_advance_ok, _wf_advance_msg = wf_svc.tr_wf_advance(req, current_user, action_code="complete")
+            if _wf_advance_ok:
+                db.commit()
+                db.refresh(req)
+            else:
+                import logging
+                logging.getLogger(__name__).warning(f"tr_wf_advance complete failed: {_wf_advance_msg}")
+        except Exception as _wf:
+            import logging
+            _wf_advance_msg = str(_wf)
+            logging.getLogger(__name__).warning(f"tr_wf_advance complete error: {_wf}")
+
     # ── Fire test_submitted notification (both rec_type and non-rec_type paths) ─
     try:
         from services.notification_service import NotificationService
@@ -477,6 +496,13 @@ def submit_test_results(
         "summary":             summary,
         "notes":               detailed,
         "replacement_products": repl_prods,
+    }
+    enriched["wf_advance"] = {
+        "ok": _wf_advance_ok,
+        "msg": _wf_advance_msg,
+        "wf_instance_id": str(req.wf_instance_id) if getattr(req, "wf_instance_id", None) else None,
+        "current_wf_stage_id": str(req.current_wf_stage_id) if getattr(req, "current_wf_stage_id", None) else None,
+        "current_status_code": getattr(req, "current_status_code", None),
     }
     return enriched
 
@@ -707,8 +733,8 @@ def create_structured_result(
         replacement_products=data.replacement_products,
         test_session_id=data.test_session_id,
         testing_kit_id=data.testing_kit_id,
+        finalize=data.finalize,
     )
-    # Build response with images list
     return _build_structured_response(result)
 
 

@@ -115,6 +115,7 @@ class StagePatch(BaseModel):
     is_mandatory: Optional[bool] = None
     default_duration_days: Optional[int] = None
     template_id: Optional[UUID] = None
+    remove_template: bool = False
 
 
 class ReorderItem(BaseModel):

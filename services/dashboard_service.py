@@ -21,7 +21,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import func, true
+from sqlalchemy import func, true, or_
 from sqlalchemy.orm import Session
 
 from models import (
@@ -100,6 +100,7 @@ OPEN_STATUSES = (
     TestingRequestStatus.under_approval,
     TestingRequestStatus.under_review,     # sent back to tester for revision
     TestingRequestStatus.finance_pending,  # awaiting finance approval
+    TestingRequestStatus.pending_assignment,  # tr_wf: L2 approved, routing to L3
 )
 CLOSED_STATUSES = (
     TestingRequestStatus.approved,
@@ -107,6 +108,23 @@ CLOSED_STATUSES = (
     TestingRequestStatus.outcome_active,   # approved + downstream ticket created
     TestingRequestStatus.commissioned,     # equipment commissioned (TAQC terminal)
 )
+
+# tr_wf terminal status codes that count as "closed" for analytics.
+# When a tr_wf request completes, its legacy .status stays at pending_assignment
+# but current_status_code is one of these.
+TR_WF_CLOSED_STATUS_CODES = (
+    "wf_completed",
+    "wf_rejected",
+    "wf_cancelled",
+)
+
+
+def _is_closed_filter():
+    """SQLAlchemy filter expression matching either legacy CLOSED status OR tr_wf terminal codes."""
+    return or_(
+        TestingRequest.status.in_(CLOSED_STATUSES),
+        TestingRequest.current_status_code.in_(TR_WF_CLOSED_STATUS_CODES),
+    )
 
 
 def resolve_dashboard_view(role_names: Optional[List[str]] = None, module_paths: Optional[List[str]] = None) -> str:
@@ -324,7 +342,7 @@ class DashboardService:
                     "sub": "No records in period", "trend": None,
                     "trend_dir": "neutral", "colour": colour}
         completed = q.filter(
-            TestingRequest.status.in_(CLOSED_STATUSES),
+            _is_closed_filter(),
             TestingRequest.completed_at.isnot(None),
             TestingRequest.completed_at <= TestingRequest.due_date,
         ).count()
@@ -430,7 +448,7 @@ class DashboardService:
             TestingRequest.due_date.isnot(None),
             TestingRequest.due_date >= since,
             TestingRequest.due_date <= now,
-            TestingRequest.status.in_(CLOSED_STATUSES),
+            _is_closed_filter(),
         ).count()
         pct = round(done / total_due * 100, 1) if total_due else 0
         colour = "green" if pct >= 80 else ("purple" if pct >= 60 else "amber")
@@ -461,7 +479,7 @@ class DashboardService:
         # Resolved in last 30 days
         resolved_since = _now() - timedelta(days=30)
         resolved = q.filter(
-            TestingRequest.status.in_(CLOSED_STATUSES),
+            _is_closed_filter(),
             TestingRequest.completed_at.isnot(None),
             TestingRequest.completed_at >= resolved_since,
         ).count()
@@ -984,7 +1002,7 @@ class DashboardService:
 
         total      = q.count()
         open_count = q.filter(TestingRequest.status.in_(OPEN_STATUSES)).count()
-        closed_count = q.filter(TestingRequest.status.in_(CLOSED_STATUSES)).count()
+        closed_count = q.filter(_is_closed_filter()).count()
         rows = q.limit(10).all()
         now  = _now()
         items = []

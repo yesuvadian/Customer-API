@@ -17,6 +17,7 @@ from routers import (
     websocket_routes,
     workflow_dashboard,
     workflow_config,
+    workflow_config,
 )
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.test_request_schedule_service import TestRequestScheduleService
@@ -121,6 +122,7 @@ from routers import reporting as reporting_router
 from routers import analytics as analytics_router
 from routers import data_import as data_import_router  # Import Data module
 from routers import scada as scada_router               # SCADA Integration
+from routers import tr_workflow_config as tr_wf_config_router  # TR Configurable Workflow Admin
 
 # Workflow Engine
 from routers import workflows
@@ -172,7 +174,7 @@ scheduler.add_job(
 )
 
 
-# ── SCADA Analytics — runs every hour for all orgs ───────────────────────────
+# ── SCADA Analytics — runs every hour ────────────────────────────────────────
 def _run_scada_analytics():
     db = SessionLocal()
     try:
@@ -193,7 +195,7 @@ def _run_scada_analytics():
 scheduler.add_job(
     _run_scada_analytics,
     trigger="cron",
-    minute=30,      # run at :30 past every hour (offset from other jobs)
+    minute=30,
     id="scada_analytics_job",
     max_instances=1,
     coalesce=True,
@@ -1066,6 +1068,7 @@ app.include_router(reporting_router.router)
 app.include_router(analytics_router.router)
 app.include_router(data_import_router.router)  # Import Data module
 app.include_router(scada_router.router)         # SCADA Integration
+app.include_router(tr_wf_config_router.router)  # TR Configurable Workflow Admin
 
 # Organization Multi-Tenancy
 app.include_router(organizations.router)

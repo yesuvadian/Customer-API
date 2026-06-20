@@ -91,9 +91,21 @@ def build_report_skeleton(template: dict) -> dict:
     return skeleton
 
 
+# In empty_report(), for table fields — return [] instead of default_rows copies
+# The parser will build rows dynamically from what it finds in the PDF
 def empty_report(template: dict) -> dict:
-    """Return a fresh deep copy of the skeleton for each parse run."""
-    return copy.deepcopy(build_report_skeleton(template))
+    report = {}
+    for section in template.get("sections", []):
+        for field in section.get("fields", []):
+            key   = field.get("key", "")
+            ftype = field.get("type", "text")
+            if ftype == "table":
+                report[report_list_key(field["key"])] = []   # ← empty list, not default_rows
+            elif ftype in ("calculated", "readonly"):
+                pass
+            else:
+                report[key] = field.get("default", None)
+    return report
 
 
 def resolve_context_binding(binding_path: str, eq, report: dict, field_key: str) -> str:
