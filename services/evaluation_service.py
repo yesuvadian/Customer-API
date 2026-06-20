@@ -423,6 +423,7 @@ class EvaluationService:
 
             # 5. Find which band the value falls into
             row_status = NORMAL
+            row_breach_limit = None
             for band_name, band_range in bands.items():
                 if not isinstance(band_range, list) or len(band_range) < 2:
                     continue
@@ -433,6 +434,9 @@ class EvaluationService:
                     continue
                 rank = _cond_rank.get(band_name.lower().split()[0], 0)
                 row_status = [NORMAL, ALERT, CRITICAL][min(rank, 2)]
+                # breach_limit: the boundary that was exceeded
+                if rank >= 1:
+                    row_breach_limit = lo  # value fell into this band from below
                 break
 
             rank = _STATUS_RANK.get(row_status, 0)
@@ -440,10 +444,11 @@ class EvaluationService:
                 worst_rank = rank
 
             row_results.append({
-                "row_id":  row_id,
-                "value":   value,
-                "unit":    row.get("unit"),
-                "status":  row_status,
+                "row_id":       row_id,
+                "value":        value,
+                "unit":         row.get("unit"),
+                "status":       row_status,
+                "breach_limit": row_breach_limit,
             })
 
         if not row_results:
