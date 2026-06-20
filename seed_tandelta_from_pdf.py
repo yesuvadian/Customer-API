@@ -37,7 +37,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import fitz  # PyMuPDF
-from PIL import Image
+from PIL import Image, report
+from torch import full
 from database import VendorSessionLocal as _SessionLocal
 from sqlalchemy import text
 from sqlalchemy.exc import InvalidRequestError
@@ -318,59 +319,64 @@ def parse_ocr_text(text: str) -> dict | None:
 
     # ── Winding Test ───────────────────────────────────────────────────────────
     # ITC factor: try explicit label first, then "Factor X.XX" near winding section
-    _winding_area = full[max(0, full.lower().find("winding")):full.lower().find("winding") + 3000] if "winding" in full.lower() else full
+    # ── Winding Test ───────────────────────────────────────────────────────────────
+    _winding_area = full[max(0, full.lower().find("winding")):full.lower().find("winding") + 3000] \
+        if "winding" in full.lower() else full
     report["winding_itc_factor"] = (
         _num(_find(r"winding[^\n]*(?:ITC|itc|correction)\s*factor\s*[:\.]?\s*(\d+(?:\.\d+)?)", full))
         or _num(_find(r"(?:ITC|itc)\s*correction\s*factor\s*[:\.]?\s*(\d+(?:\.\d+)?)", full))
         or _find_itc(_winding_area)
     )
 
-    # Isolate winding block up to the next major section
     winding_block_m = re.search(
-        r"winding\s*test[\s\S]{0,5000}?(?=(?:220|hv)\s*k\.?v\.?\s*bushing|66\s*k\.?v\.?\s*bushing|idax|$)",
+        r"winding\s*test[\s\S]{0,5000}?"
+        r"(?=(?:220|400|hv)\s*k\.?v\.?\s*bushing|66\s*k\.?v\.?\s*bushing|idax|$)",
         full, re.I
     )
     winding_block = winding_block_m.group(0) if winding_block_m else full
 
-    # Config labels: normalise GND variants (Ground/Grd/Grnd), IV=LV, TV-HV=HV-TV
-    # Also match IDAX-style abbreviations: CHG=HV-GND, CHL=HV-LV, CLG=LV-GND,
-    #   CLT=LV-TV, CTG=TV-GND, CTH=HV-TV (C=capacitance, H=HV, L=LV, T=TV, G=GND)
-    _GND = r"(?:GND|Grd|Grnd|Ground)"
-    _CFG_PAT = {
-        "HV-GND": rf"(?:CHG\b|HV\s*[-–]\s*{_GND})",
-        "HV-LV":  r"(?:CHL\b|HV\s*[-–]\s*(?:LV|IV))",
-        "LV-GND": rf"(?:CLG\b|(?:LV|IV)\s*[-–]\s*{_GND})",
-        "LV-TV":  r"(?:CLT\b|(?:LV|IV)\s*[-–]\s*TV)",
-        "TV-GND": rf"(?:CTG\b|TV\s*[-–]\s*{_GND})",
-        "HV-TV":  r"(?:CTH\b|(?:HV|TV)\s*[-–]\s*(?:TV|HV))",
-    }
+    # All known config labels across all PDF form variants (from Excel mapping)
+    # Each tuple: (canonical_label, regex_pattern)
+    _WINDING_CFG_PATTERNS = [
+        ("HV-GND",        r"(?:CHG\b|HV\s*[-–&]\s*(?:GND|Grd|Grnd|Ground))"),
+        ("HV-LV",         r"(?:CHL\b|HV\s*[-–&]\s*(?:LV|IV|MV))"),
+        ("LV-GND",        r"(?:CLG\b|(?:LV|IV|MV)\s*[-–]\s*(?:GND|Grd|Grnd|Ground))"),
+        ("LV-TV",         r"(?:CLT\b|(?:LV|IV|MV)\s*[-–]\s*TV)"),
+        ("TV-GND",        r"(?:CTG\b|TV\s*[-–]\s*(?:GND|Grd|Grnd|Ground))"),
+        ("HV-TV",         r"(?:CTH\b|(?:HV|TV)\s*[-–]\s*(?:TV|HV))"),
+        ("(HV+LV)-GND",   r"\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*(?:GND|Grd|Grnd|Ground)"),
+        ("(HV+LV)-TV",    r"\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*TV"),
+        ("Winding-GND",   r"Winding\s*[-–]\s*(?:GND|Grd|Grnd|Ground)"),   # form 7 variant
+    ]
 
-    for row in report["winding"]:
-        cfg     = row["test_configuration"]
-        cfg_pat = _CFG_PAT.get(cfg, re.escape(cfg))
-        # With paragraph=False, numbers may be on separate lines after the label.
-        # Scan a 300-char window after the config label; collect up to 4 numbers.
+    all_winding_pats = [pat for _, pat in _WINDING_CFG_PATTERNS]
+
+    report["winding"] = []
+    for label, cfg_pat in _WINDING_CFG_PATTERNS:
         m_win = re.search(cfg_pat + r"([\s\S]{0,300})", winding_block, re.I)
-        if m_win:
-            window = m_win.group(1)
-            # Stop the window at the next config label to avoid stealing from the next row
-            for other_cfg, other_pat in _CFG_PAT.items():
-                if other_cfg != cfg:
-                    stop = re.search(other_pat, window, re.I)
-                    if stop:
-                        window = window[:stop.start()]
-            nums = [_num(n) for n in re.findall(r"[\d]+(?:\.\d+)?", window)]
-            nums = [n for n in nums if n is not None]
-            if len(nums) >= 4:
-                row["voltage_kv"]       = nums[0]
-                row["capacitance_nf"]   = nums[1]
-                row["df_measured"]      = nums[2]
-                row["df_corrected_20c"] = nums[3]
-            elif len(nums) >= 2:
-                row["df_measured"]      = nums[-2]
-                row["df_corrected_20c"] = nums[-1]
-            elif len(nums) == 1:
-                row["df_corrected_20c"] = nums[0]
+        if not m_win:
+            continue
+        window = m_win.group(1)
+        # Stop at the next config label
+        for other_pat in all_winding_pats:
+            stop = re.search(other_pat, window, re.I)
+            if stop:
+                window = window[:stop.start()]
+        nums = [_num(n) for n in re.findall(r"[\d]+(?:\.\d+)?", window)]
+        nums = [n for n in nums if n is not None]
+        row = {"test_configuration": label, "voltage_kv": None, "capacitance_nf": None,
+            "df_measured": None, "df_corrected_20c": None}
+        if len(nums) >= 4:
+            row["voltage_kv"]       = nums[0]
+            row["capacitance_nf"]   = nums[1]
+            row["df_measured"]      = nums[2]
+            row["df_corrected_20c"] = nums[3]
+        elif len(nums) >= 2:
+            row["df_measured"]      = nums[-2]
+            row["df_corrected_20c"] = nums[-1]
+        elif len(nums) == 1:
+            row["df_corrected_20c"] = nums[0]
+        report["winding"].append(row)
 
     report["winding_observations"] = (
         _find(r"observation[s]?\s*(?:\(winding\))?\s*[:\.]?\s*(.+?)(?:\n|$)", full) or ""
@@ -378,29 +384,90 @@ def parse_ocr_text(text: str) -> dict | None:
 
     # ── 220kV Bushing Test ─────────────────────────────────────────────────────
     # OCR may give "220 kV Bushing", "220 LV Bughieg" — allow for common typos
-    hv_test_m = re.search(
-        r"220\s*k?\.?[vV]\.?\s*bu(?:sh|gh)\w*[\s\S]{0,2500}?"
-        r"(?=66\s*k?\.?[vV]\.?\s*bu(?:sh|gh|sl)\w*|idax|$)",
+    # ── Bushing detection: determine transformer type first ───────────────────────
+    # 400kV presence → 400/220/33kV transformer; else → 220/66/11kV
+    is_400kv = bool(re.search(r"400\s*k\.?v", full, re.I))
+
+    # Bushing voltage labels used in regex and in report keys
+    _HV_KV  = "400" if is_400kv else "220"
+    _MV_KV  = "220" if is_400kv else "66"
+    _LV_KV  = "33"  if is_400kv else "11"
+
+    report["transformer_type"]       = "400/220/33 kV" if is_400kv else "220/66/11 kV"
+    report["hv_bushing_voltage_class"] = f"{_HV_KV} kV"
+    report["mv_bushing_voltage_class"] = f"{_MV_KV} kV"
+    report["lv_bushing_voltage_class"] = f"{_LV_KV} kV"
+
+    def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None, list[dict]]:
+        """Extract ITC factor and R/Y/B phase rows from a bushing block."""
+        itc = _find_itc(block)
+        rows = []
+        for phase in ("R", "Y", "B"):
+            phase_pat = rf"{phase}'?\s*Phase"
+            m_start = re.search(phase_pat, block, re.I)
+            if not m_start:
+                continue
+            abs_start = m_start.end()
+            window_end = abs_start + 250
+            stop = re.search(r"[RYB]'?\s*Phase", block[abs_start + 2:], re.I)
+            if stop:
+                window_end = min(window_end, abs_start + 2 + stop.start())
+            window = block[abs_start:window_end]
+            nums = [_num(n) for n in re.findall(r"\d+(?:\.\d+)?", window)]
+            nums = [n for n in nums if n is not None]
+            row = {"bushing": f"'{phase}' Phase", "voltage_kv": None,
+                "capacitance_pf": None, "df_measured": None, "df_corrected_20c": None}
+            if len(nums) >= 4:
+                row["voltage_kv"]       = nums[0]
+                row["capacitance_pf"]   = nums[1]
+                row["df_measured"]      = nums[2]
+                row["df_corrected_20c"] = nums[3]
+            elif len(nums) >= 2:
+                row["df_measured"]      = nums[-2]
+                row["df_corrected_20c"] = nums[-1]
+            elif len(nums) == 1:
+                row["df_corrected_20c"] = nums[0]
+            rows.append(row)
+        return itc, rows
+
+    # ── HV Bushing (220kV or 400kV) ───────────────────────────────────────────────
+    hv_end_pat = rf"{_MV_KV}\s*k\.?v\.?\s*bu|idax|$"
+    hv_m = re.search(
+        rf"{_HV_KV}\s*k\.?[vV]\.?\s*bu(?:sh|gh)\w*[\s\S]{{0,2500}}?(?={hv_end_pat})",
         full, re.I
     )
-    if hv_test_m:
-        hv_block = hv_test_m.group(0)
-        report["hv_bushing_itc_factor"] = _find_itc(hv_block)
-        _parse_bushing_test_rows(hv_block, report["hv_bushing"])
+    report["hv_bushing"] = []
+    if hv_m:
+        itc, rows = _parse_bushing_section(hv_m.group(0), _HV_KV)
+        report["hv_bushing_itc_factor"] = itc
+        report["hv_bushing"] = rows
 
-    # ── 66kV Bushing Test ──────────────────────────────────────────────────────
-    # "66 kV Bushing" may be OCR'd as "66 kV Bushleg", "66 LV Bughing" etc.
-    lv_test_m = re.search(
-        r"66\s*k?\.?[vV]\.?\s*bu(?:sh|gh|sl)\w*[\s\S]{0,2500}?"
-        r"(?=idax|overall|assessment|Observ|$)",
+    # ── MV Bushing (66kV or 220kV) ───────────────────────────────────────────────
+    mv_end_pat = rf"{_LV_KV}\s*k\.?v\.?\s*bu|idax|overall|$" if _LV_KV != "11" \
+        else r"idax|overall|assessment|$"
+    mv_m = re.search(
+        rf"{_MV_KV}\s*k\.?[vV]\.?\s*bu(?:sh|gh|sl)\w*[\s\S]{{0,2500}}?(?={mv_end_pat})",
         full, re.I
     )
-    if lv_test_m:
-        lv_block = lv_test_m.group(0)
-        report["lv_bushing_itc_factor"] = _find_itc(lv_block)
-        _parse_bushing_test_rows(lv_block, report["lv_bushing"])
+    report["mv_bushing"] = []
+    if mv_m:
+        itc, rows = _parse_bushing_section(mv_m.group(0), _MV_KV)
+        report["mv_bushing_itc_factor"] = itc
+        report["mv_bushing"] = rows
 
-    # ── IDAX ───────────────────────────────────────────────────────────────────
+    # ── LV Bushing (11kV or 33kV) — only some PDFs have this ─────────────────────
+    report["lv_bushing"] = []
+    if _LV_KV != "11":   # 33kV bushing section present in 400/220/33kV PDFs
+        lv_m = re.search(
+            rf"{_LV_KV}\s*k\.?[vV]\.?\s*bu(?:sh|gh|sl)\w*[\s\S]{{0,2500}}?(?=idax|overall|$)",
+            full, re.I
+        )
+        if lv_m:
+            itc, rows = _parse_bushing_section(lv_m.group(0), _LV_KV)
+            report["lv_bushing_itc_factor"] = itc
+            report["lv_bushing"] = rows
+
+    # ── IDAX ───────────────────────────────────────────────────────────────────────
     report["idax_testing_kit"] = (
         _find(r"testing\s*kit\s*(?:used)?\s*[:\.]?\s*(.+?)(?:\n|$)", full)
         or _find(r"(megger\s*IDAX\s*\d+|IDAX\s*\d+)", full)
@@ -410,50 +477,42 @@ def parse_ocr_text(text: str) -> dict | None:
     _MOISTURE_CATS = ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]
     _OIL_CATS      = ["As new", "Acceptable", "Poor", "Bad"]
 
+    # All IDAX config variants from Excel mapping (forms 1-5 + bushing rows)
+    _IDAX_CFG_PATTERNS = [
+        ("HV-GND",   r"(?:CHG\b|HV\s*[-–]\s*(?:GND|Grd|Grnd|Ground))"),
+        ("HV-LV",    r"(?:CHL\b|HV\s*[-–]\s*(?:LV|IV|MV))"),
+        ("LV-GND",   r"(?:CLG\b|(?:LV|IV|MV)\s*[-–]\s*(?:GND|Grd|Grnd|Ground))"),
+        ("LV-TV",    r"(?:CLT\b|(?:LV|IV|MV)\s*[-–]\s*TV)"),
+        ("TV-GND",   r"(?:CTG\b|TV\s*[-–]\s*(?:GND|Grd|Grnd|Ground))"),
+        ("HV-TV",    r"(?:CTH\b|(?:TV|HV)\s*[-–]\s*(?:HV|TV))"),
+        # Extra rows seen in some forms (from Excel mapping)
+        ("(HV+LV)-GND", r"\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*(?:GND|Grd|Grnd|Ground)"),
+        ("(HV+LV)-TV",  r"\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*TV"),
+    ]
+
+    # Bushing IDAX rows: "66kV R phase bushing" style (form 5 in Excel)
+    _BUSHING_IDAX_PAT = re.compile(
+        r"(\d+)\s*kv\s*([RYB])(?:'?\s*phase)?\s*bushing", re.I
+    )
+
     idax_m = re.search(r"IDAX[\s\S]{0,3000}?(?=overall|assessment|recommendation|$)", full, re.I)
+    report["idax"] = []
+
     if idax_m:
         idax_block = idax_m.group(0)
+        all_idax_pats = [pat for _, pat in _IDAX_CFG_PATTERNS]
 
-        # Same abbreviation map used by the winding section — CHG=HV-GND, CHL=HV-LV, etc.
-        _idax_GND = r"(?:GND|Grd|Grnd|Ground)"
-        _IDAX_CFG_PAT = {
-            "HV-GND": rf"(?:CHG\b|HV\s*[-–]\s*{_idax_GND})",
-            "HV-LV":  r"(?:CHL\b|HV\s*[-–]\s*(?:LV|IV))",
-            "LV-GND": rf"(?:CLG\b|(?:LV|IV)\s*[-–]\s*{_idax_GND})",
-            "LV-TV":  r"(?:CLT\b|(?:LV|IV)\s*[-–]\s*TV)",
-            "TV-GND": rf"(?:CTG\b|TV\s*[-–]\s*{_idax_GND})",
-            "HV-TV":  r"(?:CTH\b|(?:HV|TV)\s*[-–]\s*(?:TV|HV))",
-        }
-
-        def _cfg_pat(cfg: str) -> str:
-            """Return regex matching both abbreviated (CHG…) and long-form (HV-GND…) labels."""
-            if cfg in _IDAX_CFG_PAT:
-                return _IDAX_CFG_PAT[cfg]
-            # Fallback: normalise GND/LV variants for any unexpected config key
-            pat = re.escape(cfg)
-            pat = pat.replace(r"GND", r"(?:GND|Grd|Grnd|Ground)")
-            pat = pat.replace(r"LV",  r"(?:LV|IV)")
-            return pat
-
-        _all_cfg_pat = "|".join(_cfg_pat(row["test_configuration"]) for row in report["idax"])
-
-        for row in report["idax"]:
-            cfg = row["test_configuration"]
-            # Scan 300-char window after config label; stop at next config label
-            win_m = re.search(_cfg_pat(cfg) + r"([\s\S]{0,300})", idax_block, re.I)
-            if not win_m:
-                continue
-            window = win_m.group(1)
-            stop_m = re.search(_all_cfg_pat, window, re.I)
-            if stop_m:
-                window = window[:stop_m.start()]
-
-            # Moisture %
+        def _extract_idax_row(label: str, window: str) -> dict:
+            row = {
+                "test_configuration": label,
+                "moisture_percent": None,
+                "tr_analysis_moisture": None,
+                "oil_conductivity_psm": None,
+                "tr_analysis_oil": None,
+            }
             moisture_m = re.search(r"(\d+(?:\.\d+)?)\s*%", window)
             if moisture_m:
                 row["moisture_percent"] = _num(moisture_m.group(1))
-
-            # Oil conductivity: decimal numbers (exclude integers)
             decimals = [_num(n) for n in re.findall(r"\b\d+\.\d+\b", window)]
             decimals = [n for n in decimals if n is not None]
             if len(decimals) >= 2:
@@ -461,8 +520,6 @@ def parse_ocr_text(text: str) -> dict | None:
                 row["oil_conductivity_psm"] = decimals[-1]
             elif len(decimals) == 1:
                 row["oil_conductivity_psm"] = decimals[0]
-
-            # Categorical analysis labels
             for cat in _MOISTURE_CATS:
                 if cat.lower() in window.lower():
                     row["tr_analysis_moisture"] = cat
@@ -471,6 +528,30 @@ def parse_ocr_text(text: str) -> dict | None:
                 if cat.lower() in window.lower():
                     row["tr_analysis_oil"] = cat
                     break
+            return row
+
+        # Standard winding configuration rows
+        for label, cfg_pat in _IDAX_CFG_PATTERNS:
+            win_m = re.search(cfg_pat + r"([\s\S]{0,300})", idax_block, re.I)
+            if not win_m:
+                continue
+            window = win_m.group(1)
+            for other_pat in all_idax_pats:
+                stop_m = re.search(other_pat, window, re.I)
+                if stop_m:
+                    window = window[:stop_m.start()]
+            report["idax"].append(_extract_idax_row(label, window))
+
+        # Bushing IDAX rows (e.g. "66kV R phase bushing" — form 5 in Excel)
+        for bm in _BUSHING_IDAX_PAT.finditer(idax_block):
+            b_label = f"{bm.group(1)}kV {bm.group(2).upper()} Phase Bushing"
+            abs_end = bm.end()
+            window  = idax_block[abs_end: abs_end + 300]
+            # Stop at next bushing label or config label
+            stop_b = _BUSHING_IDAX_PAT.search(window)
+            if stop_b:
+                window = window[:stop_b.start()]
+            report["idax"].append(_extract_idax_row(b_label, window))
 
     report["idax_observation"] = (
         _find(r"idax.*?observation[s]?\s*[:\.]?\s*(.+?)(?:\n|$)", full)
@@ -647,11 +728,6 @@ def extract_with_easyocr(images: list, workers: int = 1, debug_dir: Path | None 
 # ── Template-driven test_data builder ─────────────────────────────────────────
 
 def _tandelta_test_data(r: dict, eq=None) -> dict:
-    """Build test_data matching capacitance_tandelta_transformer form output.
-
-    Mirrors the Flutter UI's _collectData(): numbers as strings, all column
-    keys present, calculated columns as None.
-    """
     from test_templates import TEST_TEMPLATES
     template = TEST_TEMPLATES.get("capacitance_tandelta_transformer", {})
     test_data: dict = {}
@@ -659,24 +735,13 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
     def _str(v) -> str:
         return "" if v is None else str(v)
 
-    def _empty_row(columns: list) -> dict:
-        return {c.get("key", ""): "" for c in columns if c.get("key")}
-
+    # Table field key → report dict key
+    # e.g. "winding_test_results" → "winding", "hv_bushing_test_results" → "hv_bushing"
     def _report_list_key(field_key: str) -> str:
-        """Derive report list key from template table field key by convention.
-        e.g. 'idax_test_results' → 'idax', 'hv_bushing_test_results' → 'hv_bushing'
-        """
         for suffix in ("_test_results", "_results"):
             if field_key.endswith(suffix):
                 return field_key[: -len(suffix)]
         return field_key
-
-    def _match_key(columns: list) -> str:
-        """First readonly column is the row identity key (e.g. test_configuration, bushing)."""
-        for col in columns:
-            if col.get("type") == "readonly":
-                return col.get("key", "")
-        return ""
 
     for section in template.get("sections", []):
         for field in section.get("fields", []):
@@ -685,60 +750,63 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
 
             if ftype == "table":
                 columns      = field.get("columns", [])
-                default_rows = field.get("default_rows", [])
+                r_list_key   = _report_list_key(key)
+                source_rows  = r.get(r_list_key, [])
                 rows         = []
 
-                r_list_key = _report_list_key(key)
-                mk         = _match_key(columns)
-                source_rows = r.get(r_list_key, [])
-
-                for dr in default_rows:
-                    row = _empty_row(columns)
-                    # Apply readonly defaults first
-                    for k, v in dr.items():
-                        if k in row:
-                            row[k] = v or ""
-                    # Mark calculated columns as None
-                    for col in columns:
-                        if col.get("type") == "calculated":
-                            row[col["key"]] = None
-
-                    # Merge matching source row if one exists
-                    if mk and source_rows:
-                        match_val = dr.get(mk, "")
-                        for src in source_rows:
-                            if src.get(mk) == match_val:
-                                for col in columns:
-                                    ck = col.get("key", "")
-                                    if col.get("type") in ("calculated", "readonly"):
-                                        continue
-                                    if ck in src and src[ck] is not None:
-                                        row[ck] = _str(src[ck])
-                                break
-
-                    rows.append(row)
+                if source_rows:
+                    # ── Dynamic: use whatever rows the extractor actually found ──
+                    for src in source_rows:
+                        row = {}
+                        for col in columns:
+                            ck    = col.get("key", "")
+                            ctype = col.get("type", "text")
+                            if ctype == "calculated":
+                                row[ck] = None          # computed server-side
+                            elif ck in src and src[ck] is not None:
+                                row[ck] = _str(src[ck])
+                            else:
+                                row[ck] = ""
+                        rows.append(row)
+                else:
+                    # ── Fallback: empty default_rows skeleton (no data available) ──
+                    for dr in field.get("default_rows", []):
+                        row = {c.get("key", ""): "" for c in columns if c.get("key")}
+                        for k, v in dr.items():
+                            if k in row:
+                                row[k] = v or ""
+                        for col in columns:
+                            if col.get("type") == "calculated":
+                                row[col["key"]] = None
+                        rows.append(row)
 
                 test_data[key] = rows
 
             elif ftype in ("calculated", "readonly"):
-                pass  # computed by EvaluationService
+                pass
 
             else:
-                # Template field key matches report key by convention;
-                # fall back to field default when not present in report.
                 val = r.get(key)
                 if val is not None:
                     test_data[key] = _str(val)
                 elif field.get("default") is not None:
                     test_data[key] = field["default"]
 
-    # Resolve readonly/context fields from equipment + report fallback.
-    # Driven by context_bindings so no manual updates needed when the template changes.
+    # Context bindings (sub_station, make, serial_number, etc.)
     for field_key, binding_path in template.get("context_bindings", {}).items():
         test_data[field_key] = resolve_context_binding(binding_path, eq, r, field_key)
 
-    return test_data
+    # Pass through transformer type and bushing voltage class selections
+    for passthrough_key in (
+        "transformer_type",
+        "hv_bushing_voltage_class",
+        "mv_bushing_voltage_class",
+        "lv_bushing_voltage_class",
+    ):
+        if passthrough_key in r:
+            test_data[passthrough_key] = r[passthrough_key]
 
+    return test_data
 
 # ── DB seed ────────────────────────────────────────────────────────────────────
 
