@@ -388,27 +388,60 @@ class HealthScorer:
                 row_results = ef.get("row_results") or []
                 critical_rows = [r for r in row_results if r.get("status") in ("CRITICAL", "ALERT")]
 
+                # Build a lookup of allowable limits from template threshold config
+                # Key: row_id (lowercase) → allowable value (Good band lower bound or Poor band upper bound)
+                _tmpl_limits: dict = {}
+                for col in field.get("columns", []):
+                    rule = (col.get("rule") or {})
+                    if rule.get("type") == "THRESHOLD":
+                        cfg = rule.get("config") or {}
+                        ths = cfg.get("thresholds") or {}
+                        for row_name, row_bands in ths.items():
+                            # row_bands may be { band: [lo, hi] } or { sub_key: { band: [lo, hi] } }
+                            bands = row_bands
+                            if isinstance(bands, dict):
+                                first_val = next(iter(bands.values()), None)
+                                if isinstance(first_val, dict):
+                                    # Two-level — pick first sub-key's bands
+                                    bands = first_val
+                            if isinstance(bands, dict):
+                                # Find the Good/Normal band boundary that marks the allowable limit
+                                for band_name, band_range in bands.items():
+                                    bn_lower = band_name.lower().split()[0]
+                                    if bn_lower in ("good", "normal", "pass", "ok"):
+                                        if isinstance(band_range, list) and len(band_range) >= 2:
+                                            lo, hi = band_range[0], band_range[1]
+                                            # If Good band has a finite upper bound → upper is the allowable max
+                                            # If Good band has no upper bound (hi=None) → lo is the allowable min
+                                            limit = hi if hi is not None else lo
+                                            if limit is not None:
+                                                _tmpl_limits[row_name.lower()] = limit
+                                        break
+
                 if critical_rows:
-                    # Build one finding per failed row e.g. "BDV Top: 20 kV (CRITICAL)"
                     for row in critical_rows:
-                        rv   = row.get("value")
-                        ru   = row.get("unit", "")
-                        rs   = row.get("status", "")
-                        name = row.get("row_id", "")
-                        u    = f" {ru}" if ru else ""
-                        if rv is not None:
+                        rv    = row.get("value")
+                        ru    = row.get("unit", "")
+                        rs    = row.get("status", "")
+                        name  = row.get("row_id", "")
+                        # Use stored breach_limit if available; fall back to template lookup
+                        rl    = row.get("breach_limit") or _tmpl_limits.get(name.lower())
+                        u     = f" {ru}" if ru else ""
+                        if rv is not None and rl is not None:
+                            r_reason = f"{name}: {rv}{u} — allowable {rl}{u} ({rs})"
+                        elif rv is not None:
                             r_reason = f"{name}: {rv}{u} — {rs}"
                         else:
                             r_reason = f"{name} — evaluated as {rs}"
                         critical_findings.append({
-                            "key":       f"{fkey}.{name}",
-                            "label":     name,
-                            "condition": "Poor",
-                            "status":    rs,
-                            "unit":      ru or None,
-                            "value":     rv,
-                            "breach_limit": None,
-                            "reason":    r_reason,
+                            "key":          f"{fkey}.{name}",
+                            "label":        name,
+                            "condition":    "Poor",
+                            "status":       rs,
+                            "unit":         ru or None,
+                            "value":        rv,
+                            "breach_limit": rl,
+                            "reason":       r_reason,
                         })
                 else:
                     # Non-table field

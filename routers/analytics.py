@@ -381,11 +381,15 @@ def get_dashboard_equipment(
 
     eq_ids = [e.id for e in all_eq]
 
-    # Analytics map
+    # Analytics map — only equipment that has been tested has a row here
     ea_rows = db.query(EquipmentAnalytics).filter(
         EquipmentAnalytics.equipment_id.in_(eq_ids)
     ).all()
     ea_map = {r.equipment_id: r for r in ea_rows}
+
+    # Exclude equipment with no analytics (never tested)
+    all_eq = [e for e in all_eq if e.id in ea_map]
+    eq_ids = [e.id for e in all_eq]
 
     # Type names
     type_ids = list({e.equipment_type_id for e in all_eq if e.equipment_type_id})
@@ -436,11 +440,9 @@ def get_dashboard_equipment(
 
     def _sort_key(eq: Equipment):
         ea = ea_map.get(eq.id)
-        if ea and ea.risk_level in _risk_order:
-            # Primary: risk priority (Critical first); secondary: lowest health score first
+        if ea is not None and ea.risk_level and ea.risk_level in _risk_order:
             score = float(ea.health_score) if ea.health_score is not None else 999.0
             return (0, _risk_order[ea.risk_level], score)
-        # No analytics — push to bottom
         return (1, 99, 999.0)
 
     sorted_eq = sorted(all_eq, key=_sort_key, reverse=True)
