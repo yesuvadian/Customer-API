@@ -487,6 +487,7 @@ def get_dashboard_equipment(
             "health_score":            float(ea.health_score) if ea and ea.health_score is not None else None,
             "risk_level":              ea.risk_level if ea else "Unknown",
             "condition_summary":       reason,
+            "critical_findings":       ea.critical_findings or [] if ea else [],
             "parameters_at_risk":      ea.parameters_at_risk if ea else 0,
             "at_risk_parameter_names": at_risk_params_map.get(eq.id, []),
             "last_test_date":          ea.last_test_date.isoformat() if ea and ea.last_test_date else None,
