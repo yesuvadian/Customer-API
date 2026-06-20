@@ -214,7 +214,7 @@ class ApprovalService:
                 from models import OrgTestTemplate
                 tmpl = (
                     self.db.query(OrgTestTemplate)
-                    .filter(OrgTestTemplate.template_key == template_key)
+                    .filter(OrgTestTemplate.template_key == template_key, OrgTestTemplate.is_active == True)  # noqa: E712
                     .first()
                 )
                 data = tmpl.template_data if tmpl and tmpl.template_data else {}

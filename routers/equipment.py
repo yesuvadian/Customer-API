@@ -186,7 +186,7 @@ def _types_by_category_for_equipment(db, eq) -> dict:
         bucket = buckets.get(cat, buckets["test"])
         tpl = (
             db.query(OrgTestTemplate)
-            .filter(OrgTestTemplate.test_type_id == t.id)
+            .filter(OrgTestTemplate.test_type_id == t.id, OrgTestTemplate.is_active == True)  # noqa: E712
             .order_by(OrgTestTemplate.version.desc())
             .first()
         )
@@ -256,6 +256,7 @@ def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: 
         .filter(
             OrgTestTemplate.test_type_id == detail.id,
             OrgTestTemplate.org_id == equipment.organization_id,
+            OrgTestTemplate.is_active == True,  # noqa: E712
         )
         .first()
     ) or (
@@ -263,6 +264,7 @@ def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: 
         .filter(
             OrgTestTemplate.test_type_id == detail.id,
             OrgTestTemplate.org_id == None,
+            OrgTestTemplate.is_active == True,  # noqa: E712
         )
         .first()
     )
@@ -1263,7 +1265,7 @@ def get_applicable_tests(
     def _template_flags(test_type_id: int) -> dict:
         tpl = (
             db.query(OrgTestTemplate)
-            .filter(OrgTestTemplate.test_type_id == test_type_id)
+            .filter(OrgTestTemplate.test_type_id == test_type_id, OrgTestTemplate.is_active == True)  # noqa: E712
             .order_by(OrgTestTemplate.version.desc())
             .first()
         )

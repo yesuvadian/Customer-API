@@ -78,6 +78,7 @@ class OrgTestTemplateService:
                 .filter(
                     OrgTestTemplate.org_id == org_id,
                     OrgTestTemplate.test_type_id == test_type_id,
+                    OrgTestTemplate.is_active == True,  # noqa: E712
                 )
                 .first()
             )
@@ -90,6 +91,7 @@ class OrgTestTemplateService:
             .filter(
                 OrgTestTemplate.org_id == None,  # noqa: E711
                 OrgTestTemplate.test_type_id == test_type_id,
+                OrgTestTemplate.is_active == True,  # noqa: E712
             )
             .first()
         )

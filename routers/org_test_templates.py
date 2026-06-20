@@ -113,14 +113,16 @@ def get_by_request_category(
     if org_id:
         tmpl = (
             db.query(OrgTestTemplate)
-            .filter(OrgTestTemplate.org_id == org_id, OrgTestTemplate.template_key == template_key)
+            .filter(OrgTestTemplate.org_id == org_id, OrgTestTemplate.template_key == template_key,
+                    OrgTestTemplate.is_active == True)  # noqa: E712
             .first()
         )
         if tmpl:
             return tmpl
     tmpl = (
         db.query(OrgTestTemplate)
-        .filter(OrgTestTemplate.org_id == None, OrgTestTemplate.template_key == template_key)  # noqa: E711
+        .filter(OrgTestTemplate.org_id == None, OrgTestTemplate.template_key == template_key,  # noqa: E711
+                OrgTestTemplate.is_active == True)  # noqa: E712
         .first()
     )
     if not tmpl:
@@ -147,7 +149,7 @@ def list_by_category_type(
     q = (
         db.query(OrgTestTemplate)
         .join(CD, CD.id == OrgTestTemplate.test_type_id)
-        .filter(CD.category_type == category_type)
+        .filter(CD.category_type == category_type, OrgTestTemplate.is_active == True)  # noqa: E712
     )
     if org_id:
         q = q.filter(OrgTestTemplate.org_id == org_id)
@@ -231,6 +233,24 @@ def reset_to_global(
     """Reset an org-specific template back to the global default."""
     svc = OrgTestTemplateService(db)
     return svc.reset_to_global(template_id=template_id, modified_by=current_user.id)
+
+
+# ─── Toggle active ────────────────────────────────────────────────────────────
+
+@router.patch("/{template_id}/toggle-active", response_model=OrgTestTemplateResponse)
+def toggle_active(
+    template_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Flip is_active between True and False."""
+    tmpl = db.query(OrgTestTemplate).filter(OrgTestTemplate.id == template_id).first()
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    tmpl.is_active = not tmpl.is_active
+    db.commit()
+    db.refresh(tmpl)
+    return tmpl
 
 
 # ─── Delete ───────────────────────────────────────────────────────────────────

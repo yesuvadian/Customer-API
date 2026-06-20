@@ -1104,6 +1104,10 @@ class TestingRequestResponse(BaseModel):
     repair_status: Optional[str] = None
     repair_progress: Optional[int] = None
 
+    # TR Workflow Engine fields
+    wf_instance_id: Optional[UUID] = None
+    current_status_code: Optional[str] = None   # WF status (l2_pending_approval, testing_in_progress, etc.)
+
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
@@ -1583,6 +1587,7 @@ class OrgTestTemplateResponse(BaseModel):
     test_type_id: Optional[int] = None
     template_data: dict
     is_system: bool = True
+    is_active: bool = True
     version: int = 1
 
 

@@ -156,7 +156,7 @@ def get_recommendation_detail(
             return labels
         try:
             from models import OrgTestTemplate
-            tmpl = db.query(OrgTestTemplate).filter(OrgTestTemplate.template_key == template_key).first()
+            tmpl = db.query(OrgTestTemplate).filter(OrgTestTemplate.template_key == template_key, OrgTestTemplate.is_active == True).first()  # noqa: E712
             data = tmpl.template_data if tmpl and tmpl.template_data else {}
             if not data:
                 from test_templates import get_template_by_key

@@ -639,7 +639,7 @@ def get_test_template_by_request_category(
         )
     tmpl = (
         db.query(OrgTestTemplate)
-        .filter(OrgTestTemplate.template_key == template_key)
+        .filter(OrgTestTemplate.template_key == template_key, OrgTestTemplate.is_active == True)  # noqa: E712
         .first()
     )
     if not tmpl:

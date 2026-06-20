@@ -715,6 +715,7 @@ class EvaluationService:
                 .filter(
                     OrgTestTemplate.template_key == template_key,
                     OrgTestTemplate.org_id == org_id,
+                    OrgTestTemplate.is_active == True,  # noqa: E712
                 )
                 .first()
             )
@@ -727,6 +728,7 @@ class EvaluationService:
             .filter(
                 OrgTestTemplate.template_key == template_key,
                 OrgTestTemplate.org_id.is_(None),
+                OrgTestTemplate.is_active == True,  # noqa: E712
             )
             .first()
         )

@@ -3619,6 +3619,7 @@ class OrgTestTemplate(Base):
     test_type_id = Column(Integer, nullable=True)            # soft ref to CategoryDetails.id
     template_data = Column(MutableDict.as_mutable(JSONB), nullable=False)  # full template JSON
     is_system = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     version = Column(Integer, default=1)
 
 
