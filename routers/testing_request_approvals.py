@@ -697,6 +697,51 @@ def download_testing_request_pdf(
 # TR_WF_* Configurable Workflow Endpoints (new parallel engine)
 # =============================================================================
 
+@router.get("/tr-wf/debug/{request_id}")
+def tr_wf_debug(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Debug: return WF instance state for a testing request."""
+    from models import TrWfInstance, TrWfStage, TrWfStageInstance
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if not getattr(req, "wf_instance_id", None):
+        return {"wf_instance_id": None, "msg": "No WF instance on this request"}
+
+    inst = db.query(TrWfInstance).filter(TrWfInstance.id == req.wf_instance_id).first()
+    if not inst:
+        return {"wf_instance_id": str(req.wf_instance_id), "msg": "Instance row missing"}
+
+    stage = db.query(TrWfStage).filter(TrWfStage.id == inst.current_stage_id).first() if inst.current_stage_id else None
+    stage_insts = db.query(TrWfStageInstance).filter(
+        TrWfStageInstance.wf_instance_id == inst.id
+    ).order_by(TrWfStageInstance.created_at.desc()).all()
+
+    return {
+        "request_id": str(req.id),
+        "wf_instance_id": str(inst.id),
+        "instance_status": inst.status,
+        "current_stage_id": str(inst.current_stage_id) if inst.current_stage_id else None,
+        "current_stage_code": stage.code if stage else None,
+        "current_stage_name": stage.name if stage else None,
+        "current_status_code": inst.current_status_code,
+        "request_department_id": str(req.department_id) if req.department_id else None,
+        "stage_instances": [
+            {
+                "stage_id": str(si.stage_id) if si.stage_id else None,
+                "status": si.status,
+                "action_taken": si.action_taken,
+                "created_at": si.created_at.isoformat() if si.created_at else None,
+            }
+            for si in stage_insts
+        ],
+    }
+
+
 @router.get("/tr-wf/pending", response_model=List[dict])
 def tr_wf_get_pending_queue(
     organization_id: Optional[UUID] = None,
