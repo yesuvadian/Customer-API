@@ -428,3 +428,19 @@ def seed_tr_wf_workflow(session):
 
     session.flush()
     print("  [OK] TR Configurable Workflow Engine seeding complete")
+
+
+if __name__ == "__main__":
+    from database import SessionLocal
+    _session = SessionLocal()
+    try:
+        print("\n--- TR Configurable Workflow Engine Seeding ---")
+        seed_tr_wf_workflow(_session)
+        _session.commit()
+        print("--- Done ---\n")
+    except Exception as _e:
+        _session.rollback()
+        print(f"Error: {_e}")
+        import traceback; traceback.print_exc()
+    finally:
+        _session.close()
