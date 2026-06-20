@@ -2121,8 +2121,23 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "TRC Member",                  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
 
-        # ✅ AI ANALYTICS DASHBOARD — org-admin only
-        {"role": "Admin",                       "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        # ✅ AI ANALYTICS DASHBOARD — all operational roles
+        {"role": "Admin",                             "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",                     "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Reviewing Officer",                 "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",               "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver",        "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Maintenance Officer",               "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Asset Data Officer",                "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Inspection Engineer",               "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Auditor",                           "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "TRC Member",                        "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Test & Work Coordinator",           "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Transformer Repair Coordinator",    "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "QA Team",                           "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Finance Officer",                   "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Procurement Officer",               "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Operator",                          "module": "AI Analytics Dashboard", "can_view": True},
 
         # ✅ PRE-COMMISSION QAP — Request tickets (approval queue)
         # Asset Data Officer creates PCR tickets; approvers approve/reject.
