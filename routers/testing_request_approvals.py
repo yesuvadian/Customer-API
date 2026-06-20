@@ -824,6 +824,10 @@ def tr_wf_get_pending_queue(
             ) if req.originator else None,
             "current_status_code": inst.current_status_code,
             "current_stage_id": str(inst.current_stage_id) if inst.current_stage_id else None,
+            "stage_code": (
+                db.query(TrWfStage).filter(TrWfStage.id == inst.current_stage_id).first().code
+                if inst.current_stage_id else None
+            ),
             "wf_instance_id": str(inst.id),
             "resolved_tester_role_id": str(inst.resolved_tester_role_id) if inst.resolved_tester_role_id else None,
             "resolved_tester_role_name": inst.resolved_tester_role.name if inst.resolved_tester_role else None,
