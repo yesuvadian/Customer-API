@@ -431,8 +431,21 @@ def seed_tr_wf_workflow(session):
 
 
 if __name__ == "__main__":
+    import sqlalchemy as _sa
     from database import SessionLocal
     _session = SessionLocal()
+    try:
+        # Ensure post_action column exists (idempotent — safe to run on any machine)
+        _session.execute(_sa.text(
+            "ALTER TABLE tr_wf_stage_transitions "
+            "ADD COLUMN IF NOT EXISTS post_action VARCHAR(100) NULL"
+        ))
+        _session.commit()
+        print("[migration] post_action column ensured on tr_wf_stage_transitions")
+    except Exception as _me:
+        _session.rollback()
+        print(f"[migration] skipped: {_me}")
+
     try:
         print("\n--- TR Configurable Workflow Engine Seeding ---")
         seed_tr_wf_workflow(_session)
