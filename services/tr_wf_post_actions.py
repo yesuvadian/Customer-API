@@ -64,6 +64,26 @@ class RecommendationFinalizeAction(BaseWfAction):
         except Exception:
             pass
 
+        # Run analytics engine for the latest test result
+        try:
+            from models import TestResult
+            from services.analytics_engine import AnalyticsEngine
+            import logging as _log
+            latest = (
+                db.query(TestResult)
+                .filter(TestResult.testing_request_id == testing_request.id)
+                .order_by(TestResult.tested_at.desc())
+                .first()
+            )
+            if latest:
+                AnalyticsEngine(db).run_for_test(latest.id)
+                _log.getLogger(__name__).info(
+                    "recommendation_finalize: analytics run for request %s (result %s)",
+                    testing_request.id, latest.id,
+                )
+        except Exception:
+            pass
+
         # Surveillance tracking update if linked
         if getattr(testing_request, "surveillance_workflow_id", None):
             try:
@@ -115,3 +135,33 @@ class ScheduleCreateAction(BaseWfAction):
             "schedule_create fired for request %s (not yet implemented)",
             testing_request.id,
         )
+
+
+class TriggerAnalyticsAction(BaseWfAction):
+    key   = "trigger_analytics"
+    label = "Trigger Analytics Engine"
+
+    def execute(self, db, testing_request, context):
+        """
+        Run the analytics engine for the latest TestResult on this request.
+        Updates ParameterAnalytics, TestAnalytics, EquipmentAnalytics and
+        hierarchy aggregates so dashboards reflect the completed test immediately.
+        """
+        import logging
+        from models import TestResult
+        from services.analytics_engine import AnalyticsEngine
+
+        log = logging.getLogger(__name__)
+
+        latest = (
+            db.query(TestResult)
+            .filter(TestResult.testing_request_id == testing_request.id)
+            .order_by(TestResult.tested_at.desc())
+            .first()
+        )
+        if not latest:
+            log.warning("trigger_analytics: no TestResult for request %s", testing_request.id)
+            return
+
+        AnalyticsEngine(db).run_for_test(latest.id)
+        log.info("trigger_analytics: analytics completed for request %s (result %s)", testing_request.id, latest.id)
