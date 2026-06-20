@@ -1477,7 +1477,7 @@ def seed_modules(session):
 {"name": "Testing Requests", "description": "Create and manage transformer testing requests", "path": "testing_requests", "group_name": "Testing"},
 {"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
 {"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
-{"name": "Testing Request Approvals", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
+{"name": "Test Request Approval", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
 # Removed: Validation Requests (not implemented)
 # Removed: Tester Mapping (no longer used)
@@ -1497,7 +1497,7 @@ def seed_modules(session):
 # ✅ DASHBOARD KPI MODULES - Role-specific dashboards
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
 {"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
-{"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
+{"name": "Test Monitoring Status", "rename_from": "Test Coordinator Dashboard", "description": "Test Monitoring Status operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
 {"name": "AE Dashboard",    "path": "ae_dashboard",    "description": "Field officer daily work overview — tests due, overdue maintenance, remedial actions", "group_name": "Testing", "is_menu": False},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
@@ -3379,7 +3379,7 @@ def seed_role_templates(session):
     # Role-specific dashboard module IDs
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
     asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
-    test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
+    test_coordinator_dashboard_module_id = modules_by_name.get("Test Monitoring Status")
     aee_dashboard_module_id    = modules_by_name.get("AEE Dashboard")
     see_dashboard_module_id    = modules_by_name.get("SEE Dashboard")
     cee_dashboard_module_id    = modules_by_name.get("CEE Dashboard")
