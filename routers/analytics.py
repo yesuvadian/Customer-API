@@ -436,11 +436,9 @@ def get_dashboard_equipment(
 
     def _sort_key(eq: Equipment):
         ea = ea_map.get(eq.id)
-        if ea and ea.risk_level in _risk_order:
-            # Primary: risk priority (Critical first); secondary: lowest health score first
+        if ea is not None and ea.risk_level and ea.risk_level in _risk_order:
             score = float(ea.health_score) if ea.health_score is not None else 999.0
             return (0, _risk_order[ea.risk_level], score)
-        # No analytics — push to bottom
         return (1, 99, 999.0)
 
     sorted_eq = sorted(all_eq, key=_sort_key)
