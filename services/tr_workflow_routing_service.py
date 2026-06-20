@@ -496,10 +496,7 @@ class WorkflowRoutingService:
             if to_stage:
                 stage_roles = (
                     self.db.query(TrWfStageRole)
-                    .filter(
-                        TrWfStageRole.stage_id == to_stage.id,
-                        TrWfStageRole.is_active.is_(True),
-                    )
+                    .filter(TrWfStageRole.stage_id == to_stage.id)
                     .all()
                 )
                 for sr in stage_roles:
