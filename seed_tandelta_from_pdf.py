@@ -225,6 +225,17 @@ def parse_ocr_text(text: str) -> dict | None:
     if not serial:
         serial = _find(r"\b((?:HT|KT)-?\d{3,}[/\-]\d+)\b", full)
     if not serial:
+        # KPTCL T-XXXX/B-XXXXX on one line (e.g. "Sl. No. T-7124/B-31124")
+        serial = _find(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*([A-Z]-\d{3,}/[A-Z]-\d{4,})", full)
+    if not serial:
+        # Standalone T-XXXX/B-XXXXX anywhere in text
+        serial = _find(r"\b([A-Z]-\d{4,}/[A-Z]-\d{4,})\b", full)
+    if not serial:
+        # KPTCL split-line: "T-7124\nB-31125" (OCR splits the Sl.No. field across two lines)
+        m = re.search(r"\b([A-Z]-\d{4,})\s*\n\s*([A-Z]-\d{4,})", full)
+        if m:
+            serial = f"{m.group(1)}/{m.group(2)}"
+    if not serial:
         # Manufacturer serial: "Sl. No. 13068-005" or "S1. No.\n13068-005"
         serial = _find(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*(\d{4,}[-/]\d+)", full)
     if serial:
@@ -495,7 +506,12 @@ def parse_ocr_text(text: str) -> dict | None:
         r"(\d+)\s*kv\s*([RYB])(?:'?\s*phase)?\s*bushing", re.I
     )
 
-    idax_m = re.search(r"IDAX[\s\S]{0,3000}?(?=overall|assessment|recommendation|$)", full, re.I)
+    # OCR often drops the "ID" prefix → "JAX", "AX", "1DAX"; also match "Insulation Diagnostics"
+    idax_m = re.search(
+        r"(?:IDAX|JAX|1DAX|AX)\s*Test\s*Results?[\s\S]{0,3000}?(?=overall|assessment|recommendation|$)"
+        r"|insulation\s*diagnostics[\s\S]{0,3000}?(?=overall|assessment|recommendation|$)",
+        full, re.I
+    )
     report["idax"] = []
 
     if idax_m:
@@ -627,6 +643,12 @@ def _has_serial(text: str) -> bool:
     # KPTCL asset format:  HT-1234/56, KT-001/2
     if re.search(r"\b(?:HT|KT)\s*[-]?\s*\d{3,}[/\-]\d+", text, re.I):
         return True
+    # KPTCL T-XXXX/B-XXXXX on one line (e.g. T-7124/B-31124)
+    if re.search(r"\b[A-Z]-\d{3,}/[A-Z]-\d{4,}", text):
+        return True
+    # KPTCL T-XXXX split across two lines: "T-7124\nB-31125"
+    if re.search(r"\b[A-Z]-\d{4,}\s*\n\s*[A-Z]-\d{4,}", text):
+        return True
     # Manufacturer format: 13068-005, 12345/006 (4+ digits, dash/slash, 2+ digits)
     if re.search(r"\bS[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*\d{4,}[-/]\d+", text, re.I):
         return True
@@ -642,7 +664,12 @@ def _is_primary_page(text: str) -> bool:
 def _is_secondary_page(text: str) -> bool:
     """True if page has bushing/IDAX test data but no transformer serial."""
     has_bushing = bool(re.search(r"bushing\s*test|(?:220|66)\s*kv.*bushing|idax\s*test", text, re.I))
-    return has_bushing and not _has_serial(text)
+    # IDAX pages: OCR often reads "IDAX" as "JAX", "AX", "1DAX" etc.
+    has_idax = bool(re.search(r"(?:idax|jax|1dax|ax)\s*test\s*results?|insulation\s*diagnostics", text, re.I))
+    # Moisture/conductivity table = IDAX page
+    has_moisture = bool(re.search(r"(?:hv|lv|tv)[- ](?:ground|gnd|lv|tv|hv).*\d+\.\d+", text, re.I)
+                        and re.search(r"moisture|conductivity", text, re.I))
+    return (has_bushing or has_idax or has_moisture) and not _has_serial(text)
 
 
 def _group_pages(page_texts: list[str]) -> list[str]:
