@@ -55,9 +55,42 @@ class RecommendationFinalizeAction(BaseWfAction):
     def execute(self, db, testing_request, context):
         """
         Trigger downstream recommendation processing after L3 approves test results:
+        - Dispatches next_action (follow-up test/maintenance/replacement tickets)
         - Fires any pending surveillance/schedule updates
         - Notifies relevant parties via NotificationService
         """
+        import logging as _log
+        from models import Recommendation
+        approver_id = context.get("performed_by_id")
+
+        # ── next_action dispatch — creates follow-up tickets via WorkflowDispatchService ──
+        try:
+            rec = (
+                db.query(Recommendation)
+                .filter(Recommendation.testing_request_id == testing_request.id)
+                .order_by(Recommendation.cts.desc())
+                .first()
+            )
+            if rec:
+                # Mark recommendation approved so dispatch guards pass
+                if rec.approval_status != "approved":
+                    rec.approval_status = "approved"
+                    rec.approved_by = approver_id
+                    from datetime import datetime, timezone
+                    rec.approved_at = datetime.now(timezone.utc)
+                    db.flush()
+
+                from services.workflow_dispatch_service import WorkflowDispatchService
+                WorkflowDispatchService(db).dispatch(testing_request, rec, approver_id)
+                _log.getLogger(__name__).info(
+                    "recommendation_finalize: dispatch completed for request %s", testing_request.id
+                )
+        except Exception as _e:
+            _log.getLogger(__name__).warning(
+                "recommendation_finalize: dispatch failed for request %s (non-fatal): %s",
+                testing_request.id, _e,
+            )
+
         from services.notification_service import NotificationService
         try:
             NotificationService(db).notify_recommendation_approved(testing_request)
