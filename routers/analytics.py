@@ -418,13 +418,28 @@ def get_dashboard_equipment(
         active_ids = {eq_id for eq_id, cnt in test_count_map.items() if cnt > 0}
         all_eq = [e for e in all_eq if e.id in active_ids]
 
+    # At-risk parameter names per equipment (condition = Poor), deduplicated
+    at_risk_params_rows = (
+        db.query(ParameterAnalytics.equipment_id, ParameterAnalytics.parameter_label, ParameterAnalytics.parameter_key)
+        .filter(
+            ParameterAnalytics.equipment_id.in_(eq_ids),
+            ParameterAnalytics.condition == "Poor",
+        )
+        .all()
+    )
+    at_risk_params_map: dict = {}
+    for eq_id, label, key in at_risk_params_rows:
+        at_risk_params_map.setdefault(eq_id, set()).add(label or key)
+    at_risk_params_map = {k: sorted(v) for k, v in at_risk_params_map.items()}
+
     def _sort_key(eq: Equipment):
         ea = ea_map.get(eq.id)
-        if ea and ea.health_score is not None:
-            return (0, float(ea.health_score))   # tested: sort ascending (worst first)
-        return (1, 0.0)                           # untested: at the end
+        # Sort by last_test_date descending (most recently tested first)
+        if ea and ea.last_test_date is not None:
+            return (0, ea.last_test_date)
+        return (1, datetime.min)
 
-    sorted_eq = sorted(all_eq, key=_sort_key)
+    sorted_eq = sorted(all_eq, key=_sort_key, reverse=True)
     total = len(sorted_eq)
     start = (page - 1) * page_size
     page_eq = sorted_eq[start: start + page_size]
@@ -433,16 +448,18 @@ def get_dashboard_equipment(
     for eq in page_eq:
         ea = ea_map.get(eq.id)
         items.append({
-            "equipment_id":      str(eq.id),
-            "ueic":              eq.ueic,
-            "equipment_type":    type_map.get(eq.equipment_type_id),
-            "department":        dept_name_map.get(eq.department_id),
-            "department_id":     str(eq.department_id) if eq.department_id else None,
-            "health_score":      float(ea.health_score) if ea and ea.health_score is not None else None,
-            "risk_level":        ea.risk_level if ea else "Unknown",
-            "parameters_at_risk":ea.parameters_at_risk if ea else 0,
-            "test_count":        test_count_map.get(eq.id, 0),
-            "tested":            ea is not None,
+            "equipment_id":            str(eq.id),
+            "ueic":                    eq.ueic,
+            "equipment_type":          type_map.get(eq.equipment_type_id),
+            "department":              dept_name_map.get(eq.department_id),
+            "department_id":           str(eq.department_id) if eq.department_id else None,
+            "health_score":            float(ea.health_score) if ea and ea.health_score is not None else None,
+            "risk_level":              ea.risk_level if ea else "Unknown",
+            "parameters_at_risk":      ea.parameters_at_risk if ea else 0,
+            "at_risk_parameter_names": at_risk_params_map.get(eq.id, []),
+            "last_test_date":          ea.last_test_date.isoformat() if ea and ea.last_test_date else None,
+            "test_count":              test_count_map.get(eq.id, 0),
+            "tested":                  ea is not None,
         })
 
     return {
