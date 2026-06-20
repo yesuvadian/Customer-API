@@ -803,9 +803,9 @@ def tr_wf_get_pending_queue(
         )
     instances = instances_q.all()
 
-    # Filter by resolved_l3_role_id: if set, only the resolved role sees L3 assign stage
+    # Filter by resolved_l3_role_id at both l3_assign_tester and l3_review_result stages
     from models import TrWfStage as TrWfStageModel
-    l3_assign_stage_codes = {"l3_assign_tester"}
+    role_scoped_stage_codes = {"l3_assign_tester", "l3_review_result"}
 
     def _caller_sees_instance(inst: TrWfInstance) -> bool:
         if not inst.resolved_l3_role_id:
@@ -813,9 +813,9 @@ def tr_wf_get_pending_queue(
         current_stage = db.query(TrWfStageModel).filter(
             TrWfStageModel.id == inst.current_stage_id
         ).first()
-        if not current_stage or current_stage.code not in l3_assign_stage_codes:
-            return True  # role filter only applies at L3 assign stage
-        # At L3: caller must have the resolved role
+        if not current_stage or current_stage.code not in role_scoped_stage_codes:
+            return True  # role filter only applies at role-scoped stages
+        # Caller must have the resolved AEE role for this stream
         return inst.resolved_l3_role_id in caller_role_ids
 
     instances = [inst for inst in instances if _caller_sees_instance(inst)]

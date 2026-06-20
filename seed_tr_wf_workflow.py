@@ -276,8 +276,8 @@ def seed_tr_wf_workflow(session):
     _grant_module(session, role_aee_rd,  mod_map, "TR Approval Queue",  can_view=True, can_add=True, can_edit=True)
     _grant_module(session, role_ae_rt,   mod_map, "TR Approval Queue",  can_view=True, can_edit=True)
     _grant_module(session, role_ae_rd,   mod_map, "TR Approval Queue",  can_view=True, can_edit=True)
-    _grant_module(session, role_ee_rt,   mod_map, "TR Result Review",   can_view=True, can_edit=True)
-    _grant_module(session, role_ee_rd,   mod_map, "TR Result Review",   can_view=True, can_edit=True)
+    _grant_module(session, role_aee_rt,  mod_map, "TR Result Review",   can_view=True, can_edit=True)
+    _grant_module(session, role_aee_rd,  mod_map, "TR Result Review",   can_view=True, can_edit=True)
     # AE-R&T and AE-R&D must have Testing module perms to appear in the tester picker
     _grant_module(session, role_ae_rt,   mod_map, "Testing",  can_view=True, can_add=True, can_edit=True, can_delete=True, can_approve=True, can_assign=True)
     _grant_module(session, role_ae_rd,   mod_map, "Testing",  can_view=True, can_add=True, can_edit=True, can_delete=True, can_approve=True, can_assign=True)
@@ -334,10 +334,18 @@ def seed_tr_wf_workflow(session):
     _get_or_create_stage_role(session, sg_l4,    role_ae_rd,    can_edit=True)
     if role_ae_je:
         _get_or_create_stage_role(session, sg_l4, role_ae_je,   can_edit=True)
-    _get_or_create_stage_role(session, sg_l3rev, role_ee_rt,    can_approve=True)
-    _get_or_create_stage_role(session, sg_l3rev, role_ee_rd,    can_approve=True)
-    if role_ee_tlss:
-        _get_or_create_stage_role(session, sg_l3rev, role_ee_tlss, can_approve=True)
+    # l3_review_result: AEE R&T and AEE R&D (stream-scoped via resolved_l3_role_id)
+    # Remove any previously seeded incorrect roles
+    for wrong_role in [role_ee_rt, role_ee_rd, role_ee_tlss]:
+        if wrong_role:
+            bad = session.query(TrWfStageRole).filter_by(
+                stage_id=sg_l3rev.id, role_id=wrong_role.id
+            ).first()
+            if bad:
+                session.delete(bad)
+                print(f"  [FIX] Removed {wrong_role.name} from l3_review_result stage")
+    _get_or_create_stage_role(session, sg_l3rev, role_aee_rt, can_approve=True)
+    _get_or_create_stage_role(session, sg_l3rev, role_aee_rd, can_approve=True)
     session.flush()
 
     # ── Transitions ───────────────────────────────────────────────────────────
