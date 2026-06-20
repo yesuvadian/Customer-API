@@ -455,19 +455,26 @@ def get_dashboard_equipment(
         reason = None
         if ea and ea.critical_findings:
             findings = ea.critical_findings or []
-            param_names = [
-                f.get("parameter_label") or f.get("parameter_key", "")
-                for f in findings if f.get("parameter_label") or f.get("parameter_key")
-            ]
-            # deduplicate while preserving order
-            seen = set(); unique = []
-            for n in param_names:
-                if n not in seen:
-                    seen.add(n); unique.append(n)
-            if unique:
-                reason = f"{len(unique)} parameter{'s' if len(unique) > 1 else ''} exceeded threshold: {', '.join(unique[:4])}"
-                if len(unique) > 4:
-                    reason += f" +{len(unique) - 4} more"
+            # Use rich per-finding reason if available, else fall back to label
+            parts = []
+            seen = set()
+            for f in findings:
+                label = f.get("label") or f.get("key", "")
+                if label in seen:
+                    continue
+                seen.add(label)
+                r = f.get("reason")
+                if r:
+                    parts.append(r)
+                elif label:
+                    parts.append(f"{label} exceeded threshold")
+            if parts:
+                if len(parts) == 1:
+                    reason = parts[0]
+                else:
+                    reason = f"{len(parts)} parameters: " + "; ".join(parts[:3])
+                    if len(parts) > 3:
+                        reason += f" +{len(parts)-3} more"
         elif ea and ea.condition_summary:
             reason = ea.condition_summary
 

@@ -348,8 +348,16 @@ class HealthScorer:
         # The eval engine is the authority on what is evaluatable — we don't
         # re-check ev blocks here so that THRESHOLD / column_evaluation paths
         # are included automatically.
+        # Build a lookup of field detail (value, thresholds) from evaluation_result
+        eval_field_map: dict[str, dict] = {
+            f["key"]: f
+            for f in evaluation_result.get("fields", [])
+            if isinstance(f, dict) and "key" in f
+        }
+
         for fkey, status in field_statuses.items():
             field = field_defs.get(fkey, {})
+            ef    = eval_field_map.get(fkey, {})
 
             # Weight: read from whichever eval block is present, default 1.0
             ev = (
@@ -367,12 +375,35 @@ class HealthScorer:
             total_weight  += weight
 
             if condition == "Poor":
+                value       = ef.get("value")
+                unit        = ef.get("unit") or field.get("unit")
+                thresholds  = ef.get("thresholds") or {}
+                # Determine which threshold was breached
+                breach_limit = (
+                    thresholds.get("critical_above")
+                    or thresholds.get("normal_max")
+                    or thresholds.get("alert_max")
+                )
+                # Build a layman-friendly reason
+                if value is not None and breach_limit is not None:
+                    u = f" {unit}" if unit else ""
+                    reason = (
+                        f"Value {value}{u} exceeds the critical limit of {breach_limit}{u}"
+                    )
+                elif value is not None:
+                    reason = f"Value {value} {unit or ''} triggered {status} evaluation".strip()
+                else:
+                    reason = f"Evaluated as {status} based on test result"
+
                 critical_findings.append({
-                    "key":       fkey,
-                    "label":     field.get("label", fkey),
-                    "condition": condition,
-                    "status":    status,
-                    "unit":      field.get("unit"),
+                    "key":           fkey,
+                    "label":         field.get("label", fkey),
+                    "condition":     condition,
+                    "status":        status,
+                    "unit":          unit,
+                    "value":         value,
+                    "breach_limit":  breach_limit,
+                    "reason":        reason,
                 })
 
         if total_weight == 0:
