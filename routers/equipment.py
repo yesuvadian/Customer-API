@@ -1,38 +1,3 @@
-"""
-Equipment Asset Register Router
-CRUD for equipment units with UEIC auto-generation, linked to OrgDepartment hierarchy.
-Enforces org-scoping and module-level RBAC via OrgRolePermission.
-
-ROUTE ORDER RULE (FastAPI matches top-to-bottom):
-  All fixed-path routes (no UUID segment) MUST come before /{equipment_id} routes.
-  Otherwise FastAPI tries to parse e.g. "manufacturers" as a UUID → 422 error.
-
-  Safe order used here:
-    1.  POST   /                          create_equipment
-    2.  GET    /                          list_equipment          ← updated with all filters
-    3.  GET    /export/csv                export_equipment_csv
-    4.  GET    /stats/counts              get_equipment_counts
-    5.  GET    /types-by-category/{int}   get_types_by_category_for_type
-    6.  GET    /types-by-test-type/{int}  get_types_by_test_type
-    7.  GET    /by-ueic/{ueic}            get_equipment_by_ueic
-    8.  GET    /manufacturers             get_manufacturers       ← NEW
-    9.  GET    /models                    get_models              ← NEW
-    10. GET    /substations               get_substations         ← NEW
-    11. GET    /divisions                 get_divisions           ← NEW
-    12. GET    /circles                   get_circles             ← NEW
-    13. GET    /zones                     get_zones               ← NEW
-    ── all /{equipment_id} routes below ──
-    14. GET    /{equipment_id}
-    15. PUT    /{equipment_id}
-    16. POST   /{equipment_id}/retire
-    17. POST   /{equipment_id}/replace
-    18. GET    /{equipment_id}/replacement-report
-    19. GET    /{equipment_id}/applicable-tests
-    20. GET    /{equipment_id}/history
-    21. GET    /{equipment_id}/location-hierarchy
-    22. POST   /{equipment_id}/nameplate-files/{field_key}
-    23. GET    /{equipment_id}/nameplate-files/{field_key}
-"""
 
 import os
 import json
@@ -45,6 +10,7 @@ from fastapi import Response
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func, extract
 
 from database import get_db
 from auth_utils import get_current_user
@@ -79,10 +45,7 @@ router = APIRouter(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _dt(val) -> Optional[str]:
-    """
-    Safely convert a datetime (or date) value to an ISO-8601 string.
-    Returns None if the value is None, so json.dumps never sees a raw datetime.
-    """
+    """Safely convert a datetime (or date) value to an ISO-8601 string."""
     if val is None:
         return None
     return val.isoformat() if hasattr(val, "isoformat") else str(val)
@@ -100,10 +63,7 @@ def _get_equipment_module_id(db: Session) -> int:
 
 
 def _require_permission(db: Session, user: User, action: str) -> None:
-    """
-    Check that *user* has *action* on the Equipment module.
-    Org admins bypass all module checks.
-    """
+    """Check that *user* has *action* on the Equipment module."""
     from models import OrgUserRole, OrgRole
 
     is_org_admin = (
@@ -139,10 +99,7 @@ def _enforce_org_scope(user: User) -> UUID:
 
 
 def _chain_ref(eq_obj) -> Optional[dict]:
-    """
-    Lightweight replacement-chain reference dict from an Equipment ORM object.
-    All datetime fields are converted to ISO strings to ensure JSON serialisability.
-    """
+    """Lightweight replacement-chain reference dict from an Equipment ORM object."""
     if eq_obj is None:
         return None
     return {
@@ -151,21 +108,18 @@ def _chain_ref(eq_obj) -> Optional[dict]:
         "status": eq_obj.status.value if eq_obj.status else None,
         "manufacturer": eq_obj.manufacturer,
         "model_number": eq_obj.model_number,
-        "commissioned_date": _dt(eq_obj.commissioned_date),   # FIX: was raw datetime
-        "retired_date":      _dt(eq_obj.retired_date),         # FIX: was raw datetime
+        "commissioned_date": _dt(eq_obj.commissioned_date),
+        "retired_date":      _dt(eq_obj.retired_date),
     }
 
 
 def _to_response(db: Session, eq: Equipment) -> dict:
-    """
-    Convert Equipment ORM object to response dict with computed fields.
-    All datetime/date fields are serialised to ISO strings via _dt().
-    """
+    """Convert Equipment ORM object to response dict with computed fields."""
     return {
         "id": str(eq.id) if eq.id else None,
         "ueic": eq.ueic,
         "organization_id": str(eq.organization_id) if eq.organization_id else None,
-       "department_id": str(eq.department_id) if eq.department_id else None,
+        "department_id": str(eq.department_id) if eq.department_id else None,
         "equipment_type_id": eq.equipment_type_id,
         "equipment_type_name": eq.equipment_type.name if eq.equipment_type else None,
         "department_name": eq.department.name if eq.department else None,
@@ -175,15 +129,15 @@ def _to_response(db: Session, eq: Equipment) -> dict:
         "nameplate_data": json.loads(json.dumps(eq.nameplate_data, default=str))
         if eq.nameplate_data else {},
         "status": eq.status.value if eq.status else None,
-       "replaces_equipment_id": str(eq.replaces_equipment_id) if eq.replaces_equipment_id else None,
+        "replaces_equipment_id": str(eq.replaces_equipment_id) if eq.replaces_equipment_id else None,
         "replaces_equipment": _chain_ref(eq.replaces_equipment),
-       "replaced_by_id": str(eq.replaced_by_id) if eq.replaced_by_id else None,
+        "replaced_by_id": str(eq.replaced_by_id) if eq.replaced_by_id else None,
         "replaced_by": _chain_ref(
             eq.replaced_by_equipment[0] if eq.replaced_by_equipment else None
         ),
         "replacement_reason_type": eq.replacement_reason_type,
-        "commissioned_date": _dt(eq.commissioned_date),        # FIX: was raw datetime
-        "retired_date":      _dt(eq.retired_date),             # FIX: was raw datetime
+        "commissioned_date": _dt(eq.commissioned_date),
+        "retired_date":      _dt(eq.retired_date),
         "retirement_reason": eq.retirement_reason,
         "manufacturer": eq.manufacturer,
         "model_number": eq.model_number,
@@ -196,16 +150,16 @@ def _to_response(db: Session, eq: Equipment) -> dict:
         "ct_ratio_current": eq.ct_ratio_current,
         "pt_ratio": eq.pt_ratio,
         "vector_group": eq.vector_group,
-      "impedance_pct": (
+        "impedance_pct": (
             float(eq.impedance_pct)
             if eq.impedance_pct is not None
             and str(eq.impedance_pct).lower() != "nan"
             else None
         ),
-       "created_by": str(eq.created_by) if eq.created_by else None,
+        "created_by": str(eq.created_by) if eq.created_by else None,
         "modified_by": str(eq.modified_by) if eq.modified_by else None,
-        "cts": _dt(eq.cts),                                    # FIX: was raw datetime
-        "mts": _dt(eq.mts),                                    # FIX: was raw datetime
+        "cts": _dt(eq.cts),
+        "mts": _dt(eq.mts),
         "types_by_category": _types_by_category_for_equipment(db, eq),
     }
 
@@ -250,11 +204,7 @@ def _types_by_category_for_equipment(db, eq) -> dict:
 
 
 def _get_departments_at_depth(db: Session, org_id, depth: int) -> list:
-    """
-    Return all departments at a specific tree depth for the given org.
-    depth=0 → root (zones), depth=1 → circles, depth=2 → divisions, etc.
-    Returns a list of plain dicts: [{"id": ..., "name": ...}, ...]
-    """
+    """Return all departments at a specific tree depth for the given org."""
     from sqlalchemy import text
 
     sql = text(
@@ -284,10 +234,7 @@ def _get_departments_at_depth(db: Session, org_id, depth: int) -> list:
 
 
 def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: str) -> dict:
-    """
-    Look up the template for this equipment type and return the field definition
-    for field_key. Raises 404 if the field doesn't exist or isn't type='file'.
-    """
+    """Look up the template for this equipment type and return the field definition."""
     from models import CategoryDetails, OrgTestTemplate
 
     detail = (
@@ -315,7 +262,7 @@ def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: 
         db.query(OrgTestTemplate)
         .filter(
             OrgTestTemplate.test_type_id == detail.id,
-            OrgTestTemplate.org_id == None,  # noqa: E711
+            OrgTestTemplate.org_id == None,
         )
         .first()
     )
@@ -339,10 +286,9 @@ def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: 
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ① STATIC ROUTES — no UUID path segment  (MUST be above /{equipment_id})
+# ① STATIC ROUTES — no UUID path segment
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── 1. CREATE ────────────────────────────────────────────────────────────────
 @router.post("/", response_model=EquipmentResponse, status_code=status.HTTP_201_CREATED)
 def create_equipment(
     data: EquipmentCreate,
@@ -385,14 +331,12 @@ def create_equipment(
     db.commit()
     db.refresh(equipment)
 
-    # ── Optional: link to pre-commission request ─────────────────────────────
     if data.precommission_request_id:
         try:
             from services.precommission_service import PreCommissionService
             PreCommissionService(db).link_equipment(
                 data.precommission_request_id, equipment.id, current_user
             )
-            # Also stamp the FK on the equipment record itself for direct lookup
             equipment.precommission_request_id = data.precommission_request_id
             db.flush()
         except Exception as _pcr_exc:
@@ -424,7 +368,6 @@ def create_equipment(
     return _to_response(db, equipment)
 
 
-# ── 2. LIST (with ALL filters) ────────────────────────────────────────────────
 @router.get("/", response_model=List[EquipmentResponse])
 def list_equipment(
     # Basic filters
@@ -526,7 +469,6 @@ def list_equipment(
     )
 
 
-# ── 3. EXPORT CSV ─────────────────────────────────────────────────────────────
 @router.get("/export/csv")
 def export_equipment_csv(
     department_id: Optional[UUID] = None,
@@ -583,7 +525,7 @@ def export_equipment_csv(
     for eq in items:
         writer.writerow([col[1](eq) for col in columns])
 
-    csv_bytes = output.getvalue().encode("utf-8-sig")  # BOM so Excel opens correctly
+    csv_bytes = output.getvalue().encode("utf-8-sig")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"equipment_export_{timestamp}.csv"
 
@@ -594,20 +536,177 @@ def export_equipment_csv(
     )
 
 
-# ── 4. STATS / COUNTS ─────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ✅ FIXED: STATS / COUNTS with all filters
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/stats/counts", response_model=EquipmentCountResponse)
 def get_equipment_counts(
+    # Basic filters
     department_id: Optional[UUID] = None,
+    equipment_type_id: Optional[int] = None,
+    status: Optional[str] = None,
+    voltage_class: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+    model_number: Optional[str] = None,
+    search: Optional[str] = None,
+    # Area filters
+    tlss_division: Optional[str] = None,
+    wm_circle: Optional[str] = None,
+    transmission_zone: Optional[str] = None,
+    substation_ids: Optional[str] = None,
+    # Year filters
+    commission_year: Optional[int] = None,
+    commission_year_from: Optional[int] = None,
+    commission_year_to: Optional[int] = None,
+    failure_year: Optional[int] = None,
+    failure_year_from: Optional[int] = None,
+    failure_year_to: Optional[int] = None,
+    replacement_year: Optional[int] = None,
+    replacement_year_from: Optional[int] = None,
+    replacement_year_to: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Equipment counts by status — scoped to user's organization and optional department."""
+    """
+    Equipment counts by status — scoped to user's organization and optional filters.
+    This now supports ALL the same filters as the list endpoint.
+    """
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-    return EquipmentService.get_equipment_count(db, org_id, department_id)
+    
+    # Start with base query
+    query = db.query(Equipment.status, func.count(Equipment.id))
+    
+    # Organization scope
+    query = query.filter(Equipment.organization_id == org_id)
+    
+    # ── Department / substation filter ──────────────────────────────────────
+    if department_id:
+        from services.equipment_service import EquipmentService as ES
+        dept_ids = ES._get_department_subtree_ids(db, department_id)
+        query = query.filter(Equipment.department_id.in_(dept_ids))
+    
+    # ── Equipment type filter ──────────────────────────────────────────────
+    if equipment_type_id:
+        query = query.filter(Equipment.equipment_type_id == equipment_type_id)
+    
+    # ── Status filter ──────────────────────────────────────────────────────
+    if status:
+        query = query.filter(Equipment.status == status)
+    
+    # ── Voltage class filter ──────────────────────────────────────────────
+    if voltage_class:
+        query = query.filter(Equipment.voltage_class == voltage_class)
+    
+    # ── Manufacturer filter ────────────────────────────────────────────────
+    if manufacturer:
+        query = query.filter(Equipment.manufacturer.ilike(f"%{manufacturer}%"))
+    
+    # ── Model number filter ────────────────────────────────────────────────
+    if model_number:
+        query = query.filter(Equipment.model_number.ilike(f"%{model_number}%"))
+    
+    # ── Search filter ──────────────────────────────────────────────────────
+    if search:
+        query = query.filter(
+            (Equipment.ueic.ilike(f"%{search}%")) |
+            (Equipment.bay_number.ilike(f"%{search}%")) |
+            (Equipment.manufacturer.ilike(f"%{search}%")) |
+            (Equipment.model_number.ilike(f"%{search}%")) |
+            (Equipment.factory_serial_number.ilike(f"%{search}%"))
+        )
+    
+    # ── Substation IDs filter ─────────────────────────────────────────────
+    if substation_ids:
+        id_list = [s.strip() for s in substation_ids.split(",") if s.strip()]
+        if id_list:
+            try:
+                parsed = [UUID(i) for i in id_list]
+                query = query.filter(Equipment.department_id.in_(parsed))
+            except ValueError:
+                pass
+    
+    # ── Area filters (zone, circle, division) ─────────────────────────────
+    from services.equipment_service import EquipmentService as ES
+    
+    if transmission_zone:
+        dept_ids = ES._get_descendants_of_named(db, org_id, transmission_zone)
+        if not dept_ids:
+            return {"total": 0, "active": 0, "under_repair": 0, "retired": 0, "scrapped": 0}
+        query = query.filter(Equipment.department_id.in_(dept_ids))
+    
+    if wm_circle:
+        dept_ids = ES._get_descendants_of_named(db, org_id, wm_circle)
+        if not dept_ids:
+            return {"total": 0, "active": 0, "under_repair": 0, "retired": 0, "scrapped": 0}
+        query = query.filter(Equipment.department_id.in_(dept_ids))
+    
+    if tlss_division:
+        dept_ids = ES._get_descendants_of_named(db, org_id, tlss_division)
+        if not dept_ids:
+            return {"total": 0, "active": 0, "under_repair": 0, "retired": 0, "scrapped": 0}
+        query = query.filter(Equipment.department_id.in_(dept_ids))
+    
+    # ── Commission year filters ───────────────────────────────────────────
+    if commission_year:
+        query = query.filter(
+            extract('year', Equipment.commissioned_date) == commission_year
+        )
+    if commission_year_from:
+        query = query.filter(
+            extract('year', Equipment.commissioned_date) >= commission_year_from
+        )
+    if commission_year_to:
+        query = query.filter(
+            extract('year', Equipment.commissioned_date) <= commission_year_to
+        )
+    
+    # ── Failure year filters ──────────────────────────────────────────────
+    if failure_year:
+        query = query.filter(
+            extract('year', Equipment.retired_date) == failure_year
+        )
+    if failure_year_from:
+        query = query.filter(
+            extract('year', Equipment.retired_date) >= failure_year_from
+        )
+    if failure_year_to:
+        query = query.filter(
+            extract('year', Equipment.retired_date) <= failure_year_to
+        )
+    
+    # ── Replacement year filters ──────────────────────────────────────────
+    if replacement_year:
+        query = query.filter(
+            Equipment.replaces_equipment_id.isnot(None),
+            extract('year', Equipment.commissioned_date) == replacement_year
+        )
+    if replacement_year_from:
+        query = query.filter(
+            Equipment.replaces_equipment_id.isnot(None),
+            extract('year', Equipment.commissioned_date) >= replacement_year_from
+        )
+    if replacement_year_to:
+        query = query.filter(
+            Equipment.replaces_equipment_id.isnot(None),
+            extract('year', Equipment.commissioned_date) <= replacement_year_to
+        )
+    
+    # ── Execute and build response ────────────────────────────────────────
+    rows = query.group_by(Equipment.status).all()
+    from models import EquipmentStatus
+    counts = {s.value: 0 for s in EquipmentStatus}
+    for s, c in rows:
+        counts[s.value] = c
+    counts["total"] = sum(counts.values())
+    return counts
 
 
-# ── 5. TYPES BY CATEGORY (by equipment_type_id int) ──────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ② OTHER STATIC ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/types-by-category/{equipment_type_id}")
 def get_types_by_category_for_type(
     equipment_type_id: int,
@@ -615,16 +714,13 @@ def get_types_by_category_for_type(
     current_user: User = Depends(get_current_user),
 ):
     """Return types_by_category for a CategoryMaster (equipment type) ID."""
-
     class _FakeEq:
         pass
-
     fake = _FakeEq()
     fake.equipment_type_id = equipment_type_id
     return _types_by_category_for_equipment(db, fake)
 
 
-# ── 6. TYPES BY TEST-TYPE (by test_type_id int) ───────────────────────────────
 @router.get("/types-by-test-type/{test_type_id}")
 def get_types_by_test_type(
     test_type_id: int,
@@ -633,20 +729,17 @@ def get_types_by_test_type(
 ):
     """Return types_by_category for the equipment category that owns test_type_id."""
     from models import CategoryDetails
-
     detail = db.query(CategoryDetails).filter(CategoryDetails.id == test_type_id).first()
     if not detail or not detail.category_master_id:
         return {"test": [], "maintenance": [], "inspection": [], "repair_lifecycle": []}
-
+    
     class _FakeEq:
         pass
-
     fake = _FakeEq()
     fake.equipment_type_id = detail.category_master_id
     return _types_by_category_for_equipment(db, fake)
 
 
-# ── 7. GET BY UEIC ────────────────────────────────────────────────────────────
 @router.get("/by-ueic/{ueic}", response_model=EquipmentResponse)
 def get_equipment_by_ueic(
     ueic: str,
@@ -655,17 +748,14 @@ def get_equipment_by_ueic(
 ):
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     equipment = EquipmentService.get_equipment_by_ueic(db, ueic)
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
     if equipment.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
-
     return _to_response(db, equipment)
 
 
-# ── 8. MANUFACTURERS (filter-data) ────────────────────────────────────────────
 @router.get("/manufacturers")
 def get_manufacturers(
     db: Session = Depends(get_db),
@@ -674,9 +764,7 @@ def get_manufacturers(
     """Return distinct manufacturer names present in the org's equipment."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     from sqlalchemy import distinct
-
     rows = (
         db.query(distinct(Equipment.manufacturer))
         .filter(
@@ -690,7 +778,6 @@ def get_manufacturers(
     return [{"id": r[0], "name": r[0]} for r in rows]
 
 
-# ── 9. MODELS (filter-data) ───────────────────────────────────────────────────
 @router.get("/models")
 def get_models(
     manufacturer: Optional[str] = None,
@@ -700,9 +787,7 @@ def get_models(
     """Return distinct model numbers, optionally filtered by manufacturer."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     from sqlalchemy import distinct
-
     query = db.query(distinct(Equipment.model_number)).filter(
         Equipment.organization_id == org_id,
         Equipment.model_number.isnot(None),
@@ -714,7 +799,6 @@ def get_models(
     return [{"model_number": r[0]} for r in rows]
 
 
-# ── 10. SUBSTATIONS (filter-data) ─────────────────────────────────────────────
 @router.get("/substations")
 def get_substations(
     db: Session = Depends(get_db),
@@ -723,9 +807,7 @@ def get_substations(
     """Return leaf departments (substations) for the org."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     from sqlalchemy import text
-
     sql = text(
         """
         WITH RECURSIVE dept_tree AS (
@@ -758,7 +840,6 @@ def get_substations(
     return [{"id": str(r[0]), "name": r[1], "code": r[2]} for r in rows]
 
 
-# ── 11. DIVISIONS (filter-data) ───────────────────────────────────────────────
 @router.get("/divisions")
 def get_divisions(
     db: Session = Depends(get_db),
@@ -770,7 +851,6 @@ def get_divisions(
     return _get_departments_at_depth(db, org_id, depth=2)
 
 
-# ── 12. CIRCLES (filter-data) ─────────────────────────────────────────────────
 @router.get("/circles")
 def get_circles(
     db: Session = Depends(get_db),
@@ -782,7 +862,6 @@ def get_circles(
     return _get_departments_at_depth(db, org_id, depth=1)
 
 
-# ── 13. ZONES (filter-data) ───────────────────────────────────────────────────
 @router.get("/zones")
 def get_zones(
     db: Session = Depends(get_db),
@@ -794,7 +873,6 @@ def get_zones(
     return _get_departments_at_depth(db, org_id, depth=0)
 
 
-# ── Testing Kits availability ─────────────────────────────────────────────────
 @router.get("/testing-kits")
 def get_testing_kits(
     org_id: UUID = Query(..., description="Organization ID"),
@@ -803,14 +881,7 @@ def get_testing_kits(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """
-    Return testing kits (equipment with type 'Testing Kit') available at a station.
-    If department_id is provided, kits are grouped as:
-      - at_station  : kits whose department_id matches exactly
-      - nearby      : kits in parent/sibling departments (one level up)
-    If equipment_type_id is provided, only kits mapped to that type are returned.
-    """
-    # Resolve the "Testing Kit" CategoryMaster
+    """Return testing kits (equipment with type 'Testing Kit') available at a station."""
     kit_master = db.query(CategoryMaster).filter(
         CategoryMaster.name == "Testing Kit",
         CategoryMaster.is_active == True,
@@ -818,7 +889,6 @@ def get_testing_kits(
     if not kit_master:
         return {"at_station": [], "nearby": [], "all": []}
 
-    # If filtering by equipment type, get the required kit sub-type ids
     required_kit_type_ids: Optional[list] = None
     if equipment_type_id:
         mappings = db.query(EquipmentTypeKitMapping).filter(
@@ -856,14 +926,9 @@ def get_testing_kits(
             Equipment.status == "active",
             Equipment.department_id.in_(dept_ids),
         )
-        if required_kit_type_ids:
-            # Filter to kits whose sub-type matches the required mappings
-            # kit sub-type is stored as nameplate_data['kit_type_id'] or matched by equipment_type detail
-            q = q.join(CategoryMaster, Equipment.equipment_type_id == CategoryMaster.id)
         return q.all()
 
     if not department_id:
-        # Return all kits org-wide
         all_kits = db.query(Equipment).filter(
             Equipment.organization_id == org_id,
             Equipment.equipment_type_id == kit_master.id,
@@ -871,10 +936,8 @@ def get_testing_kits(
         ).all()
         return {"all": [_kit_row(k, k.department.name if k.department else "") for k in all_kits]}
 
-    # At-station kits
     at_station = _query_kits([department_id])
 
-    # Nearby: find parent department and its direct children (siblings)
     dept = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
     nearby_dept_ids = []
     if dept and dept.parent_department_id:
@@ -894,10 +957,9 @@ def get_testing_kits(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ② DYNAMIC ROUTES — all contain /{equipment_id: UUID}  (always LAST)
+# ③ DYNAMIC ROUTES — all contain /{equipment_id: UUID}
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── 14. GET SINGLE ────────────────────────────────────────────────────────────
 @router.get("/{equipment_id}", response_model=EquipmentResponse)
 def get_equipment(
     equipment_id: UUID,
@@ -906,17 +968,14 @@ def get_equipment(
 ):
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     equipment = EquipmentService.get_equipment(db, equipment_id)
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
     if equipment.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
-
     return _to_response(db, equipment)
 
 
-# ── 15. UPDATE ────────────────────────────────────────────────────────────────
 @router.put("/{equipment_id}", response_model=EquipmentResponse)
 def update_equipment(
     equipment_id: UUID,
@@ -926,11 +985,9 @@ def update_equipment(
 ):
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_edit")
-
     existing = EquipmentService.get_equipment(db, equipment_id)
     if not existing or existing.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
-
     equipment = EquipmentService.update_equipment(
         db=db,
         equipment_id=equipment_id,
@@ -942,7 +999,6 @@ def update_equipment(
     return _to_response(db, equipment)
 
 
-# ── 16. RETIRE ────────────────────────────────────────────────────────────────
 @router.post("/{equipment_id}/retire", response_model=EquipmentResponse)
 def retire_equipment(
     equipment_id: UUID,
@@ -953,11 +1009,9 @@ def retire_equipment(
     """Retire equipment (soft-delete). UEIC and historical data remain."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_edit")
-
     existing = EquipmentService.get_equipment(db, equipment_id)
     if not existing or existing.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
-
     equipment = EquipmentService.retire_equipment(
         db=db,
         equipment_id=equipment_id,
@@ -986,7 +1040,6 @@ def retire_equipment(
     return _to_response(db, equipment)
 
 
-# ── 17. REPLACE ───────────────────────────────────────────────────────────────
 @router.post("/{equipment_id}/replace", status_code=status.HTTP_201_CREATED)
 async def replace_equipment(
     equipment_id: UUID,
@@ -1008,18 +1061,16 @@ async def replace_equipment(
     pt_ratio: Optional[str] = Form(None),
     vector_group: Optional[str] = Form(None),
     impedance_pct: Optional[float] = Form(None),
-    precommission_request_id: Optional[str] = Form(
-        None, description="Optional: link the replacement to a completed, unlinked pre-commission request"
-    ),
+    voltage_class: Optional[str] = Form(None),
+    bay_number: Optional[str] = Form(None),
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
+    precommission_request_id: Optional[str] = Form(None),
     analysis_report: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Retire old equipment and register a replacement.
-    reason_type='other' → analysis_report PDF is mandatory.
-    reason_type='recommendation_compliance' → recommendation_id is mandatory.
-    """
+    """Retire old equipment and register a replacement."""
     import json
     from datetime import datetime as _dt_cls
 
@@ -1092,12 +1143,15 @@ async def replace_equipment(
         pt_ratio=pt_ratio,
         vector_group=vector_group,
         impedance_pct=impedance_pct,
+        voltage_class=voltage_class,
+        bay_number=bay_number,
+        latitude=latitude,
+        longitude=longitude,
     )
     db.commit()
     db.refresh(old)
     db.refresh(new)
 
-    # ── Optional: link the replacement to a pre-commission request ───────────
     if precommission_request_id:
         try:
             _pcr_uuid = UUID(precommission_request_id)
@@ -1160,7 +1214,6 @@ async def replace_equipment(
     }
 
 
-# ── 18. REPLACEMENT REPORT PDF ────────────────────────────────────────────────
 @router.get("/{equipment_id}/replacement-report")
 def download_replacement_report(
     equipment_id: UUID,
@@ -1169,7 +1222,6 @@ def download_replacement_report(
 ):
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     new_eq = EquipmentService.get_equipment(db, equipment_id)
     if not new_eq or new_eq.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
@@ -1178,9 +1230,7 @@ def download_replacement_report(
             status_code=400,
             detail="This equipment is not a replacement unit. No replacement report available.",
         )
-
     from services.equipment_replacement_pdf_service import EquipmentReplacementPDFService
-
     try:
         buf: BytesIO = EquipmentReplacementPDFService(db).generate_pdf(
             old_equipment_id=new_eq.replaces_equipment_id,
@@ -1188,7 +1238,6 @@ def download_replacement_report(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-
     filename = f"Replacement_Report_{new_eq.ueic}.pdf"
     return StreamingResponse(
         buf,
@@ -1197,7 +1246,6 @@ def download_replacement_report(
     )
 
 
-# ── 19. APPLICABLE TESTS ──────────────────────────────────────────────────────
 @router.get("/{equipment_id}/applicable-tests")
 def get_applicable_tests(
     equipment_id: UUID,
@@ -1207,15 +1255,11 @@ def get_applicable_tests(
     """Test types applicable to this equipment's type."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     existing = EquipmentService.get_equipment(db, equipment_id)
     if not existing or existing.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
-
     tests = EquipmentService.get_applicable_tests(db, equipment_id)
-
     from models import OrgTestTemplate
-
     def _template_flags(test_type_id: int) -> dict:
         tpl = (
             db.query(OrgTestTemplate)
@@ -1228,7 +1272,6 @@ def get_applicable_tests(
             "enable_cumulative": bool(data.get("enable_cumulative", False)),
             "enable_calibration": bool(data.get("enable_calibration", False)),
         }
-
     return [
         {
             "id": t.id,
@@ -1242,7 +1285,6 @@ def get_applicable_tests(
     ]
 
 
-# ── 20. HISTORY ───────────────────────────────────────────────────────────────
 @router.get("/{equipment_id}/history")
 def get_equipment_history(
     equipment_id: UUID,
@@ -1254,14 +1296,11 @@ def get_equipment_history(
     """Testing and failure history for one equipment unit."""
     from models import TestingRequest
     from sqlalchemy.orm import joinedload
-
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     equipment = EquipmentService.get_equipment(db, equipment_id)
     if not equipment or equipment.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
-
     rows = (
         db.query(TestingRequest)
         .options(
@@ -1274,7 +1313,6 @@ def get_equipment_history(
         .limit(limit)
         .all()
     )
-
     def _fmt(r):
         result = r.test_results[0] if r.test_results else None
         originator = r.originator
@@ -1292,9 +1330,8 @@ def get_equipment_history(
                 if originator
                 else None
             ),
-            "cts": _dt(r.cts),   # FIX: was .isoformat() called inline
+            "cts": _dt(r.cts),
         }
-
     return {
         "equipment_id": str(equipment_id),
         "ueic": equipment.ueic,
@@ -1303,7 +1340,6 @@ def get_equipment_history(
     }
 
 
-# ── 21. LOCATION HIERARCHY ────────────────────────────────────────────────────
 @router.get("/{equipment_id}/location-hierarchy")
 def get_equipment_location_hierarchy(
     equipment_id: UUID,
@@ -1313,13 +1349,11 @@ def get_equipment_location_hierarchy(
     """Full department hierarchy for an equipment's location."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     equipment = EquipmentService.get_equipment(db, equipment_id)
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
     if equipment.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
-
     ancestry = EquipmentService._get_department_ancestry_names(db, equipment.department_id)
     return {
         "equipment_id": str(equipment.id),
@@ -1330,7 +1364,6 @@ def get_equipment_location_hierarchy(
     }
 
 
-# ── 22. UPLOAD NAMEPLATE FILE ─────────────────────────────────────────────────
 @router.post("/{equipment_id}/nameplate-files/{field_key}", status_code=200)
 async def upload_nameplate_file(
     equipment_id: UUID,
@@ -1341,16 +1374,12 @@ async def upload_nameplate_file(
 ):
     """Upload a file for a 'file'-type field in the nameplate template."""
     from datetime import datetime as _dt_cls
-
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_edit")
-
     equipment = EquipmentService.get_equipment(db, equipment_id)
     if not equipment or equipment.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found.")
-
     field_def = _resolve_nameplate_file_field(db, equipment, field_key)
-
     accepted = set(field_def.get("accept", ["image/jpeg", "application/pdf"]))
     content_type = file.content_type or ""
     if content_type not in accepted:
@@ -1358,7 +1387,6 @@ async def upload_nameplate_file(
             status_code=400,
             detail=f"File type '{content_type}' not allowed. Accepted: {sorted(accepted)}",
         )
-
     max_bytes = field_def.get("max_size_kb", 10240) * 1024
     content = await file.read()
     if len(content) > max_bytes:
@@ -1366,10 +1394,8 @@ async def upload_nameplate_file(
             status_code=400,
             detail=f"File exceeds maximum size of {field_def.get('max_size_kb', 10240)} KB.",
         )
-
     eq_dir = os.path.join(NAMEPLATE_FILES_DIR, str(equipment_id))
     os.makedirs(eq_dir, exist_ok=True)
-
     ext = os.path.splitext(file.filename or "upload")[1] or (
         ".jpg" if "jpeg" in content_type else ".pdf"
     )
@@ -1377,9 +1403,7 @@ async def upload_nameplate_file(
     dest = os.path.join(eq_dir, stored_name)
     with open(dest, "wb") as fh:
         fh.write(content)
-
     relative_path = f"uploads/nameplate_files/{equipment_id}/{stored_name}"
-
     nameplate = dict(equipment.nameplate_data or {})
     nameplate[field_key] = {
         "original_filename": file.filename,
@@ -1389,14 +1413,11 @@ async def upload_nameplate_file(
         "uploaded_at": _dt_cls.utcnow().isoformat(),
         "uploaded_by": str(current_user.id),
     }
-
     from sqlalchemy.orm.attributes import flag_modified
-
     equipment.nameplate_data = nameplate
     flag_modified(equipment, "nameplate_data")
     equipment.modified_by = current_user.id
     db.commit()
-
     return {
         "field_key": field_key,
         "original_filename": file.filename,
@@ -1406,7 +1427,6 @@ async def upload_nameplate_file(
     }
 
 
-# ── 23. DOWNLOAD NAMEPLATE FILE ───────────────────────────────────────────────
 @router.get("/{equipment_id}/nameplate-files/{field_key}")
 def download_nameplate_file(
     equipment_id: UUID,
@@ -1417,11 +1437,9 @@ def download_nameplate_file(
     """Serve the uploaded file for a nameplate field."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
-
     equipment = EquipmentService.get_equipment(db, equipment_id)
     if not equipment or equipment.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found.")
-
     nameplate = equipment.nameplate_data or {}
     file_meta = nameplate.get(field_key)
     if not isinstance(file_meta, dict) or "path" not in file_meta:
@@ -1429,17 +1447,13 @@ def download_nameplate_file(
             status_code=404,
             detail=f"No file uploaded for field '{field_key}'.",
         )
-
     abs_path = os.path.join(os.path.dirname(__file__), "..", file_meta["path"])
     if not os.path.isfile(abs_path):
         raise HTTPException(status_code=404, detail="File not found on server.")
-
     import mimetypes
-
     def _stream():
         with open(abs_path, "rb") as fh:
             yield from iter(lambda: fh.read(65536), b"")
-
     mime = (
         file_meta.get("mime_type")
         or mimetypes.guess_type(abs_path)[0]

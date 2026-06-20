@@ -446,9 +446,6 @@ class IdList(BaseModel):
     ids: List[int]
 
 
-
-
-
 class ProductUpdateSchema(BaseModel):
     name: Optional[str] = None
     sku: Optional[str] = None
@@ -642,9 +639,6 @@ class RoleResponse(RoleBase):
 
     class Config:
         orm_mode = True
-
-
-
 
 
 class UserRolesBulkCreate(BaseModel):
@@ -859,9 +853,6 @@ class UserDocumentUpdate(BaseModel):
     # 🌟 ADDED NEW FIELD
 
     company_product_id: Optional[int] = None
-
-
-
 
 
 class UserDocumentResponse(UserDocumentBase):
@@ -1105,17 +1096,14 @@ class TestingRequestResponse(BaseModel):
     is_cumulative: Optional[bool] = False
     is_calibration: Optional[bool] = False
 
-        # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────
     # Repair Workflow Projection
     # ─────────────────────────────────────────────
-
     repair_workflow_id: Optional[str] = None
-
     repair_current_stage: Optional[str] = None
-
     repair_status: Optional[str] = None
-
     repair_progress: Optional[int] = None
+
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
@@ -1478,6 +1466,22 @@ class SubmitTestResultsBody(BaseModel):
     test_types: Optional[list] = None           # [{id, name}] — recommended follow-up test types
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# RecommendationResponse
+#
+# IMPORTANT — computed fields from _enrich():
+#   equipment_ueic       — set from rec.testing_request.equipment.ueic
+#   equipment_type_name  — set from rec.testing_request.equipment.equipment_type.name
+#   request_number       — set from rec.testing_request.request_number
+#   request_title        — set from rec.testing_request.title
+#   submitted_by_name    — set from rec.submitter display name
+#   approved_by_name     — set from rec.approver display name
+#
+# These fields are NOT columns on the Recommendation table.  They are
+# attached in-memory by RecommendationService._enrich().  Pydantic must
+# declare them here or it silently drops them during serialisation, causing
+# Flutter to receive null and fall back to "Unknown Equipment Type" / "Unknown UEIC".
+# ──────────────────────────────────────────────────────────────────────────────
 class RecommendationResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
@@ -1488,24 +1492,26 @@ class RecommendationResponse(BaseModel):
     replacement_products: Optional[list] = None
     next_action: Optional[str] = None
     schedule_frequency: Optional[str] = None
-    test_types: Optional[list] = None          # [{id, name}] — recommended follow-up test types
+    test_types: Optional[list] = None
     approval_status: Optional[str] = None
     approved_by: Optional[UUID] = None
-    approved_by_name: Optional[str] = None   # resolved display name
     approved_at: Optional[datetime] = None
     approval_notes: Optional[str] = None
     submitted_by: Optional[UUID] = None
-    submitted_by_name: Optional[str] = None  # resolved display name
     submitted_at: Optional[datetime] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
-    # Enriched from related TR + equipment
-    request_number: Optional[str] = None
-    request_title: Optional[str] = None
-    equipment_ueic: Optional[str] = None
-    equipment_type_name: Optional[str] = None
+
+    # ── Computed by _enrich() — MUST be declared or Pydantic silently drops them ──
+    approved_by_name: Optional[str] = None       # resolved from rec.approver
+    submitted_by_name: Optional[str] = None      # resolved from rec.submitter
+    request_number: Optional[str] = None         # from rec.testing_request.request_number
+    request_title: Optional[str] = None          # from rec.testing_request.title
+    equipment_ueic: Optional[str] = None         # from rec.testing_request.equipment.ueic
+    equipment_type_name: Optional[str] = None    # from rec.testing_request.equipment.equipment_type.name
+                                                 # ↑ THIS was None → caused "Unknown Equipment Type" grouping
 
     class Config:
         from_attributes = True
@@ -2426,7 +2432,7 @@ class EquipmentResponse(BaseModel):
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
-    latitude: Optional[float] = None   
+    latitude: Optional[float] = None
     longitude: Optional[float] = None
 
     class Config:
