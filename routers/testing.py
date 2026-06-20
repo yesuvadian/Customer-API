@@ -707,8 +707,8 @@ def create_structured_result(
         replacement_products=data.replacement_products,
         test_session_id=data.test_session_id,
         testing_kit_id=data.testing_kit_id,
+        finalize=data.finalize,
     )
-    # Build response with images list
     return _build_structured_response(result)
 
 

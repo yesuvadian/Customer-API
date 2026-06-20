@@ -46,16 +46,18 @@ from typing import Optional
 # Value : attribute name on the source record that holds a User UUID
 #
 SYSTEM_RECIPIENT_TOKENS: dict[str, str] = {
-    "@assignee":  "assigned_tester_id",  # TestingRequest.assigned_tester_id
-    "@owner":     "created_by",           # Any record with a created_by field
-    "@requester": "requested_by",         # Records with a requested_by field
+    "@assignee":   "assigned_tester_id",  # TestingRequest.assigned_tester_id
+    "@owner":      "created_by",           # Any record with a created_by field
+    "@requester":  "requested_by",         # Records with a requested_by field
+    "@originator": "originator_id",        # TestingRequest.originator_id (submitter)
 }
 
 # ── Human-readable labels (shown in the admin UI chip selector) ───────────────
 SYSTEM_RECIPIENT_TOKEN_LABELS: dict[str, str] = {
-    "@assignee":  "@ Assignee",
-    "@owner":     "@ Owner / Creator",
-    "@requester": "@ Requester",
+    "@assignee":   "@ Assignee",
+    "@owner":      "@ Owner / Creator",
+    "@requester":  "@ Requester",
+    "@originator": "@ Originator (Submitter)",
 }
 
 

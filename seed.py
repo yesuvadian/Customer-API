@@ -1635,6 +1635,27 @@ def seed_modules(session):
  "path": "import-data",
  "group_name": "Condition Monitoring",
  "is_menu": True},
+# ✅ CONFIGURABLE TEST-REQUEST WORKFLOW ENGINE (tr_wf_*) MODULES
+{"name": "TR Approval Queue",
+ "description": "Stage-aware testing request approval queue for L2 routing and L3 tester assignment (Configurable Workflow Engine).",
+ "path": "tr-wf/approval-queue",
+ "group_name": "Testing",
+ "is_menu": True},
+{"name": "TR Result Review",
+ "description": "L3 reviewer queue — approve or reject test result recommendations routed via the Configurable Workflow Engine.",
+ "path": "tr-wf/result-review",
+ "group_name": "Testing",
+ "is_menu": True},
+{"name": "TR Workflow Config",
+ "description": "Admin: define workflow definitions, stages, statuses, roles and transitions for the Configurable Test-Request Workflow Engine.",
+ "path": "config/tr-workflow",
+ "group_name": "Administration",
+ "is_menu": True},
+{"name": "TR Routing Config",
+ "description": "Admin: configure routing rules (equipment type, test type, request type) to map test requests to the correct workflow definition.",
+ "path": "config/tr-routing",
+ "group_name": "Administration",
+ "is_menu": True},
     ]
 
     module_ids = {}
@@ -11827,6 +11848,26 @@ def run_seed():
         except Exception as _e:
             import traceback
             print(f"[WARN] Notification defaults seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── TR Configurable Workflow Engine — DDL + Seed ─────────────────────────
+        # Must run after seed_seacms_roles_users so EE_TLSS role exists.
+        print("\n" + "=" * 80)
+        print("  TR CONFIGURABLE WORKFLOW ENGINE")
+        print("=" * 80)
+        run_migration_from_file(
+            session,
+            "migrations/029_tr_wf_engine.sql",
+            "Migration 029: TR Configurable Workflow Engine Tables",
+        )
+        try:
+            from seed_tr_wf_workflow import seed_tr_wf_workflow
+            seed_tr_wf_workflow(session)
+            session.commit()
+        except Exception as _e:
+            session.rollback()
+            import traceback
+            print(f"[WARN] TR workflow engine seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
         # ── All workflow role mappings — after seed_seacms_roles_users ───────────

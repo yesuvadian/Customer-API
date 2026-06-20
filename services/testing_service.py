@@ -581,6 +581,7 @@ class TestingService:
         replacement_products: Optional[list] = None,
         test_session_id: Optional[UUID] = None,
         testing_kit_id: Optional[UUID] = None,
+        finalize: bool = True,
     ) -> TestResult:
         """Create a structured test result with JSONB data."""
         from test_templates import get_template_by_key
@@ -660,7 +661,12 @@ class TestingService:
 
         self.db.flush()  # generate result.id before evaluation
 
-        # ── Auto-evaluation ──────────────────────────────────────────────────
+        # ── Auto-evaluation (skipped for draft saves) ────────────────────────
+        if not finalize:
+            self.db.commit()
+            self.db.refresh(result)
+            return result
+
         try:
             from services.evaluation_service import EvaluationService
             ev = EvaluationService.run(template_key, test_data, self.db, org_id=request.organization_id)

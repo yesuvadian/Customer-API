@@ -384,6 +384,21 @@ class TestingRequestService:
         self.db.commit()
         self.db.refresh(request)
 
+        # Instantiate the TR workflow so the L2 approver sees it in their queue
+        if request.status == TestingRequestStatus.submitted and not request.wf_instance_id:
+            try:
+                from services.tr_workflow_routing_service import WorkflowRoutingService
+                wf_svc = WorkflowRoutingService(self.db)
+                wf_svc.instantiate_workflow(request, performed_by_id=modified_by)
+                self.db.commit()
+                self.db.refresh(request)
+            except Exception as e:
+                self.db.rollback()
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"TR workflow instantiation failed for {request.id}: {e}"
+                )
+
         # Trigger notification
         try:
             from services.notification_service import NotificationService

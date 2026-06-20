@@ -1262,8 +1262,9 @@ class TestResultStructuredCreate(BaseModel):
     remarks: Optional[str] = None
     replacement_products: Optional[list] = None
     organization_id: Optional[UUID] = None
-    test_session_id: Optional[UUID] = None  # Link result to specific session
-    testing_kit_id: Optional[UUID] = None   # Testing kit used for this result
+    test_session_id: Optional[UUID] = None
+    testing_kit_id: Optional[UUID] = None
+    finalize: bool = True  # False = draft save, skips auto-evaluation
 
 class TestResultImageResponse(BaseModel):
     id: UUID

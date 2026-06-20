@@ -75,9 +75,15 @@ def run(db=None):
                     can_import=False,
                 ))
                 granted += 1
-                print(f"[OK] Granted full permissions → {role.name}")
+                print(f"[OK] Granted full permissions -> {role.name}")
             else:
-                print(f"[INFO] Already granted → {role.name}")
+                # Ensure can_view=True even if row existed with wrong values
+                exists.can_view = True
+                exists.can_add = True
+                exists.can_edit = True
+                exists.can_delete = True
+                granted += 1
+                print(f"[OK] Updated permissions -> {role.name}")
 
         db.commit()
         print(f"\n[DONE] Workflow Configuration module ready. Granted to {granted} role(s).")

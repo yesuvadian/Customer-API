@@ -252,7 +252,7 @@ def fleet_overview(
         )
         SELECT
             l.equipment_id::text,
-            e.name   AS equipment_name,
+            COALESCE(cm.name || ' — ' || e.ueic, e.ueic) AS equipment_name,
             e.ueic,
             (
                 SELECT alarm_condition
@@ -277,9 +277,10 @@ def fleet_overview(
                 ORDER BY l.scada_tag
             ) AS tags
         FROM   latest l
-        JOIN   public.equipment e ON e.id = l.equipment_id
-        GROUP  BY l.equipment_id, e.name, e.ueic
-        ORDER  BY e.name
+        JOIN   public.equipment e  ON e.id = l.equipment_id
+        LEFT   JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+        GROUP  BY l.equipment_id, e.ueic, cm.name
+        ORDER  BY equipment_name
     """), {"org_id": str(current_user.organization_id)}).fetchall()
 
     return [dict(r._mapping) for r in rows]
@@ -339,6 +340,25 @@ def equipment_trend(
         "hours":  hours,
     }).fetchall()
     return [dict(r._mapping) for r in rows]
+
+
+# ─── Equipment Types (SCADA-instrumented) ────────────────────────────────────
+
+@router.get("/equipment-types")
+def list_scada_equipment_types(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return distinct equipment types that have at least one SCADA-tagged equipment."""
+    rows = db.execute(text("""
+        SELECT DISTINCT cm.id, cm.name
+        FROM   public.equipment e
+        JOIN   public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+        WHERE  e.organization_id = :org
+        AND    e.scada_tag IS NOT NULL
+        ORDER  BY cm.name
+    """), {"org": str(current_user.organization_id)}).fetchall()
+    return [{"id": str(r[0]), "name": r[1]} for r in rows]
 
 
 # ─── Alert Rules ─────────────────────────────────────────────────────────────
