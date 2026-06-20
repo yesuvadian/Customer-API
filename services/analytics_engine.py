@@ -378,33 +378,58 @@ class HealthScorer:
                 value       = ef.get("value")
                 unit        = ef.get("unit") or field.get("unit")
                 thresholds  = ef.get("thresholds") or {}
-                # Determine which threshold was breached
                 breach_limit = (
                     thresholds.get("critical_above")
                     or thresholds.get("normal_max")
                     or thresholds.get("alert_max")
                 )
-                # Build a layman-friendly reason
-                if value is not None and breach_limit is not None:
-                    u = f" {unit}" if unit else ""
-                    reason = (
-                        f"Value {value}{u} exceeds the critical limit of {breach_limit}{u}"
-                    )
-                elif value is not None:
-                    reason = f"Value {value} {unit or ''} triggered {status} evaluation".strip()
-                else:
-                    reason = f"Evaluated as {status} based on test result"
 
-                critical_findings.append({
-                    "key":           fkey,
-                    "label":         field.get("label", fkey),
-                    "condition":     condition,
-                    "status":        status,
-                    "unit":          unit,
-                    "value":         value,
-                    "breach_limit":  breach_limit,
-                    "reason":        reason,
-                })
+                # For TABLE fields: pull the individual row failures instead
+                row_results = ef.get("row_results") or []
+                critical_rows = [r for r in row_results if r.get("status") in ("CRITICAL", "ALERT")]
+
+                if critical_rows:
+                    # Build one finding per failed row e.g. "BDV Top: 20 kV (CRITICAL)"
+                    for row in critical_rows:
+                        rv   = row.get("value")
+                        ru   = row.get("unit", "")
+                        rs   = row.get("status", "")
+                        name = row.get("row_id", "")
+                        u    = f" {ru}" if ru else ""
+                        if rv is not None:
+                            r_reason = f"{name}: {rv}{u} — {rs}"
+                        else:
+                            r_reason = f"{name} — evaluated as {rs}"
+                        critical_findings.append({
+                            "key":       f"{fkey}.{name}",
+                            "label":     name,
+                            "condition": "Poor",
+                            "status":    rs,
+                            "unit":      ru or None,
+                            "value":     rv,
+                            "breach_limit": None,
+                            "reason":    r_reason,
+                        })
+                else:
+                    # Non-table field
+                    if value is not None and breach_limit is not None:
+                        u = f" {unit}" if unit else ""
+                        reason = f"Value {value}{u} exceeds the critical limit of {breach_limit}{u}"
+                    elif value is not None:
+                        reason = f"Value {value} {unit or ''} triggered {status} evaluation".strip()
+                    else:
+                        reason = f"Evaluated as {status} based on test result"
+
+                    critical_findings.append({
+                        "key":           fkey,
+                        "label":         field.get("label", fkey),
+                        "condition":     condition,
+                        "status":        status,
+                        "unit":          unit,
+                        "value":         value,
+                        "breach_limit":  breach_limit,
+                        "reason":        reason,
+                    })
 
         if total_weight == 0:
             return None, critical_findings
