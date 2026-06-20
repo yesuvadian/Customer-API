@@ -432,14 +432,18 @@ def get_dashboard_equipment(
         at_risk_params_map.setdefault(eq_id, set()).add(label or key)
     at_risk_params_map = {k: sorted(v) for k, v in at_risk_params_map.items()}
 
+    _risk_order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+
     def _sort_key(eq: Equipment):
         ea = ea_map.get(eq.id)
-        # Sort by last_test_date descending (most recently tested first)
-        if ea and ea.last_test_date is not None:
-            return (0, ea.last_test_date)
-        return (1, datetime.min)
+        if ea and ea.risk_level in _risk_order:
+            # Primary: risk priority (Critical first); secondary: lowest health score first
+            score = float(ea.health_score) if ea.health_score is not None else 999.0
+            return (0, _risk_order[ea.risk_level], score)
+        # No analytics — push to bottom
+        return (1, 99, 999.0)
 
-    sorted_eq = sorted(all_eq, key=_sort_key, reverse=True)
+    sorted_eq = sorted(all_eq, key=_sort_key)
     total = len(sorted_eq)
     start = (page - 1) * page_size
     page_eq = sorted_eq[start: start + page_size]
@@ -447,6 +451,26 @@ def get_dashboard_equipment(
     items = []
     for eq in page_eq:
         ea = ea_map.get(eq.id)
+        # Build plain-English reason from critical_findings
+        reason = None
+        if ea and ea.critical_findings:
+            findings = ea.critical_findings or []
+            param_names = [
+                f.get("parameter_label") or f.get("parameter_key", "")
+                for f in findings if f.get("parameter_label") or f.get("parameter_key")
+            ]
+            # deduplicate while preserving order
+            seen = set(); unique = []
+            for n in param_names:
+                if n not in seen:
+                    seen.add(n); unique.append(n)
+            if unique:
+                reason = f"{len(unique)} parameter{'s' if len(unique) > 1 else ''} exceeded threshold: {', '.join(unique[:4])}"
+                if len(unique) > 4:
+                    reason += f" +{len(unique) - 4} more"
+        elif ea and ea.condition_summary:
+            reason = ea.condition_summary
+
         items.append({
             "equipment_id":            str(eq.id),
             "ueic":                    eq.ueic,
@@ -455,6 +479,7 @@ def get_dashboard_equipment(
             "department_id":           str(eq.department_id) if eq.department_id else None,
             "health_score":            float(ea.health_score) if ea and ea.health_score is not None else None,
             "risk_level":              ea.risk_level if ea else "Unknown",
+            "condition_summary":       reason,
             "parameters_at_risk":      ea.parameters_at_risk if ea else 0,
             "at_risk_parameter_names": at_risk_params_map.get(eq.id, []),
             "last_test_date":          ea.last_test_date.isoformat() if ea and ea.last_test_date else None,
