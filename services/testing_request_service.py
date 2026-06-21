@@ -573,6 +573,19 @@ class TestingRequestService:
             else q.filter(OrgDepartment.parent_department_id == parent_id)
         )
         depts = q.order_by(OrgDepartment.name).all()
+
+        # Compute depth of a single node by walking up parent chain
+        def _depth(dept) -> int:
+            d, n = 0, dept
+            while n.parent_department_id is not None:
+                parent = self.db.query(OrgDepartment).filter(
+                    OrgDepartment.id == n.parent_department_id).first()
+                if parent is None:
+                    break
+                d += 1
+                n = parent
+            return d
+
         return [
             {
                 "id": str(d.id),
@@ -586,6 +599,7 @@ class TestingRequestService:
                     )
                     .count() > 0,
                 "type": "department",
+                "depth": _depth(d),
             }
             for d in depts
         ]

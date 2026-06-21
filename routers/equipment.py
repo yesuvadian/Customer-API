@@ -224,13 +224,16 @@ def _get_departments_at_depth(db: Session, org_id, depth: int) -> list:
             WHERE d.is_active = true
               AND dt.depth < :max_depth
         )
-        SELECT id, name FROM dept_tree WHERE depth = :depth ORDER BY name
+        SELECT dt.id, dt.name, od.aliases
+        FROM dept_tree dt
+        JOIN org_departments od ON od.id = dt.id
+        WHERE dt.depth = :depth ORDER BY dt.name
         """
     )
     rows = db.execute(
         sql, {"org_id": str(org_id), "depth": depth, "max_depth": depth}
     ).fetchall()
-    return [{"id": str(r[0]), "name": r[1]} for r in rows]
+    return [{"id": str(r[0]), "name": r[1], "aliases": r[2] or []} for r in rows]
 
 
 def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: str) -> dict:
