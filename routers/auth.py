@@ -45,7 +45,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
             SELECT m.path
             FROM public.org_roles oroles
             LEFT JOIN public.modules m ON oroles.default_module_id = m.id
-            WHERE oroles.is_system_admin = true AND oroles.is_active = true
+            WHERE oroles.role_type = 'system' AND oroles.is_active = true
             LIMIT 1
         """)
         fallback_row = db.execute(fallback_query).fetchone()
