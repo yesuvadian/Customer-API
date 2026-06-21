@@ -1698,16 +1698,28 @@ class OrgRoleUpdate(BaseModel):
     is_org_admin: Optional[bool] = None
     is_dept_admin: Optional[bool] = None
     is_active: Optional[bool] = None
+    default_module_id: Optional[int] = None
 
 class OrgRoleOut(OrgRoleBase):
     id: UUID
     organization_id: UUID
     role_type: str
     is_active: bool
+    default_module_id: Optional[int] = None
+    default_module_path: Optional[str] = None
+    default_module_name: Optional[str] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+
+    @classmethod
+    def from_orm(cls, obj):
+        instance = super().from_orm(obj)
+        if hasattr(obj, 'default_module') and obj.default_module:
+            instance.default_module_path = obj.default_module.path
+            instance.default_module_name = obj.default_module.name
+        return instance
 
     class Config:
         from_attributes = True
