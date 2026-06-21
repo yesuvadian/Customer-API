@@ -26,7 +26,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     from sqlalchemy import text
     user_id = result["user"]["id"]
 
-    # Query default_module_path directly from database
+    # Query default_module_path — from org role first, then user's own setting
     query = text("""
         SELECT m.path
         FROM public.org_user_roles our
@@ -38,6 +38,18 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 
     result_row = db.execute(query, {"user_id": user_id}).fetchone()
     default_module_path = result_row[0] if (result_row and result_row[0]) else None
+
+    # Fallback: System Admin has no org_user_roles entry — use the is_system_admin org role's default module
+    if not default_module_path:
+        fallback_query = text("""
+            SELECT m.path
+            FROM public.org_roles oroles
+            LEFT JOIN public.modules m ON oroles.default_module_id = m.id
+            WHERE oroles.is_system_admin = true AND oroles.is_active = true
+            LIMIT 1
+        """)
+        fallback_row = db.execute(fallback_query).fetchone()
+        default_module_path = fallback_row[0] if (fallback_row and fallback_row[0]) else None
 
     print(f"[DEBUG] user_id: {user_id}")
     print(f"[DEBUG] default_module_path: {default_module_path}")

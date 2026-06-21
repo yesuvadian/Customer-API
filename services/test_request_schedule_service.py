@@ -560,8 +560,8 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             # Enroll in TR workflow engine so the ticket enters the L2→L3→L4
             # approval/assignment/test flow instead of the old direct-approval path.
             try:
-                from services.tr_workflow_routing_service import TrWfRoutingService
-                TrWfRoutingService(db).instantiate_workflow(
+                from services.tr_workflow_routing_service import WorkflowRoutingService
+                WorkflowRoutingService(db).instantiate_workflow(
                     new_request,
                     performed_by_id=schedule.created_by,
                 )

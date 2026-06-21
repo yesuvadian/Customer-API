@@ -55,6 +55,236 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 
+def _build_dept_rollup(equipment_list: list, scope_dept_id, db) -> dict:
+    """Return {child_dept_id: count} rollup for a list of equipment objects."""
+    counts: dict = {}
+    if not equipment_list:
+        return counts
+    if scope_dept_id:
+        children = db.query(OrgDepartment.id).filter(
+            OrgDepartment.parent_department_id == scope_dept_id).all()
+        child_ids = [r[0] for r in children]
+        dept_to_child: dict = {}
+        for cid in child_ids:
+            for did in _collect_department_ids(cid, db):
+                dept_to_child[did] = cid
+        for eq in equipment_list:
+            if eq.department_id:
+                cid = dept_to_child.get(eq.department_id)
+                if cid:
+                    ck = str(cid)
+                    counts[ck] = counts.get(ck, 0) + 1
+    else:
+        roots = db.query(OrgDepartment.id).filter(
+            OrgDepartment.parent_department_id.is_(None)).all()
+        dept_to_root: dict = {}
+        for (rid,) in roots:
+            for did in _collect_department_ids(rid, db):
+                dept_to_root[did] = rid
+        for eq in equipment_list:
+            if eq.department_id:
+                rid = dept_to_root.get(eq.department_id)
+                if rid:
+                    rk = str(rid)
+                    counts[rk] = counts.get(rk, 0) + 1
+    return counts
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Asset Dashboard breakdown endpoint — all groupings in one DB round-trip
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/asset-breakdown", summary="Asset Dashboard grouping counts (voltage, type, make, year, dept)")
+def get_asset_breakdown(
+    department_id: Optional[uuid.UUID] = Query(None),
+    db:   Session = Depends(get_vendor_db),
+    user: dict    = Depends(get_current_user),
+):
+    """
+    Returns all grouping aggregations needed by the Asset Dashboard in one call:
+      - by_voltage_class  : { "220": 450, "400": 380, ... }
+      - by_type           : { "Power Transformer": 600, ... }
+      - by_make           : { "ABB": 320, ... }
+      - by_commissioned_year: { "2020": 150, ... }
+      - by_capacity_mva   : { "10-50 MVA": 200, ... }
+      - dept_equipment_counts: { "<dept-id>": 120, ... }  (direct children)
+      - total             : total equipment count in scope
+    """
+    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+
+    # Resolve Testing Kit category IDs to exclude from asset counts
+    testkit_type_ids = {
+        c.id for c in db.query(CategoryMaster.id)
+        .filter(CategoryMaster.name.ilike("%testing kit%"))
+        .all()
+        if c.id
+    }
+
+    # Active equipment — split into real assets vs test kits
+    active_q = db.query(Equipment).filter(Equipment.status != "retired")
+    if dept_ids:
+        active_q = active_q.filter(Equipment.department_id.in_(dept_ids))
+    _all_active: list[Equipment] = active_q.all()
+
+    all_eq    = [e for e in _all_active if e.equipment_type_id not in testkit_type_ids]
+    testkit_eq = [e for e in _all_active if e.equipment_type_id in testkit_type_ids]
+
+    # Equipment added this month (cts = created timestamp)
+    from datetime import date as _date
+    _today = _date.today()
+    added_this_month = sum(
+        1 for eq in all_eq
+        if eq.cts and eq.cts.month == _today.month and eq.cts.year == _today.year
+    )
+
+    # Retired equipment for failure-year breakdown
+    retired_q = db.query(Equipment).filter(Equipment.status == "retired")
+    if dept_ids:
+        retired_q = retired_q.filter(Equipment.department_id.in_(dept_ids))
+    retired_eq: list[Equipment] = retired_q.all()
+
+    # Bulk-fetch type names
+    type_ids = list({e.equipment_type_id for e in all_eq if e.equipment_type_id})
+    type_map = {
+        c.id: c.name
+        for c in db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
+    } if type_ids else {}
+
+    # Fetch analytics for health distribution per group
+    eq_ids_all = [e.id for e in all_eq]
+    ea_rows = db.query(EquipmentAnalytics).filter(
+        EquipmentAnalytics.equipment_id.in_(eq_ids_all)
+    ).all() if eq_ids_all else []
+    ea_map = {r.equipment_id: r for r in ea_rows}
+
+    def _empty_health() -> dict:
+        return {"critical": 0, "high": 0, "healthy": 0, "sum": 0.0, "cnt": 0}
+
+    def _add_health(bucket: dict, eq_id) -> None:
+        ea = ea_map.get(eq_id)
+        if ea:
+            rl = (ea.risk_level or "").strip()
+            if rl == "Critical":
+                bucket["critical"] += 1
+            elif rl == "High":
+                bucket["high"] += 1
+            else:
+                bucket["healthy"] += 1
+            if ea.health_score is not None:
+                bucket["sum"] += float(ea.health_score)
+                bucket["cnt"] += 1
+
+    def _finalise(bucket: dict) -> dict:
+        return {
+            "critical":   bucket["critical"],
+            "high":       bucket["high"],
+            "healthy":    bucket["healthy"],
+            "avg_health": round(bucket["sum"] / bucket["cnt"], 1) if bucket["cnt"] > 0 else None,
+        }
+
+    by_voltage:       dict[str, int]  = {}
+    by_voltage_h:     dict[str, dict] = {}
+    by_type:          dict[str, int]  = {}
+    by_type_h:        dict[str, dict] = {}
+    by_make:          dict[str, int]  = {}
+    by_make_h:        dict[str, dict] = {}
+    by_year:          dict[str, int]  = {}
+    by_year_h:        dict[str, dict] = {}
+    by_capacity:      dict[str, int]  = {}
+    by_capacity_h:    dict[str, dict] = {}
+    by_failure_year:  dict[str, int]  = {}
+    by_failure_year_h: dict[str, dict] = {}
+
+    # Test counts per equipment (all statuses)
+    eq_id_set = {e.id for e in all_eq}
+    tc_rows_all = (
+        db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
+        .filter(TestingRequest.equipment_id.in_(eq_id_set))
+        .group_by(TestingRequest.equipment_id)
+        .all()
+    ) if eq_id_set else []
+    eq_test_counts: dict = {str(r[0]): r[1] for r in tc_rows_all}
+
+    # Test groupings (parallel to asset groupings)
+    by_make_tests:         dict[str, int] = {}
+    by_type_tests:         dict[str, int] = {}
+    by_voltage_tests:      dict[str, int] = {}
+    by_year_tests:         dict[str, int] = {}
+    by_capacity_tests:     dict[str, int] = {}
+    by_failure_year_tests: dict[str, int] = {}
+
+    for eq in all_eq:
+        tc = eq_test_counts.get(str(eq.id), 0)
+
+        vc = (eq.voltage_class or "").strip() or "Unknown"
+        by_voltage[vc] = by_voltage.get(vc, 0) + 1
+        by_voltage_h.setdefault(vc, _empty_health())
+        _add_health(by_voltage_h[vc], eq.id)
+        by_voltage_tests[vc] = by_voltage_tests.get(vc, 0) + tc
+
+        tn = type_map.get(eq.equipment_type_id) or "Unknown"
+        by_type[tn] = by_type.get(tn, 0) + 1
+        by_type_h.setdefault(tn, _empty_health())
+        _add_health(by_type_h[tn], eq.id)
+        by_type_tests[tn] = by_type_tests.get(tn, 0) + tc
+
+        mk = (eq.manufacturer or "").strip() or "Unknown"
+        by_make[mk] = by_make.get(mk, 0) + 1
+        by_make_h.setdefault(mk, _empty_health())
+        _add_health(by_make_h[mk], eq.id)
+        by_make_tests[mk] = by_make_tests.get(mk, 0) + tc
+
+        yr = str(eq.commissioned_date.year) if eq.commissioned_date else "Unknown"
+        by_year[yr] = by_year.get(yr, 0) + 1
+        by_year_h.setdefault(yr, _empty_health())
+        _add_health(by_year_h[yr], eq.id)
+        by_year_tests[yr] = by_year_tests.get(yr, 0) + tc
+
+        by_capacity["Unknown"] = by_capacity.get("Unknown", 0) + 1
+        by_capacity_h.setdefault("Unknown", _empty_health())
+        _add_health(by_capacity_h["Unknown"], eq.id)
+        by_capacity_tests["Unknown"] = by_capacity_tests.get("Unknown", 0) + tc
+
+    for eq in retired_eq:
+        yr = str(eq.retired_date.year) if eq.retired_date else "Unknown"
+        by_failure_year[yr] = by_failure_year.get(yr, 0) + 1
+        by_failure_year_h.setdefault(yr, _empty_health())
+        by_failure_year_tests[yr] = by_failure_year_tests.get(yr, 0) + eq_test_counts.get(str(eq.id), 0)
+        _add_health(by_failure_year_h[yr], eq.id)
+
+    # ── Hierarchical dept_equipment_counts: rollup per direct child of scope ──
+    dept_counts = _build_dept_rollup(all_eq, department_id, db)
+
+    def _sort(d: dict) -> dict:
+        return dict(sorted(d.items(), key=lambda x: -x[1]))
+
+    return {
+        "total":                    len(all_eq),
+        "testkit_total":            len(testkit_eq),
+        "added_this_month":         added_this_month,
+        "dept_testkit_counts":      _build_dept_rollup(testkit_eq, department_id, db),
+        "by_voltage_class":         _sort(by_voltage),
+        "by_voltage_class_health":  {k: _finalise(v) for k, v in by_voltage_h.items()},
+        "by_type":                  _sort(by_type),
+        "by_type_health":           {k: _finalise(v) for k, v in by_type_h.items()},
+        "by_make":                  _sort(by_make),
+        "by_make_health":           {k: _finalise(v) for k, v in by_make_h.items()},
+        "by_make_tests":            _sort(by_make_tests),
+        "by_commissioned_year":     dict(sorted(by_year.items())),
+        "by_commissioned_year_health": {k: _finalise(v) for k, v in by_year_h.items()},
+        "by_commissioned_year_tests":  dict(sorted(by_year_tests.items())),
+        "by_failure_year":          dict(sorted(by_failure_year.items())),
+        "by_failure_year_health":   {k: _finalise(v) for k, v in by_failure_year_h.items()},
+        "by_failure_year_tests":    dict(sorted(by_failure_year_tests.items())),
+        "by_capacity_mva":          _sort(by_capacity),
+        "by_capacity_mva_health":   {k: _finalise(v) for k, v in by_capacity_h.items()},
+        "by_capacity_mva_tests":    _sort(by_capacity_tests),
+        "by_type_tests":            _sort(by_type_tests),
+        "by_voltage_class_tests":   _sort(by_voltage_tests),
+        "dept_equipment_counts":    dept_counts,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Dashboard summary endpoint (consumed by the AI Analytics Dashboard UI)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -86,8 +316,16 @@ def get_analytics_dashboard(
     all_ea: list[EquipmentAnalytics] = eq_query.all()
 
     # ── 2. KPI summary ───────────────────────────────────────────────────────
-    all_eq_ids = [ea.equipment_id for ea in all_ea if ea.equipment_id]
+    ea_eq_ids = [ea.equipment_id for ea in all_ea if ea.equipment_id]
     _TERMINAL_STATUSES_KPI = ("completed", "closed")
+
+    # All equipment IDs in scope (from Equipment table — includes untested equipment)
+    _scope_eq_q = db.query(Equipment.id).filter(Equipment.status != "retired")
+    if dept_ids:
+        _scope_eq_q = _scope_eq_q.filter(Equipment.department_id.in_(dept_ids))
+    all_scope_eq_ids: set = {row[0] for row in _scope_eq_q.all()}
+    # Use scope IDs for all test queries so untested equipment is accounted for
+    all_eq_ids = list(all_scope_eq_ids) if all_scope_eq_ids else ea_eq_ids
 
     # Build per-equipment test count (respects date filter)
     if all_eq_ids:
@@ -106,6 +344,84 @@ def get_analytics_dashboard(
 
     total_tests = sum(kpi_test_count_map.values())
 
+    # Tests-by-category breakdown for AI analytics tab
+    if all_eq_ids:
+        cat_q = (
+            db.query(TestingRequest.request_category, func.count(TestingRequest.id))
+            .filter(
+                TestingRequest.equipment_id.in_(all_eq_ids),
+                TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
+            )
+        )
+        cat_q = _apply_completed_at_filter(cat_q, date_from, date_to)
+        cat_rows = cat_q.group_by(TestingRequest.request_category).all()
+        tests_by_category = {
+            (getattr(row[0], "value", str(row[0])) if row[0] else "unknown"): row[1]
+            for row in cat_rows
+        }
+    else:
+        tests_by_category = {}
+
+    # Tests by year (completed_at year → count)
+    if all_eq_ids:
+        tby_rows = (
+            db.query(
+                func.extract("year", TestingRequest.completed_at).label("yr"),
+                func.count(TestingRequest.id),
+            )
+            .filter(
+                TestingRequest.equipment_id.in_(all_eq_ids),
+                TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
+                TestingRequest.completed_at.isnot(None),
+            )
+            .group_by("yr")
+            .order_by("yr")
+            .all()
+        )
+        tests_by_year = {str(int(r[0])): r[1] for r in tby_rows}
+    else:
+        tests_by_year = {}
+
+    # Failures by year (retired_date year → count of retired equipment in scope)
+    if all_eq_ids:
+        eq_scope = db.query(Equipment).filter(
+            Equipment.id.in_(all_eq_ids),
+            Equipment.retired_date.isnot(None),
+        ).all()
+        failures_by_year: dict = {}
+        for eq in eq_scope:
+            yr = str(eq.retired_date.year)
+            failures_by_year[yr] = failures_by_year.get(yr, 0) + 1
+    else:
+        failures_by_year = {}
+
+    # Replacements by year (commissioned_date year of equipment that replaced another → count)
+    if all_eq_ids:
+        rep_scope = db.query(Equipment).filter(
+            Equipment.id.in_(all_eq_ids),
+            Equipment.replaced_by_id.isnot(None),
+            Equipment.commissioned_date.isnot(None),
+        ).all()
+        replacements_by_year: dict = {}
+        for eq in rep_scope:
+            yr = str(eq.commissioned_date.year)
+            replacements_by_year[yr] = replacements_by_year.get(yr, 0) + 1
+    else:
+        replacements_by_year = {}
+
+    # Commissioned by year (fleet age breakdown for Asset Dashboard)
+    if all_eq_ids:
+        comm_scope = db.query(Equipment).filter(
+            Equipment.id.in_(all_eq_ids),
+            Equipment.commissioned_date.isnot(None),
+        ).all()
+        commissioned_by_year: dict = {}
+        for eq in comm_scope:
+            yr = str(eq.commissioned_date.year)
+            commissioned_by_year[yr] = commissioned_by_year.get(yr, 0) + 1
+    else:
+        commissioned_by_year = {}
+
     # When a date filter is active, total_equipment = equipment with tests in that period.
     # Without a date filter, count all equipment in scope.
     if date_from or date_to:
@@ -114,6 +430,32 @@ def get_analytics_dashboard(
     else:
         active_eq_ids = set(all_eq_ids)
         active_ea     = all_ea
+
+    real_total_equipment: int = len(all_scope_eq_ids)
+
+    # Equipment with at least one completed test
+    tested_eq_ids: set = {eq_id for eq_id, cnt in kpi_test_count_map.items() if cnt > 0}
+
+    # Per-category: which equipment have had that category of test (across all scope equipment)
+    cat_tested: dict[str, set] = {}
+    if all_scope_eq_ids:
+        cat_eq_rows = (
+            db.query(TestingRequest.request_category, TestingRequest.equipment_id)
+            .filter(
+                TestingRequest.equipment_id.in_(all_scope_eq_ids),
+                TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
+            )
+        )
+        cat_eq_rows = _apply_completed_at_filter(cat_eq_rows, date_from, date_to)
+        for cat, eq_id in cat_eq_rows.all():
+            key = getattr(cat, "value", str(cat)) if cat else "unknown"
+            cat_tested.setdefault(key, set()).add(eq_id)
+
+    # Equipment that have NEVER had each activity type (out of all in-scope equipment)
+    no_test_count        = len(all_scope_eq_ids - cat_tested.get("test", set()) - cat_tested.get("testing", set()))
+    no_maintenance_count = len(all_scope_eq_ids - cat_tested.get("maintenance", set()))
+    no_inspection_count  = len(all_scope_eq_ids - cat_tested.get("inspection", set()) - cat_tested.get("taqc_inspection", set()))
+    no_repair_count      = len(all_scope_eq_ids - cat_tested.get("repair_lifecycle", set()))
 
     risk_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Unknown": 0}
     for ea in active_ea:
@@ -224,45 +566,109 @@ def get_analytics_dashboard(
     ]
 
     # ── 6. One-level child department scores (for drill-down picker) ─────────
-    child_ha_rows = (
-        db.query(HierarchyAnalytics)
-        .filter(HierarchyAnalytics.parent_department_id == department_id)
-        .all()
-    ) if department_id else []
+    # Fetch HierarchyAnalytics rows for children that have analytics data
+    if department_id:
+        child_ha_rows = (
+            db.query(HierarchyAnalytics)
+            .filter(HierarchyAnalytics.parent_department_id == department_id)
+            .all()
+        )
+        # Fetch ALL actual child OrgDepartments (includes zones/depts with 0 tests)
+        all_child_depts = (
+            db.query(OrgDepartment)
+            .filter(OrgDepartment.parent_department_id == department_id)
+            .all()
+        )
+    else:
+        # No dept selected: return root departments (parent_department_id IS NULL)
+        child_ha_rows = (
+            db.query(HierarchyAnalytics)
+            .filter(HierarchyAnalytics.parent_department_id.is_(None))
+            .all()
+        )
+        # Determine org from scope equipment (or dept_obj if available)
+        _org_id = None
+        if dept_obj:
+            _org_id = dept_obj.organization_id
+        else:
+            _sample = db.query(Equipment.organization_id).filter(
+                Equipment.id.in_(list(all_scope_eq_ids)[:1])
+            ).scalar() if all_scope_eq_ids else None
+            _org_id = _sample
+        all_child_depts = (
+            db.query(OrgDepartment)
+            .filter(
+                OrgDepartment.parent_department_id.is_(None),
+                OrgDepartment.organization_id == _org_id,
+            )
+            .all()
+        ) if _org_id else []
 
-    child_dept_ids = [c.department_id for c in child_ha_rows]
-    child_dept_map = {
-        d.id: d.name
-        for d in db.query(OrgDepartment).filter(OrgDepartment.id.in_(child_dept_ids)).all()
-    }
+    # Build lookup from HierarchyAnalytics by department_id
+    ha_map: dict = {c.department_id: c for c in child_ha_rows}
 
-    department_scores = [
-        {
-            "department_id":  str(c.department_id),
-            "department_name":child_dept_map.get(c.department_id),
-            "level_type":     c.level_type,
-            "health_score":   float(c.health_score) if c.health_score is not None else None,
-            "risk_level":     c.risk_level,
-            "equipment_count":c.equipment_count,
-            "links": {
-                "analytics": f"/analytics/departments/{c.department_id}",
-                "equipment": f"/analytics/departments/{c.department_id}/equipment",
-            },
-        }
-        for c in child_ha_rows
-    ]
+    all_child_dept_ids = [d.id for d in all_child_depts]
+
+    # Test counts + equipment counts per child dept — across entire subtree
+    child_test_counts: dict = {}
+    child_eq_counts: dict = {}
+    for child_id in all_child_dept_ids:
+        subtree_ids = _collect_department_ids(child_id, db)
+        tc_rows = (
+            db.query(func.count(TestingRequest.id))
+            .join(Equipment, Equipment.id == TestingRequest.equipment_id)
+            .filter(Equipment.department_id.in_(subtree_ids))
+            .scalar()
+        )
+        eq_cnt = (
+            db.query(func.count(Equipment.id))
+            .filter(Equipment.department_id.in_(subtree_ids),
+                    Equipment.status != "retired")
+            .scalar()
+        )
+        child_test_counts[str(child_id)] = tc_rows or 0
+        child_eq_counts[str(child_id)]   = eq_cnt or 0
+
+    department_scores = []
+    for d in all_child_depts:
+        ha = ha_map.get(d.id)
+        eq_count = ha.equipment_count if ha else child_eq_counts.get(str(d.id), 0)
+        department_scores.append({
+            "department_id":      str(d.id),
+            "department_name":    d.name,
+            "level_type":         ha.level_type if ha else None,
+            "health_score":       float(ha.health_score) if ha and ha.health_score is not None else None,
+            "risk_level":         ha.risk_level if ha else None,
+            "equipment_count":    eq_count,
+            "equipment_critical": ha.equipment_critical if ha else 0,
+            "equipment_high":     ha.equipment_high if ha else 0,
+            "test_count":         child_test_counts.get(str(d.id), 0),
+            "has_analytics":      ha is not None,
+        })
 
     return {
         "department_id":   str(department_id) if department_id else None,
         "department_name": dept_obj.name if dept_obj else None,
         "kpi_summary": {
-            "total_equipment": total,
-            "avg_health_score": avg_score,
-            "total_tests":   total_tests,
-            "critical":  risk_counts["Critical"],
-            "high":      risk_counts["High"],
-            "medium":    risk_counts["Medium"],
-            "low":       risk_counts["Low"],
+            "total_equipment":   real_total_equipment,
+            "avg_health_score":  avg_score,
+            "total_tests":       total_tests,
+            "critical":          risk_counts["Critical"],
+            "high":              risk_counts["High"],
+            "medium":            risk_counts["Medium"],
+            "low":               risk_counts["Low"],
+            "tests_by_category":   {
+                **tests_by_category,
+                "no_test":         no_test_count,
+                "no_maintenance":  no_maintenance_count,
+                "no_inspection":   no_inspection_count,
+                "no_repair":       no_repair_count,
+            },
+            "untested_count":      max(0, real_total_equipment - len(tested_eq_ids)),
+            "tests_by_year":       tests_by_year,
+            "failures_by_year":    failures_by_year,
+            "replacements_by_year":replacements_by_year,
+            "commissioned_by_year":commissioned_by_year,
         },
         "hierarchy_node":    _serialize_hierarchy_analytics(ha_node, dept_obj) if ha_node else None,
         "top_critical":      top_critical,
@@ -356,14 +762,20 @@ def recompute_all_analytics(
 
 @router.get("/dashboard/equipment", summary="Paginated equipment list for dashboard")
 def get_dashboard_equipment(
-    department_id: Optional[uuid.UUID] = Query(None),
-    page:          int                 = Query(1, ge=1),
-    page_size:     int                 = Query(20, ge=1, le=100),
-    search:        Optional[str]       = Query(None, description="Filter by UEIC (partial match)"),
-    date_from:     Optional[date]      = Query(None),
-    date_to:       Optional[date]      = Query(None),
-    db:            Session             = Depends(get_vendor_db),
-    user:          dict                = Depends(get_current_user),
+    department_id:    Optional[uuid.UUID] = Query(None),
+    page:             int                 = Query(1, ge=1),
+    page_size:        int                 = Query(20, ge=1, le=100),
+    search:           Optional[str]       = Query(None, description="Filter by UEIC (partial match)"),
+    date_from:        Optional[date]      = Query(None),
+    date_to:          Optional[date]      = Query(None),
+    voltage_class:    Optional[str]       = Query(None, description="Filter by voltage class"),
+    equipment_type:   Optional[str]       = Query(None, description="Filter by equipment type name"),
+    manufacturer:     Optional[str]       = Query(None, description="Filter by manufacturer"),
+    commission_year:  Optional[int]       = Query(None, description="Filter by commissioned year"),
+    failure_year:     Optional[int]       = Query(None, description="Filter by retired/failure year"),
+    risk_level:       Optional[str]       = Query(None, description="Filter by risk level: Critical, High, Medium, Low"),
+    db:               Session             = Depends(get_vendor_db),
+    user:             dict                = Depends(get_current_user),
 ):
     """
     Returns all equipment in scope (worst health first), paginated.
@@ -377,7 +789,27 @@ def get_dashboard_equipment(
         eq_q = eq_q.filter(Equipment.department_id.in_(dept_ids))
     if search:
         eq_q = eq_q.filter(Equipment.ueic.ilike(f"%{search}%"))
+    if voltage_class:
+        if voltage_class.lower() == "unknown":
+            eq_q = eq_q.filter((Equipment.voltage_class == None) | (Equipment.voltage_class == ""))
+        else:
+            eq_q = eq_q.filter(Equipment.voltage_class == voltage_class)
+    if manufacturer:
+        if manufacturer.lower() == "unknown":
+            eq_q = eq_q.filter((Equipment.manufacturer == None) | (Equipment.manufacturer == ""))
+        else:
+            eq_q = eq_q.filter(Equipment.manufacturer == manufacturer)
+    if commission_year:
+        from sqlalchemy import extract
+        eq_q = eq_q.filter(extract("year", Equipment.commissioned_date) == commission_year)
+    if failure_year:
+        from sqlalchemy import extract as _extract
+        eq_q = eq_q.filter(Equipment.status == "retired")
+        eq_q = eq_q.filter(_extract("year", Equipment.retired_date) == failure_year)
     all_eq: list[Equipment] = eq_q.all()
+
+    # Apply equipment_type filter after type_map is built (done below)
+    _filter_equipment_type = equipment_type
 
     eq_ids = [e.id for e in all_eq]
 
@@ -389,6 +821,11 @@ def get_dashboard_equipment(
 
     # Exclude equipment with no analytics (never tested)
     all_eq = [e for e in all_eq if e.id in ea_map]
+
+    # Apply risk_level filter
+    if risk_level:
+        all_eq = [e for e in all_eq if (ea_map.get(e.id) and ea_map[e.id].risk_level == risk_level)]
+
     eq_ids = [e.id for e in all_eq]
 
     # Type names
@@ -397,6 +834,15 @@ def get_dashboard_equipment(
         c.id: c.name
         for c in db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
     }
+
+    # Apply equipment_type filter now that we have type_map
+    if _filter_equipment_type:
+        _ft = _filter_equipment_type.lower()
+        if _ft == "unknown":
+            all_eq = [e for e in all_eq if not type_map.get(e.equipment_type_id)]
+        else:
+            all_eq = [e for e in all_eq if (type_map.get(e.equipment_type_id) or "").lower() == _ft]
+        eq_ids = [e.id for e in all_eq]
 
     # Department names
     dept_ids_for_names = list({e.department_id for e in all_eq if e.department_id})
@@ -495,6 +941,11 @@ def get_dashboard_equipment(
             "last_test_date":          ea.last_test_date.isoformat() if ea and ea.last_test_date else None,
             "test_count":              test_count_map.get(eq.id, 0),
             "tested":                  ea is not None,
+            # Equipment register fields for client-side view-by grouping
+            "manufacturer":            eq.manufacturer,
+            "model_number":            eq.model_number,
+            "commissioned_date":       eq.commissioned_date.isoformat() if eq.commissioned_date else None,
+            "retired_date":            eq.retired_date.isoformat() if getattr(eq, "retired_date", None) else None,
         })
 
     return {
