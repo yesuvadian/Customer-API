@@ -1713,16 +1713,16 @@ class OrgRoleOut(OrgRoleBase):
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
 
+    class Config:
+        from_attributes = True
+
     @classmethod
-    def from_orm(cls, obj):
-        instance = super().from_orm(obj)
+    def model_validate(cls, obj, *args, **kwargs):
+        instance = super().model_validate(obj, *args, **kwargs)
         if hasattr(obj, 'default_module') and obj.default_module:
             instance.default_module_path = obj.default_module.path
             instance.default_module_name = obj.default_module.name
         return instance
-
-    class Config:
-        from_attributes = True
 
 
 # ==========================================

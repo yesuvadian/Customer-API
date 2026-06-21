@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from uuid import UUID
 from typing import List, Optional, Dict
@@ -88,7 +88,9 @@ class OrgRoleService(UTCDateTimeMixin):
         is_org_admin: Optional[bool] = None
     ) -> List[OrgRole]:
         """List roles in an organization."""
-        query = self.db.query(OrgRole).filter(
+        query = self.db.query(OrgRole).options(
+            joinedload(OrgRole.default_module)
+        ).filter(
             OrgRole.organization_id == organization_id
         )
 
