@@ -1,21 +1,3 @@
-"""
-KPTCL Capacitance & Tan Delta Test PDF / JSON → DB seed.
-
-Usage:
-    python seed_tandelta_from_pdf.py --from-pdf "Tan Delta 2 (1).pdf"
-    python seed_tandelta_from_pdf.py --from-pdf /folder/
-    python seed_tandelta_from_pdf.py --from-pdf /folder/ --emit-only
-    python seed_tandelta_from_pdf.py --from-json data/tandelta.json
-    python seed_tandelta_from_pdf.py --from-json data/tandelta.json --dry-run
-    python seed_tandelta_from_pdf.py --template > tandelta_template.json
-
-Bushing section key mapping (parser → template):
-    report["bushing_400kv"]  → "400 kV Bushing Test Results"
-    report["bushing_220kv"]  → "220 kV Bushing Test Results"
-    report["bushing_66kv"]   → "66 kV Bushing Test Results"
-    report["bushing_33kv"]   → "33 kV Bushing Test Results"
-    report["bushing_11kv"]   → "11 kV Bushing Test Results"
-"""
 
 import argparse
 import io
@@ -76,15 +58,12 @@ def _itc_num(raw: str | None) -> float | None:
 
 def _find_itc(block: str) -> float | None:
     """Find ITC/Correction factor in any of the common KPTCL formats."""
-    # Standard: "Factor 1.06" or "Factor L06"
     m = re.search(r"Factor\s+([0-9L\.]+)", block, re.I)
     if m:
         return _itc_num(m.group(1))
-    # Parenthesised: "Correction (0.80)"
     m = re.search(r"(?:ITC|Correction)[^)]*\(([0-9\.]+)\)", block, re.I)
     if m:
         return _itc_num(m.group(1))
-    # Bare decimal: "Temp. Correction 0.90 in %"
     m = re.search(r"(?:ITC|Correction)\s+(?:Factor\s+)?([0-9]\.[0-9]+)", block, re.I)
     if m:
         return _itc_num(m.group(1))
@@ -113,47 +92,102 @@ def _parse_date_str(s: str | None) -> str | None:
 
 def _extract_voltage_kv(window: str) -> float | None:
     """
-    Extract test voltage (e.g. 10 kV, 5 kV, 2 kV) from a small window
-    taken immediately after the row's config/phase label.
-    Handles multi-digit voltages (10 kV) which the old single-digit pattern missed.
+    Extract test voltage from a small window (≤60 chars) right after the row label.
+
+    Strategy (in priority order):
+      1. "NNN kV" token  — covers "10 kV", "5kV", "2 kV" etc.
+      2. Bare integer on its own line — covers OCR that strips the "kV" suffix
+         from the voltage column (e.g. just "10" on a line by itself).
+         Only accepted in the 1–500 range to avoid mistaking capacitance for voltage.
     """
+    # Primary: number followed by kV/KV
     m = re.search(r'(?<![\d.])\b(\d+(?:\.\d+)?)\s*[kK][vV]\b', window)
-    return float(m.group(1)) if m else None
+    if m:
+        return float(m.group(1))
+    # Fallback: bare integer alone on its own line (OCR dropped the "kV" suffix)
+    m = re.search(r'(?:^|\n)\s*(\d{1,3})\s*(?:\n|$)', window.strip())
+    if m:
+        val = float(m.group(1))
+        if 1 <= val <= 500:
+            return val
+    return None
+
+
+def _strip_voltage_from_window(window: str, volt: float | None) -> str:
+    """
+    Remove the bare voltage integer from the measurement window after it has
+    been extracted.  Only needed when the voltage appeared as a bare integer
+    (no kV suffix) — if it had a kV suffix, _strip_kv_noise() already removes it.
+    """
+    if volt is None:
+        return window
+    v_str = str(int(volt)) if volt == int(volt) else str(volt)
+    # Remove a line that contains ONLY this integer (with optional whitespace)
+    return re.sub(rf'(?:^|\n)\s*{re.escape(v_str)}\s*(?=\n|$)', '\n', window)
 
 
 def _strip_kv_noise(window: str) -> str:
     """
-    Remove ALL kV-tagged tokens from a measurement window so that only
+    Remove kV-tagged tokens and parenthetical previous-test notes so only
     the numeric measurement values remain.
-
-    Removes:
-      - Parenthetical previous-test notes: "(For 5 kV)", "(For 2 kV)"
-      - Any bare "NNN kV" token (test voltage leaking into measurement window)
-
-    This fixes the core column-shift bug: OCR outputs "10 kV\\n4.205\\n0.24\\n0.28"
-    and the old single-char strip left "10" in the array, pushing every
-    subsequent value one position to the left.
     """
-    # Remove "(For N kV)" style notes first (most specific)
     window = re.sub(r'\(For\s+\d+(?:\.\d+)?\s*[kK][vV]\)', '', window, flags=re.I)
-    # Remove any remaining "N kV" token
     window = re.sub(r'\b\d+(?:\.\d+)?\s*[kK][vV]\b', '', window, flags=re.I)
     return window
 
 
+def _extract_measurement_nums(window: str) -> list[float]:
+    """
+    Clean a measurement window and return only plausible measurement values.
+
+    Steps:
+      1. Strip kV-tagged tokens and previous-test parentheticals.
+      2. Strip comma thousand-separators (e.g. "4,208.07" → "4208.07").
+         Without this, "4,208.07" tokenises as [4, 208.07] and shifts every
+         downstream column one position to the left.
+      3. Collect all remaining numbers, rejecting 6+-digit plain integers
+         (serial / asset numbers).
+
+    Column order (voltage already extracted separately):
+      [0] Capacitance C (pF or nF — stored as pF regardless of PDF unit label)
+      [1] % D.F Measured
+      [2] % D.F @ 20°C (ITC Corrected)
+      [3] Previous test result (ignored — extra column in some PDFs)
+    """
+    cleaned = _strip_kv_noise(window)
+    cleaned = cleaned.replace(',', '')          # FIX-1: strip thousand-separators
+    nums: list[float] = []
+    for nm in re.finditer(r'\b(\d+(?:\.\d+)?)\b', cleaned):
+        raw = nm.group(1)
+        val = float(raw)
+        if val >= 100_000 and '.' not in raw:
+            continue   # serial / asset number
+        nums.append(val)
+    return nums
+
+
+def _assign_measurement_row(row: dict, nums: list[float]) -> None:
+    """Assign measurement nums into a row dict (voltage already in row)."""
+    if len(nums) >= 3:
+        row["capacitance_pf"]   = nums[0]
+        row["df_measured"]      = nums[1]
+        row["df_corrected_20c"] = nums[2]
+    elif len(nums) == 2:
+        row["df_measured"]      = nums[0]
+        row["df_corrected_20c"] = nums[1]
+    elif len(nums) == 1:
+        row["df_corrected_20c"] = nums[0]
+
+
 # ── Quote-agnostic phase pattern helpers ──────────────────────────────────────
-# Covers: 'R' Phase  "R" Phase  "R" Phase  R Phase  (R) Phase
+# Covers: 'R' Phase  "R" Phase  "R" Phase  R Phase  (R) Phase  R' Phase
 # Unicode quotes: \u2018\u2019 (single), \u201c\u201d (double)
 
 _Q  = r"""[\s'\u2018\u2019\u201c\u201d"(]*"""
 _QC = r"""[\s'\u2018\u2019\u201c\u201d")]*"""
 
-_PHASE_STOP = re.compile(
-    rf"""{_Q}[RYB]{_QC}\s*[Pp]hase""", re.I
-)
-_PHASE_STOP_WIDENED = re.compile(
-    rf"""{_Q}[RYB]?{_QC}\s*[Pp]hase""", re.I
-)
+_PHASE_STOP         = re.compile(rf"""{_Q}[RYB]{_QC}\s*[Pp]hase""", re.I)
+_PHASE_STOP_WIDENED = re.compile(rf"""{_Q}[RYB]?{_QC}\s*[Pp]hase""", re.I)
 
 
 def _phase_pat(letter: str) -> str:
@@ -167,67 +201,13 @@ def _phase_pat_fallback(letter: str) -> str:
 _BARE_PHASE_WORD = re.compile(r"""(?:^|\n)\s*[Pp]hase\b""", re.I)
 
 
-# ── Measurement row extractor ──────────────────────────────────────────────────
-
-def _extract_measurement_nums(window: str) -> list[float]:
-    """
-    Clean a measurement window and return only plausible measurement values.
-
-    Steps:
-      1. Strip all kV-tagged tokens (removes test-voltage leakage + previous-test notes)
-      2. Collect all remaining numbers
-      3. Reject 6+-digit integers (serial / asset numbers)
-
-    Returns list of floats in document order:
-      [capacitance, df_measured, df_corrected_20c, (optional: previous_result)]
-    """
-    cleaned = _strip_kv_noise(window)
-    nums: list[float] = []
-    for nm in re.finditer(r'\b(\d+(?:\.\d+)?)\b', cleaned):
-        raw = nm.group(1)
-        val = float(raw)
-        if val >= 100_000 and '.' not in raw:
-            continue  # serial / asset number
-        nums.append(val)
-    return nums
-
-
-def _assign_measurement_row(row: dict, nums: list[float]) -> None:
-    """
-    Assign extracted nums into a measurement row dict.
-
-    Column order (after voltage is already extracted separately):
-      nums[0] = Capacitance C (pF or nF — stored as pF regardless)
-      nums[1] = % D.F Measured
-      nums[2] = % D.F @ 20°C (ITC Corrected)
-      nums[3] = previous test result (ignored — some PDFs have this extra column)
-
-    Handles partial rows (OCR missed some values).
-    """
-    if len(nums) >= 3:
-        row["capacitance_pf"]   = nums[0]
-        row["df_measured"]      = nums[1]
-        row["df_corrected_20c"] = nums[2]
-    elif len(nums) == 2:
-        row["df_measured"]      = nums[0]
-        row["df_corrected_20c"] = nums[1]
-    elif len(nums) == 1:
-        row["df_corrected_20c"] = nums[0]
-
-
 # ── Bushing section parser ─────────────────────────────────────────────────────
 
 def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None, list[dict]]:
-    """
-    Extract ITC factor and R/Y/B phase test rows from one bushing block.
-
-    Stage 1: find where the test-data table starts (skip Details/nameplate).
-    Stage 2: for each phase, extract voltage from a small local window,
-             then collect measurement nums from a wider window with kV noise stripped.
-    """
+    """Extract ITC factor and R/Y/B phase test rows from one bushing block."""
     itc = _find_itc(block)
 
-    # ── Locate test-data table start ──────────────────────────────────────
+    # Locate test-data table start (skip Details/nameplate sub-section)
     search_start = 0
     for hdr_m in re.finditer(
         r"ITC|Correction\s*Factor|%\s*D\.?F|Capacitance\s*\(pF\)|Test\s*Voltage",
@@ -249,7 +229,7 @@ def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None
         else:
             search_start = max(search_start, details_end)
 
-    # ── Find phase label positions ─────────────────────────────────────────
+    # Find phase label positions
     positions: dict[str, int] = {}
     for phase in ("R", "Y", "B"):
         m = re.search(_phase_pat(phase), block[search_start:], re.I)
@@ -258,7 +238,7 @@ def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None
         if m:
             positions[phase] = search_start + m.end()
 
-    # Positional fallback: if Y is missing but R and B are found, infer Y position
+    # Positional fallback for missing Y phase
     if "Y" not in positions and "R" in positions and "B" in positions:
         lo   = positions["R"]
         hi_m = re.search(_phase_pat("B"), block[search_start:], re.I) \
@@ -269,7 +249,6 @@ def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None
         if bare:
             positions["Y"] = lo + bare.end()
 
-    # ── Extract rows ──────────────────────────────────────────────────────
     rows: list[dict] = []
     for phase in ("R", "Y", "B"):
         if phase not in positions:
@@ -281,11 +260,11 @@ def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None
         if stop and stop.start() < window_end:
             window_end = stop.start()
 
-        # Voltage: small local window right after the phase label
-        voltage_val = _extract_voltage_kv(block[abs_start: abs_start + 60])
+        small_win   = block[abs_start: abs_start + 60]
+        voltage_val = _extract_voltage_kv(small_win)
 
-        # Measurement nums: wider window with all kV tokens stripped
         window = block[abs_start:window_end]
+        window = _strip_voltage_from_window(window, voltage_val)   # FIX-2+3
         nums   = _extract_measurement_nums(window)
 
         row: dict = {
@@ -312,25 +291,26 @@ def _extract_winding_row(
     """
     Extract one winding row given the position after its config label matched.
 
-    Voltage is extracted from a small local window (60 chars) so each row
-    gets its own correct voltage regardless of OCR row order.
-    Measurement nums are collected from a 300-char window with kV noise stripped.
+    Voltage is extracted from a small local window (60 chars) with a fallback
+    for bare integers (FIX-2).  The bare integer is then stripped from the
+    wider measurement window before collecting nums (FIX-3).
     """
-    voltage_val = _extract_voltage_kv(winding_block[match_end: match_end + 60])
+    small_win   = winding_block[match_end: match_end + 60]
+    voltage_val = _extract_voltage_kv(small_win)
 
     window = winding_block[match_end: match_end + 300]
-    # Stop at the next config label
     for stop_pat in all_stop_pats:
         stop_m = re.search(stop_pat, window, re.I)
         if stop_m:
             window = window[:stop_m.start()]
 
-    nums = _extract_measurement_nums(window)
+    window = _strip_voltage_from_window(window, voltage_val)   # FIX-2+3
+    nums   = _extract_measurement_nums(window)
 
     row: dict = {
         "test_configuration": label,
         "voltage_kv":         voltage_val,
-        "capacitance_pf":     None,   # nF values stored here too (unit note only)
+        "capacitance_pf":     None,
         "df_measured":        None,
         "df_corrected_20c":   None,
     }
@@ -492,7 +472,6 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
     )
     winding_block = winding_block_m.group(0) if winding_block_m else full
 
-    # All winding config patterns — covers all KPTCL PDF variants
     _WINDING_CFG_PATTERNS = [
         ("HV-GND",      r"(?:CHG\b|HV\s*[-–&]\s*(?:GND|Grd|Grnd|Ground))"),
         ("HV-LV",       r"(?:CHL\b|HV\s*[-–&]\s*(?:LV|IV|MV))"),
@@ -512,12 +491,12 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
     all_winding_pats = [pat for _, pat in _WINDING_CFG_PATTERNS]
     all_stop_pats    = all_winding_pats + [p for _, p in _WINDING_CFG_PATTERNS_IV]
 
-    _claimed: list[tuple[int,int]] = []
+    _claimed: list[tuple[int, int]] = []
 
     def _claimed_at(pos: int) -> bool:
         return any(s <= pos < e for s, e in _claimed)
 
-    # Pass 1: IV-specific patterns first
+    # Pass 1: IV-specific patterns
     for label, cfg_pat in _WINDING_CFG_PATTERNS_IV:
         m = re.search(cfg_pat, winding_block, re.I)
         if not m or _claimed_at(m.start()):
@@ -744,6 +723,7 @@ def _is_secondary_page(text: str) -> bool:
 
 
 def _group_pages(page_texts: list[str]) -> list[str]:
+    """Merge primary page (serial + winding) with following secondary pages (bushing/IDAX)."""
     groups: list[str] = []
     i = 0
     while i < len(page_texts):
@@ -782,8 +762,11 @@ def extract_with_easyocr(images: list, workers: int = 1, debug_dir: Path | None 
             page_texts.append(ocr_text)
             print("done")
     else:
-        page_args = [(i, (lambda img, b=io.BytesIO(): (img.save(b, "PNG"), b)[-1].getvalue())(img))
-                     for i, img in enumerate(images)]
+        page_args = []
+        for i, img in enumerate(images):
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            page_args.append((i, buf.getvalue()))
         raw_texts: dict[int, str] = {}
         with ProcessPoolExecutor(max_workers=workers) as ex:
             for fut in as_completed({ex.submit(_ocr_page_worker, a): a[0] for a in page_args}):
@@ -828,6 +811,15 @@ _ITC_FIELD_MAP: dict[str, str] = {
 
 
 def _tandelta_test_data(r: dict, eq=None) -> dict:
+    """
+    Build test_data matching capacitance_tandelta_transformer form output.
+
+    FIX-4: For "calculated" columns (df_corrected_20c, condition), we now
+    preserve any parsed value from the source row rather than unconditionally
+    writing None.  The EvaluationService can still recompute if needed, but
+    having the OCR-read ITC-corrected value avoids blank cells in the UI when
+    the service hasn't run yet or the ITC factor wasn't parsed.
+    """
     from test_templates import TEST_TEMPLATES
     template  = TEST_TEMPLATES.get("capacitance_tandelta_transformer", {})
     test_data: dict = {}
@@ -860,7 +852,10 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
                             ck    = col.get("key", "")
                             ctype = col.get("type", "text")
                             if ctype == "calculated":
-                                row[ck] = None
+                                # FIX-4: preserve parsed value if present; only
+                                # fall back to None when the parser found nothing
+                                parsed_val = src.get(ck)
+                                row[ck] = _str(parsed_val) if parsed_val is not None else None
                             elif ck in src and src[ck] is not None:
                                 row[ck] = _str(src[ck])
                             else:
@@ -868,7 +863,7 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
                         rows.append(row)
                 else:
                     for dr in field.get("default_rows", []):
-                        row = {c.get("key",""): "" for c in columns if c.get("key")}
+                        row = {c.get("key", ""): "" for c in columns if c.get("key")}
                         for k, v in dr.items():
                             if k in row:
                                 row[k] = v or ""
@@ -989,7 +984,9 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
         dept       = eq.department or _resolve_dept(r.get("sub_station", ""))
         req_number = f"TR-HIST-{tested_at.strftime('%Y%m%d')}-{serial}-TDELTA"
 
-        if session.query(TestingRequest).filter(TestingRequest.request_number == req_number).first():
+        if session.query(TestingRequest).filter(
+            TestingRequest.request_number == req_number
+        ).first():
             print(f"  [SKIP] {req_number} already seeded.")
             continue
 
@@ -1007,7 +1004,10 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
 
         tr = tr_svc.create_request(
             data={
-                "title":                f"Capacitance & Tan Delta Test — {eq.factory_serial_number or eq.ueic}",
+                "title":                (
+                    f"Capacitance & Tan Delta Test — "
+                    f"{eq.factory_serial_number or eq.ueic}"
+                ),
                 "description":          "Historical KPTCL R&D Centre capacitance & tan delta report.",
                 "equipment_id":         eq.id,
                 "equipment_type_id":    eq.equipment_type_id,
@@ -1027,10 +1027,15 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
         session.flush()
 
         overall_raw = r.get("overall_result", "PASS")
-        overall_str = "pass" if overall_raw.upper() == "PASS" \
-                      else "fail" if overall_raw.upper() == "FAIL" \
-                      else "conditional"
-        remarks = r.get("recommendation", "") or "Seeded from historical KPTCL tan delta report."
+        overall_str = (
+            "pass"        if overall_raw.upper() == "PASS"
+            else "fail"   if overall_raw.upper() == "FAIL"
+            else "conditional"
+        )
+        remarks = (
+            r.get("recommendation", "")
+            or "Seeded from historical KPTCL tan delta report."
+        )
 
         try:
             tst_svc.create_structured_result(
@@ -1045,7 +1050,10 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
             session.expire_all()
 
         session.execute(
-            text("UPDATE public.test_results SET tested_at = :d WHERE testing_request_id = :rid"),
+            text(
+                "UPDATE public.test_results "
+                "SET tested_at = :d WHERE testing_request_id = :rid"
+            ),
             {"d": tested_at, "rid": tr.id},
         )
         session.flush()
@@ -1149,11 +1157,15 @@ def main():
             print("[DONE] Nothing extracted.")
             return
 
-        pdf_root = Path(args.from_pdf[0]) if Path(args.from_pdf[0]).is_dir() \
-                   else Path(args.from_pdf[0]).parent
-        out_path = _save_json(all_reports, args.output,
-                              args.from_pdf[0] if len(args.from_pdf)==1 else "tandelta",
-                              pdf_root / "data")
+        pdf_root = (
+            Path(args.from_pdf[0]) if Path(args.from_pdf[0]).is_dir()
+            else Path(args.from_pdf[0]).parent
+        )
+        out_path = _save_json(
+            all_reports, args.output,
+            args.from_pdf[0] if len(args.from_pdf) == 1 else "tandelta",
+            pdf_root / "data",
+        )
         print(f"\n[SAVED] {out_path}")
         if args.emit_only:
             return
