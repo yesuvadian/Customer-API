@@ -3123,11 +3123,11 @@ TEST_TEMPLATES = {
     # ITC correction factor stored at section level (one factor per section, not per row).
     # df_corrected_20c is auto-calculated via FORMULA rule (PRODUCT of df_measured * form-level ITC factor).
     # ────────────────────────────────────────────────────────────────────────────
-   "capacitance_tandelta_transformer": {
+  "capacitance_tandelta_transformer": {
     "key": "capacitance_tandelta_transformer",
     "name": "Capacitance & Tan Delta Test (Transformer)",
     "equipment_type": "Power Transformer",
-    "description": "Combined Tan-Delta/Capacitance and IDAX insulation diagnostics per KPTCL R&D Centre format — winding, HV bushing, LV bushing, TV bushing, and moisture/oil conductivity measurements. Supports 220/66/11kV and 400/220/33kV transformer types.",
+    "description": "Combined Tan-Delta/Capacitance and IDAX insulation diagnostics per KPTCL R&D Centre format — winding, 400kV/220kV/66kV/33kV/11kV bushing, and moisture/oil conductivity measurements. Supports 220/66/11kV and 400/220/33kV transformer types.",
     "supports_multi_session": False,
     "typical_session_interval_days": None,
     "typical_total_sessions": 1,
@@ -3184,9 +3184,6 @@ TEST_TEMPLATES = {
             ],
         },
         # ── Winding Test Results ──────────────────────────────────────────
-        # Rows cover all naming variants seen across PDFs.
-        # Each row has an editable "label" so the user can match exactly
-        # what appears in their PDF, plus the numeric measurement columns.
         {
             "title": "Winding Test Results",
             "collapsible": True,
@@ -3207,10 +3204,9 @@ TEST_TEMPLATES = {
                     "allow_delete_rows": True,
                     "lock_default_rows": False,
                     "columns": [
-                        # Editable label — user types the exact config label from their PDF
-                        {"key": "test_configuration", "label": "Test Configuration", "type": "text",   "placeholder": "e.g. HV-GND, CHG, HV-Ground"},
+                        {"key": "test_configuration", "label": "Test Configuration", "type": "text",   "placeholder": "e.g. HV-GND, CHG, HV-Ground, HV-IV"},
                         {"key": "voltage_kv",          "label": "kV",                "type": "number", "unit": "kV"},
-                        {"key": "capacitance_nf",      "label": "Capacitance C (nF)","type": "number", "unit": "nF"},
+                        {"key": "capacitance_pf",      "label": "Capacitance C (pF)","type": "number", "unit": "pF"},
                         {"key": "df_measured",         "label": "% D.F Measured",    "type": "number", "unit": "%"},
                         {
                             "key": "df_corrected_20c",
@@ -3246,8 +3242,6 @@ TEST_TEMPLATES = {
                             },
                         },
                     ],
-                    # Default rows cover all variants from the Excel mapping.
-                    # User edits the label to match their PDF, leaves unused rows blank or deletes them.
                     "default_rows": [
                         {"test_configuration": "HV-GND"},
                         {"test_configuration": "HV-LV"},
@@ -3255,7 +3249,6 @@ TEST_TEMPLATES = {
                         {"test_configuration": "LV-TV"},
                         {"test_configuration": "TV-GND"},
                         {"test_configuration": "HV-TV"},
-                        # Extra rows seen in some PDFs (forms 6–8 in mapping)
                         {"test_configuration": "(HV+LV)-GND"},
                         {"test_configuration": "(HV+LV)-TV"},
                     ],
@@ -3276,40 +3269,40 @@ TEST_TEMPLATES = {
                 {"key": "winding_observations", "label": "Observations (Winding)", "type": "textarea"},
             ],
         },
-        # ── HV Bushing Test Results (220kV for 220/66/11kV | 400kV for 400/220/33kV) ──
+
+        # ═══════════════════════════════════════════════════════════════════
+        # BUSHING TEST RESULTS — one separate section per voltage class.
+        # Each section is independently collapsible (skip if not applicable).
+        # 220/66/11 kV transformer  → use 220kV + 66kV sections
+        # 400/220/33 kV transformer → use 400kV + 220kV + 33kV sections
+        # ═══════════════════════════════════════════════════════════════════
+
+        # ── 400 kV Bushing Test Results ───────────────────────────────────
+        # Applicable to 400/220/33 kV transformers only.
         {
-            "title": "HV Bushing Test Results",
-            "subtitle_hint": "220kV bushing (for 220/66/11kV transformer) or 400kV bushing (for 400/220/33kV transformer)",
+            "title": "400 kV Bushing Test Results",
             "collapsible": True,
             "collapse_control": {
-                "key": "hv_bushing_enabled",
-                "label": "HV Bushing Test",
+                "key": "bushing_400kv_enabled",
+                "label": "400 kV Bushing Test",
                 "type": "section_toggle",
-                "default": "open",
+                "default": "skip",          # default skip — only open for 400kV transformers
                 "options": ["open", "skip"],
             },
             "fields": [
+                {"key": "bushing_400kv_itc_factor", "label": "ITC Correction Factor (400 kV Bushing)", "type": "number"},
                 {
-                    "key": "hv_bushing_voltage_class",
-                    "label": "Bushing Voltage Class",
-                    "type": "dropdown",
-                    "options": ["220 kV", "400 kV"],
-                    "required": True,
-                    "hint": "Select 220 kV for 220/66/11kV transformer, 400 kV for 400/220/33kV transformer",
-                },
-                {"key": "hv_bushing_itc_factor", "label": "ITC Correction Factor (HV Bushing)", "type": "number"},
-                {
-                    "key": "hv_bushing_test_results",
-                    "label": "HV Bushing Test Data",
+                    "key": "bushing_400kv_test_results",
+                    "label": "400 kV Bushing Test Data",
                     "type": "table",
                     "allow_add_rows": True,
                     "allow_delete_rows": True,
                     "lock_default_rows": False,
                     "columns": [
-                        {"key": "bushing",         "label": "Bushing",                       "type": "text",   "placeholder": "e.g. 'R' Phase"},
-                        {"key": "voltage_kv",       "label": "kV",                            "type": "number", "unit": "kV"},
-                        {"key": "capacitance_pf",   "label": "Capacitance C (pF)",            "type": "number", "unit": "pF"},
-                        {"key": "df_measured",      "label": "% D.F Measured",                "type": "number", "unit": "%"},
+                        {"key": "bushing",          "label": "Bushing",                        "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                             "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",             "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                 "type": "number", "unit": "%"},
                         {
                             "key": "df_corrected_20c",
                             "label": "% D.F @ 20°C (ITC Corrected)",
@@ -3319,7 +3312,7 @@ TEST_TEMPLATES = {
                                 "type": "FORMULA",
                                 "config": {
                                     "formula": "PRODUCT",
-                                    "inputs": {"a": "df_measured", "b": "$form.hv_bushing_itc_factor"},
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_400kv_itc_factor"},
                                     "precision": 4,
                                 },
                             },
@@ -3334,7 +3327,7 @@ TEST_TEMPLATES = {
                                 "config": {
                                     "input_field": "df_corrected_20c",
                                     "thresholds": {
-                                        "HV Bushing % D.F @ 20°C (IEC OIP)": {
+                                        "400 kV Bushing % D.F @ 20°C (IEC OIP)": {
                                             "Good":  [None, 0.5],
                                             "Alert": [0.5,  0.7],
                                             "Poor":  [0.7,  None],
@@ -3358,48 +3351,43 @@ TEST_TEMPLATES = {
                                 "critical_below": None, "critical_above": 0.7,
                                 "trend_watch": True,
                                 "weight": 1.5,
-                                "remedial_action_text": "HV bushing insulation degraded — inspect and consider replacement.",
+                                "remedial_action_text": "400 kV bushing insulation degraded — inspect and consider replacement.",
                             },
                         },
                     },
                 },
-                {"key": "hv_bushing_observations", "label": "Observations (HV Bushing)", "type": "textarea"},
+                {"key": "bushing_400kv_observations", "label": "Observations (400 kV Bushing)", "type": "textarea"},
             ],
         },
-        # ── MV Bushing Test Results (66kV for 220/66/11kV | 220kV for 400/220/33kV) ──
+
+        # ── 220 kV Bushing Test Results ───────────────────────────────────
+        # Applicable to BOTH transformer types:
+        #   220/66/11 kV  → primary HV bushing
+        #   400/220/33 kV → secondary MV bushing
         {
-            "title": "MV Bushing Test Results",
-            "subtitle_hint": "66kV bushing (for 220/66/11kV transformer) or 220kV bushing (for 400/220/33kV transformer)",
+            "title": "220 kV Bushing Test Results",
             "collapsible": True,
             "collapse_control": {
-                "key": "mv_bushing_enabled",
-                "label": "MV Bushing Test",
+                "key": "bushing_220kv_enabled",
+                "label": "220 kV Bushing Test",
                 "type": "section_toggle",
                 "default": "open",
                 "options": ["open", "skip"],
             },
             "fields": [
+                {"key": "bushing_220kv_itc_factor", "label": "ITC Correction Factor (220 kV Bushing)", "type": "number"},
                 {
-                    "key": "mv_bushing_voltage_class",
-                    "label": "Bushing Voltage Class",
-                    "type": "dropdown",
-                    "options": ["66 kV", "220 kV"],
-                    "required": True,
-                    "hint": "Select 66 kV for 220/66/11kV transformer, 220 kV for 400/220/33kV transformer",
-                },
-                {"key": "mv_bushing_itc_factor", "label": "ITC Correction Factor (MV Bushing)", "type": "number"},
-                {
-                    "key": "mv_bushing_test_results",
-                    "label": "MV Bushing Test Data",
+                    "key": "bushing_220kv_test_results",
+                    "label": "220 kV Bushing Test Data",
                     "type": "table",
                     "allow_add_rows": True,
                     "allow_delete_rows": True,
                     "lock_default_rows": False,
                     "columns": [
-                        {"key": "bushing",         "label": "Bushing",                       "type": "text",   "placeholder": "e.g. 'R' Phase"},
-                        {"key": "voltage_kv",       "label": "kV",                            "type": "number", "unit": "kV"},
-                        {"key": "capacitance_pf",   "label": "Capacitance C (pF)",            "type": "number", "unit": "pF"},
-                        {"key": "df_measured",      "label": "% D.F Measured",                "type": "number", "unit": "%"},
+                        {"key": "bushing",          "label": "Bushing",                        "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                             "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",             "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                 "type": "number", "unit": "%"},
                         {
                             "key": "df_corrected_20c",
                             "label": "% D.F @ 20°C (ITC Corrected)",
@@ -3409,7 +3397,7 @@ TEST_TEMPLATES = {
                                 "type": "FORMULA",
                                 "config": {
                                     "formula": "PRODUCT",
-                                    "inputs": {"a": "df_measured", "b": "$form.mv_bushing_itc_factor"},
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_220kv_itc_factor"},
                                     "precision": 4,
                                 },
                             },
@@ -3424,7 +3412,90 @@ TEST_TEMPLATES = {
                                 "config": {
                                     "input_field": "df_corrected_20c",
                                     "thresholds": {
-                                        "MV Bushing % D.F @ 20°C (IEC OIP)": {
+                                        "220 kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                            "Good":  [None, 0.5],
+                                            "Alert": [0.5,  0.7],
+                                            "Poor":  [0.7,  None],
+                                        }
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    "default_rows": [
+                        {"bushing": "'R' Phase"},
+                        {"bushing": "'Y' Phase"},
+                        {"bushing": "'B' Phase"},
+                    ],
+                    "table_evaluation": {
+                        "enabled": True,
+                        "column_evaluations": {
+                            "df_corrected_20c": {
+                                "normal_min": None, "normal_max": 0.5,
+                                "alert_min":  0.5,  "alert_max":  0.7,
+                                "critical_below": None, "critical_above": 0.7,
+                                "trend_watch": True,
+                                "weight": 1.5,
+                                "remedial_action_text": "220 kV bushing insulation degraded — inspect and consider replacement.",
+                            },
+                        },
+                    },
+                },
+                {"key": "bushing_220kv_observations", "label": "Observations (220 kV Bushing)", "type": "textarea"},
+            ],
+        },
+
+        # ── 66 kV Bushing Test Results ────────────────────────────────────
+        # Applicable to 220/66/11 kV transformers (LV bushing).
+        {
+            "title": "66 kV Bushing Test Results",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "bushing_66kv_enabled",
+                "label": "66 kV Bushing Test",
+                "type": "section_toggle",
+                "default": "open",
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "bushing_66kv_itc_factor", "label": "ITC Correction Factor (66 kV Bushing)", "type": "number"},
+                {
+                    "key": "bushing_66kv_test_results",
+                    "label": "66 kV Bushing Test Data",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "bushing",          "label": "Bushing",                       "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                            "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",            "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                "type": "number", "unit": "%"},
+                        {
+                            "key": "df_corrected_20c",
+                            "label": "% D.F @ 20°C (ITC Corrected)",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "FORMULA",
+                                "config": {
+                                    "formula": "PRODUCT",
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_66kv_itc_factor"},
+                                    "precision": 4,
+                                },
+                            },
+                        },
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "df_corrected_20c",
+                                    "thresholds": {
+                                        "66 kV Bushing % D.F @ 20°C (IEC OIP)": {
                                             "Good":  [None, 0.7],
                                             "Alert": [0.7,  1.0],
                                             "Poor":  [1.0,  None],
@@ -3448,48 +3519,41 @@ TEST_TEMPLATES = {
                                 "critical_below": None, "critical_above": 1.0,
                                 "trend_watch": True,
                                 "weight": 1.5,
-                                "remedial_action_text": "MV bushing insulation degraded — inspect and consider replacement.",
+                                "remedial_action_text": "66 kV bushing insulation degraded — inspect and consider replacement.",
                             },
                         },
                     },
                 },
-                {"key": "mv_bushing_observations", "label": "Observations (MV Bushing)", "type": "textarea"},
+                {"key": "bushing_66kv_observations", "label": "Observations (66 kV Bushing)", "type": "textarea"},
             ],
         },
-        # ── LV Bushing Test Results (11kV for 220/66/11kV | 33kV for 400/220/33kV) ──
+
+        # ── 33 kV Bushing Test Results ────────────────────────────────────
+        # Applicable to 400/220/33 kV transformers (TV bushing).
         {
-            "title": "LV Bushing Test Results",
-            "subtitle_hint": "11kV bushing (for 220/66/11kV transformer) or 33kV bushing (for 400/220/33kV transformer)",
+            "title": "33 kV Bushing Test Results",
             "collapsible": True,
             "collapse_control": {
-                "key": "lv_bushing_enabled",
-                "label": "LV Bushing Test",
+                "key": "bushing_33kv_enabled",
+                "label": "33 kV Bushing Test",
                 "type": "section_toggle",
-                "default": "open",
+                "default": "skip",          # default skip — only open for 400/220/33kV
                 "options": ["open", "skip"],
             },
             "fields": [
+                {"key": "bushing_33kv_itc_factor", "label": "ITC Correction Factor (33 kV Bushing)", "type": "number"},
                 {
-                    "key": "lv_bushing_voltage_class",
-                    "label": "Bushing Voltage Class",
-                    "type": "dropdown",
-                    "options": ["11 kV", "33 kV"],
-                    "required": True,
-                    "hint": "Select 11 kV for 220/66/11kV transformer, 33 kV for 400/220/33kV transformer",
-                },
-                {"key": "lv_bushing_itc_factor", "label": "ITC Correction Factor (LV Bushing)", "type": "number"},
-                {
-                    "key": "lv_bushing_test_results",
-                    "label": "LV Bushing Test Data",
+                    "key": "bushing_33kv_test_results",
+                    "label": "33 kV Bushing Test Data",
                     "type": "table",
                     "allow_add_rows": True,
                     "allow_delete_rows": True,
                     "lock_default_rows": False,
                     "columns": [
-                        {"key": "bushing",         "label": "Bushing",                       "type": "text",   "placeholder": "e.g. 'R' Phase"},
-                        {"key": "voltage_kv",       "label": "kV",                            "type": "number", "unit": "kV"},
-                        {"key": "capacitance_pf",   "label": "Capacitance C (pF)",            "type": "number", "unit": "pF"},
-                        {"key": "df_measured",      "label": "% D.F Measured",                "type": "number", "unit": "%"},
+                        {"key": "bushing",          "label": "Bushing",                       "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                            "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",            "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                "type": "number", "unit": "%"},
                         {
                             "key": "df_corrected_20c",
                             "label": "% D.F @ 20°C (ITC Corrected)",
@@ -3499,7 +3563,7 @@ TEST_TEMPLATES = {
                                 "type": "FORMULA",
                                 "config": {
                                     "formula": "PRODUCT",
-                                    "inputs": {"a": "df_measured", "b": "$form.lv_bushing_itc_factor"},
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_33kv_itc_factor"},
                                     "precision": 4,
                                 },
                             },
@@ -3514,7 +3578,7 @@ TEST_TEMPLATES = {
                                 "config": {
                                     "input_field": "df_corrected_20c",
                                     "thresholds": {
-                                        "LV Bushing % D.F @ 20°C (IEC OIP)": {
+                                        "33 kV Bushing % D.F @ 20°C (IEC OIP)": {
                                             "Good":  [None, 1.0],
                                             "Alert": [1.0,  1.5],
                                             "Poor":  [1.5,  None],
@@ -3538,18 +3602,99 @@ TEST_TEMPLATES = {
                                 "critical_below": None, "critical_above": 1.5,
                                 "trend_watch": True,
                                 "weight": 1.0,
-                                "remedial_action_text": "LV bushing insulation degraded — inspect and consider replacement.",
+                                "remedial_action_text": "33 kV bushing insulation degraded — inspect and consider replacement.",
                             },
                         },
                     },
                 },
-                {"key": "lv_bushing_observations", "label": "Observations (LV Bushing)", "type": "textarea"},
+                {"key": "bushing_33kv_observations", "label": "Observations (33 kV Bushing)", "type": "textarea"},
             ],
         },
+
+        # ── 11 kV Bushing Test Results ────────────────────────────────────
+        # Applicable to 220/66/11 kV transformers (TV bushing).
+        {
+            "title": "11 kV Bushing Test Results",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "bushing_11kv_enabled",
+                "label": "11 kV Bushing Test",
+                "type": "section_toggle",
+                "default": "skip",          # default skip — fill only if 11kV bushing tested
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "bushing_11kv_itc_factor", "label": "ITC Correction Factor (11 kV Bushing)", "type": "number"},
+                {
+                    "key": "bushing_11kv_test_results",
+                    "label": "11 kV Bushing Test Data",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "bushing",          "label": "Bushing",                       "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                            "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",            "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                "type": "number", "unit": "%"},
+                        {
+                            "key": "df_corrected_20c",
+                            "label": "% D.F @ 20°C (ITC Corrected)",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "FORMULA",
+                                "config": {
+                                    "formula": "PRODUCT",
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_11kv_itc_factor"},
+                                    "precision": 4,
+                                },
+                            },
+                        },
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "df_corrected_20c",
+                                    "thresholds": {
+                                        "11 kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                            "Good":  [None, 1.0],
+                                            "Alert": [1.0,  1.5],
+                                            "Poor":  [1.5,  None],
+                                        }
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    "default_rows": [
+                        {"bushing": "'R' Phase"},
+                        {"bushing": "'Y' Phase"},
+                        {"bushing": "'B' Phase"},
+                    ],
+                    "table_evaluation": {
+                        "enabled": True,
+                        "column_evaluations": {
+                            "df_corrected_20c": {
+                                "normal_min": None, "normal_max": 1.0,
+                                "alert_min":  1.0,  "alert_max":  1.5,
+                                "critical_below": None, "critical_above": 1.5,
+                                "trend_watch": True,
+                                "weight": 1.0,
+                                "remedial_action_text": "11 kV bushing insulation degraded — inspect and consider replacement.",
+                            },
+                        },
+                    },
+                },
+                {"key": "bushing_11kv_observations", "label": "Observations (11 kV Bushing)", "type": "textarea"},
+            ],
+        },
+
         # ── IDAX Insulation Diagnostics ───────────────────────────────────
-        # Row labels are editable to match PDF notation (CHG/HV-GND/HV-Ground etc.)
-        # Extra rows added for (HV+LV)-GND, (HV+LV)-TV seen in some forms.
-        # Bushing IDAX rows (e.g. "66kV R phase bushing") can be added by user.
         {
             "title": "IDAX Test Results (Insulation Diagnostics)",
             "collapsible": True,
@@ -3570,16 +3715,15 @@ TEST_TEMPLATES = {
                     "allow_delete_rows": True,
                     "lock_default_rows": False,
                     "columns": [
-                        # Editable — user types the label exactly as in their PDF
-                        {"key": "test_configuration",   "label": "Test Configuration",             "type": "text",     "placeholder": "e.g. HV-GND, CHG, HV-Ground"},
-                        {"key": "moisture_percent",     "label": "% Moisture",                    "type": "number",   "unit": "%"},
+                        {"key": "test_configuration",    "label": "Test Configuration",              "type": "text",   "placeholder": "e.g. HV-GND, CHG, HV-Ground"},
+                        {"key": "moisture_percent",      "label": "% Moisture",                      "type": "number", "unit": "%"},
                         {
                             "key": "tr_analysis_moisture",
                             "label": "Tr. Analysis (% Moisture)",
                             "type": "dropdown",
                             "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"],
                         },
-                        {"key": "oil_conductivity_psm", "label": "Oil Conductivity (pS/m)",        "type": "number",   "unit": "pS/m"},
+                        {"key": "oil_conductivity_psm",  "label": "Oil Conductivity (pS/m)",         "type": "number", "unit": "pS/m"},
                         {
                             "key": "tr_analysis_oil",
                             "label": "Tr. Analysis (Oil Conductivity)",
@@ -3594,7 +3738,6 @@ TEST_TEMPLATES = {
                         {"test_configuration": "LV-TV"},
                         {"test_configuration": "TV-GND"},
                         {"test_configuration": "HV-TV"},
-                        # Extra rows seen in some PDF forms
                         {"test_configuration": "(HV+LV)-GND"},
                         {"test_configuration": "(HV+LV)-TV"},
                     ],
@@ -3623,6 +3766,7 @@ TEST_TEMPLATES = {
                 {"key": "idax_observation", "label": "Observation", "type": "textarea"},
             ],
         },
+
         # ── Overall Assessment ────────────────────────────────────────────
         {
             "title": "Overall Assessment",
@@ -3646,10 +3790,9 @@ TEST_TEMPLATES = {
             ],
         },
     ],
-},# ════════════════════════════════════════════════════════════════════════════
+},
     # CIRCUIT BREAKER TEMPLATES
     # ════════════════════════════════════════════════════════════════════════════
-
     "circuit_breaker_contact_resistance": {
         "key": "circuit_breaker_contact_resistance",
         "name": "Contact Resistance Test",
