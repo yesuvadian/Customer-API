@@ -75,6 +75,15 @@ def _find(pattern: str, text: str, group: int = 1) -> str | None:
     return m.group(group).strip() if m else None
 
 
+def _normalize_serial(serial: str | None) -> str:
+    """Normalize OCR-spaced transformer serials like 'HT-1690/ 12569'."""
+    if not serial:
+        return ""
+    serial = re.sub(r"\s+", "", serial.upper())
+    serial = re.sub(r"^(HT|KT)(\d)", r"\1-\2", serial)
+    return serial
+
+
 def _parse_date_str(s: str | None) -> str | None:
     if not s:
         return None
@@ -367,14 +376,12 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         for i, l in enumerate(lines[:20]):
             print(f"    {i:02d}: {l}")
 
-    serial = _find(r"serial\s*(?:number|no\.?)\s*[:\.]?\s*([A-Za-z]{2,3}[-\s]?\d{3,}[/\-]\d+)", full)
+    serial = _find(r"serial\s*(?:number|no\.?)\s*[:\.]?\s*([A-Za-z]{2,3}[-\s]?\d{3,}\s*[/\-]\s*\d+)", full)
     if not serial:
-        serial = _find(r"\b((?:HT|KT)-?\d{3,}[/\-]\d+)\b", full)
+        serial = _find(r"\b((?:HT|KT)\s*-?\s*\d{3,}\s*[/\-]\s*\d+)\b", full)
     if not serial:
         serial = _find(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*(\d{4,}[-/]\d+)", full)
-    if serial:
-        serial = re.sub(r"^(HT|KT)(\d)", r"\1-\2", serial)
-    report["serial_number"] = serial or ""
+    report["serial_number"] = _normalize_serial(serial)
 
     report["make"] = (
         _find(r"make\s*[:\.]?\s*([A-Za-z][\w\s\-&]{1,30}?)(?:\n|$)", full)
@@ -543,12 +550,13 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         "bushing_11kv":  "bushing_11kv_itc_factor",
     }
 
+    kv_unit_pat = r"[kKlLeE*]\.?\s*[vV]"
     for rep_key, kv, end_kvs in _BUSHING_SECTIONS:
-        end_alts  = [rf"{e}\s*k\.?v\.?\s*bu" for e in end_kvs]
+        end_alts  = [rf"{e}\s*{kv_unit_pat}\.?\s*bu" for e in end_kvs]
         end_alts += [r"idax", r"overall", r"assessment"]
         end_pat   = "(?=" + "|".join(end_alts) + r"|\Z)"
         block_pat = (
-            rf"{kv}\s*k\.?[vV]\.?\s*bu(?:sh|gh|sl)\w*"
+            rf"{kv}\s*{kv_unit_pat}\.?\s*bu(?:sh|gh|sl)\w*"
             rf"[\s\S]{{0,2500}}?"
             + end_pat
         )
@@ -558,9 +566,9 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
             report[_ITC_KEY[rep_key]] = itc
             report[rep_key]           = rows
             if rows:
-                print(f"  [BUSHING] {kv}kV — {len(rows)} phase row(s) extracted")
+                print(f"  [BUSHING] {kv}kV - {len(rows)} phase row(s) extracted")
         else:
-            print(f"  [BUSHING] {kv}kV — section not found, skipped")
+            print(f"  [BUSHING] {kv}kV - section not found, skipped")
 
     # ── IDAX ───────────────────────────────────────────────────────────────
     report["idax_testing_kit"] = (
@@ -569,8 +577,8 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         or ""
     )
 
-    _MOISTURE_CATS = ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]
-    _OIL_CATS      = ["As new", "Acceptable", "Poor", "Bad"]
+    _MOISTURE_CATS = ["Moderately Wet", "Very Wet", "As new", "Dry", "Wet"]
+    _OIL_CATS      = ["As new", "Acceptable", "Good", "Poor", "Bad"]
 
     _IDAX_CFG_PATTERNS = [
         ("HV-GND",      r"(?:CHG\b|HV\s*[-–]\s*(?:GND|Grd|Grnd|Ground))"),
@@ -596,26 +604,45 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         moisture_m = re.search(r"(\d+(?:\.\d+)?)\s*%", window)
         if moisture_m:
             row["moisture_percent"] = _num(moisture_m.group(1))
-        decimals = [_num(n) for n in re.findall(r"\b\d+\.\d+\b", window)]
+        decimal_matches = list(re.finditer(r"\b\d+\.\d+\b", window))
+        decimals = [_num(m.group(0)) for m in decimal_matches]
         decimals = [n for n in decimals if n is not None]
         if len(decimals) >= 2:
             row["moisture_percent"]     = decimals[0]
             row["oil_conductivity_psm"] = decimals[-1]
         elif len(decimals) == 1:
             row["oil_conductivity_psm"] = decimals[0]
-        for cat in _MOISTURE_CATS:
-            if cat.lower() in window.lower():
-                row["tr_analysis_moisture"] = cat
-                break
-        for cat in _OIL_CATS:
-            if cat.lower() in window.lower():
-                row["tr_analysis_oil"] = cat
-                break
+
+        def _find_category(segment: str, categories: list[str]) -> str | None:
+            for cat in categories:
+                if re.search(rf"\b{re.escape(cat)}\b", segment, re.I):
+                    return cat
+            return None
+
+        if len(decimal_matches) >= 2:
+            moisture_segment = window[decimal_matches[0].end(): decimal_matches[-1].start()]
+            oil_segment      = window[decimal_matches[-1].end():]
+            row["tr_analysis_moisture"] = _find_category(moisture_segment, _MOISTURE_CATS)
+            row["tr_analysis_oil"]      = _find_category(oil_segment, _OIL_CATS)
+        else:
+            row["tr_analysis_moisture"] = _find_category(window, _MOISTURE_CATS)
+            row["tr_analysis_oil"]      = _find_category(window, _OIL_CATS)
         return row
 
-    idax_m = re.search(r"IDAX[\s\S]{0,3000}?(?=overall|assessment|recommendation|$)", full, re.I)
-    if idax_m:
-        idax_block = idax_m.group(0)
+    idax_block = ""
+    idax_candidates = list(re.finditer(
+        r"(?:IDAX\W*Test|INSULATION\s+\w*\s*TEST\s+REP|Testing\s+Kit\s+Used:\s*IDAX)",
+        full,
+        re.I,
+    ))
+    for cand in reversed(idax_candidates):
+        window = full[cand.start(): cand.start() + 3500]
+        if re.search(r"moisture", window, re.I) and re.search(r"oil\s+conductivity", window, re.I):
+            end_m = re.search(r"(?=overall|assessment|recommendation|SFRA\s+Test|$)", window, re.I)
+            idax_block = window[:end_m.start()] if end_m and end_m.start() > 0 else window
+            break
+
+    if idax_block:
         for label, cfg_pat in _IDAX_CFG_PATTERNS:
             win_m = re.search(cfg_pat + r"([\s\S]{0,300})", idax_block, re.I)
             if not win_m:
@@ -699,13 +726,13 @@ def _ocr_page_worker(args):
         parsed   = parse_ocr_text(ocr_text)
     finally:
         _sys.stdout = _sys.__stdout__
-    return page_idx, parsed, buf.getvalue().strip()
+    return page_idx, ocr_text, parsed, buf.getvalue().strip()
 
 
 def _has_serial(text: str) -> bool:
-    if re.search(r"\b(?:HT|KT)\s*[-]?\s*\d{3,}[/\-]\d+", text, re.I):
+    if re.search(r"\b(?:HT|KT)\s*-?\s*\d{3,}\s*[/\-]\s*\d+", text, re.I):
         return True
-    if re.search(r"\bS[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*\d{4,}[-/]\d+", text, re.I):
+    if re.search(r"\bS[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*\d{4,}\s*[-/]\s*\d+", text, re.I):
         return True
     return False
 
@@ -770,19 +797,19 @@ def extract_with_easyocr(images: list, workers: int = 1, debug_dir: Path | None 
         raw_texts: dict[int, str] = {}
         with ProcessPoolExecutor(max_workers=workers) as ex:
             for fut in as_completed({ex.submit(_ocr_page_worker, a): a[0] for a in page_args}):
-                idx, _, _ = fut.result()
-                raw_texts[idx] = ""
+                idx, ocr_text, _, _ = fut.result()
+                raw_texts[idx] = ocr_text
         page_texts = [raw_texts.get(i, "") for i in range(len(images))]
 
     groups = _group_pages(page_texts)
-    print(f"  {len(page_texts)} pages → {len(groups)} transformer group(s).")
+    print(f"  {len(page_texts)} pages -> {len(groups)} transformer group(s).")
 
     reports: list[dict] = []
     for g_idx, combined in enumerate(groups):
         print(f"  Parsing group {g_idx+1}/{len(groups)}...", end=" ", flush=True)
         parsed = parse_ocr_text(combined)
         if parsed:
-            print(f"OK — serial={parsed.get('serial_number')}  date={parsed.get('test_date')}")
+            print(f"OK - serial={parsed.get('serial_number')}  date={parsed.get('test_date')}")
             reports.append(parsed)
         else:
             print("skipped.")
@@ -967,7 +994,7 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
                         if dept:
                             break
         _dept_cache[key] = dept
-        print(f"  [DEPT] '{sub_station}' → {dept.name if dept else 'null'}")
+        print(f"  [DEPT] '{sub_station}' -> {dept.name if dept else 'null'}")
         return dept
 
     created = 0
@@ -990,7 +1017,7 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
             print(f"  [SKIP] {req_number} already seeded.")
             continue
 
-        print(f"  {'[DRY]' if dry_run else '[SEED]'} {req_number} — {serial} {tested_at.date()}")
+        print(f"  {'[DRY]' if dry_run else '[SEED]'} {req_number} - {serial} {tested_at.date()}")
         if dry_run:
             continue
 
@@ -1005,7 +1032,7 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
         tr = tr_svc.create_request(
             data={
                 "title":                (
-                    f"Capacitance & Tan Delta Test — "
+                    f"Capacitance & Tan Delta Test - "
                     f"{eq.factory_serial_number or eq.ueic}"
                 ),
                 "description":          "Historical KPTCL R&D Centre capacitance & tan delta report.",
@@ -1061,7 +1088,7 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
         rec = rec_svc.create_recommendation(
             testing_request_id=tr.id,
             recommendation_type=overall_str,
-            summary=f"{overall_raw} — seeded from historical KPTCL tan delta report.",
+            summary=f"{overall_raw} - seeded from historical KPTCL tan delta report.",
             submitted_by=system_user.id,
             next_action="none",
         )
