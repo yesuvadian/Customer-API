@@ -23,6 +23,9 @@ from models import (
 )
 
 from utils.common_service import UTCDateTimeMixin
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================

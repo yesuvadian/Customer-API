@@ -142,7 +142,7 @@ class ParameterAnalyzer:
         history_count.
         """
         result: dict = {
-            "history_count":      len(history),
+            "history_count":      len(history) + 1,  # +1 for current reading
             "trend":              "Insufficient_Data",
             "trend_slope":        None,
             "trend_r_squared":    None,

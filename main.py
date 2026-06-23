@@ -123,6 +123,8 @@ from routers import analytics as analytics_router
 from routers import data_import as data_import_router  # Import Data module
 from routers import scada as scada_router               # SCADA Integration
 from routers import tr_workflow_config as tr_wf_config_router  # TR Configurable Workflow Admin
+from routers import doc_support as doc_support_router          # Document Support Workflow
+from routers import file_upload as file_upload_router          # Generic file upload
 
 # Workflow Engine
 from routers import workflows
@@ -1097,6 +1099,10 @@ app.include_router(websocket_routes.router)
 
 # ✅ Vendor Directory — fetches vendors from supplier portal
 app.include_router(vendor_directory_router)
+
+# Document Support Workflow
+app.include_router(doc_support_router.router)
+app.include_router(file_upload_router.router)
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")

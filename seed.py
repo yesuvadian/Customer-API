@@ -11885,6 +11885,38 @@ def run_seed():
             print(f"[WARN] TR workflow engine seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
+        # ── Document Support: module, roles, users ────────────────────────────────
+        print("\n--- Doc Support Roles & Users (seed_doc_support_roles_users) ---")
+        try:
+            from seed_doc_support_roles_users import seed_doc_support_roles_users
+            seed_doc_support_roles_users()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Doc support roles/users seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── Document Support Workflow definition ──────────────────────────────────
+        print("\n--- Doc Support Workflow (seed_doc_support_workflow) ---")
+        try:
+            from seed_doc_support_workflow import seed_doc_support_workflow
+            seed_doc_support_workflow(session)
+        except Exception as _e:
+            session.rollback()
+            import traceback
+            print(f"[WARN] Doc support workflow seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── Document Support Notification Templates ───────────────────────────────
+        print("\n--- Doc Support Notifications (seed_doc_support_notifications) ---")
+        try:
+            from seed_doc_support_notifications import seed_doc_support_notifications
+            seed_doc_support_notifications(session)
+        except Exception as _e:
+            session.rollback()
+            import traceback
+            print(f"[WARN] Doc support notifications seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
         # ── All workflow role mappings — after seed_seacms_roles_users ───────────
         # OrgRoles (EE_TLSS, AEE_MAINTENANCE, etc.) must exist before stage→role
 

@@ -898,7 +898,9 @@ class TrWfInstance(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     wf_definition_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_definitions.id", ondelete="SET NULL"), nullable=True)
-    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=True, unique=True, index=True)
+    entity_type = Column(String(50), nullable=True, index=True)   # 'testing_request' | 'document_request' | …
+    entity_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="SET NULL"), nullable=True)
     current_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="SET NULL"), nullable=True)
     current_status_code = Column(String(100), nullable=True, index=True)  # denormalized from tr_wf_statuses for fast querying
@@ -950,7 +952,7 @@ class TrWfAuditLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     wf_instance_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_instances.id", ondelete="CASCADE"), nullable=False, index=True)
-    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False, index=True)
+    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=True, index=True)
     from_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="SET NULL"), nullable=True)
     to_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="SET NULL"), nullable=True)
     action_code = Column(String(50), nullable=False)
@@ -5196,6 +5198,39 @@ class ScadaParameterAnalytics(Base):
     days_to_breach      = Column(Numeric(8,2),  nullable=True)
     equipment           = relationship("Equipment",    foreign_keys=[equipment_id])
     organization        = relationship("Organization", foreign_keys=[organization_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DOCUMENT SUPPORT WORKFLOW
+# ═══════════════════════════════════════════════════════════════════════════
+
+class DocumentRequest(Base):
+    """A document uploaded by a user that enters the Document Support Workflow."""
+    __tablename__ = "document_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_number = Column(String(50), nullable=True, unique=True)
+    title = Column(String(300), nullable=False)
+    description = Column(Text, nullable=True)
+    file_url = Column(String(500), nullable=True)
+    file_name = Column(String(300), nullable=True)
+    file_size = Column(Integer, nullable=True)   # bytes
+    mime_type = Column(String(100), nullable=True)
+    notes = Column(Text, nullable=True)          # additional notes from submitter
+    submitted_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False, index=True)
+    assigned_manager_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    assigned_processor_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    wf_instance_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_instances.id", ondelete="SET NULL"), nullable=True, index=True)
+    current_status_code = Column(String(100), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    submitter = relationship("User", foreign_keys=[submitted_by])
+    assigned_manager = relationship("User", foreign_keys=[assigned_manager_id])
+    assigned_processor = relationship("User", foreign_keys=[assigned_processor_id])
+    org = relationship("Organization", foreign_keys=[org_id])
 
 
 # ═══════════════════════════════════════════════════════════════════════════

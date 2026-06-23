@@ -44,14 +44,9 @@ from security_utils import get_password_hash
 
 def _apply_perms(session, role_id, module_map, perm_list):
     """
-    Full-replace permissions for a role:
-      1. Delete ALL existing OrgRolePermissions for this role.
-      2. Insert the complete correct set from perm_list.
-    This ensures stale/wrong permissions from previous runs are removed.
+    Upsert permissions — only touches modules listed in perm_list.
+    Never deletes permissions for modules not managed by this seed.
     """
-    session.query(OrgRolePermission).filter_by(org_role_id=role_id).delete()
-    session.flush()
-
     valid_cols = {
         'can_view', 'can_add', 'can_edit', 'can_delete',
         'can_approve', 'can_assign', 'can_export', 'can_import',
@@ -67,9 +62,16 @@ def _apply_perms(session, role_id, module_map, perm_list):
             can_export=False, can_import=False,
         )
         base.update({k: v for k, v in flags.items() if k in valid_cols})
-        session.add(OrgRolePermission(
-            id=uuid.uuid4(), org_role_id=role_id, module_id=mid, **base
-        ))
+        row = session.query(OrgRolePermission).filter_by(
+            org_role_id=role_id, module_id=mid
+        ).first()
+        if row:
+            for k, v in base.items():
+                setattr(row, k, v)
+        else:
+            session.add(OrgRolePermission(
+                id=uuid.uuid4(), org_role_id=role_id, module_id=mid, **base
+            ))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -391,9 +393,20 @@ ROLE_DEFS = [
             ("equipment",                  FULL),
             ("testing_requests",           FULL),
             ("testing",                    FULL),
+            ("test_register",              FULL),
+            ("/testing_kit_register",      FULL),
+            ("testing_schedules",          FULL),
+            ("maintenance_schedules",      FULL),
+            ("schedule_compliance",        FULL),
             ("recommendations",            FULL),
+            ("analytics-dashboard",        FULL),
+            ("asset_dashboard",            FULL),
             ("approvals",                  FULL),
             ("testing_request_approvals",  FULL),
+            ("tr-wf/approval-queue",       FULL),
+            ("tr-wf/result-review",        FULL),
+            ("config/tr-workflow",         FULL),
+            ("config/tr-routing",          FULL),
             ("repair-workflows",           FULL),
             ("overhaul-workflows",         FULL),
             ("calibration-workflows",      FULL),
@@ -411,6 +424,9 @@ ROLE_DEFS = [
             ("org_notification_center",    FULL),
             ("org_reporting_center",       FULL),
             ("workflow-dashboard",         FULL),
+            ("import-data",                FULL),
+            ("document-support",           FULL),
+            ("document-support-queue",     FULL),
             ("admin_dashboard",            READ),
         ],
     },

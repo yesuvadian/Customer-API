@@ -351,6 +351,20 @@ def _enrich_context_from_source(
                 ctx.setdefault("recommendation.id",     str(rec.id))
                 ctx.setdefault("recommendation.status", rec.approval_status or "")
 
+        elif source_type == "document_request":
+            from models import DocumentRequest as _DocReq, User as _DocUser
+            doc = db.query(_DocReq).filter(_DocReq.id == source_id).first()
+            if doc:
+                ctx.setdefault("title",        doc.title or "")
+                ctx.setdefault("status_name",  doc.current_status_code or "")
+                if doc.submitted_by:
+                    _sub = db.query(_DocUser).filter(_DocUser.id == doc.submitted_by).first()
+                    if _sub:
+                        _sub_name = f"{_sub.firstname or ''} {_sub.lastname or ''}".strip() or _sub.email or ""
+                        ctx.setdefault("originator",       _sub_name)
+                        ctx.setdefault("originator.email", _sub.email or "")
+                        ctx.setdefault("submitted_by",     _sub_name)
+
         elif source_type == "scada_reading":
             from models import ScadaReading, Equipment as _ScadaEq
             reading = db.query(ScadaReading).filter(ScadaReading.id == source_id).first()
@@ -614,6 +628,10 @@ def _resolve_token_user(
         # surveillance_workflow IDs point to RepairWorkflow rows — same overrides
         ("surveillance_workflow", "assigned_tester_id"): "work_award_by",
         ("surveillance_workflow", "requested_by"):       "created_by",
+        # DocumentRequest: @originator = submitted_by, @assignee = assigned_processor_id
+        ("document_request",      "originator_id"):      "submitted_by",
+        ("document_request",      "requested_by"):       "submitted_by",
+        ("document_request",      "assigned_tester_id"): "assigned_processor_id",
     }
     actual_field = _FIELD_OVERRIDES.get((source_type, field_name), field_name)
 
@@ -652,6 +670,10 @@ def _resolve_token_user(
             # surveillance_workflow IDs are FKs into repair_workflows (same table).
             from models import RepairWorkflow as _RW
             record = db.query(_RW).filter(_RW.id == source_id).first()
+
+        elif source_type == "document_request":
+            from models import DocumentRequest as _DR
+            record = db.query(_DR).filter(_DR.id == source_id).first()
 
         else:
             logger.debug(

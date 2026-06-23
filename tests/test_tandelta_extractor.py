@@ -37,7 +37,7 @@ def _render_table(rows: list[dict], indent: int = 6) -> None:
 
 def _print_report(idx: int, r: dict) -> None:
     print(f"\n{'='*70}")
-    print(f"  REPORT {idx + 1}  —  serial={r.get('serial_number')}  date={r.get('test_date')}")
+    print(f"  REPORT {idx + 1}  -  serial={r.get('serial_number')}  date={r.get('test_date')}")
     print(f"{'='*70}")
 
     # Scalar fields
@@ -65,13 +65,10 @@ def _print_report(idx: int, r: dict) -> None:
     print(f"\n  Winding test results (ITC={r.get('winding_itc_factor')}):")
     _render_table(r.get("winding", []))
 
-    # HV bushing
-    print(f"\n  220kV Bushing (ITC={r.get('hv_bushing_itc_factor')}):")
-    _render_table(r.get("hv_bushing", []))
-
-    # LV bushing
-    print(f"\n  66kV Bushing (ITC={r.get('lv_bushing_itc_factor')}):")
-    _render_table(r.get("lv_bushing", []))
+    for kv in ("400", "220", "66", "33", "11"):
+        key = f"bushing_{kv}kv"
+        print(f"\n  {kv}kV Bushing (ITC={r.get(f'{key}_itc_factor')}):")
+        _render_table(r.get(key, []))
 
     # IDAX
     print(f"\n  IDAX ({r.get('idax_testing_kit', '(kit unknown)')}):")
@@ -173,7 +170,15 @@ def main() -> None:
         "test_voltage_kv", "frequency_hz", "ambient_temp_c", "oil_temp_c",
         "instrument_make", "winding_itc_factor",
     ]
-    table_keys = ["winding", "hv_bushing", "lv_bushing", "idax"]
+    table_keys = [
+        "winding",
+        "bushing_400kv",
+        "bushing_220kv",
+        "bushing_66kv",
+        "bushing_33kv",
+        "bushing_11kv",
+        "idax",
+    ]
 
     for i, r in enumerate(reports):
         print(f"\n  Report {i + 1} ({r.get('serial_number', '?')}):")

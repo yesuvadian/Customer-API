@@ -774,6 +774,7 @@ def get_dashboard_equipment(
     commission_year:  Optional[int]       = Query(None, description="Filter by commissioned year"),
     failure_year:     Optional[int]       = Query(None, description="Filter by retired/failure year"),
     risk_level:       Optional[str]       = Query(None, description="Filter by risk level: Critical, High, Medium, Low"),
+    tested_only:      bool                = Query(False, description="If true, exclude equipment with no analytics data"),
     db:               Session             = Depends(get_vendor_db),
     user:             dict                = Depends(get_current_user),
 ):
@@ -819,8 +820,9 @@ def get_dashboard_equipment(
     ).all()
     ea_map = {r.equipment_id: r for r in ea_rows}
 
-    # Exclude equipment with no analytics (never tested)
-    all_eq = [e for e in all_eq if e.id in ea_map]
+    # Exclude untested equipment when caller requests it (AI Analytics)
+    if tested_only:
+        all_eq = [e for e in all_eq if e.id in ea_map]
 
     # Apply risk_level filter
     if risk_level:
