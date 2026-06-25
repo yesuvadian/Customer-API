@@ -132,10 +132,11 @@ def _enrich(req):
     try:
         if req.is_multi_session and req.test_type_id:
             from models import OrgTestTemplate
+            from services.org_test_template_service import active_template_filter
             _tpl = (
                 req._sa_instance_state.session
                 .query(OrgTestTemplate)
-                .filter(OrgTestTemplate.test_type_id == req.test_type_id)
+                .filter(OrgTestTemplate.test_type_id == req.test_type_id, active_template_filter())
                 .order_by(OrgTestTemplate.version.desc())
                 .first()
             )

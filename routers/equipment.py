@@ -184,9 +184,10 @@ def _types_by_category_for_equipment(db, eq) -> dict:
     for t in all_types:
         cat = t.category_type or "test"
         bucket = buckets.get(cat, buckets["test"])
+        from services.org_test_template_service import active_template_filter
         tpl = (
             db.query(OrgTestTemplate)
-            .filter(OrgTestTemplate.test_type_id == t.id)
+            .filter(OrgTestTemplate.test_type_id == t.id, active_template_filter())
             .order_by(OrgTestTemplate.version.desc())
             .first()
         )
@@ -254,11 +255,13 @@ def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: 
             detail="No nameplate template found for this equipment type.",
         )
 
+    from services.org_test_template_service import active_template_filter
     tmpl = (
         db.query(OrgTestTemplate)
         .filter(
             OrgTestTemplate.test_type_id == detail.id,
             OrgTestTemplate.org_id == equipment.organization_id,
+            active_template_filter(),
         )
         .first()
     ) or (
@@ -266,6 +269,7 @@ def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: 
         .filter(
             OrgTestTemplate.test_type_id == detail.id,
             OrgTestTemplate.org_id == None,
+            active_template_filter(),
         )
         .first()
     )
@@ -1263,10 +1267,11 @@ def get_applicable_tests(
         raise HTTPException(status_code=404, detail="Equipment not found")
     tests = EquipmentService.get_applicable_tests(db, equipment_id)
     from models import OrgTestTemplate
+    from services.org_test_template_service import active_template_filter
     def _template_flags(test_type_id: int) -> dict:
         tpl = (
             db.query(OrgTestTemplate)
-            .filter(OrgTestTemplate.test_type_id == test_type_id)
+            .filter(OrgTestTemplate.test_type_id == test_type_id, active_template_filter())
             .order_by(OrgTestTemplate.version.desc())
             .first()
         )
