@@ -10,7 +10,9 @@ Adding a new workflow type to that table automatically appears in the response.
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -18,6 +20,7 @@ from auth_utils import get_current_user
 from database import get_db
 from models import (
     Equipment,
+    OrgDepartment,
     RepairStageAuditLog,
     RepairStageDefinition,
     RepairStageInstance,
@@ -25,6 +28,23 @@ from models import (
     RepairWorkflowDefinition,
     User,
 )
+
+
+def _dept_ids(department_id: UUID | None, db: Session) -> set | None:
+    if department_id is None:
+        return None
+    visited: set = set()
+    queue = [department_id]
+    while queue:
+        cur = queue.pop()
+        if cur in visited:
+            continue
+        visited.add(cur)
+        for (child_id,) in db.query(OrgDepartment.id).filter(
+            OrgDepartment.parent_department_id == cur
+        ).all():
+            queue.append(child_id)
+    return visited
 
 router = APIRouter(
     prefix="/workflow-dashboard",
@@ -42,10 +62,12 @@ def _user_name(user: User | None) -> str | None:
 
 @router.get("/")
 def get_workflow_dashboard(
+    department_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     org_id = current_user.organization_id
+    dept_ids = _dept_ids(department_id, db)
 
     # ── 1. All active workflow definitions ───────────────────────────────────
     definitions = (
@@ -58,6 +80,11 @@ def get_workflow_dashboard(
     # ── 2. Per-definition stats ───────────────────────────────────────────────
     # Single aggregation query: (workflow_code, status) → count
     # outerjoin Equipment so org-level workflows (no equipment_id) are included
+    def _eq_filter():
+        if dept_ids:
+            return Equipment.department_id.in_(dept_ids)
+        return Equipment.organization_id == org_id
+
     counts_raw = (
         db.query(
             RepairWorkflow.workflow_code,
@@ -66,10 +93,8 @@ def get_workflow_dashboard(
         )
         .outerjoin(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .filter(
-            or_(
-                Equipment.organization_id == org_id,
-                RepairWorkflow.organization_id == org_id,
-            )
+            or_(_eq_filter(), RepairWorkflow.organization_id == org_id) if not dept_ids
+            else _eq_filter()
         )
         .group_by(RepairWorkflow.workflow_code, RepairWorkflow.status)
         .all()
@@ -87,10 +112,8 @@ def get_workflow_dashboard(
         )
         .outerjoin(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .filter(
-            or_(
-                Equipment.organization_id == org_id,
-                RepairWorkflow.organization_id == org_id,
-            ),
+            or_(_eq_filter(), RepairWorkflow.organization_id == org_id) if not dept_ids
+            else _eq_filter(),
             RepairWorkflow.status == "active",
             RepairWorkflow.assignment_pending.is_(True),
         )
@@ -100,7 +123,7 @@ def get_workflow_dashboard(
     pending: dict[str, int] = {code: cnt for code, cnt in pending_raw}
 
     workflow_types = []
-    total_active = total_completed = total_cancelled = total_pending = 0
+    total_active = total_completed = total_cancelled = total_scheduled = total_pending = 0
 
     for defn in definitions:
         code = defn.workflow_code or ""
@@ -108,11 +131,13 @@ def get_workflow_dashboard(
         active    = stat.get("active", 0)
         completed = stat.get("completed", 0)
         cancelled = stat.get("cancelled", 0)
+        scheduled = stat.get("scheduled", 0)
         pend      = pending.get(code, 0)
 
         total_active    += active
         total_completed += completed
         total_cancelled += cancelled
+        total_scheduled += scheduled
         total_pending   += pend
 
         workflow_types.append({
@@ -121,6 +146,7 @@ def get_workflow_dashboard(
             "active":             active,
             "completed":          completed,
             "cancelled":          cancelled,
+            "scheduled":          scheduled,
             "pending_assignment": pend,
         })
 
@@ -128,6 +154,7 @@ def get_workflow_dashboard(
         "active":             total_active,
         "completed":          total_completed,
         "cancelled":          total_cancelled,
+        "scheduled":          total_scheduled,
         "pending_assignment": total_pending,
     }
 
@@ -144,7 +171,7 @@ def get_workflow_dashboard(
             RepairStageDefinition.id == RepairWorkflow.current_stage_id,
         )
         .filter(
-            Equipment.organization_id == org_id,
+            _eq_filter(),
             RepairWorkflow.status == "active",
         )
         .group_by(RepairWorkflow.workflow_code, RepairStageDefinition.name)
@@ -171,7 +198,7 @@ def get_workflow_dashboard(
             RepairStageDefinition.id == RepairWorkflow.current_stage_id,
         )
         .filter(
-            Equipment.organization_id == org_id,
+            _eq_filter(),
             RepairWorkflow.status == "active",
         )
         .order_by(RepairWorkflow.started_at.desc())
@@ -194,7 +221,7 @@ def get_workflow_dashboard(
         db.query(RepairStageAuditLog)
         .join(RepairWorkflow, RepairWorkflow.id == RepairStageAuditLog.workflow_id)
         .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
-        .filter(Equipment.organization_id == org_id)
+        .filter(_eq_filter())
         .order_by(RepairStageAuditLog.performed_at.desc())
         .limit(15)
         .all()
@@ -237,7 +264,7 @@ def get_workflow_dashboard(
             RepairStageDefinition.id == RepairStageInstance.stage_id,
         )
         .filter(
-            Equipment.organization_id == org_id,
+            _eq_filter(),
             RepairWorkflow.status == "active",
             RepairStageInstance.started_at.isnot(None),
             RepairStageDefinition.default_duration_days.isnot(None),
@@ -268,11 +295,94 @@ def get_workflow_dashboard(
     # Sort alerts by days_overdue (most overdue first)
     alerts.sort(key=lambda x: x.get("days_overdue", 0), reverse=True)
 
+    # ── 7. Per-department breakdown ───────────────────────────────────────────
+    # Get workflow counts grouped by equipment's department + workflow_code + status
+    dept_counts_raw = (
+        db.query(
+            Equipment.department_id,
+            RepairWorkflow.workflow_code,
+            RepairWorkflow.status,
+            func.count(RepairWorkflow.id).label("cnt"),
+        )
+        .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+        .filter(_eq_filter())
+        .group_by(Equipment.department_id, RepairWorkflow.workflow_code, RepairWorkflow.status)
+        .all()
+    )
+
+    # Aggregate: { dept_id: { code: { status: count } } }
+    from collections import defaultdict
+    dept_agg: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    dept_total: dict = defaultdict(lambda: {"active": 0, "completed": 0, "cancelled": 0, "scheduled": 0, "pending_assignment": 0})
+    dept_code_set: dict = defaultdict(set)
+
+    for dept_id, code, status, cnt in dept_counts_raw:
+        if dept_id is None:
+            continue
+        key = str(dept_id)
+        dept_agg[key][code or ""][status or ""] += cnt
+        if status == "active":
+            dept_total[key]["active"] += cnt
+        elif status == "completed":
+            dept_total[key]["completed"] += cnt
+        elif status == "cancelled":
+            dept_total[key]["cancelled"] += cnt
+        elif status == "scheduled":
+            dept_total[key]["scheduled"] += cnt
+        dept_code_set[key].add(code or "")
+
+    # Fetch department names
+    all_dept_ids_in_result = list(dept_agg.keys())
+    dept_name_map = {}
+    if all_dept_ids_in_result:
+        depts_q = db.query(OrgDepartment.id, OrgDepartment.name).filter(
+            OrgDepartment.id.in_([UUID(d) for d in all_dept_ids_in_result])
+        ).all()
+        dept_name_map = {str(d_id): name for d_id, name in depts_q}
+
+    # Also pending assignment per dept
+    dept_pending_raw = (
+        db.query(Equipment.department_id, func.count(RepairWorkflow.id).label("cnt"))
+        .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+        .filter(_eq_filter(), RepairWorkflow.status == "active",
+                RepairWorkflow.assignment_pending.is_(True))
+        .group_by(Equipment.department_id)
+        .all()
+    )
+    for dept_id, cnt in dept_pending_raw:
+        if dept_id:
+            dept_total[str(dept_id)]["pending_assignment"] += cnt
+
+    by_department = []
+    for dept_id_str, totals_d in dept_total.items():
+        codes = dept_code_set[dept_id_str]
+        by_type = []
+        for code in sorted(codes):
+            stat = dept_agg[dept_id_str][code]
+            by_type.append({
+                "code":      code,
+                "active":    stat.get("active", 0),
+                "completed": stat.get("completed", 0),
+                "cancelled": stat.get("cancelled", 0),
+            })
+        by_department.append({
+            "department_id":   dept_id_str,
+            "department_name": dept_name_map.get(dept_id_str, "Unknown"),
+            "active":          totals_d["active"],
+            "completed":       totals_d["completed"],
+            "cancelled":       totals_d["cancelled"],
+            "scheduled":       totals_d["scheduled"],
+            "pending_assignment": totals_d["pending_assignment"],
+            "by_type":         by_type,
+        })
+    by_department.sort(key=lambda x: -(x["active"] + x["completed"]))
+
     return {
-        "workflow_types":   workflow_types,
-        "totals":           totals,
-        "stage_breakdown":  stage_breakdown,
+        "workflow_types":    workflow_types,
+        "totals":            totals,
+        "stage_breakdown":   stage_breakdown,
         "equipment_at_risk": equipment_at_risk,
-        "recent_activity":  recent_activity,
-        "alerts":           alerts[:10],  # Limit to 10 most overdue
+        "recent_activity":   recent_activity,
+        "alerts":            alerts[:10],
+        "by_department":     by_department,
     }
