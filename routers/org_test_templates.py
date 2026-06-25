@@ -18,7 +18,7 @@ from auth_utils import get_current_user
 from database import get_db
 from models import OrgTestTemplate, User
 from schemas import OrgTestTemplateCreate, OrgTestTemplateResponse, OrgTestTemplateUpdate
-from services.org_test_template_service import OrgTestTemplateService
+from services.org_test_template_service import OrgTestTemplateService, active_template_filter
 
 router = APIRouter(
     prefix="/org-test-templates",
@@ -38,11 +38,12 @@ browser_router = APIRouter(
 @router.get("/", response_model=List[OrgTestTemplateResponse])
 def list_templates(
     org_id: Optional[UUID] = Query(None, description="Filter by org; omit for global defaults"),
+    active_only: bool = Query(False, description="When true, exclude disabled templates"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     svc = OrgTestTemplateService(db)
-    return svc.list_templates(org_id=org_id)
+    return svc.list_templates(org_id=org_id, active_only=active_only)
 
 
 # ─── Overall Assessment (global appended section) ────────────────────────────
@@ -113,18 +114,20 @@ def get_by_request_category(
     if org_id:
         tmpl = (
             db.query(OrgTestTemplate)
-            .filter(OrgTestTemplate.org_id == org_id, OrgTestTemplate.template_key == template_key)
+            .filter(OrgTestTemplate.org_id == org_id, OrgTestTemplate.template_key == template_key,
+                    active_template_filter())
             .first()
         )
         if tmpl:
             return tmpl
     tmpl = (
         db.query(OrgTestTemplate)
-        .filter(OrgTestTemplate.org_id == None, OrgTestTemplate.template_key == template_key)  # noqa: E711
+        .filter(OrgTestTemplate.org_id == None, OrgTestTemplate.template_key == template_key,  # noqa: E711
+                active_template_filter())
         .first()
     )
     if not tmpl:
-        raise HTTPException(status_code=404, detail=f"Template '{template_key}' not found in DB — run /provision/global first")
+        raise HTTPException(status_code=404, detail=f"Template '{template_key}' not found or is disabled")
     return tmpl
 
 
@@ -147,7 +150,7 @@ def list_by_category_type(
     q = (
         db.query(OrgTestTemplate)
         .join(CD, CD.id == OrgTestTemplate.test_type_id)
-        .filter(CD.category_type == category_type)
+        .filter(CD.category_type == category_type, active_template_filter())
     )
     if org_id:
         q = q.filter(OrgTestTemplate.org_id == org_id)
@@ -231,6 +234,45 @@ def reset_to_global(
     """Reset an org-specific template back to the global default."""
     svc = OrgTestTemplateService(db)
     return svc.reset_to_global(template_id=template_id, modified_by=current_user.id)
+
+
+# ─── Enable / disable ────────────────────────────────────────────────────────
+
+@router.patch("/{template_id}/active", response_model=OrgTestTemplateResponse)
+def set_template_active(
+    template_id: UUID,
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Toggle is_active on OrgTestTemplate and sync CategoryDetails.is_active by name."""
+    from fastapi import HTTPException
+    from models import CategoryDetails
+    from test_templates import TEST_TYPE_TO_TEMPLATE
+
+    tpl = db.query(OrgTestTemplate).filter(OrgTestTemplate.id == template_id).first()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    is_active = bool(body.get("is_active", True))
+
+    # 1. Update OrgTestTemplate.template_data['is_active']
+    data = dict(tpl.template_data or {})
+    data["is_active"] = is_active
+    tpl.template_data = data
+
+    # 2. Sync CategoryDetails.is_active for all rows matching this template key
+    #    Build reverse map: template_key -> list of CategoryDetails names
+    template_key = tpl.template_key
+    matching_names = [name for name, key in TEST_TYPE_TO_TEMPLATE.items() if key == template_key]
+    if matching_names:
+        db.query(CategoryDetails).filter(
+            CategoryDetails.name.in_(matching_names)
+        ).update({CategoryDetails.is_active: is_active}, synchronize_session=False)
+
+    db.commit()
+    db.refresh(tpl)
+    return tpl
 
 
 # ─── Delete ───────────────────────────────────────────────────────────────────

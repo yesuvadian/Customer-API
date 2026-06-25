@@ -24,6 +24,7 @@ from models import (
     User,
 )
 from utils.common_service import UTCDateTimeMixin
+from services.org_test_template_service import active_template_filter
 
 
 class TestSessionService(UTCDateTimeMixin):
@@ -390,7 +391,7 @@ class TestSessionService(UTCDateTimeMixin):
         if testing_request.test_type_id:
             _tpl = (
                 self.db.query(OrgTestTemplate)
-                .filter(OrgTestTemplate.test_type_id == testing_request.test_type_id)
+                .filter(OrgTestTemplate.test_type_id == testing_request.test_type_id, active_template_filter())
                 .order_by(OrgTestTemplate.version.desc())
                 .first()
             )

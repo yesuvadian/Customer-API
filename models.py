@@ -878,6 +878,7 @@ class TrWfStageTransition(Base):
     from_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="CASCADE"), nullable=False)
     to_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="SET NULL"), nullable=True)
     action_code = Column(String(50), nullable=False)  # approve|reject|assign|return|cancel|complete|close|create_child|reassign
+    label = Column(String(100), nullable=True)  # display label; falls back to action_code.title() if null
     requires_comment = Column(Boolean, default=False)
     is_rejection = Column(Boolean, default=False)
     terminal_status_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_statuses.id", ondelete="SET NULL"), nullable=True)
@@ -5222,6 +5223,8 @@ class DocumentRequest(Base):
     assigned_manager_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     assigned_processor_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     wf_instance_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_instances.id", ondelete="SET NULL"), nullable=True, index=True)
+    priority = Column(String(20), nullable=True, default="normal")  # low / normal / high / urgent
+    target_date = Column(DateTime(timezone=True), nullable=True)
     current_status_code = Column(String(100), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -96,9 +96,13 @@ def get_test_types_for_category(category_key: str, db: Session) -> list[dict]:
     if db_category_type:
         query = query.filter(CategoryDetails.category_type == db_category_type)
 
+    seen_names: set = set()
     results = []
     for ct in query.order_by(CategoryDetails.name).all():
         name = ct.name or ""
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
         extractor = EXTRACTABLE_TEST_TYPES.get(name, {})
         results.append({
             "id": ct.id,

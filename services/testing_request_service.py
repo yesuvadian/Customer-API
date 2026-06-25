@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, text
+from sqlalchemy import func, or_, not_, text
 
 from models import (
     TestingRequest, TestingRequestStatus, User,
@@ -15,6 +15,7 @@ from models import (
     OrgTestTemplate,
 )
 from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
+from services.org_test_template_service import active_template_filter
 
 
 class TestingRequestService:
@@ -636,7 +637,7 @@ class TestingRequestService:
                 # Look up linked OrgTestTemplate to expose lifecycle flags
                 tpl = (
                     self.db.query(OrgTestTemplate)
-                    .filter(OrgTestTemplate.test_type_id == t.id)
+                    .filter(OrgTestTemplate.test_type_id == t.id, active_template_filter())
                     .order_by(OrgTestTemplate.version.desc())
                     .first()
                 )
@@ -680,7 +681,7 @@ class TestingRequestService:
         for t, m in rows:
             tpl = (
                 self.db.query(OrgTestTemplate)
-                .filter(OrgTestTemplate.test_type_id == t.id)
+                .filter(OrgTestTemplate.test_type_id == t.id, active_template_filter())
                 .order_by(OrgTestTemplate.version.desc())
                 .first()
             )
@@ -738,7 +739,7 @@ class TestingRequestService:
             for t in details:
                 tpl = (
                     self.db.query(OrgTestTemplate)
-                    .filter(OrgTestTemplate.test_type_id == t.id)
+                    .filter(OrgTestTemplate.test_type_id == t.id, active_template_filter())
                     .order_by(OrgTestTemplate.version.desc())
                     .first()
                 )

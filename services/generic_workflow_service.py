@@ -286,17 +286,9 @@ class GenericWorkflowService:
                 .first()
             )
 
-        # Send-back rule: target stage with no roles → terminal
-        if to_stage:
-            active_roles = (
-                self.db.query(func.count(TrWfStageRole.id))
-                .filter(TrWfStageRole.stage_id == to_stage.id)
-                .scalar()
-            )
-            if active_roles == 0:
-                is_terminal = True
-                to_stage = None
-        else:
+        # A stage with no role rows but with outgoing transitions is an originator/open stage —
+        # do NOT skip it. Only treat as terminal when transition has no to_stage_id.
+        if not to_stage:
             is_terminal = True
 
         terminal_status_code: Optional[str] = None
@@ -434,6 +426,7 @@ class GenericWorkflowService:
         self,
         entity_id: UUID,
         user_role_ids: list[UUID],
+        user_id: Optional[UUID] = None,
     ) -> list[dict]:
         entity = self.adapter.get_entity(entity_id)
         wf_instance_id = self.adapter.get_wf_instance_id(entity)
@@ -453,8 +446,23 @@ class GenericWorkflowService:
                 TrWfStageRole.role_id.in_(user_role_ids),
             )
             .first()
-        )
-        if not allowed_role:
+        ) if user_role_ids else None
+
+        # If no role match, check if the user is the originator of this entity.
+        # Originator stages have no TrWfStageRole rows — the submitter acts directly.
+        is_originator = False
+        if not allowed_role and user_id:
+            submitted_by = self.adapter.get_submitted_by(entity)
+            if submitted_by and str(submitted_by) == str(user_id):
+                stage_has_roles = (
+                    self.db.query(TrWfStageRole)
+                    .filter(TrWfStageRole.stage_id == instance.current_stage_id)
+                    .first()
+                )
+                if not stage_has_roles:
+                    is_originator = True
+
+        if not allowed_role and not is_originator:
             return []
 
         transitions = (
@@ -479,6 +487,7 @@ class GenericWorkflowService:
                 "action_code": t.action_code,
                 "label": label,
                 "requires_comment": t.requires_comment,
+                "requires_user_assignment": bool(allowed_role.can_assign) if allowed_role else False,
                 "is_rejection": t.is_rejection,
                 "to_stage_id": str(t.to_stage_id) if t.to_stage_id else None,
                 "to_stage_name": to_stage_name,

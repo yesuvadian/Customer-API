@@ -26,6 +26,7 @@ from models import (
     User,
 )
 from services.repair_workflow_service import RepairWorkflowService
+from services.org_test_template_service import active_template_filter
 
 
 ANNUAL_AUDIT_WORKFLOW_CODE = "ANNUAL_AUDIT"
@@ -527,6 +528,7 @@ class AnnualAuditService:
             .filter(
                 OrgTestTemplate.test_type_id == category_detail_id,
                 OrgTestTemplate.org_id.is_(None),
+                active_template_filter(),
             )
             .order_by(OrgTestTemplate.version.desc())
             .first()
