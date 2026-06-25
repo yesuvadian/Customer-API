@@ -7,6 +7,55 @@ from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 
+
+# ==========================================
+# Enums for Tan Delta Test Validation
+# ==========================================
+
+class WindingConfigurationEnum(str, PyEnum):
+    """Valid winding test configurations"""
+    HV_IV = "HV-IV"
+    HV_GND = "HV-GND"
+    IV_LV = "IV-LV"
+    IV_GND = "IV-GND"
+    LV_GND = "LV-GND"
+    HV_LV = "HV-LV"
+    IV_TV = "IV-TV"
+    LV_TV = "LV-TV"
+    TV_GND = "TV-GND"
+    HV_TV = "HV-TV"
+
+
+class BushingTypeEnum(str, PyEnum):
+    """Valid bushing types"""
+    HV_PHASE = "HV-Phase"
+    HV_GROUND = "HV-Ground"
+    HV_NEUTRAL = "HV-Neutral"
+    R_PHASE = "R Phase"
+    Y_PHASE = "Y Phase"
+    B_PHASE = "B Phase"
+    NEUTRAL = "Neutral"
+
+
+class TanDeltaReadingSchema(BaseModel):
+    """Single tan delta reading row in table"""
+    # For Winding Data
+    winding_pair: Optional[str] = None
+    # For Bushing Data  
+    bushing_type: Optional[str] = None
+    
+    # Common fields
+    test_voltage_kv: Optional[float] = None
+    freq_hz: Optional[float] = None
+    current_ma: Optional[float] = None
+    cap_pf: Optional[float] = None
+    tandelta_pct: Optional[float] = None
+    tandelta_temp_corrected: Optional[float] = None
+    
+    class Config:
+        from_attributes = True
+
+
 class CategorySchema(BaseModel):
     id: int
     name: str

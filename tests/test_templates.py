@@ -1637,18 +1637,20 @@ TEST_TEMPLATES = {
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "transformer_name", "label": "Transformer Name", "type": "text", "required": True},
                     {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
+                    {"key": "test_voltage_kv", "label": "Test Voltage (kV)", "type": "number", "required": True},
                 ]
             },
             {
                 "title": "HV Bushing Readings",
                 "fields": [
                     {"key": "hv_bushing_readings", "label": "HV Bushing Capacitance & Tan Delta", "type": "table", "columns": [
-                        {"key": "details", "label": "Details", "type": "text"},
+                        {"key": "bushing_type", "label": "Bushing Type", "type": "dropdown", "options": ["HV-Phase", "HV-Ground", "HV-Neutral", "R Phase", "Y Phase", "B Phase"], "required": True},
                         {"key": "freq_hz", "label": "f (Hz)", "type": "number"},
-                        {"key": "voltage_kv", "label": "U (kV)", "type": "number"},
+                        {"key": "test_voltage_kv", "label": "Test Voltage (kV)", "type": "number"},
                         {"key": "current_ma", "label": "I (mA)", "type": "number"},
                         {"key": "cap_pf", "label": "C (pF)", "type": "number"},
                         {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
+                        {"key": "tandelta_temp_corrected", "label": "%TanD (Temp Corrected)", "type": "number"},
                     ]}
                 ]
             },
@@ -1656,12 +1658,13 @@ TEST_TEMPLATES = {
                 "title": "LV/IV Bushing Readings",
                 "fields": [
                     {"key": "lv_bushing_readings", "label": "LV/IV Bushing Capacitance & Tan Delta", "type": "table", "columns": [
-                        {"key": "details", "label": "Details", "type": "text"},
+                        {"key": "bushing_type", "label": "Bushing Type", "type": "dropdown", "options": ["HV-Phase", "HV-Ground", "HV-Neutral", "R Phase", "Y Phase", "B Phase"], "required": True},
                         {"key": "freq_hz", "label": "f (Hz)", "type": "number"},
-                        {"key": "voltage_kv", "label": "U (kV)", "type": "number"},
+                        {"key": "test_voltage_kv", "label": "Test Voltage (kV)", "type": "number"},
                         {"key": "current_ma", "label": "I (mA)", "type": "number"},
                         {"key": "cap_pf", "label": "C (pF)", "type": "number"},
                         {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
+                        {"key": "tandelta_temp_corrected", "label": "%TanD (Temp Corrected)", "type": "number"},
                     ]}
                 ]
             },
@@ -1669,10 +1672,12 @@ TEST_TEMPLATES = {
                 "title": "Winding Readings (UST)",
                 "fields": [
                     {"key": "winding_ust_readings", "label": "Winding Capacitance & Tan Delta (UST)", "type": "table", "columns": [
-                        {"key": "winding_pair", "label": "Winding Pair", "type": "text"},
+                        {"key": "winding_pair", "label": "Winding Configuration", "type": "dropdown", "options": ["HV-IV", "HV-GND", "IV-LV", "IV-GND", "LV-GND", "HV-LV", "IV-TV", "LV-TV", "TV-GND", "HV-TV"], "required": True},
+                        {"key": "test_voltage_kv", "label": "Test Voltage (kV)", "type": "number"},
                         {"key": "current_ma", "label": "I (mA)", "type": "number"},
                         {"key": "cap_pf", "label": "C (pF)", "type": "number"},
                         {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
+                        {"key": "tandelta_temp_corrected", "label": "%TanD (Temp Corrected)", "type": "number"},
                     ]}
                 ]
             },
@@ -1680,10 +1685,12 @@ TEST_TEMPLATES = {
                 "title": "Winding Readings (GSTg-RB)",
                 "fields": [
                     {"key": "winding_gst_readings", "label": "Winding Capacitance & Tan Delta (GSTg-RB)", "type": "table", "columns": [
-                        {"key": "winding_pair", "label": "Winding Pair", "type": "text"},
+                        {"key": "winding_pair", "label": "Winding Configuration", "type": "dropdown", "options": ["HV-IV", "HV-GND", "IV-LV", "IV-GND", "LV-GND", "HV-LV", "IV-TV", "LV-TV", "TV-GND", "HV-TV"], "required": True},
+                        {"key": "test_voltage_kv", "label": "Test Voltage (kV)", "type": "number"},
                         {"key": "current_ma", "label": "I (mA)", "type": "number"},
                         {"key": "cap_pf", "label": "C (pF)", "type": "number"},
                         {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
+                        {"key": "tandelta_temp_corrected", "label": "%TanD (Temp Corrected)", "type": "number"},
                     ]}
                 ]
             },
@@ -1691,12 +1698,13 @@ TEST_TEMPLATES = {
                 "title": "Neutral Bushing",
                 "fields": [
                     {"key": "neutral_bushing", "label": "Neutral Bushing Readings", "type": "table", "columns": [
-                        {"key": "details", "label": "Details", "type": "text"},
+                        {"key": "bushing_type", "label": "Bushing Type", "type": "dropdown", "options": ["HV-Phase", "HV-Ground", "HV-Neutral", "R Phase", "Y Phase", "B Phase"], "required": True},
                         {"key": "freq_hz", "label": "f (Hz)", "type": "number"},
-                        {"key": "voltage_kv", "label": "U (kV)", "type": "number"},
+                        {"key": "test_voltage_kv", "label": "Test Voltage (kV)", "type": "number"},
                         {"key": "current_ma", "label": "I (mA)", "type": "number"},
                         {"key": "cap_pf", "label": "C (pF)", "type": "number"},
                         {"key": "tandelta_pct", "label": "%TanD", "type": "number"},
+                        {"key": "tandelta_temp_corrected", "label": "%TanD (Temp Corrected)", "type": "number"},
                     ]}
                 ]
             },
@@ -1717,6 +1725,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "station_name", "label": "Station Name", "type": "text", "required": True},
                     {"key": "date_of_testing", "label": "Date of Testing", "type": "date", "required": True},
+                    {"key": "test_voltage_kv", "label": "Test Voltage (kV)", "type": "number", "required": True},
                 ]
             },
             {
