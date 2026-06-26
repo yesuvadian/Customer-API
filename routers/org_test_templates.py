@@ -486,102 +486,136 @@ def preview_template(
     *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
       font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #0a1929;
-      color: #e0e6f0;
+      background: #EFF4FF;
+      color: #0F172A;
       min-height: 100vh;
       padding: 32px 16px;
     }}
     .container {{ max-width: 820px; margin: 0 auto; }}
+    .page-header {{
+      background: #0F2B6B;
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      display: flex; align-items: center; gap: 14px;
+    }}
+    .page-header-icon {{
+      width: 42px; height: 42px; background: rgba(255,255,255,0.15);
+      border-radius: 10px; display: flex; align-items: center; justify-content: center;
+      font-size: 20px; flex-shrink: 0;
+    }}
     h1 {{
-      font-size: 22px; font-weight: 700; color: #3fa9f5;
-      margin-bottom: 4px;
+      font-size: 20px; font-weight: 700; color: #FFFFFF;
+      margin-bottom: 2px;
     }}
     .subtitle {{
-      font-size: 12px; color: #ffffff55; margin-bottom: 28px;
+      font-size: 11px; color: rgba(255,255,255,0.6);
       text-transform: uppercase; letter-spacing: 1px;
     }}
     .section {{
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 14px;
-      margin-bottom: 20px;
+      background: #FFFFFF;
+      border: 1px solid #CBD5E1;
+      border-radius: 12px;
+      margin-bottom: 16px;
       overflow: hidden;
+      box-shadow: 0 1px 4px rgba(15,43,107,0.06);
     }}
     .sec-title {{
-      padding: 12px 18px;
-      font-size: 13px; font-weight: 700;
-      background: rgba(63,169,245,0.1);
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-      color: #3fa9f5;
+      padding: 11px 18px;
+      font-size: 12px; font-weight: 700;
+      background: #0F2B6B;
+      border-bottom: 1px solid #CBD5E1;
+      color: #FFFFFF;
       text-transform: uppercase; letter-spacing: 0.8px;
+      display: flex; align-items: center; gap: 8px;
+    }}
+    .sec-title::before {{
+      content: ''; display: inline-block;
+      width: 3px; height: 14px;
+      background: #1A56DB; border-radius: 2px;
     }}
     .fields {{ padding: 16px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
     .field {{ display: flex; flex-direction: column; gap: 5px; }}
     .field.ro-field {{
-      background: rgba(255,165,0,0.06);
-      border: 1px solid rgba(255,165,0,0.25);
+      background: #FFF7ED;
+      border: 1px solid #FED7AA;
       border-radius: 8px;
       padding: 8px 10px;
     }}
     label {{
-      font-size: 11.5px; color: #ffffff99;
+      font-size: 11.5px; color: #64748B;
       display: flex; align-items: center; gap: 6px;
+      font-weight: 500;
     }}
-    .req {{ color: #f55; font-size: 14px; }}
-    .ro {{ color: #ffb347; font-size: 10px; background: rgba(255,165,0,0.15);
-           padding: 1px 6px; border-radius: 4px; }}
-    .unit {{ color: #3fa9f555; font-size: 11px; }}
+    .req {{ color: #DC2626; font-size: 14px; }}
+    .ro {{ color: #D97706; font-size: 10px; background: #FEF3C7;
+           padding: 1px 6px; border-radius: 4px; font-weight: 600; }}
+    .unit {{ color: #94A3B8; font-size: 11px; }}
     input[type=text], input[type=number], input[type=date], select, textarea {{
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.15);
+      background: #F8FAFC;
+      border: 1px solid #CBD5E1;
       border-radius: 8px;
-      color: #e0e6f0;
+      color: #0F172A;
       padding: 8px 10px;
       font-size: 13px;
       width: 100%;
       outline: none;
+      transition: border-color 0.15s;
     }}
     input:focus, select:focus, textarea:focus {{
-      border-color: #3fa9f5;
+      border-color: #1A56DB;
+      box-shadow: 0 0 0 3px rgba(26,86,219,0.12);
     }}
     input[readonly], textarea[readonly] {{
-      color: #ffb347;
-      border-color: rgba(255,165,0,0.3);
+      color: #D97706;
+      background: #FFFBEB;
+      border-color: #FDE68A;
       cursor: default;
     }}
-    select option {{ background: #0f2233; }}
+    select option {{ background: #FFFFFF; color: #0F172A; }}
     .toggle {{ display: inline-flex; align-items: center; cursor: pointer; }}
     .toggle input {{ display: none; }}
     .slider {{
-      width: 42px; height: 22px; background: #334; border-radius: 11px;
+      width: 42px; height: 22px; background: #CBD5E1; border-radius: 11px;
       position: relative; transition: background 0.2s;
     }}
     .slider::after {{
       content: ''; position: absolute; top: 3px; left: 3px;
       width: 16px; height: 16px; border-radius: 50%;
       background: #fff; transition: left 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }}
-    .toggle input:checked + .slider {{ background: #3fa9f5; }}
+    .toggle input:checked + .slider {{ background: #1A56DB; }}
     .toggle input:checked + .slider::after {{ left: 23px; }}
     .tbl-wrap {{ overflow-x: auto; grid-column: 1 / -1; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
     th, td {{
       padding: 8px 10px;
-      border: 1px solid rgba(255,255,255,0.1);
+      border: 1px solid #E2E8F0;
       text-align: left;
     }}
-    th {{ background: rgba(63,169,245,0.12); color: #3fa9f5; font-weight: 600; }}
-    td input {{ background: transparent; border: none; color: #e0e6f0; width: 100%; outline: none; }}
+    th {{ background: #EFF4FF; color: #0F2B6B; font-weight: 700; font-size: 11px;
+          text-transform: uppercase; letter-spacing: 0.5px; }}
+    td input {{ background: transparent; border: none; color: #0F172A; width: 100%; outline: none; }}
     .preview-badge {{
       text-align: center; margin-top: 32px;
-      color: #ffffff33; font-size: 11px; letter-spacing: 1px;
+      color: #94A3B8; font-size: 11px; letter-spacing: 1px;
+      padding: 8px;
+      border: 1px dashed #CBD5E1;
+      border-radius: 8px;
+      background: #fff;
     }}
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>{name}</h1>
-    <div class="subtitle">Template Preview &nbsp;·&nbsp; Read-only</div>
+    <div class="page-header">
+      <div class="page-header-icon">📋</div>
+      <div>
+        <h1>{name}</h1>
+        <div class="subtitle">Template Preview &nbsp;·&nbsp; Read-only</div>
+      </div>
+    </div>
     {sections_html}
     <div class="preview-badge">PREVIEW ONLY — NOT A LIVE FORM</div>
   </div>
