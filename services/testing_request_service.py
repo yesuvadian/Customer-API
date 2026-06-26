@@ -146,6 +146,11 @@ class TestingRequestService:
             test_type_id=test_type_id,
             equipment_id=data.get("equipment_id"),
             request_category=data.get("request_category", "test"),
+            request_type=(
+                "failure_registry"
+                if data.get("request_category") == "failure_registry"
+                else data.get("request_type", "normal")
+            ),
             organization_id=data.get("organization_id"),
             department_id=data.get("department_id"),
             zone=data.get("zone"),

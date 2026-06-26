@@ -38,6 +38,7 @@ from models import (
     OrgUserRole,
 )
 from utils.common_service import UTCDateTimeMixin
+from services.tr_workflow_routing_service import WorkflowRoutingService
 
 
 # ── prefix map ────────────────────────────────────────────────────────────────
@@ -153,10 +154,10 @@ class DirectSubmissionService:
                 pass
 
         # ── TestingRequest ────────────────────────────────────────────────────
-        initial_status = (
-            TestingRequestStatus.under_approval  # FR goes straight to Tech Approver queue
+        request_type = (
+            "failure_registry"
             if category == RequestCategory.failure_registry
-            else TestingRequestStatus.under_approval
+            else category.value  # e.g. "taqc_inspection"
         )
 
         req = TestingRequest(
@@ -164,13 +165,14 @@ class DirectSubmissionService:
             title=data.get("title") or f"{category.value.replace('_',' ').title()} Report",
             description=data.get("description"),
             request_category=category,
+            request_type=request_type,
             equipment_id=data.get("equipment_id"),
             organization_id=org_id,
             department_id=dept_id,
             priority=data.get("priority", "normal"),
             notes=data.get("notes"),
             due_date=_due_date,
-            status=initial_status,
+            status=TestingRequestStatus.submitted,
             is_direct_submission=True,
             originator_id=submitter.id,
             created_by=submitter.id,
@@ -178,6 +180,7 @@ class DirectSubmissionService:
         )
         self.db.add(req)
         self.db.flush()
+        WorkflowRoutingService(self.db).instantiate_workflow(req, performed_by_id=submitter.id)
 
         # ── Recommendation ────────────────────────────────────────────────────
         if category == RequestCategory.failure_registry:
