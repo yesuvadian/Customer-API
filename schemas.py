@@ -1101,6 +1101,10 @@ class TestingRequestResponse(BaseModel):
     equipment_ueic: Optional[str] = None  # Computed from equipment relationship
     bay_number: Optional[str] = None      # Computed from equipment.bay_number
     serial_in_bay: Optional[str] = None   # Computed from equipment.serial_in_bay
+    voltage_class: Optional[str] = None   # Computed from equipment.voltage_class
+    equipment_make: Optional[str] = None  # Computed from equipment.manufacturer
+    commissioned_year: Optional[str] = None  # Computed from equipment.commissioned_date
+    capacity_mva: Optional[str] = None    # Computed from equipment.rated_mva
 
     # Request category
     request_category: Optional[str] = "test"
