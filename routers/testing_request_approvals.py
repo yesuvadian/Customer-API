@@ -131,8 +131,8 @@ def get_pending_approvals(
         joinedload(TestingRequest.organization),
     ).filter(
         TestingRequest.status == TestingRequestStatus.submitted,
-        TestingRequest.request_category != RequestCategory.repair_lifecycle
-          # Using submitted for testing (pending_approval requires migration)
+        TestingRequest.request_category != RequestCategory.repair_lifecycle,
+        TestingRequest.wf_instance_id.is_(None),  # already on new tr_wf queue if set
     )
 
     # Filter by organization if user belongs to one

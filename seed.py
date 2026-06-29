@@ -1635,6 +1635,14 @@ def seed_modules(session):
  "path": "import-data",
  "group_name": "Condition Monitoring",
  "is_menu": True},
+# ✅ AI GRAPH DASHBOARD MODULE
+{"name": "AI Graph Dashboard",
+ "description": "AI-powered fleet analytics dashboard — fleet health score, "
+                "remaining life distribution, ageing risk radar, and dielectric "
+                "condition trends across the substation equipment fleet.",
+ "path": "ai-graph-dashboard",
+ "group_name": "Condition Monitoring",
+ "is_menu": True},
 # ✅ CONFIGURABLE TEST-REQUEST WORKFLOW ENGINE (tr_wf_*) MODULES
 {"name": "TR Approval Queue",
  "description": "Stage-aware testing request approval queue for L2 routing and L3 tester assignment (Configurable Workflow Engine).",
@@ -11574,6 +11582,8 @@ def run_seed():
         seed_divisions(session)
         master_ids=seed_category_master(session)
         seed_category_details(session, master_ids)
+        from seed_category_active_flags import sync_category_details_active_flags
+        sync_category_details_active_flags(session)
         seed_test_type_categories(session, master_ids)
         # seed_tester_locations(session)  # DEPRECATED - using org departments instead
         seed_sample_testing_request(session)
@@ -12056,6 +12066,16 @@ def run_seed():
         except Exception as _e:
             import traceback
             print(f"[WARN] Testing kit seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── AI Graph Dashboard module + role privileges ───────────────────────
+        print("\n--- AI Graph Dashboard Module (seed_ai_graph_module) ---")
+        try:
+            from seed_ai_graph_module import seed_ai_graph_module
+            seed_ai_graph_module()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] AI Graph Dashboard module seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
         print("\n" + "=" * 80)

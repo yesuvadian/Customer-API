@@ -843,7 +843,7 @@ def get_dashboard_equipment(
         if _ft == "unknown":
             all_eq = [e for e in all_eq if not type_map.get(e.equipment_type_id)]
         else:
-            all_eq = [e for e in all_eq if (type_map.get(e.equipment_type_id) or "").lower() == _ft]
+            all_eq = [e for e in all_eq if (type_map.get(e.equipment_type_id) or "").strip().lower() == _ft.strip()]
         eq_ids = [e.id for e in all_eq]
 
     # Department names

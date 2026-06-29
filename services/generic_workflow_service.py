@@ -29,6 +29,7 @@ from models import (
     TrWfRoutingDefault,
     TrWfRoutingRule,
     TrWfAuditLog,
+    OrgUserRole,
 )
 from services.workflow_factory import EntityAdapter
 
@@ -286,17 +287,9 @@ class GenericWorkflowService:
                 .first()
             )
 
-        # Send-back rule: target stage with no roles → terminal
-        if to_stage:
-            active_roles = (
-                self.db.query(func.count(TrWfStageRole.id))
-                .filter(TrWfStageRole.stage_id == to_stage.id)
-                .scalar()
-            )
-            if active_roles == 0:
-                is_terminal = True
-                to_stage = None
-        else:
+        # A stage with no role rows but with outgoing transitions is an originator/open stage —
+        # do NOT skip it. Only treat as terminal when transition has no to_stage_id.
+        if not to_stage:
             is_terminal = True
 
         terminal_status_code: Optional[str] = None
@@ -434,6 +427,7 @@ class GenericWorkflowService:
         self,
         entity_id: UUID,
         user_role_ids: list[UUID],
+        user_id: Optional[UUID] = None,
     ) -> list[dict]:
         entity = self.adapter.get_entity(entity_id)
         wf_instance_id = self.adapter.get_wf_instance_id(entity)
@@ -453,8 +447,33 @@ class GenericWorkflowService:
                 TrWfStageRole.role_id.in_(user_role_ids),
             )
             .first()
-        )
-        if not allowed_role:
+        ) if user_role_ids else None
+
+        # If no role match, check if the stage is an originator-review stage
+        # (no TrWfStageRole rows configured). In that case, allow anyone who
+        # shares any org role with the originator — not just the exact submitter.
+        # If TrWfStageRole rows exist, those take precedence (workflow config override).
+        is_originator_role = False
+        if not allowed_role and user_id:
+            stage_has_roles = (
+                self.db.query(TrWfStageRole)
+                .filter(TrWfStageRole.stage_id == instance.current_stage_id)
+                .first()
+            )
+            if not stage_has_roles:
+                submitted_by = self.adapter.get_submitted_by(entity)
+                if submitted_by:
+                    originator_role_ids = {
+                        row.org_role_id
+                        for row in self.db.query(OrgUserRole).filter(
+                            OrgUserRole.user_id == submitted_by,
+                            OrgUserRole.is_active.is_(True),
+                        ).all()
+                    }
+                    if originator_role_ids and set(user_role_ids or []) & originator_role_ids:
+                        is_originator_role = True
+
+        if not allowed_role and not is_originator_role:
             return []
 
         transitions = (
@@ -479,6 +498,9 @@ class GenericWorkflowService:
                 "action_code": t.action_code,
                 "label": label,
                 "requires_comment": t.requires_comment,
+                "requires_user_assignment": (
+                    bool(allowed_role.can_assign) and "assign" in t.action_code.lower()
+                ) if allowed_role else False,
                 "is_rejection": t.is_rejection,
                 "to_stage_id": str(t.to_stage_id) if t.to_stage_id else None,
                 "to_stage_name": to_stage_name,

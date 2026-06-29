@@ -465,5 +465,6 @@ def available_templates(
     db: Session = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
-    templates = db.query(OrgTestTemplate).order_by(OrgTestTemplate.template_key).all()
+    from services.org_test_template_service import active_template_filter
+    templates = db.query(OrgTestTemplate).filter(active_template_filter()).order_by(OrgTestTemplate.template_key).all()
     return [TemplateOption(id=t.id, template_key=t.template_key) for t in templates]

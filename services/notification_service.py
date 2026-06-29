@@ -352,18 +352,96 @@ def _enrich_context_from_source(
                 ctx.setdefault("recommendation.status", rec.approval_status or "")
 
         elif source_type == "document_request":
-            from models import DocumentRequest as _DocReq, User as _DocUser
+            from models import (
+                DocumentRequest as _DocReq, User as _DocUser,
+                TrWfInstance as _TrWfInst, TrWfStatus as _TrWfStat, TrWfStage as _TrWfStage,
+            )
             doc = db.query(_DocReq).filter(_DocReq.id == source_id).first()
             if doc:
-                ctx.setdefault("title",        doc.title or "")
-                ctx.setdefault("status_name",  doc.current_status_code or "")
+                # ── Core document fields ──────────────────────────────────────
+                ctx.setdefault("doc.id",          str(doc.id))
+                ctx.setdefault("doc.title",       doc.title or "")
+                ctx.setdefault("title",           doc.title or "")   # short alias
+                ctx.setdefault("doc.description", doc.description or "")
+                ctx.setdefault("doc.notes",       doc.notes or "")
+                ctx.setdefault("doc.priority",    doc.priority or "normal")
+                ctx.setdefault("doc.file_name",   doc.file_name or "")
+                ctx.setdefault("doc.file_url",    doc.file_url or "")
+                ctx.setdefault("doc.mime_type",   doc.mime_type or "")
+                ctx.setdefault("doc.created_at",
+                    str(doc.created_at)[:19] if doc.created_at else "")
+                ctx.setdefault("doc.modified_at",
+                    str(doc.modified_at)[:19] if doc.modified_at else "")
+                ctx.setdefault("doc.target_date",
+                    str(doc.target_date)[:10] if doc.target_date else "")
+
+                # ── Status / stage (resolved from TrWfStatus) ────────────────
+                _status_display = doc.current_status_code or ""
+                _stage_display  = ""
+                if doc.wf_instance_id:
+                    _inst = db.query(_TrWfInst).filter(
+                        _TrWfInst.id == doc.wf_instance_id
+                    ).first()
+                    if _inst:
+                        if _inst.wf_definition_id and doc.current_status_code:
+                            _sr = db.query(_TrWfStat).filter(
+                                _TrWfStat.wf_definition_id == _inst.wf_definition_id,
+                                _TrWfStat.status_code == doc.current_status_code,
+                            ).first()
+                            if _sr:
+                                _status_display = _sr.status_name
+                        if _inst.current_stage_id:
+                            _sg = db.query(_TrWfStage).filter(
+                                _TrWfStage.id == _inst.current_stage_id
+                            ).first()
+                            if _sg:
+                                _stage_display = _sg.name or ""
+                ctx.setdefault("status_name",      _status_display)
+                ctx.setdefault("doc.status_name",  _status_display)
+                ctx.setdefault("doc.status_code",  doc.current_status_code or "")
+                ctx.setdefault("stage_name",       _stage_display)
+                ctx.setdefault("doc.stage_name",   _stage_display)
+
+                # ── Originator (submitter) ────────────────────────────────────
                 if doc.submitted_by:
                     _sub = db.query(_DocUser).filter(_DocUser.id == doc.submitted_by).first()
                     if _sub:
-                        _sub_name = f"{_sub.firstname or ''} {_sub.lastname or ''}".strip() or _sub.email or ""
-                        ctx.setdefault("originator",       _sub_name)
-                        ctx.setdefault("originator.email", _sub.email or "")
-                        ctx.setdefault("submitted_by",     _sub_name)
+                        _sub_name = (
+                            f"{_sub.firstname or ''} {_sub.lastname or ''}".strip()
+                            or _sub.email or ""
+                        )
+                        ctx.setdefault("originator",            _sub_name)
+                        ctx.setdefault("originator.name",       _sub_name)
+                        ctx.setdefault("originator.email",      _sub.email or "")
+                        ctx.setdefault("submitted_by",          _sub_name)
+                        ctx.setdefault("doc.submitted_by",      _sub_name)
+                        ctx.setdefault("doc.submitted_by.email", _sub.email or "")
+
+                # ── Assigned manager ──────────────────────────────────────────
+                if doc.assigned_manager_id:
+                    _mgr = db.query(_DocUser).filter(
+                        _DocUser.id == doc.assigned_manager_id
+                    ).first()
+                    if _mgr:
+                        _mgr_name = (
+                            f"{_mgr.firstname or ''} {_mgr.lastname or ''}".strip()
+                            or _mgr.email or ""
+                        )
+                        ctx.setdefault("doc.manager",       _mgr_name)
+                        ctx.setdefault("doc.manager.email", _mgr.email or "")
+
+                # ── Assigned processor ────────────────────────────────────────
+                if doc.assigned_processor_id:
+                    _proc = db.query(_DocUser).filter(
+                        _DocUser.id == doc.assigned_processor_id
+                    ).first()
+                    if _proc:
+                        _proc_name = (
+                            f"{_proc.firstname or ''} {_proc.lastname or ''}".strip()
+                            or _proc.email or ""
+                        )
+                        ctx.setdefault("doc.processor",       _proc_name)
+                        ctx.setdefault("doc.processor.email", _proc.email or "")
 
         elif source_type == "scada_reading":
             from models import ScadaReading, Equipment as _ScadaEq

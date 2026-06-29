@@ -565,6 +565,7 @@ class WorkflowRoutingService:
         child.status = TestingRequestStatus.submitted
         self.db.add(child)
         self.db.flush()
+        self.instantiate_workflow(child, performed_by_id=performed_by_id)
 
         self.db.add(TrWfAuditLog(
             wf_instance_id=None,

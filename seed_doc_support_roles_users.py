@@ -236,11 +236,10 @@ def seed_doc_support_roles_users(session=None):
             session, org.id,
             name="Dev Support",
             description="Processes document support requests assigned by the Dev Support Manager.",
-            default_module_id=ds_module.id,
+            default_module_id=ds_mgr_module.id,
             module_map=module_map,
             perms=[
-                ("document-support",        RW),
-                ("document-support-queue",  READ),
+                ("document-support-queue",  RW_APPROVE_ASSIGN),
                 ("notifications",           READ),
             ],
         )
@@ -286,6 +285,30 @@ def seed_doc_support_roles_users(session=None):
             role_id=proc_role.id,
             password_hash=password_hash,
         )
+
+        # ── Grant org admin roles full access to doc support modules ──────────
+        print("\nOrg admin permissions:")
+        admin_roles = session.query(OrgRole).filter_by(
+            organization_id=org.id, is_org_admin=True, is_active=True
+        ).all()
+        for ar in admin_roles:
+            for mod in [ds_module, ds_mgr_module]:
+                existing = session.query(OrgRolePermission).filter_by(
+                    org_role_id=ar.id, module_id=mod.id
+                ).first()
+                if existing:
+                    existing.can_view = existing.can_add = existing.can_edit = True
+                    existing.can_delete = existing.can_approve = existing.can_assign = True
+                else:
+                    session.add(OrgRolePermission(
+                        id=uuid.uuid4(),
+                        org_role_id=ar.id,
+                        module_id=mod.id,
+                        can_view=True, can_add=True, can_edit=True,
+                        can_delete=True, can_approve=True, can_assign=True,
+                    ))
+                print(f"  [GRANT] {ar.name} -> {mod.path}")
+        session.flush()
 
         session.commit()
 

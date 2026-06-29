@@ -166,7 +166,8 @@ async def list_user_modules(
             "description": m.description,
             "path": m.path,
             "group_name": m.group_name,
-            "is_active": m.is_active
+            "is_active": m.is_active,
+            "is_menu": m.is_menu,
         }
         for m in modules
     ]
