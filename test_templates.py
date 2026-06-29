@@ -3123,7 +3123,7 @@ TEST_TEMPLATES = {
     # ITC correction factor stored at section level (one factor per section, not per row).
     # df_corrected_20c is auto-calculated via FORMULA rule (PRODUCT of df_measured * form-level ITC factor).
     # ────────────────────────────────────────────────────────────────────────────
-  "capacitance_tandelta_transformer": {
+ "capacitance_tandelta_transformer": {
     "key": "capacitance_tandelta_transformer",
     "name": "Capacitance & Tan Delta Test (Transformer)",
     "equipment_type": "Power Transformer",
@@ -3196,6 +3196,13 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "winding_itc_factor", "label": "ITC Correction Factor (Winding)", "type": "number"},
+                # ── NEW: previous test date for this table (one date applies to whole winding table) ──
+                {
+                    "key": "winding_previous_test_date",
+                    "label": "Previous Test Date (Winding)",
+                    "type": "date",
+                    "placeholder": "Select date of previous winding test",
+                },
                 {
                     "key": "winding_test_results",
                     "label": "Winding Test Data",
@@ -3221,6 +3228,14 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3291,6 +3306,13 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_400kv_itc_factor", "label": "ITC Correction Factor (400 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_400kv_previous_test_date",
+                    "label": "Previous Test Date (400 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 400 kV bushing test",
+                },
                 {
                     "key": "bushing_400kv_test_results",
                     "label": "400 kV Bushing Test Data",
@@ -3316,6 +3338,14 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3376,6 +3406,13 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_220kv_itc_factor", "label": "ITC Correction Factor (220 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_220kv_previous_test_date",
+                    "label": "Previous Test Date (220 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 220 kV bushing test",
+                },
                 {
                     "key": "bushing_220kv_test_results",
                     "label": "220 kV Bushing Test Data",
@@ -3401,6 +3438,14 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3459,6 +3504,13 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_66kv_itc_factor", "label": "ITC Correction Factor (66 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_66kv_previous_test_date",
+                    "label": "Previous Test Date (66 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 66 kV bushing test",
+                },
                 {
                     "key": "bushing_66kv_test_results",
                     "label": "66 kV Bushing Test Data",
@@ -3484,6 +3536,14 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3542,6 +3602,13 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_33kv_itc_factor", "label": "ITC Correction Factor (33 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_33kv_previous_test_date",
+                    "label": "Previous Test Date (33 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 33 kV bushing test",
+                },
                 {
                     "key": "bushing_33kv_test_results",
                     "label": "33 kV Bushing Test Data",
@@ -3567,6 +3634,14 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3625,6 +3700,13 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_11kv_itc_factor", "label": "ITC Correction Factor (11 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_11kv_previous_test_date",
+                    "label": "Previous Test Date (11 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 11 kV bushing test",
+                },
                 {
                     "key": "bushing_11kv_test_results",
                     "label": "11 kV Bushing Test Data",
@@ -3650,6 +3732,14 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3707,6 +3797,13 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "idax_testing_kit", "label": "Testing Kit Used", "type": "text", "placeholder": "e.g. Megger IDAX 300"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "idax_previous_test_date",
+                    "label": "Previous Test Date (IDAX)",
+                    "type": "date",
+                    "placeholder": "Select date of previous IDAX test",
+                },
                 {
                     "key": "idax_test_results",
                     "label": "IDAX Test Data",
@@ -3717,6 +3814,14 @@ TEST_TEMPLATES = {
                     "columns": [
                         {"key": "test_configuration",    "label": "Test Configuration",              "type": "text",   "placeholder": "e.g. HV-GND, CHG, HV-Ground"},
                         {"key": "moisture_percent",      "label": "% Moisture",                      "type": "number", "unit": "%"},
+                        # ── NEW: previous test's %Moisture, entered manually for now ──
+                        {
+                            "key": "moisture_percent_previous",
+                            "label": "% Moisture (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
+                        },
                         {
                             "key": "tr_analysis_moisture",
                             "label": "Tr. Analysis (% Moisture)",
@@ -3793,7 +3898,8 @@ TEST_TEMPLATES = {
 },
     # CIRCUIT BREAKER TEMPLATES
     # ════════════════════════════════════════════════════════════════════════════
-    "circuit_breaker_contact_resistance": {
+ 
+  "circuit_breaker_contact_resistance": {
         "key": "circuit_breaker_contact_resistance",
         "name": "Contact Resistance Test",
         "equipment_type": "Circuit Breaker",
