@@ -1,4 +1,3 @@
-
 import argparse
 import io
 import json
@@ -97,6 +96,37 @@ def _parse_date_str(s: str | None) -> str | None:
     return None
 
 
+# ── NEW: previous-test-date helper ─────────────────────────────────────────────
+# Picks up the date hidden in the 4th-column header of winding/bushing tables,
+# e.g. "% DF after Temp- Correction on 19.05.2017 (Eltel)".
+# Pass in the *specific section block* (winding_block, or the bushing block)
+# rather than the whole document wherever possible, in case a report someday
+# contains more than one previous-test date for different sections.
+
+_PREV_DATE_PAT = re.compile(
+    r"(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})"
+)
+
+def _find_previous_test_date(block: str) -> str | None:
+    """
+    Find the previous-test date that appears near the '...Correction on ...'
+    table-header phrase. OCR layout varies a lot between report formats —
+    sometimes the date follows immediately, sometimes it's preceded by a
+    stray unit token like '(nF)' / 'C (pF)' / 'Factor 0.8921' on intervening
+    lines. Rather than trying to match the exact token sequence, we locate
+    "...on" (from "Correction on") and then take the first date-shaped token
+    within a generous window after it.
+    """
+    m = re.search(r"correct\w*\s*on\b", block, re.I)
+    if not m:
+        return None
+    window = block[m.end(): m.end() + 120]
+    dm = _PREV_DATE_PAT.search(window)
+    if dm:
+        return _parse_date_str(dm.group(1))
+    return None
+
+
 # ── Window cleaning helpers ────────────────────────────────────────────────────
 
 def _extract_voltage_kv(window: str) -> float | None:
@@ -105,14 +135,36 @@ def _extract_voltage_kv(window: str) -> float | None:
 
     Strategy (in priority order):
       1. "NNN kV" token  — covers "10 kV", "5kV", "2 kV" etc.
-      2. Bare integer on its own line — covers OCR that strips the "kV" suffix
-         from the voltage column (e.g. just "10" on a line by itself).
+      2. OCR letter-misread fallback — EasyOCR sometimes reads a single
+         voltage digit as a similarly-shaped letter when it's immediately
+         followed by "kV" with no space, e.g. "5kV" -> "SkV", "0kV" -> "OkV".
+         Without this, those rows lose their voltage value entirely even
+         though every other column extracts fine.
+      3. Bare integer on its own line — covers OCR that strips the "kV"
+         suffix from the voltage column (e.g. just "10" on a line by itself).
          Only accepted in the 1–500 range to avoid mistaking capacitance for voltage.
     """
     # Primary: number followed by kV/KV
     m = re.search(r'(?<![\d.])\b(\d+(?:\.\d+)?)\s*[kK][vV]\b', window)
     if m:
         return float(m.group(1))
+
+    # OCR letter-misread fallback: single letter immediately before kV/KV
+    # where that letter is a common misread of a digit.
+    m = re.search(r'\b([A-Za-z])\s*[kK][vV]\b', window)
+    if m:
+        _OCR_DIGIT_MAP = {
+            "S": "5", "s": "5",
+            "O": "0", "o": "0",
+            "I": "1", "i": "1", "l": "1", "L": "1",
+            "Z": "2", "z": "2",
+            "G": "6", "g": "9",
+            "B": "8",
+        }
+        digit = _OCR_DIGIT_MAP.get(m.group(1))
+        if digit is not None:
+            return float(digit)
+
     # Fallback: bare integer alone on its own line (OCR dropped the "kV" suffix)
     m = re.search(r'(?:^|\n)\s*(\d{1,3})\s*(?:\n|$)', window.strip())
     if m:
@@ -139,6 +191,12 @@ def _strip_kv_noise(window: str) -> str:
     """
     Remove kV-tagged tokens and parenthetical previous-test notes so only
     the numeric measurement values remain.
+
+    NOTE: This intentionally does NOT strip the bare numeric value inside
+    "(For 5 kV)" annotations — only the "kV" unit token itself is removed by
+    the second regex below. The leading number (e.g. the previous-test %D.F
+    value that sits right before "(For 5 kV)") is preserved so it can be
+    captured as the 4th measurement number (df_previous_corrected).
     """
     window = re.sub(r'\(For\s+\d+(?:\.\d+)?\s*[kK][vV]\)', '', window, flags=re.I)
     window = re.sub(r'\b\d+(?:\.\d+)?\s*[kK][vV]\b', '', window, flags=re.I)
@@ -161,7 +219,7 @@ def _extract_measurement_nums(window: str) -> list[float]:
       [0] Capacitance C (pF or nF — stored as pF regardless of PDF unit label)
       [1] % D.F Measured
       [2] % D.F @ 20°C (ITC Corrected)
-      [3] Previous test result (ignored — extra column in some PDFs)
+      [3] % D.F @ 20°C from the previous test report (df_previous_corrected)
     """
     cleaned = _strip_kv_noise(window)
     cleaned = cleaned.replace(',', '')          # FIX-1: strip thousand-separators
@@ -176,8 +234,18 @@ def _extract_measurement_nums(window: str) -> list[float]:
 
 
 def _assign_measurement_row(row: dict, nums: list[float]) -> None:
-    """Assign measurement nums into a row dict (voltage already in row)."""
-    if len(nums) >= 3:
+    """
+    Assign measurement nums into a row dict (voltage already in row).
+
+    FIX-5: a 4th number is now recognised as the previous-test corrected
+    %D.F value (df_previous_corrected) instead of being silently dropped.
+    """
+    if len(nums) >= 4:
+        row["capacitance_pf"]       = nums[0]
+        row["df_measured"]          = nums[1]
+        row["df_corrected_20c"]     = nums[2]
+        row["df_previous_corrected"] = nums[3]
+    elif len(nums) == 3:
         row["capacitance_pf"]   = nums[0]
         row["df_measured"]      = nums[1]
         row["df_corrected_20c"] = nums[2]
@@ -212,9 +280,15 @@ _BARE_PHASE_WORD = re.compile(r"""(?:^|\n)\s*[Pp]hase\b""", re.I)
 
 # ── Bushing section parser ─────────────────────────────────────────────────────
 
-def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None, list[dict]]:
-    """Extract ITC factor and R/Y/B phase test rows from one bushing block."""
+def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None, list[dict], str | None]:
+    """
+    Extract ITC factor, R/Y/B phase test rows, and the previous-test date
+    from one bushing block.
+
+    Returns (itc_factor, rows, previous_test_date_iso_or_None).
+    """
     itc = _find_itc(block)
+    prev_date = _find_previous_test_date(block)   # NEW
 
     # Locate test-data table start (skip Details/nameplate sub-section)
     search_start = 0
@@ -277,16 +351,17 @@ def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None
         nums   = _extract_measurement_nums(window)
 
         row: dict = {
-            "bushing":          f"'{phase}' Phase",
-            "voltage_kv":       voltage_val,
-            "capacitance_pf":   None,
-            "df_measured":      None,
-            "df_corrected_20c": None,
+            "bushing":               f"'{phase}' Phase",
+            "voltage_kv":            voltage_val,
+            "capacitance_pf":        None,
+            "df_measured":           None,
+            "df_corrected_20c":      None,
+            "df_previous_corrected": None,   # NEW default
         }
         _assign_measurement_row(row, nums)
         rows.append(row)
 
-    return itc, rows
+    return itc, rows, prev_date
 
 
 # ── Winding row extractor ──────────────────────────────────────────────────────
@@ -317,11 +392,12 @@ def _extract_winding_row(
     nums   = _extract_measurement_nums(window)
 
     row: dict = {
-        "test_configuration": label,
-        "voltage_kv":         voltage_val,
-        "capacitance_pf":     None,
-        "df_measured":        None,
-        "df_corrected_20c":   None,
+        "test_configuration":    label,
+        "voltage_kv":            voltage_val,
+        "capacitance_pf":        None,
+        "df_measured":           None,
+        "df_corrected_20c":      None,
+        "df_previous_corrected": None,   # NEW default
     }
     _assign_measurement_row(row, nums)
     return row
@@ -479,6 +555,13 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
     )
     winding_block = winding_block_m.group(0) if winding_block_m else full
 
+    # NEW: previous-test date for the winding table.
+    # Search winding_block first (most precise); fall back to the whole
+    # document if the table header text fell just outside the captured block.
+    report["winding_previous_test_date"] = (
+        _find_previous_test_date(winding_block) or _find_previous_test_date(full)
+    )
+
     _WINDING_CFG_PATTERNS = [
         ("HV-GND",      r"(?:CHG\b|HV\s*[-–&]\s*(?:GND|Grd|Grnd|Ground))"),
         ("HV-LV",       r"(?:CHL\b|HV\s*[-–&]\s*(?:LV|IV|MV))"),
@@ -549,6 +632,14 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         "bushing_33kv":  "bushing_33kv_itc_factor",
         "bushing_11kv":  "bushing_11kv_itc_factor",
     }
+    # NEW: maps section key -> the report field that holds its previous-test date
+    _PREV_DATE_KEY = {
+        "bushing_400kv": "bushing_400kv_previous_test_date",
+        "bushing_220kv": "bushing_220kv_previous_test_date",
+        "bushing_66kv":  "bushing_66kv_previous_test_date",
+        "bushing_33kv":  "bushing_33kv_previous_test_date",
+        "bushing_11kv":  "bushing_11kv_previous_test_date",
+    }
 
     kv_unit_pat = r"[kKlLeE*]\.?\s*[vV]"
     for rep_key, kv, end_kvs in _BUSHING_SECTIONS:
@@ -562,9 +653,10 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         )
         bm = re.search(block_pat, full, re.I)
         if bm:
-            itc, rows = _parse_bushing_section(bm.group(0), kv)
-            report[_ITC_KEY[rep_key]] = itc
-            report[rep_key]           = rows
+            itc, rows, prev_date = _parse_bushing_section(bm.group(0), kv)
+            report[_ITC_KEY[rep_key]]      = itc
+            report[rep_key]                = rows
+            report[_PREV_DATE_KEY[rep_key]] = prev_date   # NEW
             if rows:
                 print(f"  [BUSHING] {kv}kV - {len(rows)} phase row(s) extracted")
         else:
@@ -595,11 +687,12 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
 
     def _extract_idax_row(label: str, window: str) -> dict:
         row: dict = {
-            "test_configuration":   label,
-            "moisture_percent":     None,
-            "tr_analysis_moisture": None,
-            "oil_conductivity_psm": None,
-            "tr_analysis_oil":      None,
+            "test_configuration":      label,
+            "moisture_percent":        None,
+            "moisture_percent_previous": None,   # NEW default (no source col in this PDF format)
+            "tr_analysis_moisture":    None,
+            "oil_conductivity_psm":    None,
+            "tr_analysis_oil":         None,
         }
         moisture_m = re.search(r"(\d+(?:\.\d+)?)\s*%", window)
         if moisture_m:
@@ -641,6 +734,12 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
             end_m = re.search(r"(?=overall|assessment|recommendation|SFRA\s+Test|$)", window, re.I)
             idax_block = window[:end_m.start()] if end_m and end_m.start() > 0 else window
             break
+
+    # NEW: previous-test date for IDAX, in case some report formats include it
+    # (none observed in current samples, so this will resolve to None there).
+    report["idax_previous_test_date"] = (
+        _find_previous_test_date(idax_block) if idax_block else None
+    )
 
     if idax_block:
         for label, cfg_pat in _IDAX_CFG_PATTERNS:
@@ -834,6 +933,17 @@ _ITC_FIELD_MAP: dict[str, str] = {
     "bushing_33kv_itc_factor":  "bushing_33kv_itc_factor",
     "bushing_11kv_itc_factor":  "bushing_11kv_itc_factor",
     "winding_itc_factor":       "winding_itc_factor",
+    # NEW: previous-test-date fields map straight through (key == report_key),
+    # listed here explicitly for clarity/documentation even though the
+    # generic fallback (`_ITC_FIELD_MAP.get(key, key)`) would resolve them
+    # the same way without this entry.
+    "winding_previous_test_date":       "winding_previous_test_date",
+    "bushing_400kv_previous_test_date": "bushing_400kv_previous_test_date",
+    "bushing_220kv_previous_test_date": "bushing_220kv_previous_test_date",
+    "bushing_66kv_previous_test_date":  "bushing_66kv_previous_test_date",
+    "bushing_33kv_previous_test_date":  "bushing_33kv_previous_test_date",
+    "bushing_11kv_previous_test_date":  "bushing_11kv_previous_test_date",
+    "idax_previous_test_date":          "idax_previous_test_date",
 }
 
 
@@ -846,6 +956,16 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
     writing None.  The EvaluationService can still recompute if needed, but
     having the OCR-read ITC-corrected value avoids blank cells in the UI when
     the service hasn't run yet or the ITC factor wasn't parsed.
+
+    FIX-5: df_previous_corrected (table column) and moisture_percent_previous
+    (IDAX table column) are plain (non-calculated) columns, so they're
+    already copied through by the generic `elif ck in src and src[ck] is not
+    None:` branch below as long as the OCR parser populates them on the row
+    dict — which it now does (see _assign_measurement_row / _extract_idax_row).
+
+    FIX-6: *_previous_test_date fields are plain "date" type top-level fields
+    (not table, not calculated), so they're picked up by the generic
+    scalar-field branch at the bottom of the field loop, via _ITC_FIELD_MAP.
     """
     from test_templates import TEST_TEMPLATES
     template  = TEST_TEMPLATES.get("capacitance_tandelta_transformer", {})
