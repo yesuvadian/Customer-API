@@ -284,9 +284,9 @@ def seed_tr_wf_workflow(session):
     session.flush()
 
     # ── Workflow definitions ──────────────────────────────────────────────────
-    wf_normal  = _get_or_create_definition(session, org.id, "Standard Test Workflow",    "normal",  is_default=True)
+    wf_normal  = _get_or_create_definition(session, org.id, "Standard Test Workflow",    "normal",            is_default=True)
     wf_rnd     = _get_or_create_definition(session, org.id, "Standard R&D Workflow",     None)
-    wf_failure = _get_or_create_definition(session, org.id, "Failure Registry Workflow", "failure")
+    wf_failure = _get_or_create_definition(session, org.id, "Failure Registry Workflow", "failure_registry")
     wf_special = _get_or_create_definition(session, org.id, "Special Test Workflow",     "special")
 
     # Set default L3 role + default tester role on Standard Test Workflow
@@ -374,7 +374,16 @@ def seed_tr_wf_workflow(session):
         ))
         print("  [NEW] TrWfRoutingDefault -> Standard Test Workflow")
 
-    for req_type, wf_def in [("failure", wf_failure), ("special", wf_special)]:
+    # Remove stale routing rule created before request_type was renamed
+    stale = session.query(TrWfRoutingRule).filter_by(
+        org_id=org.id, request_type="failure",
+        equipment_type_id=None, test_type_id=None,
+    ).first()
+    if stale:
+        session.delete(stale)
+        print("  [DEL] TrWfRoutingRule: stale request_type='failure' removed")
+
+    for req_type, wf_def in [("failure_registry", wf_failure), ("special", wf_special)]:
         if not session.query(TrWfRoutingRule).filter_by(
             org_id=org.id, request_type=req_type,
             equipment_type_id=None, test_type_id=None,
@@ -388,6 +397,42 @@ def seed_tr_wf_workflow(session):
                 is_active=True,
             ))
             print(f"  [NEW] TrWfRoutingRule: request_type={req_type} -> {wf_def.name}")
+
+    # ── Failure Registry Workflow: stages + transitions ───────────────────────
+    # 2-stage flow: EE_TLSS initial review → EE_TLSS/Senior technical approval
+    # Terminal approve fires recommendation_finalize (same as normal workflow)
+    # which marks the recommendation approved and calls WorkflowDispatchService.
+    st_fr_l2   = _get_or_create_status(session, wf_failure, "fr_pending_l2",      "Pending L2 Review",       10, "#F59E0B", approval=True)
+    st_fr_tech = _get_or_create_status(session, wf_failure, "fr_under_approval",  "Under Technical Approval",20, "#7C3AED", approval=True)
+    st_fr_done = _get_or_create_status(session, wf_failure, "fr_approved",        "FR Approved",             30, "#10B981", terminal=True)
+    st_fr_rej  = _get_or_create_status(session, wf_failure, "fr_rejected",        "FR Rejected",             40, "#EF4444", terminal=True)
+    st_fr_can  = _get_or_create_status(session, wf_failure, "fr_cancelled",       "FR Cancelled",            50, "#6B7280", terminal=True)
+    session.flush()
+
+    sg_fr_l2   = _get_or_create_stage(session, wf_failure, st_fr_l2,   "L2 Initial Review",      "fr_l2_review",     1)
+    sg_fr_tech = _get_or_create_stage(session, wf_failure, st_fr_tech, "Technical Approval",     "fr_tech_approve",  2)
+    session.flush()
+
+    # EE_TLSS handles both stages (initial forward + technical sign-off)
+    if role_ee_tlss:
+        _get_or_create_stage_role(session, sg_fr_l2,   role_ee_tlss, can_approve=True)
+        _get_or_create_stage_role(session, sg_fr_tech, role_ee_tlss, can_approve=True)
+
+    # L2 → forward to tech approve
+    _get_or_create_transition(session, sg_fr_l2,   sg_fr_tech, "approve")
+    _get_or_create_transition(session, sg_fr_l2,   None,       "reject",
+                               requires_comment=True, is_rejection=True, terminal_status=st_fr_rej)
+    _get_or_create_transition(session, sg_fr_l2,   None,       "cancel",
+                               requires_comment=True, terminal_status=st_fr_can)
+    # Tech approve → terminal (triggers recommendation dispatch)
+    _get_or_create_transition(session, sg_fr_tech, None,       "approve",
+                               terminal_status=st_fr_done, post_action="recommendation_finalize")
+    _get_or_create_transition(session, sg_fr_tech, None,       "reject",
+                               requires_comment=True, is_rejection=True, terminal_status=st_fr_rej)
+    _get_or_create_transition(session, sg_fr_tech, None,       "cancel",
+                               requires_comment=True, terminal_status=st_fr_can)
+    session.flush()
+    print("  [OK] Failure Registry Workflow stages seeded")
 
     # ── R&D role override rules ───────────────────────────────────────────────
     # For these test types the override_role (AEE-R&D) takes precedence over the

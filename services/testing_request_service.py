@@ -13,6 +13,7 @@ from models import (
     Role, UserRole, TesterLocation,
     OrgRole, OrgUserRole,
     OrgTestTemplate,
+    Equipment,
 )
 from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
 
@@ -186,6 +187,179 @@ class TestingRequestService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Testing request not found")
         return request
 
+    @staticmethod
+    def _capacity_label(equipment) -> str:
+        if not equipment:
+            return "Unknown"
+        data = equipment.nameplate_data or {}
+        value = (
+            data.get("rated_mva")
+            or data.get("rated_mva_onan")
+            or data.get("capacity_mva")
+            or data.get("mva_rating")
+            or data.get("rated_capacity")
+            or data.get("capacity")
+            or data.get("kva_rating")
+        )
+        if value is None or str(value).strip() == "":
+            return "Unknown"
+        return str(value).strip()
+
+    def _base_request_query(
+        self,
+        status_filter: Optional[str] = None,
+        category_filter: Optional[str] = None,
+        originator_id: Optional[UUID] = None,
+        tester_id: Optional[UUID] = None,
+        organization_id: Optional[UUID] = None,
+        department_id: Optional[UUID] = None,
+        department_ids: Optional[List[UUID]] = None,
+        equipment_id: Optional[UUID] = None,
+        date_from=None,
+        date_to=None,
+        search: Optional[str] = None,
+        voltage_class: Optional[str] = None,
+        equipment_type: Optional[str] = None,
+        make: Optional[str] = None,
+        commissioned_year: Optional[str] = None,
+        failure_year: Optional[str] = None,
+        capacity_mva: Optional[str] = None,
+    ):
+        query = (
+            self.db.query(TestingRequest)
+            .outerjoin(Equipment, TestingRequest.equipment_id == Equipment.id)
+            .outerjoin(CategoryMaster, Equipment.equipment_type_id == CategoryMaster.id)
+            .filter(TestingRequest.is_schedule_template.is_(False))
+        )
+
+        if search:
+            term = f"%{search.strip()}%"
+            query = query.filter(
+                (Equipment.ueic.ilike(term)) |
+                (Equipment.bay_number.ilike(term)) |
+                (TestingRequest.request_number.ilike(term)) |
+                (TestingRequest.title.ilike(term))
+            )
+        if status_filter:
+            if status_filter == "open":
+                query = query.filter(
+                    TestingRequest.status.in_([
+                        TestingRequestStatus.draft,
+                        TestingRequestStatus.submitted,
+                        TestingRequestStatus.assigned,
+                        TestingRequestStatus.accepted,
+                        TestingRequestStatus.in_progress,
+                        TestingRequestStatus.under_approval,
+                        TestingRequestStatus.outcome_active,   # <-- add this
+                    ])
+                )
+
+            elif status_filter == "closed":
+                query = query.filter(
+                    TestingRequest.status.in_([
+                        TestingRequestStatus.closed,
+                        TestingRequestStatus.completed,
+                        TestingRequestStatus.approved,
+                        TestingRequestStatus.rejected,
+                    ])
+                )
+
+            elif status_filter == "rejected":
+                query = query.filter(
+                    TestingRequest.status == TestingRequestStatus.rejected
+                )
+
+            # Direct enum values (for existing API compatibility)
+            else:
+                statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+
+                if len(statuses) == 1:
+                    query = query.filter(
+                        TestingRequest.status == TestingRequestStatus(statuses[0])
+                    )
+
+                elif statuses:
+                    query = query.filter(
+                        TestingRequest.status.in_(
+                            [TestingRequestStatus(s) for s in statuses]
+                        )
+                    )
+        if category_filter:
+            query = query.filter(TestingRequest.request_category == category_filter)
+        if originator_id:
+            query = query.filter(TestingRequest.originator_id == originator_id)
+        if tester_id:
+            query = query.filter(TestingRequest.assigned_tester_id == tester_id)
+        if organization_id:
+            query = query.filter(TestingRequest.organization_id == organization_id)
+        if equipment_id:
+            query = query.filter(TestingRequest.equipment_id == equipment_id)
+        if department_ids is not None:
+            query = query.filter(TestingRequest.department_id.in_(department_ids))
+        elif department_id:
+            query = query.filter(TestingRequest.department_id == department_id)
+        if date_from:
+            from datetime import datetime
+            query = query.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            from datetime import datetime, timedelta
+            query = query.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+
+        if voltage_class:
+            if voltage_class == "Unknown":
+                query = query.filter(or_(Equipment.voltage_class.is_(None), Equipment.voltage_class == ""))
+            else:
+                query = query.filter(Equipment.voltage_class == voltage_class)
+        if equipment_type:
+            if equipment_type == "Unknown":
+                query = query.filter(CategoryMaster.name.is_(None))
+            else:
+                query = query.filter(CategoryMaster.name == equipment_type)
+        if make:
+            if make == "Unknown":
+                query = query.filter(or_(Equipment.manufacturer.is_(None), Equipment.manufacturer == ""))
+            else:
+                query = query.filter(Equipment.manufacturer == make)
+        if commissioned_year:
+            if commissioned_year == "Unknown":
+                query = query.filter(Equipment.commissioned_date.is_(None))
+            else:
+                try:
+                    query = query.filter(func.extract("year", Equipment.commissioned_date) == int(commissioned_year))
+                except ValueError:
+                    query = query.filter(TestingRequest.id.is_(None))
+        if failure_year:
+            if failure_year == "Unknown":
+                query = query.filter(Equipment.retired_date.is_(None))
+            else:
+                try:
+                    query = query.filter(func.extract("year", Equipment.retired_date) == int(failure_year))
+                except ValueError:
+                    query = query.filter(TestingRequest.id.is_(None))
+        if capacity_mva:
+            equipment_rows = (
+                self.db.query(Equipment)
+                .filter(Equipment.id.isnot(None))
+                .all()
+            )
+            matching_ids = [
+                equipment.id for equipment in equipment_rows
+                if self._capacity_label(equipment) == capacity_mva
+            ]
+            if matching_ids and capacity_mva == "Unknown":
+                query = query.filter(or_(
+                    TestingRequest.equipment_id.in_(matching_ids),
+                    TestingRequest.equipment_id.is_(None),
+                ))
+            elif matching_ids:
+                query = query.filter(TestingRequest.equipment_id.in_(matching_ids))
+            elif capacity_mva == "Unknown":
+                query = query.filter(TestingRequest.equipment_id.is_(None))
+            else:
+                query = query.filter(TestingRequest.id.is_(None))
+
+        return query
+
     def get_requests(
         self,
         skip: int = 0,
@@ -201,49 +375,32 @@ class TestingRequestService:
         date_from=None,
         date_to=None,
         search: Optional[str] = None,
+        voltage_class: Optional[str] = None,
+        equipment_type: Optional[str] = None,
+        make: Optional[str] = None,
+        commissioned_year: Optional[str] = None,
+        failure_year: Optional[str] = None,
+        capacity_mva: Optional[str] = None,
     ) -> List[TestingRequest]:
-        from models import Equipment as EquipmentModel
-        query = (
-            self.db.query(TestingRequest)
-            .filter(TestingRequest.is_schedule_template.is_(False))
+        query = self._base_request_query(
+            status_filter=status_filter,
+            category_filter=category_filter,
+            originator_id=originator_id,
+            tester_id=tester_id,
+            organization_id=organization_id,
+            department_id=department_id,
+            department_ids=department_ids,
+            equipment_id=equipment_id,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+            voltage_class=voltage_class,
+            equipment_type=equipment_type,
+            make=make,
+            commissioned_year=commissioned_year,
+            failure_year=failure_year,
+            capacity_mva=capacity_mva,
         )
-        if search:
-            term = f"%{search.strip()}%"
-            query = (
-                query
-                .outerjoin(EquipmentModel, TestingRequest.equipment_id == EquipmentModel.id)
-                .filter(
-                    (EquipmentModel.ueic.ilike(term)) |
-                    (EquipmentModel.bay_number.ilike(term))
-                )
-            )
-        if status_filter:
-            statuses = [s.strip() for s in status_filter.split(',') if s.strip()]
-            if len(statuses) == 1:
-                query = query.filter(TestingRequest.status == statuses[0])
-            else:
-                query = query.filter(TestingRequest.status.in_(statuses))
-        if category_filter:
-            query = query.filter(TestingRequest.request_category == category_filter)
-        if originator_id:
-            query = query.filter(TestingRequest.originator_id == originator_id)
-        if tester_id:
-            query = query.filter(TestingRequest.assigned_tester_id == tester_id)
-        if organization_id:
-            query = query.filter(TestingRequest.organization_id == organization_id)
-        if equipment_id:
-            query = query.filter(TestingRequest.equipment_id == equipment_id)
-        # department_ids (subtree) takes priority over single department_id
-        if department_ids is not None:
-            query = query.filter(TestingRequest.department_id.in_(department_ids))
-        elif department_id:
-            query = query.filter(TestingRequest.department_id == department_id)
-        if date_from:
-            from datetime import datetime
-            query = query.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
-        if date_to:
-            from datetime import datetime, timedelta
-            query = query.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
 
     def count_requests(
@@ -259,50 +416,113 @@ class TestingRequestService:
         date_from=None,
         date_to=None,
         search: Optional[str] = None,
+        voltage_class: Optional[str] = None,
+        equipment_type: Optional[str] = None,
+        make: Optional[str] = None,
+        commissioned_year: Optional[str] = None,
+        failure_year: Optional[str] = None,
+        capacity_mva: Optional[str] = None,
         **_ignored,
     ) -> int:
-        from models import Equipment as EquipmentModel
-        query = (
-            self.db.query(func.count(TestingRequest.id))
-            .filter(TestingRequest.is_schedule_template.is_(False))
+        query = self._base_request_query(
+            status_filter=status_filter,
+            category_filter=category_filter,
+            originator_id=originator_id,
+            tester_id=tester_id,
+            organization_id=organization_id,
+            department_id=department_id,
+            department_ids=department_ids,
+            equipment_id=equipment_id,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+            voltage_class=voltage_class,
+            equipment_type=equipment_type,
+            make=make,
+            commissioned_year=commissioned_year,
+            failure_year=failure_year,
+            capacity_mva=capacity_mva,
         )
-        if search:
-            term = f"%{search.strip()}%"
-            query = (
-                query
-                .outerjoin(EquipmentModel, TestingRequest.equipment_id == EquipmentModel.id)
-                .filter(
-                    (EquipmentModel.ueic.ilike(term)) |
-                    (EquipmentModel.bay_number.ilike(term))
-                )
-            )
-        if status_filter:
-            statuses = [s.strip() for s in status_filter.split(',') if s.strip()]
-            if len(statuses) == 1:
-                query = query.filter(TestingRequest.status == statuses[0])
-            else:
-                query = query.filter(TestingRequest.status.in_(statuses))
-        if category_filter:
-            query = query.filter(TestingRequest.request_category == category_filter)
-        if originator_id:
-            query = query.filter(TestingRequest.originator_id == originator_id)
-        if tester_id:
-            query = query.filter(TestingRequest.assigned_tester_id == tester_id)
-        if organization_id:
-            query = query.filter(TestingRequest.organization_id == organization_id)
-        if equipment_id:
-            query = query.filter(TestingRequest.equipment_id == equipment_id)
-        if department_ids is not None:
-            query = query.filter(TestingRequest.department_id.in_(department_ids))
-        elif department_id:
-            query = query.filter(TestingRequest.department_id == department_id)
-        if date_from:
-            from datetime import datetime
-            query = query.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
-        if date_to:
-            from datetime import datetime, timedelta
-            query = query.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
-        return query.scalar() or 0
+        return query.with_entities(func.count(TestingRequest.id)).scalar() or 0
+
+    def get_breakdown(
+        self,
+        status_filter: Optional[str] = None,
+        category_filter: Optional[str] = None,
+        originator_id: Optional[UUID] = None,
+        tester_id: Optional[UUID] = None,
+        organization_id: Optional[UUID] = None,
+        department_id: Optional[UUID] = None,
+        department_ids: Optional[List[UUID]] = None,
+        equipment_id: Optional[UUID] = None,
+        date_from=None,
+        date_to=None,
+        search: Optional[str] = None,
+    ) -> dict:
+        query = self._base_request_query(
+            status_filter=status_filter,
+            category_filter=category_filter,
+            originator_id=originator_id,
+            tester_id=tester_id,
+            organization_id=organization_id,
+            department_id=department_id,
+            department_ids=department_ids,
+            equipment_id=equipment_id,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+        )
+        requests = query.all()
+
+        eq_ids = {r.equipment_id for r in requests if r.equipment_id}
+        equipment_map = {
+            e.id: e
+            for e in self.db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all()
+        } if eq_ids else {}
+
+        type_ids = {e.equipment_type_id for e in equipment_map.values() if e.equipment_type_id}
+        type_map = {
+            c.id: c.name
+            for c in self.db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
+        } if type_ids else {}
+
+        by_voltage = {}
+        by_type = {}
+        by_make = {}
+        by_year = {}
+        by_failure_year = {}
+        by_capacity = {}
+        by_status = {}
+        by_category = {}
+
+        def _inc(bucket: dict, key: str):
+            bucket[key] = bucket.get(key, 0) + 1
+
+        for req in requests:
+            eq = equipment_map.get(req.equipment_id)
+            _inc(by_status, getattr(req.status, "value", str(req.status)) if req.status else "Unknown")
+            _inc(by_category, getattr(req.request_category, "value", str(req.request_category)) if req.request_category else "Unknown")
+            _inc(by_voltage, (eq.voltage_class or "").strip() if eq and eq.voltage_class else "Unknown")
+            _inc(by_type, type_map.get(eq.equipment_type_id) if eq and eq.equipment_type_id else "Unknown")
+            _inc(by_make, (eq.manufacturer or "").strip() if eq and eq.manufacturer else "Unknown")
+            _inc(by_year, str(eq.commissioned_date.year) if eq and eq.commissioned_date else "Unknown")
+            _inc(by_failure_year, str(eq.retired_date.year) if eq and eq.retired_date else "Unknown")
+            _inc(by_capacity, self._capacity_label(eq))
+
+        def _sort_count(d: dict) -> dict:
+            return dict(sorted(d.items(), key=lambda item: (-item[1], item[0])))
+
+        return {
+            "total": len(requests),
+            "by_voltage_class": _sort_count(by_voltage),
+            "by_type": _sort_count(by_type),
+            "by_make": _sort_count(by_make),
+            "by_commissioned_year": dict(sorted(by_year.items())),
+            "by_failure_year": dict(sorted(by_failure_year.items())),
+            "by_capacity_mva": _sort_count(by_capacity),
+            "by_status": _sort_count(by_status),
+            "by_category": _sort_count(by_category),
+        }
 
     def get_requests_for_user(
         self,
@@ -312,19 +532,62 @@ class TestingRequestService:
         status_filter: Optional[str] = None,
     ) -> List[TestingRequest]:
         """Return requests where user is originator OR assigned tester."""
+
         query = (
-    self.db.query(TestingRequest)
-    .filter(TestingRequest.is_schedule_template.is_(False))
-    .filter(
-        or_(
-            TestingRequest.originator_id == user_id,
-            TestingRequest.assigned_tester_id == user_id,
+            self.db.query(TestingRequest)
+            .filter(TestingRequest.is_schedule_template.is_(False))
+            .filter(
+                or_(
+                    TestingRequest.originator_id == user_id,
+                    TestingRequest.assigned_tester_id == user_id,
+                )
+            )
         )
-    )
-)
+
         if status_filter:
-            query = query.filter(TestingRequest.status == status_filter)
-        return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
+            if status_filter == "open":
+                query = query.filter(
+                    TestingRequest.status.in_([
+                        TestingRequestStatus.draft,
+                        TestingRequestStatus.submitted,
+                        TestingRequestStatus.assigned,
+                        TestingRequestStatus.accepted,
+                        TestingRequestStatus.in_progress,
+                        TestingRequestStatus.under_approval,
+                        TestingRequestStatus.outcome_active,   # <-- add this
+                    ])
+                )
+
+            elif status_filter == "closed":
+                query = query.filter(
+                    TestingRequest.status.in_([
+                        TestingRequestStatus.closed,           # <-- add this
+                        TestingRequestStatus.completed,
+                        TestingRequestStatus.approved,
+                        TestingRequestStatus.rejected,         # <-- add this
+                    ])
+                )
+
+            elif status_filter == "rejected":
+                query = query.filter(
+                    TestingRequest.status == TestingRequestStatus.rejected
+                )
+
+            else:
+                try:
+                    query = query.filter(
+                        TestingRequest.status == TestingRequestStatus(status_filter)
+                    )
+                except ValueError:
+                    # Unknown status - return no records
+                    query = query.filter(False)
+
+        return (
+            query.order_by(TestingRequest.cts.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
     def update_request(self, request_id: UUID, data: dict, modified_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
@@ -487,36 +750,65 @@ class TestingRequestService:
 
     def get_stats(self, user_id: UUID = None, organization_id: UUID = None) -> dict:
         """Return counts by testing request status."""
+
         query = (
-    self.db.query(TestingRequest)
-    .filter(TestingRequest.is_schedule_template.is_(False))
-)
+            self.db.query(TestingRequest)
+            .filter(TestingRequest.is_schedule_template.is_(False))
+        )
+
         if organization_id:
-            query = query.filter(TestingRequest.organization_id == organization_id)
+            query = query.filter(
+                TestingRequest.organization_id == organization_id
+            )
         elif user_id:
-            # Fallback for backward compatibility
             query = query.filter(
                 or_(
                     TestingRequest.originator_id == user_id,
                     TestingRequest.assigned_tester_id == user_id,
                 )
             )
+
         total = query.count()
-        draft = query.filter(TestingRequest.status == TestingRequestStatus.draft).count()
-        submitted = query.filter(TestingRequest.status == TestingRequestStatus.submitted).count()
+
+        draft = query.filter(
+            TestingRequest.status == TestingRequestStatus.draft
+        ).count()
+
+        submitted = query.filter(
+            TestingRequest.status == TestingRequestStatus.submitted
+        ).count()
+
         in_progress = query.filter(
             TestingRequest.status.in_([
                 TestingRequestStatus.assigned,
                 TestingRequestStatus.accepted,
                 TestingRequestStatus.in_progress,
+                TestingRequestStatus.outcome_active,
             ])
         ).count()
-        under_approval = query.filter(TestingRequest.status == TestingRequestStatus.under_approval).count()
-        approved = query.filter(TestingRequest.status == TestingRequestStatus.approved).count()
-        rejected = query.filter(TestingRequest.status == TestingRequestStatus.rejected).count()
-        completed = query.filter(TestingRequest.status == TestingRequestStatus.completed).count()
+
+        under_approval = query.filter(
+            TestingRequest.status == TestingRequestStatus.under_approval
+        ).count()
+
+        approved = query.filter(
+            TestingRequest.status == TestingRequestStatus.approved
+        ).count()
+
+        rejected = query.filter(
+            TestingRequest.status == TestingRequestStatus.rejected
+        ).count()
+
+        completed = query.filter(
+            TestingRequest.status.in_([
+                TestingRequestStatus.completed,
+                TestingRequestStatus.closed,
+            ])
+        ).count()
+
         # Category breakdown
         from models import RequestCategory
+
         by_category = {}
         for cat in RequestCategory:
             by_category[cat.value] = query.filter(
@@ -559,7 +851,12 @@ class TestingRequestService:
                 .all()
             )
             return [
-                {"id": str(o.id), "name": o.name, "code": o.code, "type": "organization"}
+                {
+                    "id": str(o.id),
+                    "name": o.name,
+                    "code": o.code,
+                    "type": "organization",
+                }
                 for o in orgs
             ]
 
@@ -567,42 +864,107 @@ class TestingRequestService:
             OrgDepartment.organization_id == org_id,
             OrgDepartment.is_active.is_(True),
         )
+
         q = (
             q.filter(OrgDepartment.parent_department_id.is_(None))
             if parent_id is None
             else q.filter(OrgDepartment.parent_department_id == parent_id)
         )
+
         depts = q.order_by(OrgDepartment.name).all()
 
-        # Compute depth of a single node by walking up parent chain
+        from models import TestingRequest
+        from sqlalchemy import func
+        from utils.common_service import get_dept_subtree_ids
+
         def _depth(dept) -> int:
             d, n = 0, dept
             while n.parent_department_id is not None:
-                parent = self.db.query(OrgDepartment).filter(
-                    OrgDepartment.id == n.parent_department_id).first()
+                parent = (
+                    self.db.query(OrgDepartment)
+                    .filter(OrgDepartment.id == n.parent_department_id)
+                    .first()
+                )
                 if parent is None:
                     break
                 d += 1
                 n = parent
             return d
 
-        return [
-            {
+        result = []
+
+        for d in depts:
+            subtree_ids = get_dept_subtree_ids(self.db, d.id)
+
+            # Total requests
+            request_count = (
+                self.db.query(func.count(TestingRequest.id))
+                .filter(
+                    TestingRequest.department_id.in_(subtree_ids),
+                    TestingRequest.is_schedule_template.is_(False),
+                )
+                .scalar()
+            ) or 0
+
+            # Open requests
+            open_count = (
+                self.db.query(func.count(TestingRequest.id))
+                .filter(
+                    TestingRequest.department_id.in_(subtree_ids),
+                    TestingRequest.is_schedule_template.is_(False),
+                    TestingRequest.status.in_([
+                        TestingRequestStatus.draft,
+                        TestingRequestStatus.submitted,
+                        TestingRequestStatus.assigned,
+                        TestingRequestStatus.accepted,
+                        TestingRequestStatus.in_progress,
+                        TestingRequestStatus.under_approval,
+                        TestingRequestStatus.outcome_active,
+                    ]),
+                )
+                .scalar()
+            ) or 0
+
+            # Closed requests
+            closed_count = (
+                self.db.query(func.count(TestingRequest.id))
+                .filter(
+                    TestingRequest.department_id.in_(subtree_ids),
+                    TestingRequest.is_schedule_template.is_(False),
+                    TestingRequest.status.in_([
+                        TestingRequestStatus.approved,
+                        TestingRequestStatus.completed,
+                        TestingRequestStatus.closed,
+                        TestingRequestStatus.rejected,
+                    ]),
+                )
+                .scalar()
+            ) or 0
+            result.append({
                 "id": str(d.id),
                 "name": d.name,
                 "code": d.code,
-                "parent_department_id": str(d.parent_department_id) if d.parent_department_id else None,
-                "has_children": self.db.query(OrgDepartment)
+                "request_count": request_count,
+                "open_count": open_count,
+                "closed_count": closed_count,
+                "parent_department_id": (
+                    str(d.parent_department_id)
+                    if d.parent_department_id
+                    else None
+                ),
+                "has_children": (
+                    self.db.query(OrgDepartment)
                     .filter(
                         OrgDepartment.parent_department_id == d.id,
                         OrgDepartment.is_active.is_(True),
                     )
-                    .count() > 0,
+                    .count() > 0
+                ),
                 "type": "department",
                 "depth": _depth(d),
-            }
-            for d in depts
-        ]
+            })
+
+        return result
 
     def list_equipment_types(self) -> list:
         """Return CategoryMaster rows where description='Testing Equipment'

@@ -1635,6 +1635,14 @@ def seed_modules(session):
  "path": "import-data",
  "group_name": "Condition Monitoring",
  "is_menu": True},
+# ✅ AI GRAPH DASHBOARD MODULE
+{"name": "AI Graph Dashboard",
+ "description": "AI-powered fleet analytics dashboard — fleet health score, "
+                "remaining life distribution, ageing risk radar, and dielectric "
+                "condition trends across the substation equipment fleet.",
+ "path": "ai-graph-dashboard",
+ "group_name": "Condition Monitoring",
+ "is_menu": True},
 # ✅ CONFIGURABLE TEST-REQUEST WORKFLOW ENGINE (tr_wf_*) MODULES
 {"name": "TR Approval Queue",
  "description": "Stage-aware testing request approval queue for L2 routing and L3 tester assignment (Configurable Workflow Engine).",
@@ -11574,6 +11582,8 @@ def run_seed():
         seed_divisions(session)
         master_ids=seed_category_master(session)
         seed_category_details(session, master_ids)
+        from seed_category_active_flags import sync_category_details_active_flags
+        sync_category_details_active_flags(session)
         seed_test_type_categories(session, master_ids)
         # seed_tester_locations(session)  # DEPRECATED - using org departments instead
         seed_sample_testing_request(session)
@@ -11808,15 +11818,6 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Status enum migration (non-fatal): {_e}")
 
-        # Dept-filter test users — always seeded under the default KPTCL org
-        print("\n--- Dept-filter test users (KPTCL org) ---")
-        try:
-            seed_dept_filter_users(session, org=kptcl_org)
-        except Exception as _e:
-            import traceback
-            print(f"[WARN] Dept-filter seed failed (non-fatal): {_e}")
-            traceback.print_exc()
-
         # ── KPTCL Org Roles + Users — LAST, after ALL departments exist ──────────
         # BLR_CIRCLE, RT_NORTH, RT_EAST etc. are created by seed_dept_filter_users.
         # Must run after both seed_kptcl_departments AND seed_dept_filter_users.
@@ -11965,50 +11966,7 @@ def run_seed():
         # Ensure RT substations that are in equipment_seed.xlsx but not in
         # KPTCL_Substation_Mapping.xlsx exist before equipment seeding runs.
         # Each dept is committed individually so a later rollback cannot remove them.
-        if kptcl_org:
-            _RT_EXTRA_SUBSTATIONS = [
-                # (name, 4-char-code, parent_division_name)
-                ("220kV Kanakapura",         "KANA", "RT South Division"),
-                ("400kV DHP",               "DHPX", "RT East Division"),
-                ("220kV EDC",               "EDCX", "RT East Division"),
-                ("220kV Manyatha Tech Park", "MANY", "RT North Division"),
-            ]
-            for sub_name, sub_code, parent_div_name in _RT_EXTRA_SUBSTATIONS:
-                try:
-                    # Find or create the parent division
-                    parent_div = session.query(OrgDepartment).filter_by(
-                        organization_id=kptcl_org.id,
-                        name=parent_div_name,
-                    ).first()
-                    if not parent_div:
-                        print(f"  [WARN] Parent division '{parent_div_name}' not found — skipping {sub_name}")
-                        continue
-                    existing = session.query(OrgDepartment).filter(
-                        OrgDepartment.organization_id == kptcl_org.id,
-                        OrgDepartment.name == sub_name,
-                    ).first()
-                    if existing:
-                        if existing.code != sub_code:
-                            existing.code = sub_code
-                            session.commit()
-                            print(f"  [INFO] Updated code for '{sub_name}' → {sub_code}")
-                        continue
-                    now = datetime.now()
-                    dept = OrgDepartment(
-                        organization_id=kptcl_org.id,
-                        name=sub_name,
-                        code=sub_code,
-                        parent_department_id=parent_div.id,
-                        is_active=True,
-                        cts=now, mts=now,
-                    )
-                    session.add(dept)
-                    session.commit()
-                    print(f"  [INFO] Created RT substation '{sub_name}' ({sub_code})")
-                except Exception as _e:
-                    session.rollback()
-                    print(f"  [WARN] Could not ensure RT substation '{sub_name}': {_e}")
-
+        
         # Equipment seeding from equipment_seed.xlsx — after dept hierarchy exists
         if kptcl_org:
             try:
@@ -12056,6 +12014,16 @@ def run_seed():
         except Exception as _e:
             import traceback
             print(f"[WARN] Testing kit seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── AI Graph Dashboard module + role privileges ───────────────────────
+        print("\n--- AI Graph Dashboard Module (seed_ai_graph_module) ---")
+        try:
+            from seed_ai_graph_module import seed_ai_graph_module
+            seed_ai_graph_module()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] AI Graph Dashboard module seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
         print("\n" + "=" * 80)
@@ -12827,9 +12795,9 @@ _DFT_ROLES = [
 ]
 
 _DFT_DEPTS = [
-    ("north",  "RT North Division",  "north"),
-    ("south",  "RT South Division",  "south"),
-    ("mysuru", "Mysuru Division",     "mysuru"),
+    ("hebbal",  "Hebbal Division",   "hebbal"),
+    ("hoody",   "Hoody Division",    "hoody"),
+    ("kolar",   "Kolar Division",    "kolar"),
 ]
 
 _DFT_ROLE_EMAIL = {
@@ -13622,53 +13590,42 @@ def seed_dept_filter_users(session, org=None):
 
     # 2. Department hierarchy
     print("\n[2] Department hierarchy")
-    zone = _dft_get_or_create_dept(
-        session, oid,
-        name="Bangalore Zone", code="BN",
-    )
-    print(f"  Zone   : {zone.name}")
+    # REPLACE with: look up the REAL divisions seeded from Excel by seed_kptcl_departments
+    # (disambiguate by circle parent since some division names repeat, e.g. "Somanahalli")
+    zone = session.query(OrgDepartment).filter_by(organization_id=oid, name="Bangalore Zone").first()
+    if zone is None:
+        print("[WARN] 'Bangalore Zone' not found — run seed_kptcl_departments first. Skipping dept-filter seed.")
+        return
 
-    circle = _dft_get_or_create_dept(
-        session, oid,
-        name="Bangalore Transmission Circle", code="BLRC",
-        parent_id=zone.id,
-    )
-    print(f"  Circle : {circle.name}")
+    circle_bmaz_north = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="BMAZ North", parent_department_id=zone.id
+    ).first()
+    circle_bmaz_south = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="BMAZ South", parent_department_id=zone.id
+    ).first()
+    circle_braz = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="BRAZ", parent_department_id=zone.id
+    ).first()
 
-    div_north  = _dft_get_or_create_dept(
-        session, oid,
-        name="RT North Division", code="RTNR",
-        parent_id=circle.id,
-    )
-    div_south  = _dft_get_or_create_dept(
-        session, oid,
-        name="RT South Division", code="RTSO",
-        parent_id=circle.id,
-    )
-    div_east   = _dft_get_or_create_dept(
-        session, oid,
-        name="RT East Division", code="RTEA",
-        parent_id=circle.id,
-    )
-    div_mysuru = _dft_get_or_create_dept(
-        session, oid,
-        name="Mysuru Division", code="MYSR",
-        parent_id=circle.id,
-    )
-    dept_map = {"north": div_north, "south": div_south, "east": div_east, "mysuru": div_mysuru}
+    if not all([circle_bmaz_north, circle_bmaz_south, circle_braz]):
+        print("[WARN] One or more BMAZ/BRAZ circles not found — skipping dept-filter seed.")
+        return
+
+    div_hebbal = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="Hebbal", parent_department_id=circle_bmaz_north.id
+    ).first()
+    div_hoody = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="Hoody", parent_department_id=circle_bmaz_south.id
+    ).first()
+    div_kolar = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="Kolar", parent_department_id=circle_braz.id
+    ).first()
+
+    dept_map = {"hebbal": div_hebbal, "hoody": div_hoody, "kolar": div_kolar}
     for slug, dept in dept_map.items():
-        print(f"  Div [{slug:6s}]: {dept.name}  ({dept.id})")
-
-    # Seed RT substations missing from KPTCL_Substation_Mapping.xlsx
-    # so equipment_seed.xlsx rows for these substations resolve to a dept
-    _rt_substations = [
-        ("220kV EDC",             "EDCX", div_east.id),
-        ("400kV DHP",             "DHPX", div_east.id),
-        ("220kV Kanakapura",      "KANA", div_south.id),
-        ("220kV Manyatha Tech Park", "MANY", div_north.id),
-    ]
-    for sub_name, sub_code, parent_id in _rt_substations:
-        _dft_get_or_create_dept(session, oid, name=sub_name, code=sub_code, parent_id=parent_id)
+        if dept is None:
+            print(f"[WARN] Real division for '{slug}' not found — run seed_kptcl_departments first. Skipping dept-filter seed.")
+            return
     session.commit()
 
     # 3. Roles  (org-scoped, shared across all 3 divisions)
@@ -13702,11 +13659,10 @@ def seed_dept_filter_users(session, org=None):
     # 5. Top-level users: circle & zone levels
     print("\n[5] Top-level hierarchy users  (circle + zone)")
     _top_level_users = [
-        # (email,                   fname,  lname,    role_name,             dept_obj)
-        ("ee.circle@utility.com",   "EE",   "Circle", "EE_TLSS",             circle),
-        ("see.circle@utility.com",  "SEE",  "Circle", "SEE_WM",              circle),
-        ("cee.zone@utility.com",    "CEE",  "Zone",   "CEE_TRANSMISSION_ZONE", zone),
-        ("see.zone@utility.com",    "SEE",  "Zone",   "SEE_WM",              zone),
+    ("ee.circle@utility.com",   "EE",   "Circle", "EE_TLSS",             circle_braz),
+    ("see.circle@utility.com",  "SEE",  "Circle", "SEE_WM",              circle_braz),
+    ("cee.zone@utility.com",    "CEE",  "Zone",   "CEE_TRANSMISSION_ZONE", zone),
+    ("see.zone@utility.com",    "SEE",  "Zone",   "SEE_WM",              zone),
     ]
     for email, fname, lname, role_name, dept_obj in _top_level_users:
         phone = "9000000099"

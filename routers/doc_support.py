@@ -94,6 +94,8 @@ def submit_document_request(
         file_name=payload.get("file_name"),
         file_size=payload.get("file_size"),
         mime_type=payload.get("mime_type"),
+        priority=payload.get("priority", "normal"),
+        target_date=payload.get("target_date"),
     )
     db.commit()
     db.refresh(doc)
@@ -152,7 +154,7 @@ def get_available_actions(
 ):
     svc = DocSupportService(db)
     role_ids = _user_role_ids(db, current_user)
-    return svc.get_available_actions(doc_id, role_ids)
+    return svc.get_available_actions(doc_id, role_ids, user_id=current_user.id)
 
 
 # ---------------------------------------------------------------------------
@@ -173,11 +175,15 @@ def get_assignable_users(
     """
     doc = db.query(DocumentRequest).filter(DocumentRequest.id == doc_id).first()
     if not doc or not doc.wf_instance_id:
+        print(f"[assignable-users] doc not found or no wf_instance_id: doc={doc}")
         return []
 
     instance = db.query(TrWfInstance).filter(TrWfInstance.id == doc.wf_instance_id).first()
     if not instance or not instance.current_stage_id:
+        print(f"[assignable-users] instance not found or no current_stage_id: instance={instance}")
         return []
+
+    print(f"[assignable-users] current_stage_id={instance.current_stage_id}, action={action_code}")
 
     # Find the transition for this action
     transition = (
@@ -189,7 +195,10 @@ def get_assignable_users(
         .first()
     )
     if not transition or not transition.to_stage_id:
+        print(f"[assignable-users] no transition found for action={action_code} from stage={instance.current_stage_id}")
         return []
+
+    print(f"[assignable-users] to_stage_id={transition.to_stage_id}")
 
     # Roles on the destination stage
     stage_role_ids = [
@@ -199,7 +208,10 @@ def get_assignable_users(
         .all()
     ]
     if not stage_role_ids:
+        print(f"[assignable-users] no roles on destination stage {transition.to_stage_id}")
         return []
+
+    print(f"[assignable-users] stage_role_ids={stage_role_ids}")
 
     # Users in this org who hold any of those roles
     user_ids = [
@@ -244,13 +256,17 @@ def perform_action(
     role_id = role_ids[0] if role_ids else None
 
     svc = DocSupportService(db)
+    assigned_user_id = payload.get("assigned_user_id")
+    # If a processor self-accepts (no user selected), auto-assign to themselves
+    if action_code == "assign" and not assigned_user_id:
+        assigned_user_id = str(current_user.id)
     instance = svc.transition(
         doc_id=doc_id,
         action_code=action_code,
         performed_by_id=current_user.id,
         role_id=role_id,
         comment=payload.get("comment"),
-        assigned_user_id=payload.get("assigned_user_id"),
+        assigned_user_id=assigned_user_id,
         assigned_role_id=payload.get("assigned_role_id"),
     )
     db.commit()
@@ -283,13 +299,17 @@ def get_audit_trail(
         .order_by(TrWfAuditLog.created_at)
         .all()
     )
+    user_ids = [l.performed_by for l in logs if l.performed_by]
+    users = {u.id: f"{u.firstname or ''} {u.lastname or ''}".strip() or u.email
+             for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+
     return [
         {
             "id": str(l.id),
             "action_code": l.action_code,
             "from_status_code": l.from_status_code,
             "to_status_code": l.to_status_code,
-            "performed_by": str(l.performed_by) if l.performed_by else None,
+            "performed_by": users.get(l.performed_by, str(l.performed_by)) if l.performed_by else None,
             "comment": l.comment,
             "is_send_back": l.is_send_back,
             "is_terminal": l.is_terminal,
@@ -314,6 +334,8 @@ def _doc_response(doc: DocumentRequest) -> dict:
         "file_size": doc.file_size,
         "mime_type": doc.mime_type,
         "notes": doc.notes,
+        "priority": doc.priority,
+        "target_date": doc.target_date.isoformat() if doc.target_date else None,
         "current_status_code": doc.current_status_code,
         "wf_instance_id": str(doc.wf_instance_id) if doc.wf_instance_id else None,
         "submitted_by": str(doc.submitted_by) if doc.submitted_by else None,

@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from models import DocumentRequest, TrWfInstance
+from models import DocumentRequest, TrWfInstance, TrWfStatus, TrWfStage
 from services.workflow_factory import WorkflowFactory
 from services.generic_workflow_service import GenericWorkflowService
 
@@ -26,6 +26,24 @@ import services.workflow_adapters.document_request_adapter  # noqa: F401
 log = logging.getLogger(__name__)
 
 ENTITY_TYPE = "document_request"
+
+
+def _resolve_wf_labels(db: Session, instance: TrWfInstance) -> tuple[str, str]:
+    """Return (status_name, stage_name) from DB for the current instance state."""
+    status_name = instance.current_status_code or ""
+    stage_name  = ""
+    if instance.current_status_code and instance.wf_definition_id:
+        row = db.query(TrWfStatus).filter(
+            TrWfStatus.wf_definition_id == instance.wf_definition_id,
+            TrWfStatus.status_code == instance.current_status_code,
+        ).first()
+        if row:
+            status_name = row.status_name
+    if instance.current_stage_id:
+        stage = db.query(TrWfStage).filter(TrWfStage.id == instance.current_stage_id).first()
+        if stage:
+            stage_name = stage.name or ""
+    return status_name, stage_name
 
 
 def _make_service(db: Session) -> GenericWorkflowService:
@@ -53,7 +71,16 @@ class DocSupportService:
         file_name: Optional[str] = None,
         file_size: Optional[int] = None,
         mime_type: Optional[str] = None,
+        priority: Optional[str] = "normal",
+        target_date=None,
     ) -> DocumentRequest:
+        from datetime import datetime, timezone
+        parsed_target = None
+        if target_date:
+            try:
+                parsed_target = datetime.fromisoformat(target_date.replace("Z", "+00:00"))
+            except Exception:
+                parsed_target = None
         doc = DocumentRequest(
             id=uuid4(),
             org_id=org_id,
@@ -65,6 +92,8 @@ class DocSupportService:
             file_name=file_name,
             file_size=file_size,
             mime_type=mime_type,
+            priority=priority or "normal",
+            target_date=parsed_target,
         )
         self.db.add(doc)
         self.db.flush()
@@ -77,12 +106,16 @@ class DocSupportService:
         # Notify: submission confirmation to originator + alert to Dev Support Manager
         try:
             from services.notification_service import NotificationService
+            _inst = self.db.query(TrWfInstance).filter(
+                TrWfInstance.entity_id == doc.id
+            ).first()
+            _status_name, _stage_name = _resolve_wf_labels(self.db, _inst) if _inst else ("Pending", "")
             NotificationService(self.db).fire(
                 event_type="ds_wf_submitted",
                 context={
                     "title":       doc.title,
-                    "status_name": "Pending Manager Review",
-                    "stage_name":  "Manager Review",
+                    "status_name": _status_name,
+                    "stage_name":  _stage_name,
                     "action_code": "create",
                 },
                 organization_id=org_id,
@@ -125,25 +158,44 @@ class DocSupportService:
             if doc:
                 doc.closed_at = datetime.now(timezone.utc)
 
-        # Extra notification when originator review stage is reached
-        if instance.current_status_code == "ds_originator_review" and doc:
+        if doc:
+            from services.notification_service import NotificationService
+            _svc = NotificationService(self.db)
+            _status_name, _stage_name = _resolve_wf_labels(self.db, instance)
+            _ctx = {
+                "title":       doc.title,
+                "status_name": _status_name,
+                "stage_name":  _stage_name,
+                "action_code": action_code,
+            }
+
+            # Fire general status-change notification (email + SMS + inapp via template)
             try:
-                from services.notification_service import NotificationService
-                NotificationService(self.db).fire(
-                    event_type="ds_wf_originator_review",
-                    context={
-                        "title":       doc.title,
-                        "status_name": "Your Review Required",
-                        "stage_name":  "Originator Review",
-                        "action_code": action_code,
-                    },
+                _svc.fire(
+                    event_type="ds_wf_status_changed",
+                    context=_ctx,
                     organization_id=doc.org_id,
                     source_id=doc_id,
                     source_type="document_request",
-                    recipient_roles_override=["@originator"],
+                    status_from=None,
+                    status_to=instance.current_status_code,
                 )
             except Exception as _n_err:
-                log.warning("DS originator-review notification failed (non-fatal): %s", _n_err)
+                log.warning("DS status-changed notification failed (non-fatal): %s", _n_err)
+
+            # Extra notification when originator review stage is reached
+            if instance.current_status_code == "ds_originator_review":
+                try:
+                    _svc.fire(
+                        event_type="ds_wf_originator_review",
+                        context=_ctx,
+                        organization_id=doc.org_id,
+                        source_id=doc_id,
+                        source_type="document_request",
+                        recipient_roles_override=["@originator"],
+                    )
+                except Exception as _n_err:
+                    log.warning("DS originator-review notification failed (non-fatal): %s", _n_err)
 
         return instance
 
@@ -151,12 +203,8 @@ class DocSupportService:
     # Available actions for current user
     # ------------------------------------------------------------------
 
-    def get_available_actions(
-        self,
-        doc_id: UUID,
-        user_role_ids: list[UUID],
-    ) -> list[dict]:
-        return self._wf.get_available_actions(doc_id, user_role_ids)
+    def get_available_actions(self, doc_id: UUID, user_role_ids: list[UUID], user_id=None) -> list[dict]:
+        return self._wf.get_available_actions(doc_id, user_role_ids, user_id=user_id)
 
     # ------------------------------------------------------------------
     # Get one

@@ -665,9 +665,9 @@ class TestingRequestWorkflowService:
                     performed_by_id=user.id,
                 )
 
-            # Advance past l2_approve_route stage
+            # Advance past l2_approve_route / fr_l2_review stage
             routing_svc.advance_stage(
-                instance=instance,
+                testing_request=testing_request,
                 action_code="approve",
                 performed_by_id=user.id,
                 comment=comment,

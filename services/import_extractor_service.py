@@ -63,6 +63,8 @@ IMPORT_CATEGORIES = CATEGORY_TYPE_MAP
 # have PDF/Excel extractors.  Add new entries here when new seed scripts exist.
 
 EXTRACTABLE_TEST_TYPES: dict[str, dict] = {
+    # Repair — generic row-by-row Excel import; no PDF OCR
+    "Repair":                                            {"excel": "repair"},
     "Transformer Oil Test":                              {"pdf": "oil_test",  "excel": "oil_test"},
     "Insulating Oil Test":                               {"pdf": "oil_test",  "excel": "oil_test"},
     "Oil BDV Test":                                      {"pdf": "oil_test",  "excel": "oil_test"},
@@ -96,9 +98,13 @@ def get_test_types_for_category(category_key: str, db: Session) -> list[dict]:
     if db_category_type:
         query = query.filter(CategoryDetails.category_type == db_category_type)
 
+    seen_names: set = set()
     results = []
     for ct in query.order_by(CategoryDetails.name).all():
         name = ct.name or ""
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
         extractor = EXTRACTABLE_TEST_TYPES.get(name, {})
         results.append({
             "id": ct.id,
@@ -202,6 +208,45 @@ def _extract_excel(file_bytes: bytes, extractor_type: str) -> tuple[list[dict], 
             if not records:
                 warnings.append("No records extracted from Excel. Check sheet layout.")
             return records, warnings
+
+        elif extractor_type == "repair":
+            # Generic row-by-row Excel reader for repair records.
+            # Treats each non-header row as one record; all columns become form_data fields.
+            import openpyxl
+
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                tmp.write(file_bytes)
+                tmp_path = Path(tmp.name)
+
+            try:
+                wb = openpyxl.load_workbook(tmp_path, data_only=True)
+                ws = wb.active
+                rows = list(ws.iter_rows(values_only=True))
+            finally:
+                tmp_path.unlink(missing_ok=True)
+
+            if not rows:
+                return [], ["Excel file is empty."]
+
+            headers = [str(h).strip() if h is not None else f"col_{i}"
+                       for i, h in enumerate(rows[0])]
+            records = []
+            for row in rows[1:]:
+                if all(v is None for v in row):
+                    continue
+                rec: dict = {}
+                for h, v in zip(headers, row):
+                    rec[h] = str(v) if v is not None else ""
+                # Map common column names to standard fields
+                rec.setdefault("serial_number", rec.get("Serial Number", rec.get("serial", "")))
+                rec.setdefault("test_date",     rec.get("Date", rec.get("Repair Date", "")))
+                rec.setdefault("sub_station",   rec.get("Station", rec.get("Sub Station", rec.get("Substation", ""))))
+                records.append(rec)
+
+            if not records:
+                warnings.append("No data rows found in Excel. Check the file layout.")
+            return records, warnings
+
         else:
             return [], [f"Excel extraction not supported for type: {extractor_type}"]
 

@@ -140,7 +140,7 @@ def _add_role(session, stage_id, role_id, can_approve=False, can_assign=False, c
 
 
 def _add_transition(session, from_stage_id, action_code, to_stage_id=None,
-                    terminal_status_id=None, requires_comment=False, is_rejection=False):
+                    terminal_status_id=None, requires_comment=False, is_rejection=False, label=None):
     existing = (
         session.query(TrWfStageTransition)
         .filter(
@@ -149,17 +149,21 @@ def _add_transition(session, from_stage_id, action_code, to_stage_id=None,
         )
         .first()
     )
-    if not existing:
+    if existing:
+        if label and not existing.label:
+            existing.label = label
+    else:
         session.add(TrWfStageTransition(
             id=uuid.uuid4(),
             from_stage_id=from_stage_id,
             to_stage_id=to_stage_id,
             action_code=action_code,
+            label=label,
             terminal_status_id=terminal_status_id,
             requires_comment=requires_comment,
             is_rejection=is_rejection,
         ))
-        session.flush()
+    session.flush()
 
 
 def _resolve_role(session, org_id, *name_fragments) -> OrgRole | None:
@@ -208,7 +212,7 @@ def seed_doc_support_workflow(session):
         print("    WARNING: No Dev Support Manager role found — add manually after seeding.")
 
     if proc_role:
-        _add_role(session, stg_proc.id, proc_role.id, can_assign=True)
+        _add_role(session, stg_proc.id, proc_role.id, can_approve=True)
         _add_role(session, stg_work.id, proc_role.id, can_approve=True, can_edit=True)
         print(f"    Role on Processor stages: {proc_role.name}")
     else:
@@ -221,23 +225,26 @@ def seed_doc_support_workflow(session):
 
     # ── Transitions ────────────────────────────────────────────────────────
     # Manager stage
-    _add_transition(session, stg_mgr.id, "assign",  to_stage_id=stg_proc.id)
+    _add_transition(session, stg_mgr.id, "assign",  to_stage_id=stg_proc.id,  label="Assign to Processor")
     _add_transition(session, stg_mgr.id, "reject",  terminal_status_id=st_cancelled.id,
-                    is_rejection=True, requires_comment=True)
-    _add_transition(session, stg_mgr.id, "cancel",  terminal_status_id=st_cancelled.id, is_rejection=True)
+                    is_rejection=True, requires_comment=True,                   label="Reject")
+    _add_transition(session, stg_mgr.id, "cancel",  terminal_status_id=st_cancelled.id,
+                    is_rejection=True,                                           label="Cancel")
 
-    # Processor queue stage (manager assigns specific processor → work stage)
-    _add_transition(session, stg_proc.id, "assign",  to_stage_id=stg_work.id)
-    _add_transition(session, stg_proc.id, "cancel",  terminal_status_id=st_cancelled.id, is_rejection=True)
+    # Processor queue stage (processor self-accepts → work stage)
+    _add_transition(session, stg_proc.id, "assign",  to_stage_id=stg_work.id,  label="Accept & Start")
+    _add_transition(session, stg_proc.id, "cancel",  terminal_status_id=st_cancelled.id,
+                    is_rejection=True,                                           label="Cancel")
 
-    # Processing stage (processor does work → sends to originator for review)
-    _add_transition(session, stg_work.id, "complete", to_stage_id=stg_review.id)
-    _add_transition(session, stg_work.id, "cancel",   terminal_status_id=st_cancelled.id, is_rejection=True)
+    # Processing stage
+    _add_transition(session, stg_work.id, "complete", to_stage_id=stg_review.id, label="Mark Complete")
+    _add_transition(session, stg_work.id, "cancel",   terminal_status_id=st_cancelled.id,
+                    is_rejection=True,                                             label="Cancel")
 
-    # Originator review (accept → close; reject → back to processor)
-    _add_transition(session, stg_review.id, "accept", terminal_status_id=st_completed.id)
+    # Originator review
+    _add_transition(session, stg_review.id, "accept", terminal_status_id=st_completed.id, label="Accept")
     _add_transition(session, stg_review.id, "reject", to_stage_id=stg_work.id,
-                    is_rejection=True, requires_comment=True)
+                    is_rejection=True, requires_comment=True,                              label="Request Changes")
 
     print(f"[DS-WF] Done. Definition ID: {defn_id}")
     session.commit()

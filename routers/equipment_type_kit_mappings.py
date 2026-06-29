@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import CategoryMaster, EquipmentTypeKitMapping, User
+from models import CategoryDetails, CategoryMaster, EquipmentTypeKitMapping, User
 
 router = APIRouter(
     prefix="/equipment-type-kit-mappings",
@@ -78,11 +78,11 @@ def create_mapping(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Validate both category masters exist
-    for type_id, label in [(payload.equipment_type_id, "equipment_type_id"),
-                           (payload.kit_type_id, "kit_type_id")]:
-        if not db.query(CategoryMaster).filter(CategoryMaster.id == type_id).first():
-            raise HTTPException(status_code=404, detail=f"{label} not found")
+    # Validate equipment_type_id against CategoryMaster, kit_type_id against CategoryDetails
+    if not db.query(CategoryMaster).filter(CategoryMaster.id == payload.equipment_type_id).first():
+        raise HTTPException(status_code=404, detail="equipment_type_id not found")
+    if not db.query(CategoryDetails).filter(CategoryDetails.id == payload.kit_type_id).first():
+        raise HTTPException(status_code=404, detail="kit_type_id not found")
 
     existing = db.query(EquipmentTypeKitMapping).filter(
         EquipmentTypeKitMapping.equipment_type_id == payload.equipment_type_id,

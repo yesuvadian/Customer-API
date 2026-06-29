@@ -1,6 +1,6 @@
-from typing import Any, Dict, List, Optional
 from uuid import UUID
 import os
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
@@ -307,6 +307,12 @@ def list_testing_requests(
     tester_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
     equipment_id: Optional[UUID] = None,
+    voltage_class: Optional[str] = Query(None, description="Asset-dashboard filter: voltage class"),
+    equipment_type: Optional[str] = Query(None, description="Asset-dashboard filter: equipment type name"),
+    make: Optional[str] = Query(None, description="Asset-dashboard filter: equipment manufacturer"),
+    commissioned_year: Optional[str] = Query(None, description="Asset-dashboard filter: commissioning year"),
+    failure_year: Optional[str] = Query(None, description="Asset-dashboard filter: retirement/failure year"),
+    capacity_mva: Optional[str] = Query(None, description="Asset-dashboard filter: capacity label"),
     date_from: Optional[str] = Query(None, description="Filter completed_at >= YYYY-MM-DD"),
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
     db: Session = Depends(get_db),
@@ -348,6 +354,12 @@ def list_testing_requests(
         date_from=_parse_date(date_from),
         date_to=_parse_date(date_to),
         search=search,
+        voltage_class=voltage_class,
+        equipment_type=equipment_type,
+        make=make,
+        commissioned_year=commissioned_year,
+        failure_year=failure_year,
+        capacity_mva=capacity_mva,
     )
 
     total = service.count_requests(**common)
@@ -364,6 +376,56 @@ def list_testing_requests(
         "page_size": ps,
         "has_more": (skip + len(serialized)) < total,
     }
+
+
+@router.get("/breakdown")
+def get_testing_request_breakdown(
+    search: Optional[str] = Query(None, description="Search by UEIC, bay number, request number, or title"),
+    status: Optional[str] = None,
+    category: Optional[str] = None,
+    originator_id: Optional[UUID] = None,
+    tester_id: Optional[UUID] = None,
+    department_id: Optional[UUID] = None,
+    equipment_id: Optional[UUID] = None,
+    date_from: Optional[str] = Query(None, description="Filter completed_at >= YYYY-MM-DD"),
+    date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    organization_id = current_user.organization_id
+    service = TestingRequestService(db)
+
+    if department_id is None and organization_id:
+        is_admin, scoped_dept = service.get_user_scope(current_user.id, organization_id)
+        if not is_admin and scoped_dept:
+            department_id = scoped_dept
+
+    dept_ids = None
+    if department_id:
+        subtree = get_dept_subtree_ids(db, department_id)
+        if len(subtree) > 1:
+            dept_ids = subtree
+
+    from datetime import date as _date
+    def _parse_date(s):
+        try:
+            return _date.fromisoformat(s) if s else None
+        except ValueError:
+            return None
+
+    return service.get_breakdown(
+        status_filter=status,
+        category_filter=category,
+        originator_id=originator_id,
+        tester_id=tester_id,
+        organization_id=organization_id,
+        department_id=department_id if dept_ids is None else None,
+        department_ids=dept_ids,
+        equipment_id=equipment_id,
+        date_from=_parse_date(date_from),
+        date_to=_parse_date(date_to),
+        search=search,
+    )
 
 
 @router.get("/{request_id}", response_model=TestingRequestResponse)
@@ -449,9 +511,6 @@ def approve_testing_results(
 
 
 # NOTE: Tester workflow endpoints (accept, start, submit_results)
-# are in routers/testing.py under the /testing prefix.
-
- # move to top of file
 
 @router.get("/{request_id}/report/preview", response_class=HTMLResponse)
 def request_report_preview(request_id: UUID, db: Session = Depends(get_db)):

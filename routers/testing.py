@@ -18,6 +18,7 @@ from schemas import (
     SubmitTestResultsBody,
 )
 from services.testing_service import TestingService
+from services.test_result_pdf_service import TestResultPDFService
 
 router = APIRouter(
     prefix="/testing",
@@ -637,14 +638,15 @@ def get_test_template_by_request_category(
             status_code=404,
             detail=f"No template mapped for request_category='{request_category}'",
         )
+    from services.org_test_template_service import active_template_filter
     tmpl = (
         db.query(OrgTestTemplate)
-        .filter(OrgTestTemplate.template_key == template_key)
+        .filter(OrgTestTemplate.template_key == template_key, active_template_filter())
         .first()
     )
     if not tmpl:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail=f"Template '{template_key}' not seeded — run /org-test-templates/provision/global")
+        raise HTTPException(status_code=404, detail=f"Template '{template_key}' not found or is disabled")
     svc = __import__('services.org_test_template_service', fromlist=['OrgTestTemplateService']).OrgTestTemplateService(db)
     from services.testing_service import _deduplicated_overall_sections
     data = copy.deepcopy(tmpl.template_data or {})
@@ -723,10 +725,24 @@ def create_structured_result(
 ):
     """Submit structured test results with JSONB data. Supports multi-session via test_session_id."""
     service = TestingService(db)
+    
+    # Validate tan delta test data before saving
+    test_data = data.test_data
+    if data.template_key in ["capacitance_tandelta_transformer", "tandelta_nct", "tandelta_comparison"]:
+        try:
+            pdf_service = TestResultPDFService(db)
+            test_data = pdf_service.process_tandelta_test_data(
+                test_data=test_data,
+                template_key=data.template_key,
+                request_id=request_id
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+    
     result = service.create_structured_result(
         request_id=request_id,
         template_key=data.template_key,
-        test_data=data.test_data,
+        test_data=test_data,
         overall_result=data.overall_result,
         remarks=data.remarks,
         tester_id=current_user.id,
