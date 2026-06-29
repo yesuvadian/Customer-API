@@ -50,15 +50,27 @@ def _enrich(req):
 
     # Equipment asset register fields
     if req.equipment:
-        req.equipment_ueic  = req.equipment.ueic
-        req.equipment_name  = req.equipment.ueic
-        req.bay_number      = req.equipment.bay_number
-        req.serial_in_bay   = req.equipment.serial_in_bay
+        eq = req.equipment
+        req.equipment_ueic    = eq.ueic
+        req.equipment_name    = eq.ueic
+        req.bay_number        = eq.bay_number
+        req.serial_in_bay     = eq.serial_in_bay
+        req.voltage_class     = eq.voltage_class or None
+        req.equipment_make    = eq.manufacturer or None
+        req.commissioned_year = (
+            str(eq.commissioned_date.year) if eq.commissioned_date else None
+        )
+        rated = getattr(eq, "rated_mva", None) or getattr(eq, "capacity_mva", None)
+        req.capacity_mva = str(rated) if rated else None
     else:
-        req.equipment_ueic  = None
-        req.equipment_name  = None
-        req.bay_number      = None
-        req.serial_in_bay   = None
+        req.equipment_ueic    = None
+        req.equipment_name    = None
+        req.bay_number        = None
+        req.serial_in_bay     = None
+        req.voltage_class     = None
+        req.equipment_make    = None
+        req.commissioned_year = None
+        req.capacity_mva      = None
 
     # Originator
     if req.originator:

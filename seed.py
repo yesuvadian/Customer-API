@@ -9363,6 +9363,21 @@ def _seed_notification_event_catalogue(session) -> int:
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
             default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
         ),
+        # ── TR Configurable Workflow Engine ───────────────────────────────────
+        dict(
+            event_type="tr_wf_status_changed",
+            label="TR Workflow Status Changed",
+            group_name="Stage Workflows",
+            description=(
+                "Fired on every stage transition in the configurable Test Request workflow. "
+                "Recipients: originator + assignee (if set) + active stage roles."
+            ),
+            context_vars=[
+                "request_number", "equipment", "status_name", "stage_name",
+                "action_code", "originator",
+            ],
+            default_roles=[],
+        ),
         dict(
             event_type="precommission_stage_changed",
             label="Pre-Commission Stage Advanced",
