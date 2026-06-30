@@ -187,10 +187,12 @@ class TestScheduleDashboardService:
         # 5. Batch: last completed TestingRequest per (equipment_id, test_type_id)
         last_completed = self._batch_last_completed(eq_ids, test_type_ids_ordered)
 
-        # 6. Build rows
+        # 6. Build rows — only equipment that have at least one schedule
         rows = []
         for eq in equipments:
             eq_scheds = sched_idx.get(eq.id, {})
+            if not eq_scheds:
+                continue
             cells: dict[str, dict] = {}
             worst_status = "na"
 
