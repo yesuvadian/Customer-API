@@ -472,29 +472,35 @@ class TestScheduleDashboardService:
         for dept_id, cnt in eq_sched_dept_rows:
             dept_sched_counts[dept_id] = dept_sched_counts.get(dept_id, 0) + cnt
 
-        # Build parent lookup {id: (parent_id, parent_name)}
+        # Build parent lookup {str(id): str(parent_id)}
         parent_map: dict = {}
         for d in depts:
-            if d.parent_department_id and d.parent_department:
-                parent_map[d.id] = (
-                    str(d.parent_department_id),
-                    d.parent_department.name,
-                )
+            if d.parent_department_id:
+                parent_map[str(d.id)] = str(d.parent_department_id)
+
+        # Propagate schedule counts up to all ancestors (string-keyed)
+        str_sched_counts = {str(k): v for k, v in dept_sched_counts.items()}
+        for dept_id_str, cnt in list(str_sched_counts.items()):
+            pid = parent_map.get(dept_id_str)
+            while pid:
+                str_sched_counts[pid] = str_sched_counts.get(pid, 0) + cnt
+                pid = parent_map.get(pid)
+        dept_sched_counts = str_sched_counts
 
         # Only include departments that have equipment OR org-level schedules
         dept_list = []
         for d in depts:
             eq_cnt    = dept_eq_counts.get(d.id, 0)
-            sched_cnt = dept_sched_counts.get(d.id, 0)
+            sched_cnt = dept_sched_counts.get(str(d.id), 0)
             if eq_cnt > 0 or sched_cnt > 0:
-                parent_info = parent_map.get(d.id)
+                parent_id_str = parent_map.get(str(d.id))
                 dept_list.append({
                     "id":              str(d.id),
                     "name":            d.name,
                     "equipment_count": eq_cnt,
                     "schedule_count":  sched_cnt,
-                    "parent_id":       parent_info[0] if parent_info else None,
-                    "parent_name":     parent_info[1] if parent_info else None,
+                    "parent_id":       parent_id_str,
+                    "parent_name":     None,
                 })
 
         # Sort departments by equipment count descending
