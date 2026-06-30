@@ -1837,4 +1837,34 @@ def download_nameplate_file(
         media_type=mime,
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
-    
+
+
+@router.post("/sync-schedules", status_code=200)
+def sync_equipment_schedules(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Backfill operational test schedules for all active equipment in the org.
+    Calls instantiate_equipment_schedules for each equipment that doesn't yet
+    have operational schedules — safe to call multiple times (skips existing).
+    """
+    org_id = _enforce_org_scope(current_user)
+    from services.test_request_schedule_service import TestRequestScheduleService
+
+    equipments = (
+        db.query(Equipment)
+        .filter(Equipment.organization_id == org_id, Equipment.status == "active")
+        .all()
+    )
+
+    synced = 0
+    errors = []
+    for eq in equipments:
+        try:
+            TestRequestScheduleService.instantiate_equipment_schedules(db, eq, current_user.id)
+            synced += 1
+        except Exception as e:
+            errors.append({"equipment_id": str(eq.id), "error": str(e)})
+
+    return {"synced": synced, "errors": errors}

@@ -439,7 +439,7 @@ class TestScheduleDashboardService:
         for dept_id, cnt in eq_dept_rows:
             dept_eq_counts[dept_id] = cnt
 
-        # Org-level schedule count per department
+        # Schedule count per department — org-level (equipment_id IS NULL)
         dept_sched_counts: dict = {}
         sched_dept_rows = (
             self.db.query(TestRequestSchedule.department_id, func.count(TestRequestSchedule.id))
@@ -455,6 +455,22 @@ class TestScheduleDashboardService:
         )
         for dept_id, cnt in sched_dept_rows:
             dept_sched_counts[dept_id] = cnt
+
+        # Schedule count per department — equipment-linked (via equipment.department_id)
+        eq_sched_dept_rows = (
+            self.db.query(Equipment.department_id, func.count(TestRequestSchedule.id))
+            .join(TestRequestSchedule, TestRequestSchedule.equipment_id == Equipment.id)
+            .filter(
+                TestRequestSchedule.organization_id == org_id,
+                TestRequestSchedule.is_active == True,
+                TestRequestSchedule.is_deleted == False,
+                Equipment.department_id.isnot(None),
+            )
+            .group_by(Equipment.department_id)
+            .all()
+        )
+        for dept_id, cnt in eq_sched_dept_rows:
+            dept_sched_counts[dept_id] = dept_sched_counts.get(dept_id, 0) + cnt
 
         # Build parent lookup {id: (parent_id, parent_name)}
         parent_map: dict = {}
