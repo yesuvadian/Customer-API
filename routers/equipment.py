@@ -422,7 +422,7 @@ def download_bulk_template(
     for ci, col_def in enumerate(all_cols, start=1):
         key  = col_def[0]
         lbl  = col_def[1]
-        cell = ws.cell(row=2, column=ci, value=lbl)
+        cell = ws.cell(row=2, column=ci, value=key if key.startswith("__") else lbl)
         is_meta    = key.startswith("__")
         is_np      = ci > (len(meta_cols) + len(display_cols) + len(fixed_cols))
         cell.font  = np_hdr_font if is_np else hdr_font
