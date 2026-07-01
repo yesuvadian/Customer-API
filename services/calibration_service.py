@@ -57,6 +57,31 @@ from models import (
     TestResult,
 )
 
+def _fire_calibration_notification(db: Session, equipment: Equipment, event_type: str,
+                                    next_due_date: date, days: int) -> None:
+    """Fire a kit calibration notification without crashing if service unavailable."""
+    try:
+        from services.notification_service import NotificationService
+        dept_name = equipment.department.name if equipment.department else ""
+        NotificationService(db).fire(
+            event_type=event_type,
+            context={
+                "kit.ueic":              equipment.ueic or str(equipment.id),
+                "kit.name":              equipment.name or equipment.ueic or "",
+                "kit.department":        dept_name,
+                "kit.calibration_due_date": next_due_date.isoformat(),
+                "kit.days_remaining":    str(max(0, days)),
+                "kit.days_overdue":      str(abs(min(0, days))),
+            },
+            organization_id=equipment.organization_id,
+            source_id=equipment.id,
+            source_type="equipment",
+            severity="alert" if event_type == "kit_calibration_due" else "critical",
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("calibration notification failed: %s", exc)
+
 CALIBRATION_WORKFLOW_CODE = "CALIBRATION"
 
 CALIBRATION_KEY = "calibration"
@@ -806,6 +831,11 @@ class CalibrationService:
             )
             self.db.add(new_req)
             created.append(str(equipment_id))
+
+            # Fire notification
+            days_until = (next_due - today).days
+            event = "kit_calibration_overdue" if days_until < 0 else "kit_calibration_due"
+            _fire_calibration_notification(self.db, equipment, event, next_due, days_until)
 
         self.db.commit()
         return {

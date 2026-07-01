@@ -14,7 +14,7 @@ from sqlalchemy import func, extract
 
 from database import get_db
 from auth_utils import get_current_user
-from models import CategoryMaster, Equipment, EquipmentTypeKitMapping, Module, OrgDepartment, User
+from models import CategoryDetails, CategoryMaster, Equipment, EquipmentTypeKitMapping, Module, OrgDepartment, User
 from middleware.org_auth import check_org_permission
 from schemas import (
     EquipmentCreate,
@@ -285,6 +285,497 @@ def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: 
         status_code=404,
         detail=f"Field '{field_key}' not found in nameplate template.",
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BULK IMPORT — template download, validate, import
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_FIXED_BULK_COLS = [
+    ("bay_number",            "Bay Number",              "e.g. 04"),
+    ("voltage_class",         "Voltage Class (kV)",      "400 / 220 / 110 / 66 / 33 / 11"),
+    ("manufacturer",          "Manufacturer",            "e.g. ABB"),
+    ("model_number",          "Model Number",            "e.g. TRAFO-X"),
+    ("factory_serial_number", "Factory Serial Number",   "e.g. SN-2024-001"),
+    ("year_of_manufacture",   "Year of Manufacture",     "e.g. 2015"),
+    ("commissioned_date",     "Commissioned Date",       "YYYY-MM-DD"),
+    ("phase",                 "Phase",                   "R / Y / B (leave blank for transformers)"),
+    ("ct_ratio_actual",       "CT Ratio (Nameplate)",    "e.g. 800-400/1-1A"),
+    ("ct_ratio_current",      "CT Ratio (Active Tap)",   "e.g. 800/1A"),
+    ("pt_ratio",              "PT Ratio",                "e.g. 220kV/110V"),
+    ("vector_group",          "Vector Group",            "e.g. YNyn0d11"),
+    ("impedance_pct",         "Impedance (%)",           "e.g. 9.8"),
+    ("latitude",              "Latitude",                "e.g. 12.9716"),
+    ("longitude",             "Longitude",               "e.g. 77.5946"),
+    ("scada_tag",             "SCADA Tag",               "e.g. SS_TR1_OIL_TEMP"),
+]
+
+_SKIP_FIELD_TYPES = {"readonly", "file", "table"}
+
+
+def _get_nameplate_fields(db: Session, equipment_type_id: int, org_id) -> list:
+    """Return editable nameplate template fields for a given equipment type."""
+    from models import CategoryDetails, OrgTestTemplate
+    detail = (
+        db.query(CategoryDetails)
+        .filter(
+            CategoryDetails.category_master_id == equipment_type_id,
+            CategoryDetails.category_type == "nameplate",
+        )
+        .first()
+    )
+    if not detail:
+        return []
+    tmpl = (
+        db.query(OrgTestTemplate)
+        .filter(OrgTestTemplate.test_type_id == detail.id,
+                OrgTestTemplate.org_id == org_id)
+        .first()
+    ) or (
+        db.query(OrgTestTemplate)
+        .filter(OrgTestTemplate.test_type_id == detail.id,
+                OrgTestTemplate.org_id.is_(None))
+        .first()
+    )
+    if not tmpl:
+        return []
+    fields = []
+    for section in (tmpl.template_data or {}).get("sections", []):
+        for f in section.get("fields", []):
+            if f.get("type") in _SKIP_FIELD_TYPES:
+                continue
+            fields.append(f)
+    return fields
+
+
+@router.get("/bulk-template")
+def download_bulk_template(
+    department_id: UUID = Query(...),
+    equipment_type_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate and return an Excel template pre-filled with the department and
+    nameplate columns for the given equipment type.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Protection
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    org_id = _enforce_org_scope(current_user)
+
+    dept = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+
+    equip_type = db.query(CategoryMaster).filter(CategoryMaster.id == equipment_type_id).first()
+    if not equip_type:
+        raise HTTPException(status_code=404, detail="Equipment type not found")
+
+    nameplate_fields = _get_nameplate_fields(db, equipment_type_id, org_id)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Equipment Import"
+
+    # ── Styles ────────────────────────────────────────────────────────────────
+    hdr_fill   = PatternFill("solid", fgColor="1E3A8A")
+    hdr_font   = Font(bold=True, color="FFFFFF", size=11)
+    locked_fill= PatternFill("solid", fgColor="E5E7EB")
+    hint_fill  = PatternFill("solid", fgColor="F9FAFB")
+    hint_font  = Font(italic=True, color="9CA3AF", size=10)
+    np_fill    = PatternFill("solid", fgColor="EFF6FF")
+    np_hdr_font= Font(bold=True, color="1D4ED8", size=11)
+    center     = Alignment(horizontal="center", vertical="center")
+    wrap       = Alignment(wrap_text=True, vertical="center")
+
+    # ── Build column list ─────────────────────────────────────────────────────
+    # Hidden metadata cols (col A, B) — not visible to user
+    meta_cols = [
+        ("__department_id__", str(department_id)),
+        ("__equipment_type_id__", str(equipment_type_id)),
+    ]
+    # Locked display col (col C)
+    display_cols = [("department", dept.name)]
+    fixed_cols   = _FIXED_BULK_COLS
+    np_cols      = [(f["key"], f.get("label", f["key"]), f.get("type", "text"), f.get("options", []))
+                    for f in nameplate_fields]
+
+    all_cols = meta_cols + display_cols + [(k, lbl, "") for k, lbl, _ in fixed_cols] + \
+               [(k, lbl, t, opts) for k, lbl, t, opts in np_cols]
+
+    total_cols = len(all_cols)
+
+    # ── Row 1: Title banner ───────────────────────────────────────────────────
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
+    title_cell = ws.cell(row=1, column=1,
+        value=f"Equipment Bulk Import — {dept.name} — {equip_type.name}")
+    title_cell.font  = Font(bold=True, color="FFFFFF", size=13)
+    title_cell.fill  = PatternFill("solid", fgColor="0F172A")
+    title_cell.alignment = center
+    ws.row_dimensions[1].height = 28
+
+    # ── Row 2: Column headers ─────────────────────────────────────────────────
+    ws.row_dimensions[2].height = 22
+    for ci, col_def in enumerate(all_cols, start=1):
+        key  = col_def[0]
+        lbl  = col_def[1]
+        cell = ws.cell(row=2, column=ci, value=key if key.startswith("__") else lbl)
+        is_meta    = key.startswith("__")
+        is_np      = ci > (len(meta_cols) + len(display_cols) + len(fixed_cols))
+        cell.font  = np_hdr_font if is_np else hdr_font
+        cell.fill  = np_fill     if is_np else (locked_fill if is_meta else hdr_fill)
+        cell.alignment = center
+
+    # ── Row 3: Hint/example row ────────────────────────────────────────────────
+    ws.row_dimensions[3].height = 18
+    hint_values = (
+        [str(department_id), str(equipment_type_id), dept.name]
+        + [hint for _, _, hint in fixed_cols]
+        + [f.get("placeholder", f"Enter {f.get('label',f['key'])}") for f in nameplate_fields
+           if f.get("type") not in _SKIP_FIELD_TYPES]
+    )
+    for ci, val in enumerate(hint_values, start=1):
+        cell = ws.cell(row=3, column=ci, value=val)
+        cell.font      = hint_font
+        cell.fill      = hint_fill
+        cell.alignment = wrap
+
+    # ── Data validation: voltage_class dropdown ────────────────────────────────
+    vc_col_idx = next(
+        (ci for ci, c in enumerate(all_cols, 1) if c[0] == "voltage_class"), None
+    )
+    if vc_col_idx:
+        vc_letter = get_column_letter(vc_col_idx)
+        dv = DataValidation(
+            type="list",
+            formula1='"400,220,110,66,33,11"',
+            allow_blank=True,
+        )
+        dv.sqref = f"{vc_letter}4:{vc_letter}1000"
+        ws.add_data_validation(dv)
+
+    # ── Data validation: phase dropdown ───────────────────────────────────────
+    phase_col_idx = next(
+        (ci for ci, c in enumerate(all_cols, 1) if c[0] == "phase"), None
+    )
+    if phase_col_idx:
+        ph_letter = get_column_letter(phase_col_idx)
+        dv2 = DataValidation(type="list", formula1='"R,Y,B"', allow_blank=True)
+        dv2.sqref = f"{ph_letter}4:{ph_letter}1000"
+        ws.add_data_validation(dv2)
+
+    # ── Data validation: nameplate dropdowns ──────────────────────────────────
+    np_start_ci = len(meta_cols) + len(display_cols) + len(fixed_cols) + 1
+    for rel_i, (key, lbl, ftype, opts) in enumerate(np_cols):
+        if ftype == "dropdown" and opts:
+            col_letter = get_column_letter(np_start_ci + rel_i)
+            formula    = '"' + ",".join(str(o) for o in opts[:30]) + '"'
+            dv3 = DataValidation(type="list", formula1=formula, allow_blank=True)
+            dv3.sqref = f"{col_letter}4:{col_letter}1000"
+            ws.add_data_validation(dv3)
+
+    # ── Column widths & hide metadata cols ────────────────────────────────────
+    for ci, col_def in enumerate(all_cols, start=1):
+        key = col_def[0]
+        col_letter = get_column_letter(ci)
+        if key.startswith("__"):
+            ws.column_dimensions[col_letter].hidden = True
+            ws.column_dimensions[col_letter].width  = 0
+        elif key == "department":
+            ws.column_dimensions[col_letter].width = 28
+        else:
+            ws.column_dimensions[col_letter].width = 22
+
+    # ── Freeze panes at row 4, col D (first editable data col) ───────────────
+    first_data_col = get_column_letter(len(meta_cols) + len(display_cols) + 1)
+    ws.freeze_panes = f"{first_data_col}4"
+
+    # ── Output ────────────────────────────────────────────────────────────────
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"equipment_import_{dept.name.replace(' ', '_')}_{equip_type.name.replace(' ', '_')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _parse_bulk_excel(contents: bytes) -> tuple[list, list]:
+    """
+    Parse the bulk import Excel.
+    Returns (meta, rows) where meta = {department_id, equipment_type_id}
+    and rows = list of dicts with field values.
+    """
+    import openpyxl
+    wb = openpyxl.load_workbook(filename=BytesIO(contents), data_only=True)
+    ws = wb.active
+
+    # Row 2 = headers, row 3 = hints, row 4+ = data
+    headers = [ws.cell(row=2, column=ci).value for ci in range(1, ws.max_column + 1)]
+
+    # Extract metadata from hidden cols (A, B)
+    meta = {}
+    for ci, h in enumerate(headers, start=1):
+        if h == "__department_id__":
+            meta["department_id"] = ws.cell(row=3, column=ci).value
+        elif h == "__equipment_type_id__":
+            meta["equipment_type_id"] = ws.cell(row=3, column=ci).value
+
+    rows = []
+    for row_idx in range(4, ws.max_row + 1):
+        row_vals = {h: ws.cell(row=row_idx, column=ci).value
+                    for ci, h in enumerate(headers, start=1)
+                    if h and not str(h).startswith("__")}
+        # Skip completely empty rows
+        if all(v is None or str(v).strip() == "" for v in row_vals.values()):
+            continue
+        row_vals["__row__"] = row_idx
+        rows.append(row_vals)
+
+    return meta, rows
+
+
+def _validate_bulk_rows(rows: list, meta: dict, db: Session) -> list:
+    """Validate each row and return list of result dicts."""
+    import re
+    from datetime import datetime
+
+    valid_voltage = {"400", "220", "110", "66", "33", "11"}
+    valid_phase   = {"R", "Y", "B"}
+
+    results = []
+    for row in rows:
+        errors = []
+        row_num = row.get("__row__", "?")
+
+        # bay_number — no validation needed (free text)
+
+        # voltage_class
+        vc = row.get("voltage_class")
+        if vc and str(vc).strip() not in valid_voltage:
+            errors.append(f"voltage_class '{vc}' invalid — use: 400/220/110/66/33/11")
+
+        # phase
+        ph = row.get("phase")
+        if ph and str(ph).strip().upper() not in valid_phase:
+            errors.append(f"phase '{ph}' invalid — use: R/Y/B")
+        if ph:
+            row["phase"] = str(ph).strip().upper()
+
+        # year_of_manufacture
+        yom = row.get("year_of_manufacture")
+        if yom is not None and str(yom).strip():
+            try:
+                yom_int = int(float(str(yom)))
+                if not (1900 <= yom_int <= datetime.now().year + 1):
+                    errors.append(f"year_of_manufacture '{yom}' out of range")
+                else:
+                    row["year_of_manufacture"] = yom_int
+            except ValueError:
+                errors.append(f"year_of_manufacture '{yom}' is not a valid year")
+
+        # commissioned_date
+        cd = row.get("commissioned_date")
+        if cd and str(cd).strip():
+            parsed_date = None
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+                try:
+                    parsed_date = datetime.strptime(str(cd).strip(), fmt)
+                    break
+                except ValueError:
+                    continue
+            if not parsed_date and hasattr(cd, "year"):
+                parsed_date = cd  # openpyxl already parsed it as datetime
+            if parsed_date:
+                row["commissioned_date"] = parsed_date.isoformat()
+            else:
+                errors.append(f"commissioned_date '{cd}' not parseable — use YYYY-MM-DD")
+
+        # latitude / longitude
+        for coord in ("latitude", "longitude"):
+            val = row.get(coord)
+            if val is not None and str(val).strip():
+                try:
+                    row[coord] = float(val)
+                except (ValueError, TypeError):
+                    errors.append(f"{coord} '{val}' is not a valid number")
+
+        # impedance_pct
+        imp = row.get("impedance_pct")
+        if imp is not None and str(imp).strip():
+            try:
+                row["impedance_pct"] = float(imp)
+            except (ValueError, TypeError):
+                errors.append(f"impedance_pct '{imp}' is not a valid number")
+
+        results.append({
+            "row": row_num,
+            "status": "error" if errors else "valid",
+            "errors": errors,
+            "data": {k: v for k, v in row.items() if not k.startswith("__")},
+        })
+
+    return results
+
+
+@router.post("/bulk-validate")
+async def bulk_validate(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Upload a filled bulk-import Excel and get per-row validation results.
+    Returns {department_id, equipment_type_id, rows: [{row, status, errors, data}]}
+    """
+    _enforce_org_scope(current_user)
+    contents = await file.read()
+    try:
+        meta, rows = _parse_bulk_excel(contents)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse Excel: {exc}")
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No data rows found in the file (rows start at row 4)")
+
+    results = _validate_bulk_rows(rows, meta, db)
+    valid_count = sum(1 for r in results if r["status"] == "valid")
+    error_count = len(results) - valid_count
+
+    return {
+        "department_id": meta.get("department_id"),
+        "equipment_type_id": meta.get("equipment_type_id"),
+        "total": len(results),
+        "valid": valid_count,
+        "errors": error_count,
+        "rows": results,
+    }
+
+
+@router.post("/bulk-import")
+async def bulk_import(
+    file: UploadFile = File(...),
+    skip_errors: bool = Query(default=True, description="Skip invalid rows and import valid ones"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Upload the filled Excel and import all valid rows as new equipment.
+    Returns {imported, skipped, errors: [{row, errors}]}
+    """
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_add")
+
+    contents = await file.read()
+    try:
+        meta, rows = _parse_bulk_excel(contents)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse Excel: {exc}")
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No data rows found in the file")
+
+    # Resolve department_id and equipment_type_id from metadata
+    try:
+        dept_id  = UUID(str(meta.get("department_id", "")).strip())
+        eq_type  = int(str(meta.get("equipment_type_id", "")).strip())
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read department_id / equipment_type_id from template metadata. "
+                   "Please use the template downloaded from this system.",
+        )
+
+    dept = db.query(OrgDepartment).filter(OrgDepartment.id == dept_id).first()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department in template not found")
+
+    validated = _validate_bulk_rows(rows, meta, db)
+
+    imported   = 0
+    skipped    = 0
+    error_rows = []
+
+    for result in validated:
+        if result["status"] == "error":
+            if skip_errors:
+                skipped += 1
+                error_rows.append({"row": result["row"], "errors": result["errors"]})
+                continue
+            else:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Row {result['row']} invalid: {'; '.join(result['errors'])}",
+                )
+
+        d = result["data"]
+
+        # Separate fixed fields from nameplate data
+        fixed_keys = {k for k, _, _ in _FIXED_BULK_COLS} | {"department"}
+        nameplate_data = {k: v for k, v in d.items()
+                          if k not in fixed_keys and v is not None and str(v).strip() != ""}
+
+        from datetime import datetime as _dt
+        cd_raw = d.get("commissioned_date")
+        commissioned_date = None
+        if cd_raw:
+            try:
+                commissioned_date = _dt.fromisoformat(str(cd_raw))
+            except ValueError:
+                pass
+
+        try:
+            equipment = EquipmentService.create_equipment(
+                db=db,
+                organization_id=org_id,
+                department_id=dept_id,
+                equipment_type_id=eq_type,
+                voltage_class=str(d["voltage_class"]).strip() if d.get("voltage_class") else None,
+                bay_number=str(d["bay_number"]).strip() if d.get("bay_number") else None,
+                nameplate_data=nameplate_data or None,
+                commissioned_date=commissioned_date,
+                manufacturer=str(d["manufacturer"]).strip() if d.get("manufacturer") else None,
+                model_number=str(d["model_number"]).strip() if d.get("model_number") else None,
+                factory_serial_number=str(d["factory_serial_number"]).strip() if d.get("factory_serial_number") else None,
+                year_of_manufacture=d.get("year_of_manufacture"),
+                latitude=d.get("latitude"),
+                longitude=d.get("longitude"),
+                phase=d.get("phase"),
+                ct_ratio_actual=str(d["ct_ratio_actual"]).strip() if d.get("ct_ratio_actual") else None,
+                ct_ratio_current=str(d["ct_ratio_current"]).strip() if d.get("ct_ratio_current") else None,
+                pt_ratio=str(d["pt_ratio"]).strip() if d.get("pt_ratio") else None,
+                vector_group=str(d["vector_group"]).strip() if d.get("vector_group") else None,
+                impedance_pct=d.get("impedance_pct"),
+                created_by=current_user.id,
+            )
+            db.flush()
+            imported += 1
+
+            # Non-fatal post-creation hooks
+            try:
+                from services.test_request_schedule_service import TestRequestScheduleService
+                TestRequestScheduleService.instantiate_equipment_schedules(db, equipment, current_user.id)
+            except Exception:
+                pass
+
+        except Exception as exc:
+            db.rollback()
+            skipped += 1
+            error_rows.append({"row": result["row"], "errors": [str(exc)]})
+            continue
+
+    db.commit()
+
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "error_rows": error_rows,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1122,6 +1613,306 @@ def get_department_hierarchy_with_counts(
         })
 
     return result
+
+
+@router.get("/testing-kits/import-template")
+def download_testing_kit_import_template(
+    dept_name: Optional[str] = Query(None, description="Pre-fill department name in sample row"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return a CSV template for bulk-importing testing kits.
+
+    The file has three sections:
+      1. Header row
+      2. One sample data row (delete before uploading)
+      3. A reference block listing all valid kit_type values from the DB
+    """
+    import csv
+    import io
+
+    headers = [
+        "kit_type",
+        "manufacturer",
+        "model_number",
+        "factory_serial_number",
+        "year_of_manufacture",
+        "last_calibration_date",
+        "calibration_due_date",
+        "calibration_authority",
+        "certificate_ref",
+        "measurement_range",
+        "accuracy_class",
+        "is_portable",
+        "rated_voltage",
+        "department_name",
+        "storage_location",
+        "notes",
+        "status",
+    ]
+    sample = [
+        "Relay Test Kit",          # must match one of the valid kit types below
+        "Omicron",
+        "CMC 356",
+        "SN-00123",                # unique serial number
+        "2022",
+        "2024-01-15",              # YYYY-MM-DD
+        "2025-01-15",              # YYYY-MM-DD, must be after last_calibration_date
+        "NABL Lab",
+        "CERT-2024-001",
+        "0-400 V / 0-10 A",
+        "Class 0.5",
+        "true",                    # true or false
+        "415V",
+        dept_name or "— select from reference below —",
+        "Cabinet A2",
+        "Primary relay test kit",
+        "active",                  # active | under_repair | retired
+    ]
+
+    # Fetch valid kit types live from the DB
+    kit_subtypes = (
+        db.query(CategoryDetails.name)
+        .join(CategoryMaster, CategoryDetails.category_master_id == CategoryMaster.id)
+        .filter(
+            CategoryMaster.name == "Testing Kit",
+            CategoryMaster.is_active == True,
+            CategoryDetails.is_active == True,
+        )
+        .order_by(CategoryDetails.name)
+        .all()
+    )
+    valid_kit_types = [row[0] for row in kit_subtypes]
+
+    # Fetch valid station names for this org
+    org_id = _enforce_org_scope(current_user)
+    departments = (
+        db.query(OrgDepartment.name)
+        .filter(OrgDepartment.organization_id == org_id, OrgDepartment.is_active == True)
+        .order_by(OrgDepartment.name)
+        .all()
+    )
+    valid_depts = [row[0] for row in departments]
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    # Section 1 & 2: header + sample
+    writer.writerow(headers)
+    writer.writerow(sample)
+
+    # Section 3: reference block
+    writer.writerow([])
+    writer.writerow(["# ── REFERENCE: Valid kit_type values (copy exactly) ──"])
+    writer.writerow(["# kit_type"])
+    for name in valid_kit_types:
+        writer.writerow([f"# {name}"])
+    writer.writerow([])
+    writer.writerow(["# ── REFERENCE: Valid department_name (station) values (copy exactly) ──"])
+    writer.writerow(["# department_name"])
+    for name in valid_depts:
+        writer.writerow([f"# {name}"])
+    writer.writerow([])
+    writer.writerow(["# ── REFERENCE: Valid status values ──"])
+    for s in ["# active", "# under_repair", "# retired"]:
+        writer.writerow([s])
+    writer.writerow([])
+    writer.writerow(["# ── REFERENCE: Date format (any of these work) ──"])
+    writer.writerow(["# YYYY-MM-DD  e.g. 2025-06-15"])
+    writer.writerow(["# DD-MM-YYYY  e.g. 15-06-2025"])
+    writer.writerow(["# DD/MM/YYYY  e.g. 15/06/2025"])
+    writer.writerow([])
+    writer.writerow(["# DELETE this reference section and the sample row before uploading."])
+
+    csv_bytes = buf.getvalue().encode("utf-8-sig")
+
+    return StreamingResponse(
+        iter([csv_bytes]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=testing_kit_import_template.csv"},
+    )
+
+
+@router.post("/testing-kits/bulk-import")
+def bulk_import_testing_kits(
+    file: UploadFile = File(...),
+    org_id: UUID = Query(...),
+    skip_errors: bool = Query(False, description="Skip invalid rows instead of aborting"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Bulk-import testing kits from a CSV file.
+
+    Accepts the CSV produced by /testing-kits/import-template.
+    Reference/comment rows (starting with #) and blank rows are ignored.
+    Returns { imported, skipped, errors: [{row, field, reason}] }.
+    """
+    import csv
+    import io
+    import uuid as _uuid
+    from datetime import datetime as _dt
+
+    _require_permission(db, current_user, "can_import")
+
+    content = file.file.read().decode("utf-8-sig")
+    def _is_comment_or_blank(line: str) -> bool:
+        s = line.strip()
+        return not s or s.startswith("#") or s.startswith('"#')
+
+    reader = csv.DictReader(
+        (line for line in io.StringIO(content) if not _is_comment_or_blank(line))
+    )
+
+    # Fetch kit subtype lookup: name (lower) → CategoryDetails id
+    kit_master = db.query(CategoryMaster).filter(
+        CategoryMaster.name == "Testing Kit", CategoryMaster.is_active == True
+    ).first()
+    if not kit_master:
+        raise HTTPException(status_code=400, detail="Testing Kit master category not found")
+
+    kit_subtypes = {
+        cd.name.lower(): cd
+        for cd in db.query(CategoryDetails).filter(
+            CategoryDetails.category_master_id == kit_master.id,
+            CategoryDetails.is_active == True,
+        ).all()
+    }
+
+    # Department lookup: name (lower) → OrgDepartment
+    depts = {
+        d.name.lower(): d
+        for d in db.query(OrgDepartment).filter(OrgDepartment.organization_id == org_id).all()
+    }
+
+    # Existing serial numbers (uniqueness check)
+    existing_serials = {
+        r[0].lower()
+        for r in db.query(Equipment.factory_serial_number).filter(
+            Equipment.organization_id == org_id,
+            Equipment.equipment_type_id == kit_master.id,
+            Equipment.factory_serial_number.isnot(None),
+        ).all()
+        if r[0]
+    }
+
+    imported, skipped = 0, 0
+    errors = []
+
+    for row_num, row in enumerate(reader, start=2):  # row 1 = headers
+        # Skip blank rows and any comment row that slipped through (e.g. quoted "#..." values)
+        if not any(v and v.strip() for v in row.values()):
+            continue
+        first_val = next(iter(row.values()), "") or ""
+        if first_val.strip().startswith("#"):
+            continue
+
+        row_errors = []
+
+        kit_type_name = (row.get("kit_type") or "").strip()
+        manufacturer = (row.get("manufacturer") or "").strip() or None
+        model_number = (row.get("model_number") or "").strip() or None
+        serial = (row.get("factory_serial_number") or "").strip()
+        year_mfg = (row.get("year_of_manufacture") or "").strip() or None
+        last_cal = (row.get("last_calibration_date") or "").strip() or None
+        cal_due = (row.get("calibration_due_date") or "").strip() or None
+        cal_auth = (row.get("calibration_authority") or "").strip() or None
+        cert_ref = (row.get("certificate_ref") or "").strip() or None
+        meas_range = (row.get("measurement_range") or "").strip() or None
+        accuracy = (row.get("accuracy_class") or "").strip() or None
+        portable_raw = (row.get("is_portable") or "true").strip().lower()
+        rated_voltage = (row.get("rated_voltage") or "").strip() or None
+        dept_name = (row.get("department_name") or "").strip()
+        storage_loc = (row.get("storage_location") or "").strip() or None
+        notes = (row.get("notes") or "").strip() or None
+        status_raw = (row.get("status") or "active").strip().lower()
+
+        # Validate kit_type
+        kit_detail = kit_subtypes.get(kit_type_name.lower())
+        if not kit_detail:
+            row_errors.append(f"kit_type '{kit_type_name}' not found — valid values: {', '.join(kit_subtypes.keys())}")
+
+        # Validate serial
+        if not serial:
+            row_errors.append("factory_serial_number is required")
+        elif serial.lower() in existing_serials:
+            row_errors.append(f"factory_serial_number '{serial}' already exists in this org")
+
+        # Validate dates
+        def _parse_date(val, field):
+            if not val:
+                return None
+            for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"):
+                try:
+                    return _dt.strptime(val, fmt)
+                except ValueError:
+                    continue
+            row_errors.append(f"{field}: unrecognised date '{val}' — use YYYY-MM-DD or DD-MM-YYYY")
+            return None
+
+        last_cal_dt = _parse_date(last_cal, "last_calibration_date")
+        cal_due_dt = _parse_date(cal_due, "calibration_due_date")
+        if last_cal_dt and cal_due_dt and cal_due_dt <= last_cal_dt:
+            row_errors.append("calibration_due_date must be after last_calibration_date")
+
+        # Validate status
+        valid_statuses = ("active", "under_repair", "retired")
+        if status_raw not in valid_statuses:
+            row_errors.append(f"status must be one of: {', '.join(valid_statuses)}")
+
+        # Validate portable
+        is_portable = portable_raw in ("true", "1", "yes")
+
+        # Resolve department — optional, kit can be registered without a station
+        dept = depts.get(dept_name.lower()) if dept_name else None
+        if dept_name and not dept:
+            row_errors.append(f"department_name '{dept_name}' not found — must match an exact station name or leave blank")
+        dept_id = dept.id if dept else None
+
+        if row_errors:
+            skipped += 1
+            errors.append({"row": row_num, "kit_type": kit_type_name, "serial": serial, "errors": row_errors})
+            if not skip_errors:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"message": f"Row {row_num} invalid", "errors": row_errors},
+                )
+            continue
+
+        nameplate = {
+            "kit_subtype": kit_type_name,
+            **({"last_calibration_date": last_cal} if last_cal else {}),
+            **({"calibration_due_date": cal_due} if cal_due else {}),
+            **({"calibration_authority": cal_auth} if cal_auth else {}),
+            **({"certificate_ref": cert_ref} if cert_ref else {}),
+            **({"measurement_range": meas_range} if meas_range else {}),
+            **({"accuracy_class": accuracy} if accuracy else {}),
+            "is_portable": is_portable,
+            **({"rated_voltage": rated_voltage} if rated_voltage else {}),
+            **({"storage_location": storage_loc} if storage_loc else {}),
+        }
+
+        equipment = EquipmentService.create_equipment(
+            db=db,
+            organization_id=org_id,
+            department_id=dept_id,
+            equipment_type_id=kit_master.id,
+            bay_number=kit_type_name,
+            voltage_class="0LV",
+            nameplate_data=nameplate,
+            manufacturer=manufacturer,
+            model_number=model_number,
+            factory_serial_number=serial,
+            year_of_manufacture=int(year_mfg) if year_mfg and year_mfg.isdigit() else None,
+            created_by=current_user.id,
+        )
+        existing_serials.add(serial.lower())
+        imported += 1
+
+    db.commit()
+    return {"imported": imported, "skipped": skipped, "errors": errors}
+
+
 @router.get("/testing-kits")
 def get_testing_kits(
     org_id: UUID = Query(..., description="Organization ID"),
@@ -1185,24 +1976,25 @@ def get_testing_kits(
         ).all()
         return {"all": [_kit_row(k, k.department.name if k.department else "") for k in all_kits]}
 
-    at_station = _query_kits([department_id])
+    # Recursively collect all descendant dept IDs so zone-level drill-down works
+    def _all_descendant_ids(root_id) -> list:
+        from sqlalchemy import text as sa_text
+        rows = db.execute(sa_text("""
+            WITH RECURSIVE subtree AS (
+                SELECT id FROM org_departments WHERE id = :root_id
+                UNION ALL
+                SELECT d.id FROM org_departments d
+                INNER JOIN subtree s ON d.parent_department_id = s.id
+                WHERE d.is_active = true
+            )
+            SELECT id FROM subtree
+        """), {"root_id": str(root_id)}).fetchall()
+        return [r[0] for r in rows]
 
-    dept = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
-    nearby_dept_ids = []
-    if dept and dept.parent_department_id:
-        siblings = db.query(OrgDepartment).filter(
-            OrgDepartment.parent_department_id == dept.parent_department_id,
-            OrgDepartment.id != department_id,
-            OrgDepartment.is_active == True,
-        ).all()
-        nearby_dept_ids = [dept.parent_department_id] + [s.id for s in siblings]
+    dept_ids = _all_descendant_ids(department_id)
+    all_kits = _query_kits(dept_ids)
 
-    nearby = _query_kits(nearby_dept_ids) if nearby_dept_ids else []
-
-    return {
-        "at_station": [_kit_row(k, "at_station") for k in at_station],
-        "nearby": [_kit_row(k, k.department.name if k.department else "") for k in nearby],
-    }
+    return {"all": [_kit_row(k, k.department.name if k.department else "") for k in all_kits]}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1837,4 +2629,34 @@ def download_nameplate_file(
         media_type=mime,
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
-    
+
+
+@router.post("/sync-schedules", status_code=200)
+def sync_equipment_schedules(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Backfill operational test schedules for all active equipment in the org.
+    Calls instantiate_equipment_schedules for each equipment that doesn't yet
+    have operational schedules — safe to call multiple times (skips existing).
+    """
+    org_id = _enforce_org_scope(current_user)
+    from services.test_request_schedule_service import TestRequestScheduleService
+
+    equipments = (
+        db.query(Equipment)
+        .filter(Equipment.organization_id == org_id, Equipment.status == "active")
+        .all()
+    )
+
+    synced = 0
+    errors = []
+    for eq in equipments:
+        try:
+            TestRequestScheduleService.instantiate_equipment_schedules(db, eq, current_user.id)
+            synced += 1
+        except Exception as e:
+            errors.append({"equipment_id": str(eq.id), "error": str(e)})
+
+    return {"synced": synced, "errors": errors}
