@@ -224,16 +224,15 @@ def _get_departments_at_depth(db: Session, org_id, depth: int) -> list:
             WHERE d.is_active = true
               AND dt.depth < :max_depth
         )
-        SELECT dt.id, dt.name, od.aliases
+        SELECT dt.id, dt.name
         FROM dept_tree dt
-        JOIN org_departments od ON od.id = dt.id
         WHERE dt.depth = :depth ORDER BY dt.name
         """
     )
     rows = db.execute(
         sql, {"org_id": str(org_id), "depth": depth, "max_depth": depth}
     ).fetchall()
-    return [{"id": str(r[0]), "name": r[1], "aliases": r[2] or []} for r in rows]
+    return [{"id": str(r[0]), "name": r[1], "aliases": []} for r in rows]
 
 
 def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: str) -> dict:
@@ -706,6 +705,136 @@ def get_equipment_counts(
     return counts
 
 
+@router.get("/stats/group-counts")
+def get_equipment_group_counts(
+    group_by: str = Query(..., description="Field to group by: equipment_type, manufacturer, voltage_class, model_type, bay_number, commission_year, failure_year, replacement_year"),
+    department_id: Optional[UUID] = None,
+    equipment_type_id: Optional[int] = None,
+    status: Optional[str] = None,
+    voltage_class: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+    model_number: Optional[str] = None,
+    search: Optional[str] = None,
+    tlss_division: Optional[str] = None,
+    wm_circle: Optional[str] = None,
+    transmission_zone: Optional[str] = None,
+    substation_ids: Optional[str] = None,
+    commission_year: Optional[int] = None,
+    commission_year_from: Optional[int] = None,
+    commission_year_to: Optional[int] = None,
+    failure_year: Optional[int] = None,
+    failure_year_from: Optional[int] = None,
+    failure_year_to: Optional[int] = None,
+    replacement_year: Optional[int] = None,
+    replacement_year_from: Optional[int] = None,
+    replacement_year_to: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return equipment counts grouped by a single field for the full filtered dataset."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
+    # Determine the group column expression
+    valid_fields = {
+        "equipment_type": None,  # handled via join
+        "manufacturer": Equipment.manufacturer,
+        "voltage_class": Equipment.voltage_class,
+        "model_type": Equipment.model_number,
+        "bay_number": Equipment.bay_number,
+        "commission_year": extract("year", Equipment.commissioned_date),
+        "failure_year": extract("year", Equipment.retired_date),
+        "replacement_year": extract("year", Equipment.commissioned_date),
+    }
+    if group_by not in valid_fields:
+        raise HTTPException(status_code=400, detail=f"Invalid group_by: {group_by}")
+
+    from services.equipment_service import EquipmentService as ES
+
+    if group_by == "equipment_type":
+        group_col = CategoryMaster.name
+        query = db.query(CategoryMaster.name, func.count(Equipment.id)).outerjoin(
+            CategoryMaster, Equipment.equipment_type_id == CategoryMaster.id
+        )
+    else:
+        group_col = valid_fields[group_by]
+        query = db.query(group_col, func.count(Equipment.id))
+
+    query = query.filter(Equipment.organization_id == org_id)
+
+    if department_id:
+        dept_ids = ES._get_department_subtree_ids(db, department_id)
+        query = query.filter(Equipment.department_id.in_(dept_ids))
+    if equipment_type_id:
+        query = query.filter(Equipment.equipment_type_id == equipment_type_id)
+    if status:
+        query = query.filter(Equipment.status == status)
+    if voltage_class:
+        query = query.filter(Equipment.voltage_class == voltage_class)
+    if manufacturer:
+        query = query.filter(Equipment.manufacturer.ilike(f"%{manufacturer}%"))
+    if model_number:
+        query = query.filter(Equipment.model_number.ilike(f"%{model_number}%"))
+    if search:
+        query = query.filter(
+            (Equipment.ueic.ilike(f"%{search}%")) |
+            (Equipment.bay_number.ilike(f"%{search}%")) |
+            (Equipment.manufacturer.ilike(f"%{search}%")) |
+            (Equipment.model_number.ilike(f"%{search}%")) |
+            (Equipment.factory_serial_number.ilike(f"%{search}%"))
+        )
+    if substation_ids:
+        id_list = [s.strip() for s in substation_ids.split(",") if s.strip()]
+        if id_list:
+            try:
+                parsed = [UUID(i) for i in id_list]
+                query = query.filter(Equipment.department_id.in_(parsed))
+            except ValueError:
+                pass
+    if transmission_zone:
+        dept_ids = ES._get_descendants_of_named(db, org_id, transmission_zone)
+        if not dept_ids:
+            return {}
+        query = query.filter(Equipment.department_id.in_(dept_ids))
+    if wm_circle:
+        dept_ids = ES._get_descendants_of_named(db, org_id, wm_circle)
+        if not dept_ids:
+            return {}
+        query = query.filter(Equipment.department_id.in_(dept_ids))
+    if tlss_division:
+        dept_ids = ES._get_descendants_of_named(db, org_id, tlss_division)
+        if not dept_ids:
+            return {}
+        query = query.filter(Equipment.department_id.in_(dept_ids))
+    if group_by == "replacement_year":
+        query = query.filter(Equipment.replaces_equipment_id.isnot(None))
+    if commission_year:
+        query = query.filter(extract("year", Equipment.commissioned_date) == commission_year)
+    if commission_year_from:
+        query = query.filter(extract("year", Equipment.commissioned_date) >= commission_year_from)
+    if commission_year_to:
+        query = query.filter(extract("year", Equipment.commissioned_date) <= commission_year_to)
+    if failure_year:
+        query = query.filter(extract("year", Equipment.retired_date) == failure_year)
+    if failure_year_from:
+        query = query.filter(extract("year", Equipment.retired_date) >= failure_year_from)
+    if failure_year_to:
+        query = query.filter(extract("year", Equipment.retired_date) <= failure_year_to)
+    if replacement_year:
+        query = query.filter(extract("year", Equipment.commissioned_date) == replacement_year)
+    if replacement_year_from:
+        query = query.filter(extract("year", Equipment.commissioned_date) >= replacement_year_from)
+    if replacement_year_to:
+        query = query.filter(extract("year", Equipment.commissioned_date) <= replacement_year_to)
+
+    rows = query.group_by(group_col).all()
+    result = {}
+    for key, count in rows:
+        label = str(int(key)) if key is not None and isinstance(key, float) else (str(key) if key is not None else "Unknown")
+        result[label] = count
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ② OTHER STATIC ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1074,6 +1203,129 @@ def get_testing_kits(
         "at_station": [_kit_row(k, "at_station") for k in at_station],
         "nearby": [_kit_row(k, k.department.name if k.department else "") for k in nearby],
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Department hierarchy with per-node equipment counts
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/department-hierarchy-with-counts")
+def get_department_hierarchy_with_counts(
+    parent_id: Optional[str] = None,
+    status: Optional[str] = None,
+    equipment_type_id: Optional[int] = None,
+    search: Optional[str] = None,
+    voltage_class: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+    model_number: Optional[str] = None,
+    commission_year: Optional[int] = None,
+    commission_year_from: Optional[int] = None,
+    commission_year_to: Optional[int] = None,
+    failure_year: Optional[int] = None,
+    failure_year_from: Optional[int] = None,
+    failure_year_to: Optional[int] = None,
+    replacement_year: Optional[int] = None,
+    replacement_year_from: Optional[int] = None,
+    replacement_year_to: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return child departments of parent_id (or roots) with equipment counts respecting active filters."""
+    from sqlalchemy import extract as sa_extract, func as sa_func
+
+    org_id = _enforce_org_scope(current_user)
+
+    # Fetch departments at the requested level
+    parent_uuid = None
+    if parent_id:
+        try:
+            parent_uuid = _uuid.UUID(parent_id)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid parent_id UUID")
+
+    depts = (
+        db.query(OrgDepartment)
+        .filter(
+            OrgDepartment.organization_id == org_id,
+            OrgDepartment.is_active == True,
+            OrgDepartment.parent_department_id == parent_uuid,
+        )
+        .order_by(OrgDepartment.name)
+        .all()
+    )
+
+    result = []
+    for dept in depts:
+        # Check whether this dept has children
+        has_children = (
+            db.query(OrgDepartment.id)
+            .filter(
+                OrgDepartment.parent_department_id == dept.id,
+                OrgDepartment.is_active == True,
+            )
+            .first()
+        ) is not None
+
+        # Count equipment in the full subtree of this dept (applying all active filters)
+        from services.equipment_service import EquipmentService
+        subtree_ids = EquipmentService._get_department_subtree_ids(db, dept.id)
+
+        q = db.query(sa_func.count(Equipment.id)).filter(
+            Equipment.organization_id == org_id,
+            Equipment.department_id.in_(subtree_ids),
+        )
+        if status:
+            q = q.filter(Equipment.status == status)
+        if equipment_type_id:
+            q = q.filter(Equipment.equipment_type_id == equipment_type_id)
+        if voltage_class:
+            q = q.filter(Equipment.voltage_class == voltage_class)
+        if manufacturer:
+            q = q.filter(Equipment.manufacturer.ilike(f"%{manufacturer}%"))
+        if model_number:
+            q = q.filter(Equipment.model_number.ilike(f"%{model_number}%"))
+        if search:
+            q = q.filter(
+                (Equipment.ueic.ilike(f"%{search}%")) |
+                (Equipment.bay_number.ilike(f"%{search}%")) |
+                (Equipment.manufacturer.ilike(f"%{search}%")) |
+                (Equipment.model_number.ilike(f"%{search}%")) |
+                (Equipment.factory_serial_number.ilike(f"%{search}%"))
+            )
+        if commission_year:
+            q = q.filter(sa_extract('year', Equipment.commissioned_date) == commission_year)
+        if commission_year_from:
+            q = q.filter(sa_extract('year', Equipment.commissioned_date) >= commission_year_from)
+        if commission_year_to:
+            q = q.filter(sa_extract('year', Equipment.commissioned_date) <= commission_year_to)
+        if failure_year:
+            q = q.filter(sa_extract('year', Equipment.retired_date) == failure_year)
+        if failure_year_from:
+            q = q.filter(sa_extract('year', Equipment.retired_date) >= failure_year_from)
+        if failure_year_to:
+            q = q.filter(sa_extract('year', Equipment.retired_date) <= failure_year_to)
+        if replacement_year:
+            q = q.filter(sa_extract('year', Equipment.commissioned_date) == replacement_year)
+        if replacement_year_from:
+            q = q.filter(sa_extract('year', Equipment.commissioned_date) >= replacement_year_from)
+        if replacement_year_to:
+            q = q.filter(sa_extract('year', Equipment.commissioned_date) <= replacement_year_to)
+
+        count = q.scalar() or 0
+
+        result.append({
+            "id": str(dept.id),
+            "name": dept.name,
+            "department_name": dept.name,
+            "parent_department_id": str(dept.parent_department_id) if dept.parent_department_id else None,
+            "equipment_count": count,
+            "has_children": has_children,
+            "organization_id": str(dept.organization_id),
+        })
+
+    # Sort by count descending
+    result.sort(key=lambda x: x["equipment_count"], reverse=True)
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1585,4 +1837,34 @@ def download_nameplate_file(
         media_type=mime,
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
-    
+
+
+@router.post("/sync-schedules", status_code=200)
+def sync_equipment_schedules(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Backfill operational test schedules for all active equipment in the org.
+    Calls instantiate_equipment_schedules for each equipment that doesn't yet
+    have operational schedules — safe to call multiple times (skips existing).
+    """
+    org_id = _enforce_org_scope(current_user)
+    from services.test_request_schedule_service import TestRequestScheduleService
+
+    equipments = (
+        db.query(Equipment)
+        .filter(Equipment.organization_id == org_id, Equipment.status == "active")
+        .all()
+    )
+
+    synced = 0
+    errors = []
+    for eq in equipments:
+        try:
+            TestRequestScheduleService.instantiate_equipment_schedules(db, eq, current_user.id)
+            synced += 1
+        except Exception as e:
+            errors.append({"equipment_id": str(eq.id), "error": str(e)})
+
+    return {"synced": synced, "errors": errors}

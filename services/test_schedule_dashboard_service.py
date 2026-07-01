@@ -187,10 +187,12 @@ class TestScheduleDashboardService:
         # 5. Batch: last completed TestingRequest per (equipment_id, test_type_id)
         last_completed = self._batch_last_completed(eq_ids, test_type_ids_ordered)
 
-        # 6. Build rows
+        # 6. Build rows — only equipment that have at least one schedule
         rows = []
         for eq in equipments:
             eq_scheds = sched_idx.get(eq.id, {})
+            if not eq_scheds:
+                continue
             cells: dict[str, dict] = {}
             worst_status = "na"
 
@@ -439,7 +441,7 @@ class TestScheduleDashboardService:
         for dept_id, cnt in eq_dept_rows:
             dept_eq_counts[dept_id] = cnt
 
-        # Org-level schedule count per department
+        # Schedule count per department — org-level (equipment_id IS NULL)
         dept_sched_counts: dict = {}
         sched_dept_rows = (
             self.db.query(TestRequestSchedule.department_id, func.count(TestRequestSchedule.id))
@@ -456,29 +458,51 @@ class TestScheduleDashboardService:
         for dept_id, cnt in sched_dept_rows:
             dept_sched_counts[dept_id] = cnt
 
-        # Build parent lookup {id: (parent_id, parent_name)}
+        # Schedule count per department — equipment-linked (via equipment.department_id)
+        eq_sched_dept_rows = (
+            self.db.query(Equipment.department_id, func.count(TestRequestSchedule.id))
+            .join(TestRequestSchedule, TestRequestSchedule.equipment_id == Equipment.id)
+            .filter(
+                TestRequestSchedule.organization_id == org_id,
+                TestRequestSchedule.is_active == True,
+                TestRequestSchedule.is_deleted == False,
+                Equipment.department_id.isnot(None),
+            )
+            .group_by(Equipment.department_id)
+            .all()
+        )
+        for dept_id, cnt in eq_sched_dept_rows:
+            dept_sched_counts[dept_id] = dept_sched_counts.get(dept_id, 0) + cnt
+
+        # Build parent lookup {str(id): str(parent_id)}
         parent_map: dict = {}
         for d in depts:
-            if d.parent_department_id and d.parent_department:
-                parent_map[d.id] = (
-                    str(d.parent_department_id),
-                    d.parent_department.name,
-                )
+            if d.parent_department_id:
+                parent_map[str(d.id)] = str(d.parent_department_id)
+
+        # Propagate schedule counts up to all ancestors (string-keyed)
+        str_sched_counts = {str(k): v for k, v in dept_sched_counts.items()}
+        for dept_id_str, cnt in list(str_sched_counts.items()):
+            pid = parent_map.get(dept_id_str)
+            while pid:
+                str_sched_counts[pid] = str_sched_counts.get(pid, 0) + cnt
+                pid = parent_map.get(pid)
+        dept_sched_counts = str_sched_counts
 
         # Only include departments that have equipment OR org-level schedules
         dept_list = []
         for d in depts:
             eq_cnt    = dept_eq_counts.get(d.id, 0)
-            sched_cnt = dept_sched_counts.get(d.id, 0)
-            if eq_cnt > 0 or sched_cnt > 0:
-                parent_info = parent_map.get(d.id)
+            sched_cnt = dept_sched_counts.get(str(d.id), 0)
+            if sched_cnt > 0:
+                parent_id_str = parent_map.get(str(d.id))
                 dept_list.append({
                     "id":              str(d.id),
                     "name":            d.name,
                     "equipment_count": eq_cnt,
                     "schedule_count":  sched_cnt,
-                    "parent_id":       parent_info[0] if parent_info else None,
-                    "parent_name":     parent_info[1] if parent_info else None,
+                    "parent_id":       parent_id_str,
+                    "parent_name":     None,
                 })
 
         # Sort departments by equipment count descending

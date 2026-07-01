@@ -90,12 +90,16 @@ CREATE TABLE IF NOT EXISTS tr_wf_stage_transitions (
     from_stage_id       UUID NOT NULL REFERENCES tr_wf_stages(id) ON DELETE CASCADE,
     to_stage_id         UUID REFERENCES tr_wf_stages(id) ON DELETE SET NULL,  -- NULL = terminal
     action_code         VARCHAR(50) NOT NULL,
+    label               VARCHAR(100) NULL,  -- display label; falls back to action_code.title() if null
     requires_comment    BOOLEAN NOT NULL DEFAULT FALSE,
     is_rejection        BOOLEAN NOT NULL DEFAULT FALSE,
     terminal_status_id  UUID REFERENCES tr_wf_statuses(id) ON DELETE SET NULL,
     post_action         VARCHAR(100) NULL,  -- key into BaseWfAction registry, fired after transition
     CONSTRAINT uq_tr_wf_transition_action UNIQUE (from_stage_id, action_code)
 );
+
+-- Add label column if upgrading from an older schema (idempotent)
+ALTER TABLE tr_wf_stage_transitions ADD COLUMN IF NOT EXISTS label VARCHAR(100) NULL;
 
 CREATE INDEX IF NOT EXISTS idx_tr_wf_transitions_from ON tr_wf_stage_transitions(from_stage_id);
 
