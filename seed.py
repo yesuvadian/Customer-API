@@ -8953,6 +8953,43 @@ def _seed_notification_variables(session) -> int:
              description="Email address of the notification recipient.",
              sample_value="jane.smith@utility.com",
              role_template_names=[]),
+        # ── Testing Kit Calibration ───────────────────────────────────────────
+        dict(var_key="kit.ueic",                   label="Kit UEIC",
+             group_name="Testing Kit",              resolver_key="kit.ueic",
+             fallback_keys=["kit.ueic"],
+             description="Unique Equipment Identity Code of the testing kit.",
+             sample_value="KIT-IR-001",
+             role_template_names=[]),
+        dict(var_key="kit.name",                   label="Kit Name",
+             group_name="Testing Kit",              resolver_key="kit.name",
+             fallback_keys=["kit.name"],
+             description="Name/description of the testing kit.",
+             sample_value="Insulation Resistance Tester",
+             role_template_names=[]),
+        dict(var_key="kit.department",             label="Kit Department",
+             group_name="Testing Kit",              resolver_key="kit.department",
+             fallback_keys=["kit.department"],
+             description="Department or substation where the testing kit is based.",
+             sample_value="Bangalore Zone",
+             role_template_names=[]),
+        dict(var_key="kit.calibration_due_date",   label="Calibration Due Date",
+             group_name="Testing Kit",              resolver_key="kit.calibration_due_date",
+             fallback_keys=["kit.calibration_due_date"],
+             description="Date on which the kit's calibration certificate expires.",
+             sample_value="2025-06-30",
+             role_template_names=[]),
+        dict(var_key="kit.days_remaining",         label="Days Until Calibration Due",
+             group_name="Testing Kit",              resolver_key="kit.days_remaining",
+             fallback_keys=["kit.days_remaining"],
+             description="Number of days remaining before calibration is due.",
+             sample_value="14",
+             role_template_names=[]),
+        dict(var_key="kit.days_overdue",           label="Days Overdue (Calibration)",
+             group_name="Testing Kit",              resolver_key="kit.days_overdue",
+             fallback_keys=["kit.days_overdue"],
+             description="Number of days the calibration has been overdue (0 if not overdue).",
+             sample_value="5",
+             role_template_names=[]),
         # ── System ────────────────────────────────────────────────────────────
         # System vars are injected directly in build_context — no fallback lookup needed.
         dict(var_key="system.date",     label="Today's Date",
@@ -11805,6 +11842,14 @@ def run_seed():
             seed_calibration_stages(session)
         except Exception as _e:
             print(f"[WARN] Calibration workflow seed failed (non-fatal): {_e}")
+
+        # Kit Calibration Notifications — variables, events, templates
+        try:
+            from seed_kit_calibration_notifications import seed_kit_calibration_notifications
+            result = seed_kit_calibration_notifications(session)
+            print(f"[OK] Kit calibration notifications seeded: {result}")
+        except Exception as _e:
+            print(f"[WARN] Kit calibration notification seed failed (non-fatal): {_e}")
 
         # Pre-Commission QAP Workflow — 9-stage factory inspection workflow
         print("\n--- Pre-Commission QAP Workflow Seeding ---")
