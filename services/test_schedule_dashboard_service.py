@@ -494,7 +494,7 @@ class TestScheduleDashboardService:
         for d in depts:
             eq_cnt    = dept_eq_counts.get(d.id, 0)
             sched_cnt = dept_sched_counts.get(str(d.id), 0)
-            if eq_cnt > 0 or sched_cnt > 0:
+            if sched_cnt > 0:
                 parent_id_str = parent_map.get(str(d.id))
                 dept_list.append({
                     "id":              str(d.id),

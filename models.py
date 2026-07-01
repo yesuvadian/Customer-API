@@ -2869,7 +2869,69 @@ class TestingRequest(Base):
         backref="child_requests",
     )
 
+# ═══════════════════════════════════════════════════════════════════════════
+# DATA IMPORT — PENDING RECORDS (unlinked/unserialed extractions)
+# ═══════════════════════════════════════════════════════════════════════════
 
+class PendingDataImport(Base):
+    """
+    Holds extracted-but-not-yet-submitted import records so nothing from a
+    parsed PDF is ever silently lost — specifically covers the case where
+    OCR could not find (or match) a transformer serial number.
+
+    Lifecycle:
+      POST /data-import/extract  → row created here, status="pending"
+      User edits serial/form_data in the "REVIEW" UI list
+      POST /data-import/submit   → on success, status="submitted"
+                                    (or the row is deleted — implementation
+                                    choice, doesn't affect this model)
+
+    Nothing here touches TestingRequest, Equipment, or the standard
+    create_request() flow — a pending row only becomes a real TR once a
+    person supplies a serial/equipment and submits it through the existing,
+    unmodified endpoint.
+    """
+    __tablename__ = "pending_data_imports"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    source_filename = Column(String(500), nullable=True)
+    test_type_name  = Column(String(255), nullable=False)
+    template_key    = Column(String(100), nullable=True)
+
+    report    = Column(JSONB, nullable=False)   # raw extractor output (report dict)
+    form_data = Column(JSONB, nullable=True)    # pre-built form values, editable by user
+
+    # Denormalized for fast list/search in the UI without unpacking `report`
+    serial_number = Column(String(100), nullable=True, index=True)
+    test_date     = Column(String(20),  nullable=True)
+    sub_station   = Column(String(255), nullable=True)
+
+    # Set once the user manually attaches equipment (before final submit)
+    equipment_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.equipment.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    status = Column(String(20), nullable=False, default="pending")  # pending | submitted | discarded
+    warnings = Column(JSONB, nullable=False, server_default="[]")
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    equipment    = relationship("Equipment", foreign_keys=[equipment_id])
+    creator      = relationship("User", foreign_keys=[created_by])
 # ============================================================
 # TEST REQUEST SCHEDULE MODEL
 # ============================================================

@@ -212,13 +212,23 @@ class ReportingService:
             "test_results_summary_report":    self._q_test_results_summary,
             "recommendation_approval_report": self._q_recommendation_approval,
             "compliance_status_report":       self._q_compliance_status,
-            "tester_performance_report":      self._q_tester_performance,
-            "monthly_kpi_report":             self._q_monthly_kpi,
+            "tester_performance_report":          self._q_tester_performance,
+            "monthly_kpi_report":                 self._q_monthly_kpi,
+            # Stubs — not yet implemented, return empty gracefully
+            "equipment_failure_annual_report":    self._q_stub,
+            "transformer_repair_status_report":   self._q_stub,
+            "pm_compliance_report":               self._q_stub,
+            "taqc_compliance_report":             self._q_stub,
+            "repairer_performance_report":        self._q_stub,
+            "oltc_cb_operations_report":          self._q_stub,
         }
         fn = registry.get(query_key)
         if not fn:
             raise ValueError(f"Unknown query_key: '{query_key}'")
         return fn(params)
+
+    def _q_stub(self, p: dict) -> list[dict]:
+        return []
 
     # ── 14 Query Functions ─────────────────────────────────────────────────
 
@@ -688,7 +698,9 @@ class ReportingService:
 
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = defn.name[:31]
+        import re
+        safe_title = re.sub(r'[\/\\\?\*\[\]\:]', '-', defn.name)[:31]
+        ws.title = safe_title
 
         if not rows:
             ws["A1"] = "No data found for the selected parameters."
