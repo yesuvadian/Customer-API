@@ -202,6 +202,33 @@ def _strip_kv_noise(window: str) -> str:
     window = re.sub(r'\b\d+(?:\.\d+)?\s*[kK][vV]\b', '', window, flags=re.I)
     return window
 
+def _extract_measurement_nums_with_units(window: str) -> list[float]:
+    """
+    Variant of _extract_measurement_nums for reports where capacitance is
+    written as e.g. '6.657nf' / '137.4pf' with NO space before the unit
+    (so the plain \b...\b number regex can't match — digit->letter is not
+    a word boundary), and where OCR sometimes renders the decimal point as
+    a space ('351 6pf' -> '351.6pf'). nF values are converted to pF (×1000)
+    to match the template's pF-only capacitance field.
+    Only used by fallback parsers for unusual report layouts; does not
+    replace or alter _extract_measurement_nums used elsewhere.
+    """
+    cleaned = window
+    # Repair OCR-mangled decimal point before nf/pf units: "351 6pf" -> "351.6pf"
+    cleaned = re.sub(r'(\d+)\s+(\d)\s*(nf|pf)\b', r'\1.\2\3', cleaned, flags=re.I)
+    nums: list[float] = []
+    # Capacitance values explicitly tagged with nf/pf
+    for m in re.finditer(r'(\d+(?:\.\d+)?)\s*(nf|pf)\b', cleaned, re.I):
+        val = float(m.group(1))
+        if m.group(2).lower() == "nf":
+            val *= 1000.0   # nF -> pF
+        nums.append(val)
+        cleaned = cleaned.replace(m.group(0), " ", 1)
+    # Remaining plain decimals (DF measured / corrected values)
+    cleaned = _strip_kv_noise(cleaned).replace(',', '')
+    for nm in re.finditer(r'\b(\d+\.\d+)\b', cleaned):
+        nums.append(float(nm.group(1)))
+    return nums
 
 def _extract_measurement_nums(window: str) -> list[float]:
     """
@@ -349,6 +376,9 @@ def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None
         window = block[abs_start:window_end]
         window = _strip_voltage_from_window(window, voltage_val)   # FIX-2+3
         nums   = _extract_measurement_nums(window)
+        if not nums:
+     
+            nums = _extract_measurement_nums_with_units(window)
 
         row: dict = {
             "bushing":               f"'{phase}' Phase",
@@ -402,8 +432,162 @@ def _extract_winding_row(
     _assign_measurement_row(row, nums)
     return row
 
+def _parse_single_phase_repeat_bushing(block: str) -> tuple[float | None, list[dict], str | None]:
+    """
+    Fallback for 'repeat test' bushing reports that test only ONE phase
+    across multiple test-voltage steps (e.g. 0.25/2/5/10 kV), instead of the
+    usual three-phase-at-one-voltage layout. Produces one row per voltage step.
+    Only called when _parse_bushing_section finds zero rows, so it never
+    affects the standard multi-phase report formats.
+    """
+    itc = _find_itc(block)
+    prev_date = _find_previous_test_date(block)
 
+    phase_letter = None
+    for p in ("R", "Y", "B"):
+        if re.search(_phase_pat(p), block, re.I):
+            phase_letter = p
+            break
+    if not phase_letter:
+        return itc, [], prev_date
+
+    header_m = re.search(r"correct\w*\s*on\b", block, re.I)
+    data_region = block[header_m.end():] if header_m else block
+
+    raw_tokens = re.findall(r"\d+(?:\.\d+)?", data_region.replace(",", ""))
+    nums = [float(t) for t in raw_tokens]
+
+    rows: list[dict] = []
+    i = 0
+    while i <= len(nums) - 4:
+        v, c, d1, d2 = nums[i:i + 4]
+        # Plausibility filter: capacitance is large (pF), %D.F values are
+        # small percentages, voltage is a realistic test-step value.
+        if 100 <= c <= 2000 and 0 <= d1 < 10 and 0 <= d2 < 10 and 0 <= v <= 500:
+            rows.append({
+                "bushing":               f"'{phase_letter}' Phase",
+                "voltage_kv":            v,
+                "capacitance_pf":        c,
+                "df_measured":           d1,
+                "df_corrected_20c":      d2,
+                "df_previous_corrected": None,
+            })
+            i += 4
+        else:
+            i += 1   # skip stray OCR token (e.g. Sl.No counters) and retry
+
+    # A leftover trailing %D.F number (e.g. the previous-test value that only
+    # appears once, for one row) is attached to the last extracted row.
+    if rows and i < len(nums) and 0 <= nums[i] < 10:
+        rows[-1]["df_previous_corrected"] = nums[i]
+
+    return itc, rows, prev_date
 # ── OCR parser ─────────────────────────────────────────────────────────────────
+_COMBINED_BUSHING_ROW_PAT = re.compile(
+    r"""(\d{5,7})\s*\(\s*(\d{2,3})\s*K\.?V\.?\s*[-–_~]*\s*
+        [\"'\u2018\u2019\u201c\u201d]?\s*([RYB])\s*[\"'\u2018\u2019\u201c\u201d]?\s*\)?""",
+    re.I | re.X,
+)
+
+def _parse_combined_bushing_table(full: str, target_kv: str) -> tuple[float | None, list[dict], str | None]:
+    """
+    Fallback for older single-table bushing layouts where ALL voltage
+    classes' R/Y/B phase rows are listed together (identified per-row by
+    '<bushing serial> (<kv>KV – "<phase>")') rather than in separate
+    per-voltage blocks. Only called when the normal block_pat/
+    _parse_bushing_section search finds no block for `target_kv`, so it
+    never affects reports using the standard layout.
+    """
+    itc = _find_itc(full)
+    prev_date = _find_previous_test_date(full)
+    rows: list[dict] = []
+    matches = list(_COMBINED_BUSHING_ROW_PAT.finditer(full))
+    for i, m in enumerate(matches):
+        kv, phase = m.group(2), m.group(3).upper()
+        if kv != target_kv:
+            continue
+        win_end = matches[i + 1].start() if i + 1 < len(matches) else m.end() + 150
+        window = full[m.end(): win_end]
+        nums = _extract_measurement_nums_with_units(window)
+        row: dict = {
+            "bushing":               f"'{phase}' Phase",
+            "voltage_kv":            None,
+            "capacitance_pf":        None,
+            "df_measured":           None,
+            "df_corrected_20c":      None,
+            "df_previous_corrected": None,
+        }
+        _assign_measurement_row(row, nums)
+        rows.append(row)
+    return itc, rows, prev_date
+
+_EQUIPMENT_HEADER_PAT = re.compile(
+    r"(?:[TIl]an.?Delta|Capacitance\s*&\s*[TIl]an.?Delta)"   # tolerates I/T OCR swap
+    r"[\s\S]{0,40}?"
+    r"(?:M\.?V\.?A|MVA|MA)\b"                                  # tolerates "MA" for "MVA"
+    r"[\s\S]{0,80}?"
+    r"Power\s*Trans\w*[\s\-–_]*\d*",                           # tolerates "Power_Transformer"
+    re.I,
+)
+
+_EQUIPMENT_HEADER_PAT_LOOSE = re.compile(
+    r"[TIl]an[\s_\-]{0,4}Delt[a4]"                    # tolerates "Tan _ Delta", "Delt4"
+    r"[\s\S]{0,60}?"
+    r"(?:M\.?V\.?A|MVA|MA)\b"
+    r"[\s\S]{0,100}?"
+    r"Power[\s_]*[TIl]r[ua]ns\w*[\s\-–_]*\d*",        # tolerates "Power_Transformcr", "Irunsformer"
+    re.I,
+)
+
+def _split_combined_multi_equipment_report(full_text: str) -> list[str]:
+    """
+    Splits a combined OCR text that covers multiple transformers, each
+    introduced by its own 'Tan-Delta Test on <X> MVA ... Power Transformer-N'
+    section header. Only invoked as a fallback when normal parse fails.
+    Returns the original list with one element if no split points found.
+    """
+    matches = list(_EQUIPMENT_HEADER_PAT.finditer(full_text))
+    if len(matches) < 2:
+        matches = list(_EQUIPMENT_HEADER_PAT_LOOSE.finditer(full_text))
+    if len(matches) < 2:
+        return [full_text]
+    chunks = []
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
+        chunks.append(full_text[m.start(): end])
+    return chunks
+
+def _is_old_format_winding_page(text: str) -> bool:
+    """
+    Detects older-format winding-test reports (e.g. pre-2015 Tan-Delta
+    reports) where OCR line-breaks separate the word "Winding" from
+    "Test"/"Results", so the page never satisfies _is_primary_page's
+    stricter winding-marker regex from FIX-15. Falls back to requiring
+    "Winding" followed reasonably closely by "Capacitance" — a
+    combination that only appears in a genuine winding results table
+    header, never in a bushing or IDAX table. Only used as a last-resort
+    fallback in _group_pages, so it can't affect any report that already
+    groups correctly via the normal primary/secondary page path.
+    """
+    return bool(_has_serial(text)) and bool(
+        re.search(r"winding[\s\S]{0,100}?capacitance", text, re.I)
+    )
+
+def _transformer_details_block(full: str) -> str:
+    """
+    Restrict serial-number (and similarly nameplate-only fields) extraction
+    to the Transformer/Name-Plate Details section, BEFORE any "Bushing
+    Details" heading. Bushing tables also contain their own "Sl. No" /
+    "Sl.No." rows (the bushing's own nameplate serial, e.g. "1544038"),
+    which is NOT the transformer's equipment serial and must never be
+    picked up by the serial-number fallbacks. Without this scoping, a
+    generic whole-document search could match whichever "Sl. No" occurs
+    first in OCR text order — correct only by coincidence.
+    Falls back to the full document if no "Bushing Details" heading is
+    found (so reports without a bushing section still work normally).
+    """
+    bushing_m = re.search(r"bushing\s*det\w{2,6}", full, re.I)
+    return full[: bushing_m.start()] if bushing_m else full
 
 def parse_ocr_text(ocr_text: str) -> dict | None:
     """Parse raw OCR text from one KPTCL Tan Delta / Capacitance test report."""
@@ -451,12 +635,60 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         print("  [DEBUG] date not found. First 20 OCR lines:")
         for i, l in enumerate(lines[:20]):
             print(f"    {i:02d}: {l}")
+    
+    _tx_block = _transformer_details_block(full)
 
-    serial = _find(r"serial\s*(?:number|no\.?)\s*[:\.]?\s*([A-Za-z]{2,3}[-\s]?\d{3,}\s*[/\-]\s*\d+)", full)
+    serial = _find(r"serial\s*(?:number|no\.?)\s*[:\.]?\s*([A-Za-z]{2,3}[-\s]?\d{3,}\s*[/\-]\s*\d+)", _tx_block)
     if not serial:
-        serial = _find(r"\b((?:HT|KT)\s*-?\s*\d{3,}\s*[/\-]\s*\d+)\b", full)
+        serial = _find(r"\b((?:HT|KT)\s*-?\s*\d{3,}\s*[/\-]\s*\d+)\b", _tx_block)
     if not serial:
-        serial = _find(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*(\d{4,}[-/]\d+)", full)
+        serial = _find(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*\s*(\d{4,}[-/]\d+)", _tx_block)
+    if not serial:
+        serial = _find(
+            r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*(\d{4,}[-/]\d+)",
+            _tx_block
+        )
+    if not serial:
+        serial = _find(r"S[Il1l][,\.:]*\s*[Nn]o[,\._]?\s*[:\.]*[\s_\-]*\s*(\d{4,}[-/]\d+)", _tx_block)
+    if not serial:
+        serial = _find(r"\b(S-\d{6,})\b", _tx_block)
+    if not serial:
+        serial = _find(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*([A-Za-z]\d{3,}\s*/\s*\d+)", _tx_block)
+    if not serial:
+        serial = _find(
+            r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*(\d{1,3}-\d{3,6}\s*/\s*\d{1,3})",
+            _tx_block
+        )
+    if not serial:
+        serial = _find(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*(\d{6,})\b", _tx_block)
+    if not serial:
+        serial = _find(
+            r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*([A-Za-z]\s*-\s*\d{4,6})\b",
+            _tx_block
+        )
+    if not serial:
+        serial = _find(
+            r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*"
+            r"([A-Za-z]\s*-?\s*\d{3,}\s*/\s*[A-Za-z]?\s*-?\s*\d{3,})",
+            _tx_block
+        )
+    if not serial:
+        serial = _find(
+            r"Voltage\s*Ratio\s*[\s\S]{0,5}?\d+\s*/\s*\d+(?:/\d+)?\s*k\.?V\.?\s*\n*\s*"
+            r"([A-Za-z0-9][A-Za-z0-9\-/]{4,})\s*\n*\s*(?:M[Il]g|Y\.?O\.?)",
+            _tx_block, group=1
+        )
+    if not serial:
+        serial = _find(
+            r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*(ITK\s*\d{5,})",
+            _tx_block
+        )
+    if not serial:
+        serial = _find(r"\b(S-\d{6,})\b", _tx_block)
+    if not serial:
+        serial = _find(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*\s*(\d{4,}[-/]\d+)", _tx_block)
+
+
     report["serial_number"] = _normalize_serial(serial)
 
     report["make"] = (
@@ -573,10 +805,11 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         ("(HV+LV)-TV",  r"\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*TV"),
         ("Winding-GND", r"Winding\s*[-–]\s*(?:GND|Grd|Grnd|Ground)"),
     ]
+
     _WINDING_CFG_PATTERNS_IV = [
-        ("HV-IV",  r"\bHV\s*[-–&]\s*IV\b"),
-        ("IV-LV",  r"\bIV\s*[-–]\s*LV\b"),
-        ("IV-GND", r"\bIV\s*[-–]\s*(?:GND|Grd|Grnd|Ground)\b"),
+    ("HV-IV",  r"\bHV\s*[-–&]\s*IV\b"),
+    ("IV-LV",  r"\bIV\s*[-–&]\s*LV\b|\bI\s*&\s*LV\b"),  # FIX-10: '&' added; bare "I & LV" covers OCR dropping the V in "IV & LV"
+    ("IV-GND", r"\bIV\s*[-–]\s*(?:GND|Grd|Grnd|Ground)\b"),
     ]
     all_winding_pats = [pat for _, pat in _WINDING_CFG_PATTERNS]
     all_stop_pats    = all_winding_pats + [p for _, p in _WINDING_CFG_PATTERNS_IV]
@@ -647,20 +880,34 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         end_alts += [r"idax", r"overall", r"assessment"]
         end_pat   = "(?=" + "|".join(end_alts) + r"|\Z)"
         block_pat = (
-            rf"{kv}\s*{kv_unit_pat}\.?\s*bu(?:sh|gh|sl)\w*"
+            rf"{kv}\s*{kv_unit_pat}\.?"
+            # NEW: optional phase label between "kV" and "Bushing", e.g.
+            # "220 kV 'Y' Phase\nBushing Details" (single-phase repeat-test reports)
+            rf"(?:{_Q}[RYB]{_QC}\s*[Pp]hase)?\s*"
+            rf"bu(?:sh|gh|sl)\w*"
             rf"[\s\S]{{0,2500}}?"
             + end_pat
         )
         bm = re.search(block_pat, full, re.I)
         if bm:
             itc, rows, prev_date = _parse_bushing_section(bm.group(0), kv)
-            report[_ITC_KEY[rep_key]]      = itc
+            if not rows:
+                # NEW: fallback for single-phase / multi-voltage-step format
+                fb_itc, fb_rows, fb_prev_date = _parse_single_phase_repeat_bushing(bm.group(0))
+                if fb_rows:
+                    itc, rows, prev_date = (fb_itc or itc), fb_rows, (fb_prev_date or prev_date)
+            report[_ITC_KEY[rep_key]]       = itc
             report[rep_key]                = rows
-            report[_PREV_DATE_KEY[rep_key]] = prev_date   # NEW
+            report[_PREV_DATE_KEY[rep_key]] = prev_date
+        else:
+            itc, rows, prev_date = _parse_combined_bushing_table(full, kv)
+            report[_ITC_KEY[rep_key]]       = itc
+            report[rep_key]                = rows
+            report[_PREV_DATE_KEY[rep_key]] = prev_date
             if rows:
                 print(f"  [BUSHING] {kv}kV - {len(rows)} phase row(s) extracted")
-        else:
-            print(f"  [BUSHING] {kv}kV - section not found, skipped")
+            else:
+                print(f"  [BUSHING] {kv}kV - section not found, skipped")
 
     # ── IDAX ───────────────────────────────────────────────────────────────
     report["idax_testing_kit"] = (
@@ -777,8 +1024,7 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
     )
 
     if not report.get("serial_number"):
-        print("  [SKIP] No serial number found in this page.")
-        return None
+        print("  [INFO] No serial number found — report will be saved for manual linking.")
 
     return report
 
@@ -831,22 +1077,59 @@ def _ocr_page_worker(args):
 def _has_serial(text: str) -> bool:
     if re.search(r"\b(?:HT|KT)\s*-?\s*\d{3,}\s*[/\-]\s*\d+", text, re.I):
         return True
-    if re.search(r"\bS[Il1l]\.?\s*[Nn]o\.?\s*[:\.]?\s*\d{4,}\s*[-/]\s*\d+", text, re.I):
+    if re.search(r"\bS[Il1l][,\.:]*\s*[Nn]o[,\._]?\s*[:\.]*[\s_\-]*\s*\d{4,}\s*[-/]\s*\d+", text, re.I):
+        return True
+    if re.search(r"\bS[Il1l][,\.]?\s*[Nn]o[,\._]?\s*[:\.]*[\s_\-]*\s*\d{4,}\s*[-/]\s*\d+", text, re.I):
+        return True
+    if re.search(r"\bS[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*\s*\d{4,}\s*[-/]\s*\d+", text, re.I):
+        return True
+    if re.search(r"\bS-\d{6,}\b", text):
+        return True
+    if re.search(r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*(\d{4,}[-/]\d+)", text, re.I):
+        return True
+    if re.search(r"\bS[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*\d{6,}\b", text, re.I):
+        return True
+    if re.search(
+        r"S[Il1l]\.?\s*[Nn]o\.?\s*[:\.]*[\s_\-]*\s*[A-Za-z]\s*-?\s*\d{4,}",
+        text, re.I
+    ):
         return True
     return False
 
 
 def _is_primary_page(text: str) -> bool:
     return _has_serial(text) and bool(re.search(
-        r"winding\s*test|tan[- ]?delta|dissipation\s*factor", text, re.I
-    ))
+        r"winding\s*test|winding\s*[-–]*\s*results|dissipation\s*factor",
+        text, re.I
+        ))
 
 
 def _is_secondary_page(text: str) -> bool:
     return not _has_serial(text) and bool(re.search(
-        r"bushing\s*test|(?:400|220|66|33|11)\s*kv.*bushing|idax\s*test", text, re.I
+        r"bushing\s*test"
+        r"|(?:400|220|66|33|11)\s*kv.*bushing"
+        r"|idax\s*test"
+        # FIX-20: OCR frequently drops characters from "IDAX", reading it
+        # as "JAX", "AX", or "DAX". "Insulation Diagnostics" is the
+        # section heading that reliably survives even degraded OCR.
+        r"|[IJ]AX\s*Test\s*Results?"
+        r"|insulation\s*diagnostics",
+        text, re.I
     ))
-
+def _is_bushing_repeat_test_page(text: str) -> bool:
+    """
+    Detects single-phase 'repeat test' bushing reports (voltage-stepped
+    bushing test, no Winding Test section) that _is_primary_page/
+    _is_secondary_page miss entirely — the former needs a winding section,
+    the latter is excluded because the bushing's own nameplate serial
+    ("S-XXXXXXX") trips _has_serial(). Only used as a last-resort fallback
+    in _group_pages, so it never affects normal multi-section reports.
+    """
+    return bool(
+        re.search(r"repeated\s+on", text, re.I)
+        and re.search(r"bushing", text, re.I)
+        and re.search(r"bushing\s*test\s*results|date\s*of\s*previous\s*test", text, re.I)
+    )
 
 def _group_pages(page_texts: list[str]) -> list[str]:
     """Merge primary page (serial + winding) with following secondary pages (bushing/IDAX)."""
@@ -866,6 +1149,24 @@ def _group_pages(page_texts: list[str]) -> list[str]:
             i = j
         else:
             i += 1
+
+    if not groups:
+        # FIX-21: single-phase repeat-test bushing reports (no winding
+        # section, and a bushing serial that trips _has_serial()) fall
+        # through the loop above entirely. Only fires when nothing else
+        # matched, so it can't affect any format that already groups fine.
+        combined_all = "\n\n".join(page_texts)
+        if _is_bushing_repeat_test_page(combined_all):
+            groups.append(combined_all)
+        elif any(_is_old_format_winding_page(t) for t in page_texts):
+            # FIX-25: older-format report where the winding-table page's
+            # "Winding" heading is OCR-line-split from "Test"/"Results",
+            # so it never satisfies the normal _is_primary_page check.
+            # Treat all pages of this document as one combined group,
+            # since normal primary/secondary classification can't split
+            # them reliably here.
+            groups.append(combined_all)
+
     return groups
 
 
@@ -900,6 +1201,22 @@ def extract_with_easyocr(images: list, workers: int = 1, debug_dir: Path | None 
                 raw_texts[idx] = ocr_text
         page_texts = [raw_texts.get(i, "") for i in range(len(images))]
 
+    full_ocr = "\n\n".join(page_texts)
+    pre_split_chunks = _split_combined_multi_equipment_report(full_ocr)
+    if len(pre_split_chunks) > 1:
+        print(f"  {len(page_texts)} pages -> combined report, {len(pre_split_chunks)} equipment section(s) detected.")
+        reports: list[dict] = []
+        for sc_idx, chunk in enumerate(pre_split_chunks):
+            print(f"  Parsing section {sc_idx+1}/{len(pre_split_chunks)}...", end=" ", flush=True)
+            sub_parsed = parse_ocr_text(chunk)
+            if sub_parsed:
+                print(f"OK - serial={sub_parsed.get('serial_number')}  date={sub_parsed.get('test_date')}")
+                reports.append(sub_parsed)
+            else:
+                print("skipped (no serial/date).")
+        return reports
+
+    # Normal single-transformer flow
     groups = _group_pages(page_texts)
     print(f"  {len(page_texts)} pages -> {len(groups)} transformer group(s).")
 
@@ -1123,14 +1440,19 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
         raw_date  = r.get("test_date") or ""
         tested_at = _parse_date(raw_date) or datetime.now(timezone.utc)
 
-        eq = session.query(Equipment).filter(Equipment.factory_serial_number == serial).first()
+        eq = None
+        if serial:
+            eq = session.query(Equipment).filter(Equipment.factory_serial_number == serial).first()
+
         if not eq:
-            print(f"  [SKIP] Equipment '{serial}' not found.")
+            reason = "no serial extracted" if not serial else f"serial '{serial}' not matched"
+            print(f"  [SKIP] {reason} — not seeded via CLI. "
+                  f"Use the /data-import API flow to review and link this record.")
             continue
 
         dept       = eq.department or _resolve_dept(r.get("sub_station", ""))
         req_number = f"TR-HIST-{tested_at.strftime('%Y%m%d')}-{serial}-TDELTA"
-
+        
         if session.query(TestingRequest).filter(
             TestingRequest.request_number == req_number
         ).first():
