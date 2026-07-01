@@ -98,6 +98,19 @@ def _enforce_org_scope(user: User) -> UUID:
     return user.organization_id
 
 
+def _np_get(nameplate_data: dict, *keys: str) -> Optional[str]:
+    """Extract a value from nameplate_data sections by matching field keys."""
+    if not nameplate_data:
+        return None
+    for section in nameplate_data.get("sections", []):
+        for field in section.get("fields", []):
+            if field.get("key") in keys:
+                v = field.get("value")
+                if v not in (None, "", "null"):
+                    return str(v)
+    return None
+
+
 def _chain_ref(eq_obj) -> Optional[dict]:
     """Lightweight replacement-chain reference dict from an Equipment ORM object."""
     if eq_obj is None:
@@ -139,10 +152,10 @@ def _to_response(db: Session, eq: Equipment) -> dict:
         "commissioned_date": _dt(eq.commissioned_date),
         "retired_date":      _dt(eq.retired_date),
         "retirement_reason": eq.retirement_reason,
-        "manufacturer": eq.manufacturer,
-        "model_number": eq.model_number,
-        "factory_serial_number": eq.factory_serial_number,
-        "year_of_manufacture": eq.year_of_manufacture,
+        "manufacturer": eq.manufacturer or _np_get(eq.nameplate_data, "manufacturer", "make"),
+        "model_number": eq.model_number or _np_get(eq.nameplate_data, "model_number", "model"),
+        "factory_serial_number": eq.factory_serial_number or _np_get(eq.nameplate_data, "factory_serial_number", "serial_number"),
+        "year_of_manufacture": eq.year_of_manufacture or _np_get(eq.nameplate_data, "year_of_manufacture", "year"),
         "latitude": float(eq.latitude) if eq.latitude is not None else None,
         "longitude": float(eq.longitude) if eq.longitude is not None else None,
         "phase": eq.phase,
@@ -526,9 +539,17 @@ def _parse_bulk_excel(contents: bytes) -> tuple[list, list]:
         elif h == "__equipment_type_id__":
             meta["equipment_type_id"] = ws.cell(row=3, column=ci).value
 
+    from datetime import datetime as _dt_cls, date as _date_cls
+
+    def _coerce(v):
+        """Convert Excel cell values to JSON-safe types."""
+        if isinstance(v, (_dt_cls, _date_cls)):
+            return v.isoformat()
+        return v
+
     rows = []
     for row_idx in range(4, ws.max_row + 1):
-        row_vals = {h: ws.cell(row=row_idx, column=ci).value
+        row_vals = {h: _coerce(ws.cell(row=row_idx, column=ci).value)
                     for ci, h in enumerate(headers, start=1)
                     if h and not str(h).startswith("__")}
         # Skip completely empty rows
