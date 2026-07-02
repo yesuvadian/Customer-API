@@ -155,7 +155,11 @@ def _get_or_create_status(session, wf, code, name, seq, color,
     return s
 
 
-def _get_or_create_stage(session, wf, status, name, code, seq):
+def _get_or_create_stage(
+    session, wf, status, name, code, seq,
+    show_recommendation=False, is_result_stage=False,
+    use_l2_route=False, is_role_scoped=False,
+):
     s = session.query(TrWfStage).filter_by(
         wf_definition_id=wf.id, code=code
     ).first()
@@ -170,10 +174,28 @@ def _get_or_create_stage(session, wf, status, name, code, seq):
             weight=10,
             is_mandatory=True,
             is_active=True,
+            show_recommendation=show_recommendation,
+            is_result_stage=is_result_stage,
+            use_l2_route=use_l2_route,
+            is_role_scoped=is_role_scoped,
         )
         session.add(s)
         session.flush()
         print(f"  [NEW] TrWfStage: {code}")
+    else:
+        # Ensure flags are always up-to-date on existing stages
+        changed = False
+        for attr, val in [
+            ("show_recommendation", show_recommendation),
+            ("is_result_stage", is_result_stage),
+            ("use_l2_route", use_l2_route),
+            ("is_role_scoped", is_role_scoped),
+        ]:
+            if getattr(s, attr) != val:
+                setattr(s, attr, val)
+                changed = True
+        if changed:
+            print(f"  [UPD] TrWfStage flags updated: {code}")
     return s
 
 
@@ -318,10 +340,10 @@ def seed_tr_wf_workflow(session):
     session.flush()
 
     # ── Stages for Normal workflow ────────────────────────────────────────────
-    sg_l2    = _get_or_create_stage(session, wf_normal, st_l2_pending, "L2 Approval & Route",  "l2_approve_route",  1)
-    sg_l3a   = _get_or_create_stage(session, wf_normal, st_l3_pending, "L3 Tester Assignment", "l3_assign_tester",  2)
+    sg_l2    = _get_or_create_stage(session, wf_normal, st_l2_pending, "L2 Approval & Route",  "l2_approve_route",  1, use_l2_route=True)
+    sg_l3a   = _get_or_create_stage(session, wf_normal, st_l3_pending, "L3 Tester Assignment", "l3_assign_tester",  2, is_role_scoped=True)
     sg_l4    = _get_or_create_stage(session, wf_normal, st_testing,    "L4 Test Execution",    "l4_test_execution", 3)
-    sg_l3rev = _get_or_create_stage(session, wf_normal, st_review,     "L3 Result Review",     "l3_review_result",  4)
+    sg_l3rev = _get_or_create_stage(session, wf_normal, st_review,     "L3 Result Review",     "l3_review_result",  4, show_recommendation=True, is_result_stage=True, is_role_scoped=True)
     session.flush()
 
     # ── Stage roles ───────────────────────────────────────────────────────────
@@ -409,8 +431,8 @@ def seed_tr_wf_workflow(session):
     st_fr_can  = _get_or_create_status(session, wf_failure, "fr_cancelled",       "FR Cancelled",            50, "#6B7280", terminal=True)
     session.flush()
 
-    sg_fr_l2   = _get_or_create_stage(session, wf_failure, st_fr_l2,   "L2 Initial Review",      "fr_l2_review",     1)
-    sg_fr_tech = _get_or_create_stage(session, wf_failure, st_fr_tech, "Technical Approval",     "fr_tech_approve",  2)
+    sg_fr_l2   = _get_or_create_stage(session, wf_failure, st_fr_l2,   "L2 Initial Review",  "fr_l2_review",    1)
+    sg_fr_tech = _get_or_create_stage(session, wf_failure, st_fr_tech, "Technical Approval", "fr_tech_approve", 2, show_recommendation=True)
     session.flush()
 
     # EE_TLSS handles both stages (initial forward + technical sign-off)

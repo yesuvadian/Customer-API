@@ -30,8 +30,11 @@ from sqlalchemy.orm import Session, joinedload
 
 from auth_utils import get_current_user
 from database import get_db
+from sqlalchemy import or_
+
 from models import (
     OrgRole,
+    OrgTestTemplate,
     OrgUserRole,
     TrWfDefinition,
     TrWfRoutingDefault,
@@ -64,6 +67,10 @@ def _stage_out(s: TrWfStage) -> dict:
         "is_mandatory": s.is_mandatory,
         "is_active": s.is_active,
         "default_duration_days": s.default_duration_days,
+        "show_recommendation": s.show_recommendation,
+        "is_result_stage": s.is_result_stage,
+        "use_l2_route": s.use_l2_route,
+        "is_role_scoped": s.is_role_scoped,
         "status": {
             "id": str(s.status.id),
             "status_code": s.status.status_code,
@@ -422,9 +429,11 @@ def create_stage(
 
 
 @router.patch("/stages/{stage_id}")
+@router.patch("/definitions/{definition_id}/stages/{stage_id}")
 def patch_stage(
     stage_id: UUID,
     body: dict,
+    definition_id: UUID = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -432,7 +441,8 @@ def patch_stage(
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
     for k in ("name", "code", "sequence", "weight", "status_id",
-              "is_mandatory", "is_active", "default_duration_days"):
+              "is_mandatory", "is_active", "default_duration_days",
+              "show_recommendation", "is_result_stage", "use_l2_route", "is_role_scoped"):
         if k in body:
             setattr(stage, k, body[k])
     db.commit()
@@ -440,8 +450,10 @@ def patch_stage(
 
 
 @router.delete("/stages/{stage_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/definitions/{definition_id}/stages/{stage_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_stage(
     stage_id: UUID,
+    definition_id: UUID = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -689,16 +701,27 @@ def get_equipment_types(
 def get_test_types(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    enabled_only: bool = Query(False),
 ):
-    rows = (
+    query = (
         db.query(CategoryDetails.id, CategoryDetails.name, CategoryDetails.category_master_id)
         .filter(
             CategoryDetails.category_type == "test",
             CategoryDetails.is_active.is_(True),
         )
-        .order_by(CategoryDetails.name)
-        .all()
     )
+    if enabled_only:
+        org_id = _get_org_id(current_user)
+        enabled_ids = (
+            db.query(OrgTestTemplate.test_type_id)
+            .filter(
+                OrgTestTemplate.test_type_id.isnot(None),
+                or_(OrgTestTemplate.org_id == org_id, OrgTestTemplate.org_id.is_(None)),
+            )
+            .subquery()
+        )
+        query = query.filter(CategoryDetails.id.in_(enabled_ids))
+    rows = query.order_by(CategoryDetails.name).all()
     return [{"id": r.id, "name": r.name, "equipment_type_id": r.category_master_id} for r in rows]
 
 
