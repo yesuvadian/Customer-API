@@ -613,6 +613,7 @@ class AnalyticsEngine:
                     condition = _CONDITION.get(status, "Poor") if status else None
                     score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
 
+
                     history  = history_map.get(field_key, [])
                     analysis = ParameterAnalyzer.analyse(history, ev)
 

@@ -42,7 +42,9 @@ from models import (
     EquipmentAnalytics,
     HierarchyAnalytics,
     OrgDepartment,
+    OverhaulRecommendation,
     ParameterAnalytics,
+    RepairWorkflow,
     TestAnalytics,
     TestResult,
     TestingRequest,
@@ -1269,10 +1271,119 @@ def get_parameter_history(
         for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
     }
 
-    return [
-        _serialize_parameter_history_point(row, results_map.get(row.test_result_id))
-        for row in rows
-    ]
+    # For cumulative templates (OLTC ops, CB ops): derive condition from the
+    # running cumulative diff at each reading vs the overhaul threshold.
+    # This is exactly the same logic that triggers the workflow ticket.
+    cumulative_condition_map: dict = {}
+    if rows:
+        tpl_key = rows[0].template_key
+        tpl_row = (
+            db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.template_key == tpl_key)
+            .first()
+        )
+        tpl_data = tpl_row.template_data if tpl_row else {}
+        if tpl_data.get("enable_cumulative"):
+            rules = tpl_data.get("rules", [])
+            threshold = next(
+                (r["config"].get("default_threshold")
+                 for r in rules if r.get("type") == "CUMULATIVE_DIFF"),
+                None,
+            )
+            if threshold:
+                # Build readings list ordered by reading_date
+                raw_readings = []
+                for row in rows:
+                    tr = results_map.get(row.test_result_id)
+                    td = (tr.test_data or {}) if tr else {}
+                    reading_val = td.get("reading")
+                    order_val   = td.get("reading_date") or (tr.cts.isoformat() if tr and tr.cts else "")
+                    if reading_val is not None:
+                        raw_readings.append({
+                            "result_id":    row.test_result_id,
+                            "reading_time": order_val,
+                            "reading":      float(reading_val),
+                        })
+                raw_readings.sort(key=lambda x: x["reading_time"])
+                # Running cumulative diff with reset on drop (same as CumulativeService)
+                running  = 0.0
+                prev_val = None
+                for pt in raw_readings:
+                    val = pt["reading"]
+                    if prev_val is not None:
+                        diff = val - prev_val
+                        if diff > 0:
+                            running += diff
+                        elif diff < 0:
+                            running = 0.0  # counter reset after overhaul
+                    prev_val = val
+                    pct = running / threshold
+                    cond = "Poor" if pct >= 1.0 else "Fair" if pct >= 0.7 else "Good"
+                    cumulative_condition_map[pt["result_id"]] = (cond, round(running, 1))
+
+    # Build overhaul ticket map: result_id → (workflow_number, rec_status)
+    overhaul_ticket_map: dict = {}
+    if cumulative_condition_map and rows:
+        equipment_id_val = rows[0].equipment_id if hasattr(rows[0], "equipment_id") else None
+        if equipment_id_val is None:
+            # derive from test result
+            first_tr = results_map.get(rows[0].test_result_id)
+            if first_tr:
+                equipment_id_val = first_tr.equipment_id
+        if equipment_id_val:
+            overhaul_recs = (
+                db.query(OverhaulRecommendation, RepairWorkflow)
+                .outerjoin(RepairWorkflow, RepairWorkflow.id == OverhaulRecommendation.workflow_id)
+                .filter(OverhaulRecommendation.equipment_id == equipment_id_val)
+                .order_by(OverhaulRecommendation.triggered_at)
+                .all()
+            )
+            # For each Poor reading, find the recommendation that was triggered
+            # at or around that time (most recent rec triggered up to that point)
+            poor_result_ids = [
+                rid for rid, (cond, _) in cumulative_condition_map.items() if cond == "Poor"
+            ]
+            if overhaul_recs and poor_result_ids:
+                # Build a sorted list of (triggered_at, workflow_number, status)
+                rec_timeline = []
+                for rec, wf in overhaul_recs:
+                    rec_timeline.append({
+                        "triggered_at": rec.triggered_at,
+                        "workflow_number": wf.workflow_number if wf else None,
+                        "status": rec.status,
+                    })
+                # For each Poor reading, match to the most recently triggered rec
+                for pt_dict in raw_readings if 'raw_readings' in dir() else []:
+                    rid = pt_dict.get("result_id")
+                    if rid not in cumulative_condition_map:
+                        continue
+                    cond, _ = cumulative_condition_map[rid]
+                    if cond != "Poor":
+                        continue
+                    reading_time_str = pt_dict.get("reading_time", "")
+                    matched = None
+                    for rec_entry in rec_timeline:
+                        ta = rec_entry["triggered_at"]
+                        ta_str = ta.isoformat() if ta else ""
+                        if ta_str <= reading_time_str:
+                            matched = rec_entry
+                    if matched:
+                        overhaul_ticket_map[rid] = (matched["workflow_number"], matched["status"])
+
+    points = []
+    for row in rows:
+        tr  = results_map.get(row.test_result_id)
+        pt  = _serialize_parameter_history_point(row, tr)
+        if row.test_result_id in cumulative_condition_map:
+            cond, cum_val = cumulative_condition_map[row.test_result_id]
+            pt["condition"]        = cond
+            pt["cumulative_value"] = cum_val
+        if row.test_result_id in overhaul_ticket_map:
+            wf_num, rec_status = overhaul_ticket_map[row.test_result_id]
+            pt["overhaul_ticket_number"] = wf_num
+            pt["overhaul_ticket_status"] = rec_status
+        points.append(pt)
+    return points
 
 
 # ─────────────────────────────────────────────────────────────────────────────
