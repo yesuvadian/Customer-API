@@ -1275,6 +1275,8 @@ def get_parameter_history(
     # running cumulative diff at each reading vs the overhaul threshold.
     # This is exactly the same logic that triggers the workflow ticket.
     cumulative_condition_map: dict = {}
+    cumulative_raw_readings: list = []
+    cumulative_equipment_id = None
     if rows:
         tpl_key = rows[0].template_key
         tpl_row = (
@@ -1299,12 +1301,16 @@ def get_parameter_history(
                     reading_val = td.get("reading")
                     order_val   = td.get("reading_date") or (tr.cts.isoformat() if tr and tr.cts else "")
                     if reading_val is not None:
+                        eq_id = getattr(tr, "equipment_id", None)
+                        if eq_id and not cumulative_equipment_id:
+                            cumulative_equipment_id = eq_id
                         raw_readings.append({
                             "result_id":    row.test_result_id,
                             "reading_time": order_val,
                             "reading":      float(reading_val),
                         })
                 raw_readings.sort(key=lambda x: x["reading_time"])
+                cumulative_raw_readings = raw_readings
                 # Running cumulative diff with reset on drop (same as CumulativeService)
                 running  = 0.0
                 prev_val = None
@@ -1323,52 +1329,36 @@ def get_parameter_history(
 
     # Build overhaul ticket map: result_id → (workflow_number, rec_status)
     overhaul_ticket_map: dict = {}
-    if cumulative_condition_map and rows:
-        equipment_id_val = rows[0].equipment_id if hasattr(rows[0], "equipment_id") else None
-        if equipment_id_val is None:
-            # derive from test result
-            first_tr = results_map.get(rows[0].test_result_id)
-            if first_tr:
-                equipment_id_val = first_tr.equipment_id
-        if equipment_id_val:
-            overhaul_recs = (
-                db.query(OverhaulRecommendation, RepairWorkflow)
-                .outerjoin(RepairWorkflow, RepairWorkflow.id == OverhaulRecommendation.workflow_id)
-                .filter(OverhaulRecommendation.equipment_id == equipment_id_val)
-                .order_by(OverhaulRecommendation.triggered_at)
-                .all()
-            )
-            # For each Poor reading, find the recommendation that was triggered
-            # at or around that time (most recent rec triggered up to that point)
-            poor_result_ids = [
-                rid for rid, (cond, _) in cumulative_condition_map.items() if cond == "Poor"
+    if cumulative_condition_map and cumulative_equipment_id:
+        overhaul_recs = (
+            db.query(OverhaulRecommendation, RepairWorkflow)
+            .outerjoin(RepairWorkflow, RepairWorkflow.id == OverhaulRecommendation.workflow_id)
+            .filter(OverhaulRecommendation.equipment_id == cumulative_equipment_id)
+            .order_by(OverhaulRecommendation.triggered_at)
+            .all()
+        )
+        if overhaul_recs:
+            rec_timeline = [
+                {
+                    "triggered_at": rec.triggered_at,
+                    "workflow_number": wf.workflow_number if wf else None,
+                    "status": rec.status,
+                }
+                for rec, wf in overhaul_recs
             ]
-            if overhaul_recs and poor_result_ids:
-                # Build a sorted list of (triggered_at, workflow_number, status)
-                rec_timeline = []
-                for rec, wf in overhaul_recs:
-                    rec_timeline.append({
-                        "triggered_at": rec.triggered_at,
-                        "workflow_number": wf.workflow_number if wf else None,
-                        "status": rec.status,
-                    })
-                # For each Poor reading, match to the most recently triggered rec
-                for pt_dict in raw_readings if 'raw_readings' in dir() else []:
-                    rid = pt_dict.get("result_id")
-                    if rid not in cumulative_condition_map:
-                        continue
-                    cond, _ = cumulative_condition_map[rid]
-                    if cond != "Poor":
-                        continue
-                    reading_time_str = pt_dict.get("reading_time", "")
-                    matched = None
-                    for rec_entry in rec_timeline:
-                        ta = rec_entry["triggered_at"]
-                        ta_str = ta.isoformat() if ta else ""
-                        if ta_str <= reading_time_str:
-                            matched = rec_entry
-                    if matched:
-                        overhaul_ticket_map[rid] = (matched["workflow_number"], matched["status"])
+            for pt_dict in cumulative_raw_readings:
+                rid = pt_dict["result_id"]
+                if cumulative_condition_map.get(rid, ("Good", 0))[0] != "Poor":
+                    continue
+                reading_time_str = pt_dict.get("reading_time", "")
+                matched = None
+                for rec_entry in rec_timeline:
+                    ta = rec_entry["triggered_at"]
+                    ta_str = ta.isoformat() if ta else ""
+                    if ta_str <= reading_time_str:
+                        matched = rec_entry
+                if matched:
+                    overhaul_ticket_map[rid] = (matched["workflow_number"], matched["status"])
 
     points = []
     for row in rows:
