@@ -239,6 +239,7 @@ class EquipmentService:
         pt_ratio: Optional[str] = None,
         vector_group: Optional[str] = None,
         impedance_pct: Optional[float] = None,
+        scada_tag: Optional[str] = None,
         created_by: Optional[UUID] = None,
     ) -> Equipment:
         """Register a new equipment unit with auto-generated UEIC."""
@@ -281,6 +282,7 @@ class EquipmentService:
             pt_ratio=pt_ratio,
             vector_group=vector_group,
             impedance_pct=impedance_pct,
+            scada_tag=scada_tag,
             created_by=created_by,
         )
         db.add(equipment)
