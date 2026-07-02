@@ -521,6 +521,39 @@ class AnalyticsEngine:
             template_data, evaluation_result
         )
 
+        # Fallback for calibration templates (DATE_ADD rule) where evaluation_result
+        # may be empty. Score based on days remaining vs validity period.
+        if health_score is None and template_data.get("enable_calibration"):
+            try:
+                from datetime import date, datetime as _dt
+                cal_date_str  = test_data.get("calibration_date") or test_data.get("reading_date")
+                validity_val  = test_data.get("validity_months")
+                if cal_date_str and validity_val:
+                    for fmt in ("%Y-%m-%d", "%d-%m-%Y"):
+                        try:
+                            cal_date = _dt.strptime(str(cal_date_str)[:10], fmt).date(); break
+                        except ValueError:
+                            cal_date = None
+                    validity_months = float(validity_val)
+                    if cal_date and validity_months > 0:
+                        from dateutil.relativedelta import relativedelta
+                        due_date     = cal_date + relativedelta(months=int(validity_months))
+                        total_days   = (due_date - cal_date).days
+                        days_left    = (due_date - date.today()).days
+                        pct_used     = 1 - (days_left / total_days) if total_days > 0 else 1
+                        if days_left <= 0:
+                            health_score = 0.0
+                            critical_findings = [{"key": "calibration_date", "label": "Calibration",
+                                                  "status": "Fail", "message": f"Calibration overdue by {abs(days_left)} days"}]
+                        elif pct_used >= 0.8:
+                            health_score = round(days_left / total_days * 100, 1)
+                            critical_findings = [{"key": "calibration_date", "label": "Calibration",
+                                                  "status": "Warning", "message": f"Calibration due in {days_left} days"}]
+                        else:
+                            health_score = round(days_left / total_days * 100, 1)
+            except Exception as _cal_err:
+                logger.warning(f"Calibration fallback scoring failed: {_cal_err}")
+
         # Fallback for cumulative templates (OLTC ops, CB ops) where evaluation_result
         # may be empty because the reading field had no evaluation block at submission time.
         # Derive a score from cumulative value vs the rule's default_threshold.
