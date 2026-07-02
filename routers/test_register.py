@@ -107,48 +107,50 @@ def list_templates(
 # ── Test types lookup ──────────────────────────────────────────────────────────
 
 @router.get("/test-types", summary="List test types grouped by equipment type")
-def list_test_types(db: Session = Depends(get_db)):
-    rows = (
+def list_test_types(db: Session = Depends(get_db), include_inactive: bool = False):
+    q = (
         db.query(CategoryDetails, CategoryMaster)
         .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
         .filter(
             CategoryDetails.category_type == "test",
-            CategoryDetails.is_active.is_(True),
             CategoryMaster.is_active.is_(True),
         )
-        .order_by(CategoryMaster.name, CategoryDetails.name)
-        .all()
     )
+    if not include_inactive:
+        q = q.filter(CategoryDetails.is_active.is_(True))
+    rows = q.order_by(CategoryMaster.name, CategoryDetails.name).all()
     return [
         {
             "id": detail.id,
             "name": detail.name,
             "equipment_type_id": detail.category_master_id,
             "equipment_type_name": master.name,
+            "is_active": detail.is_active,
         }
         for detail, master in rows
     ]
 
 
 @router.get("/maintenance-types", summary="List maintenance types grouped by equipment type")
-def list_maintenance_types(db: Session = Depends(get_db)):
-    rows = (
+def list_maintenance_types(db: Session = Depends(get_db), include_inactive: bool = False):
+    q = (
         db.query(CategoryDetails, CategoryMaster)
         .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
         .filter(
             CategoryDetails.category_type == "maintenance",
-            CategoryDetails.is_active.is_(True),
             CategoryMaster.is_active.is_(True),
         )
-        .order_by(CategoryMaster.name, CategoryDetails.name)
-        .all()
     )
+    if not include_inactive:
+        q = q.filter(CategoryDetails.is_active.is_(True))
+    rows = q.order_by(CategoryMaster.name, CategoryDetails.name).all()
     return [
         {
             "id": detail.id,
             "name": detail.name,
             "equipment_type_id": detail.category_master_id,
             "equipment_type_name": master.name,
+            "is_active": detail.is_active,
         }
         for detail, master in rows
     ]

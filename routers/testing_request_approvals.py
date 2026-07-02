@@ -803,9 +803,7 @@ def tr_wf_get_pending_queue(
         )
     instances = instances_q.all()
 
-    # Filter by resolved_l3_role_id at both l3_assign_tester and l3_review_result stages
     from models import TrWfStage as TrWfStageModel
-    role_scoped_stage_codes = {"l3_assign_tester", "l3_review_result"}
 
     def _caller_sees_instance(inst: TrWfInstance) -> bool:
         if not inst.resolved_l3_role_id:
@@ -813,7 +811,7 @@ def tr_wf_get_pending_queue(
         current_stage = db.query(TrWfStageModel).filter(
             TrWfStageModel.id == inst.current_stage_id
         ).first()
-        if not current_stage or current_stage.code not in role_scoped_stage_codes:
+        if not current_stage or not current_stage.is_role_scoped:
             return True  # role filter only applies at role-scoped stages
         # Caller must have the resolved AEE role for this stream
         return inst.resolved_l3_role_id in caller_role_ids
@@ -869,10 +867,17 @@ def tr_wf_get_pending_queue(
             ) if req.originator else None,
             "current_status_code": inst.current_status_code,
             "current_stage_id": str(inst.current_stage_id) if inst.current_stage_id else None,
-            "stage_code": (
-                db.query(TrWfStage).filter(TrWfStage.id == inst.current_stage_id).first().code
-                if inst.current_stage_id else None
-            ),
+            **({
+                "stage_code": _cur_stage.code,
+                "stage_show_recommendation": _cur_stage.show_recommendation,
+                "stage_is_result_stage": _cur_stage.is_result_stage,
+                "stage_use_l2_route": _cur_stage.use_l2_route,
+            } if (_cur_stage := db.query(TrWfStage).filter(TrWfStage.id == inst.current_stage_id).first()) else {
+                "stage_code": None,
+                "stage_show_recommendation": False,
+                "stage_is_result_stage": False,
+                "stage_use_l2_route": False,
+            }),
             "wf_instance_id": str(inst.id),
             "resolved_tester_role_id": str(inst.resolved_tester_role_id) if inst.resolved_tester_role_id else None,
             "resolved_tester_role_name": inst.resolved_tester_role.name if inst.resolved_tester_role else None,

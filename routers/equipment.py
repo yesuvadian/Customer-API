@@ -909,6 +909,7 @@ def list_equipment(
     replacement_year: Optional[int] = None,
     replacement_year_from: Optional[int] = None,
     replacement_year_to: Optional[int] = None,
+    has_tests: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -941,6 +942,7 @@ def list_equipment(
         replacement_year=replacement_year,
         replacement_year_from=replacement_year_from,
         replacement_year_to=replacement_year_to,
+        has_tests=has_tests,
     )
     responses = []
 

@@ -832,6 +832,10 @@ class TrWfStage(Base):
     is_mandatory = Column(Boolean, default=True)
     is_active = Column(Boolean, default=True)
     default_duration_days = Column(Integer, nullable=True)
+    show_recommendation = Column(Boolean, default=False, server_default="false")
+    is_result_stage = Column(Boolean, default=False, server_default="false")
+    use_l2_route = Column(Boolean, default=False, server_default="false")
+    is_role_scoped = Column(Boolean, default=False, server_default="false")
     created_at = Column(DateTime, server_default=func.now())
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
