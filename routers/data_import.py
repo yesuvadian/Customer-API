@@ -401,8 +401,9 @@ def download_schema(
         if not editable_cols:
             continue
 
-        # Sheet name: truncate to 31 chars (Excel limit)
-        sheet_name = tbl_label[:31]
+        # Sheet name: strip Excel-invalid chars, truncate to 31 chars
+        import re as _re
+        sheet_name = _re.sub(r'[:\\/?*\[\]]', '', tbl_label)[:31]
         tws = wb.create_sheet(title=sheet_name)
 
         # Row 1: visible label  Row 2: machine key (hidden)  Row 3: unit hint
