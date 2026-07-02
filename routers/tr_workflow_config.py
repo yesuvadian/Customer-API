@@ -704,9 +704,9 @@ def get_test_types(
     enabled_only: bool = Query(False),
 ):
     query = (
-        db.query(CategoryDetails.id, CategoryDetails.name, CategoryDetails.category_master_id)
+        db.query(CategoryDetails.id, CategoryDetails.name, CategoryDetails.category_master_id, CategoryDetails.category_type)
         .filter(
-            CategoryDetails.category_type == "test",
+            CategoryDetails.category_type.in_(["test", "maintenance", "inspection", "repair_lifecycle"]),
             CategoryDetails.is_active.is_(True),
         )
     )
@@ -722,7 +722,22 @@ def get_test_types(
         )
         query = query.filter(CategoryDetails.id.in_(enabled_ids))
     rows = query.order_by(CategoryDetails.name).all()
-    return [{"id": r.id, "name": r.name, "equipment_type_id": r.category_master_id} for r in rows]
+    _type_label = {
+        "test": "Test",
+        "maintenance": "Maintenance",
+        "inspection": "Inspection",
+        "repair_lifecycle": "Repair",
+    }
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "equipment_type_id": r.category_master_id,
+            "category_type": r.category_type,
+            "category_type_label": _type_label.get(r.category_type or "", r.category_type or ""),
+        }
+        for r in rows
+    ]
 
 
 @router.get("/options/roles")
