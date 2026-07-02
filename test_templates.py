@@ -2507,7 +2507,16 @@ TEST_TEMPLATES = {
             {
                 "title": "Operations Reading",
                 "fields": [
-                    {"key": "reading",       "label": "Operations Counter Reading", "type": "number", "required": True,  "unit": "ops"},
+                    {"key": "reading",       "label": "Operations Counter Reading", "type": "number", "required": True,  "unit": "ops",
+                     "evaluation": {
+                         "type": "THRESHOLD",
+                         "weight": 2.0,
+                         "thresholds": [
+                             {"max": 1400,  "status": "Pass",    "label": "Within safe range"},
+                             {"max": 1800,  "status": "Warning", "label": "Approaching overhaul threshold"},
+                             {"max": 2000,  "status": "Fail",    "label": "At or beyond overhaul threshold"},
+                         ],
+                     }},
                     {"key": "reading_date",  "label": "Reading Date",              "type": "date",   "required": True},
                     {"key": "reading_by",    "label": "Recorded By",               "type": "text",   "required": False},
                     {"key": "notes",         "label": "Notes / Observations",      "type": "textarea","required": False},
@@ -2555,7 +2564,16 @@ TEST_TEMPLATES = {
             {
                 "title": "Operations Reading",
                 "fields": [
-                    {"key": "reading",       "label": "Tap-Change Counter Reading", "type": "number", "required": True,  "unit": "ops"},
+                    {"key": "reading",       "label": "Tap-Change Counter Reading", "type": "number", "required": True,  "unit": "ops",
+                     "evaluation": {
+                         "type": "THRESHOLD",
+                         "weight": 2.0,
+                         "thresholds": [
+                             {"max": 3500,  "status": "Pass",    "label": "Within safe range"},
+                             {"max": 4500,  "status": "Warning", "label": "Approaching overhaul threshold"},
+                             {"max": 5000,  "status": "Fail",    "label": "At or beyond overhaul threshold"},
+                         ],
+                     }},
                     {"key": "reading_date",  "label": "Reading Date",               "type": "date",   "required": True},
                     {"key": "reading_by",    "label": "Recorded By",                "type": "text",   "required": False},
                     {"key": "notes",         "label": "Notes / Observations",       "type": "textarea","required": False},
@@ -3159,6 +3177,7 @@ TEST_TEMPLATES = {
                     "type": "dropdown",
                     "options": ["220/66/11 kV", "400/220/33 kV"],
                     "required": True,
+                    "import_skip": True,
                 },
             ],
         },
@@ -3174,7 +3193,7 @@ TEST_TEMPLATES = {
                 "options": ["open", "skip"],
             },
             "fields": [
-                {"key": "test_voltage_kv",   "label": "Applied Test Voltage",  "type": "number", "unit": "kV",  "required": True},
+                {"key": "test_voltage_kv",   "label": "Applied Test Voltage",  "type": "number", "unit": "kV",  "required": True, "import_skip": True},
                 {"key": "frequency_hz",      "label": "Supply Frequency",      "type": "number", "unit": "Hz",  "required": True, "default": "50"},
                 {"key": "ambient_temp_c",    "label": "Ambient Temperature",   "type": "number", "unit": "°C", "required": True},
                 {"key": "oil_temp_c",        "label": "Oil Temperature",       "type": "number", "unit": "°C"},

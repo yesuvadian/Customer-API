@@ -430,20 +430,30 @@ def download_bulk_template(
     title_cell.alignment = center
     ws.row_dimensions[1].height = 28
 
-    # ── Row 2: Column headers ─────────────────────────────────────────────────
-    ws.row_dimensions[2].height = 22
+    # ── Row 2: Machine-readable keys (parsed by bulk import) ─────────────────
+    # Row 3: Human-readable labels shown to user
+    ws.row_dimensions[2].height = 0   # hidden — keys only, not for user
+    ws.row_dimensions[3].height = 22  # visible label row
     for ci, col_def in enumerate(all_cols, start=1):
         key  = col_def[0]
         lbl  = col_def[1]
-        cell = ws.cell(row=2, column=ci, value=key if key.startswith("__") else lbl)
-        is_meta    = key.startswith("__")
-        is_np      = ci > (len(meta_cols) + len(display_cols) + len(fixed_cols))
-        cell.font  = np_hdr_font if is_np else hdr_font
-        cell.fill  = np_fill     if is_np else (locked_fill if is_meta else hdr_fill)
-        cell.alignment = center
+        is_meta = key.startswith("__")
+        is_np   = ci > (len(meta_cols) + len(display_cols) + len(fixed_cols))
 
-    # ── Row 3: Hint/example row ────────────────────────────────────────────────
-    ws.row_dimensions[3].height = 18
+        # Row 2: always write the field key (machine-readable)
+        key_cell = ws.cell(row=2, column=ci, value=key)
+        key_cell.font      = Font(color="FFFFFF", size=1)  # invisible text
+        key_cell.fill      = locked_fill if is_meta else (np_fill if is_np else hdr_fill)
+        key_cell.alignment = center
+
+        # Row 3: write human-readable label as the visible header
+        lbl_cell = ws.cell(row=3, column=ci, value=lbl if not is_meta else "")
+        lbl_cell.font      = np_hdr_font if is_np else hdr_font
+        lbl_cell.fill      = np_fill if is_np else (locked_fill if is_meta else hdr_fill)
+        lbl_cell.alignment = center
+
+    # ── Row 4: Hint/example row ────────────────────────────────────────────────
+    ws.row_dimensions[4].height = 18
     hint_values = (
         [str(department_id), str(equipment_type_id), dept.name]
         + [hint for _, _, hint in fixed_cols]
@@ -451,7 +461,7 @@ def download_bulk_template(
            if f.get("type") not in _SKIP_FIELD_TYPES]
     )
     for ci, val in enumerate(hint_values, start=1):
-        cell = ws.cell(row=3, column=ci, value=val)
+        cell = ws.cell(row=4, column=ci, value=val)
         cell.font      = hint_font
         cell.fill      = hint_fill
         cell.alignment = wrap
@@ -467,7 +477,7 @@ def download_bulk_template(
             formula1='"400,220,110,66,33,11"',
             allow_blank=True,
         )
-        dv.sqref = f"{vc_letter}4:{vc_letter}1000"
+        dv.sqref = f"{vc_letter}5:{vc_letter}1000"
         ws.add_data_validation(dv)
 
     # ── Data validation: phase dropdown ───────────────────────────────────────
@@ -477,7 +487,7 @@ def download_bulk_template(
     if phase_col_idx:
         ph_letter = get_column_letter(phase_col_idx)
         dv2 = DataValidation(type="list", formula1='"R,Y,B"', allow_blank=True)
-        dv2.sqref = f"{ph_letter}4:{ph_letter}1000"
+        dv2.sqref = f"{ph_letter}5:{ph_letter}1000"
         ws.add_data_validation(dv2)
 
     # ── Data validation: nameplate dropdowns ──────────────────────────────────
@@ -487,7 +497,7 @@ def download_bulk_template(
             col_letter = get_column_letter(np_start_ci + rel_i)
             formula    = '"' + ",".join(str(o) for o in opts[:30]) + '"'
             dv3 = DataValidation(type="list", formula1=formula, allow_blank=True)
-            dv3.sqref = f"{col_letter}4:{col_letter}1000"
+            dv3.sqref = f"{col_letter}5:{col_letter}1000"
             ws.add_data_validation(dv3)
 
     # ── Column widths & hide metadata cols ────────────────────────────────────
@@ -528,16 +538,16 @@ def _parse_bulk_excel(contents: bytes) -> tuple[list, list]:
     wb = openpyxl.load_workbook(filename=BytesIO(contents), data_only=True)
     ws = wb.active
 
-    # Row 2 = headers, row 3 = hints, row 4+ = data
+    # Row 2 = machine keys (hidden), row 3 = labels, row 4 = hints, row 5+ = data
     headers = [ws.cell(row=2, column=ci).value for ci in range(1, ws.max_column + 1)]
 
-    # Extract metadata from hidden cols (A, B)
+    # Extract metadata from hidden cols (A, B) — values stored in hint row 4
     meta = {}
     for ci, h in enumerate(headers, start=1):
         if h == "__department_id__":
-            meta["department_id"] = ws.cell(row=3, column=ci).value
+            meta["department_id"] = ws.cell(row=4, column=ci).value
         elif h == "__equipment_type_id__":
-            meta["equipment_type_id"] = ws.cell(row=3, column=ci).value
+            meta["equipment_type_id"] = ws.cell(row=4, column=ci).value
 
     from datetime import datetime as _dt_cls, date as _date_cls
 
@@ -548,7 +558,7 @@ def _parse_bulk_excel(contents: bytes) -> tuple[list, list]:
         return v
 
     rows = []
-    for row_idx in range(4, ws.max_row + 1):
+    for row_idx in range(5, ws.max_row + 1):
         row_vals = {h: _coerce(ws.cell(row=row_idx, column=ci).value)
                     for ci, h in enumerate(headers, start=1)
                     if h and not str(h).startswith("__")}
@@ -566,7 +576,6 @@ def _validate_bulk_rows(rows: list, meta: dict, db: Session) -> list:
     import re
     from datetime import datetime
 
-    valid_voltage = {"400", "220", "110", "66", "33", "11"}
     valid_phase   = {"R", "Y", "B"}
 
     results = []
@@ -575,11 +584,6 @@ def _validate_bulk_rows(rows: list, meta: dict, db: Session) -> list:
         row_num = row.get("__row__", "?")
 
         # bay_number — no validation needed (free text)
-
-        # voltage_class
-        vc = row.get("voltage_class")
-        if vc and str(vc).strip() not in valid_voltage:
-            errors.append(f"voltage_class '{vc}' invalid — use: 400/220/110/66/33/11")
 
         # phase
         ph = row.get("phase")
@@ -662,7 +666,7 @@ async def bulk_validate(
         raise HTTPException(status_code=400, detail=f"Could not parse Excel: {exc}")
 
     if not rows:
-        raise HTTPException(status_code=400, detail="No data rows found in the file (rows start at row 4)")
+        raise HTTPException(status_code=400, detail="No data rows found in the file (rows start at row 5)")
 
     results = _validate_bulk_rows(rows, meta, db)
     valid_count = sum(1 for r in results if r["status"] == "valid")
@@ -772,6 +776,7 @@ async def bulk_import(
                 pt_ratio=str(d["pt_ratio"]).strip() if d.get("pt_ratio") else None,
                 vector_group=str(d["vector_group"]).strip() if d.get("vector_group") else None,
                 impedance_pct=d.get("impedance_pct"),
+                scada_tag=str(d["scada_tag"]).strip() if d.get("scada_tag") else None,
                 created_by=current_user.id,
             )
             db.flush()
@@ -840,6 +845,7 @@ def create_equipment(
         pt_ratio=data.pt_ratio,
         vector_group=data.vector_group,
         impedance_pct=data.impedance_pct,
+        scada_tag=data.scada_tag,
         created_by=current_user.id,
     )
     db.commit()
@@ -909,6 +915,7 @@ def list_equipment(
     replacement_year: Optional[int] = None,
     replacement_year_from: Optional[int] = None,
     replacement_year_to: Optional[int] = None,
+    has_tests: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -941,6 +948,7 @@ def list_equipment(
         replacement_year=replacement_year,
         replacement_year_from=replacement_year_from,
         replacement_year_to=replacement_year_to,
+        has_tests=has_tests,
     )
     responses = []
 

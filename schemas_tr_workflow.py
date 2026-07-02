@@ -119,6 +119,10 @@ class TrWfStageOut(BaseModel):
     is_mandatory: bool
     is_active: bool
     default_duration_days: Optional[int]
+    show_recommendation: bool = False
+    is_result_stage: bool = False
+    use_l2_route: bool = False
+    is_role_scoped: bool = False
     roles: List[TrWfStageRoleOut] = []
     transitions: List[TrWfTransitionOut] = []
 
@@ -134,6 +138,10 @@ class TrWfStageCreate(BaseModel):
     is_mandatory: bool = True
     default_duration_days: Optional[int] = None
     status_id: Optional[UUID] = None
+    show_recommendation: bool = False
+    is_result_stage: bool = False
+    use_l2_route: bool = False
+    is_role_scoped: bool = False
 
 
 class TrWfStagePatch(BaseModel):
@@ -144,6 +152,10 @@ class TrWfStagePatch(BaseModel):
     is_active: Optional[bool] = None
     default_duration_days: Optional[int] = None
     status_id: Optional[UUID] = None
+    show_recommendation: Optional[bool] = None
+    is_result_stage: Optional[bool] = None
+    use_l2_route: Optional[bool] = None
+    is_role_scoped: Optional[bool] = None
 
 
 class TrWfStageReorderItem(BaseModel):

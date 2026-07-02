@@ -2426,6 +2426,7 @@ class EquipmentCreate(BaseModel):
     pt_ratio: Optional[str] = None
     vector_group: Optional[str] = None
     impedance_pct: Optional[float] = None
+    scada_tag: Optional[str] = None
     precommission_request_id: Optional[UUID] = None   # optional PCR link on registration
 
 

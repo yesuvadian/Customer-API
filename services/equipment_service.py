@@ -239,6 +239,7 @@ class EquipmentService:
         pt_ratio: Optional[str] = None,
         vector_group: Optional[str] = None,
         impedance_pct: Optional[float] = None,
+        scada_tag: Optional[str] = None,
         created_by: Optional[UUID] = None,
     ) -> Equipment:
         """Register a new equipment unit with auto-generated UEIC."""
@@ -281,6 +282,7 @@ class EquipmentService:
             pt_ratio=pt_ratio,
             vector_group=vector_group,
             impedance_pct=impedance_pct,
+            scada_tag=scada_tag,
             created_by=created_by,
         )
         db.add(equipment)
@@ -334,6 +336,7 @@ class EquipmentService:
         replacement_year: Optional[int] = None,
         replacement_year_from: Optional[int] = None,
         replacement_year_to: Optional[int] = None,
+        has_tests: bool = False,
     ) -> List[Equipment]:
         from sqlalchemy import extract
 
@@ -439,6 +442,13 @@ class EquipmentService:
             query = query.filter(
                 Equipment.replaces_equipment_id.isnot(None),
                 extract('year', Equipment.commissioned_date) <= replacement_year_to
+            )
+
+        if has_tests:
+            from models import TestingRequest
+            from sqlalchemy import exists as sa_exists
+            query = query.filter(
+                sa_exists().where(TestingRequest.equipment_id == Equipment.id)
             )
 
         return (

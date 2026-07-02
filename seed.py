@@ -1664,6 +1664,12 @@ def seed_modules(session):
  "path": "config/tr-routing",
  "group_name": "Administration",
  "is_menu": True},
+# ✅ WORKFLOW CONFIGURATION MODULE
+{"name": "Workflow Configuration",
+ "description": "Admin: define repair/overhaul/calibration/audit workflow definitions, stages, roles, transitions, and form templates.",
+ "path": "workflow-config",
+ "group_name": "Administration",
+ "is_menu": True},
     ]
 
     module_ids = {}
