@@ -427,11 +427,13 @@ class OrgTestTemplateService:
                 .all()
             )
             for detail in details:
+                # Check by template_key first — avoid duplicate global rows when
+                # the same activity name exists under multiple equipment masters
                 existing = (
                     self.db.query(OrgTestTemplate)
                     .filter(
                         OrgTestTemplate.org_id == None,  # noqa: E711
-                        OrgTestTemplate.test_type_id == detail.id,
+                        OrgTestTemplate.template_key == template_key,
                     )
                     .first()
                 )
