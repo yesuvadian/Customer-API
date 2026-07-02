@@ -328,14 +328,18 @@ def download_schema(
         ("test_date",     "Date of Test",  "YYYY-MM-DD format"),
     ]
 
-    # Dynamic columns from template fields (skip table / calculated / readonly)
+    # Dynamic scalar columns + collect table field definitions
     dyn_cols: list[tuple[str, str, str]] = []
+    table_fields: list[dict] = []
     if tpl:
         for sec in tpl.get("sections", []):
             sec_title = sec.get("title", "")
             for f in sec.get("fields", []):
                 ftype = f.get("type", "text")
-                if ftype in ("table", "calculated", "readonly"):
+                if ftype == "table":
+                    table_fields.append(f)
+                    continue
+                if ftype in ("calculated", "readonly"):
                     continue
                 if f.get("import_skip"):
                     continue
@@ -353,6 +357,8 @@ def download_schema(
 
     header_fill = PatternFill("solid", fgColor="1E3A5F")
     hint_fill   = PatternFill("solid", fgColor="EFF6FF")
+    table_fill  = PatternFill("solid", fgColor="1E3A5F")
+    row_fill    = PatternFill("solid", fgColor="F8FAFF")
     header_font = Font(bold=True, color="FFFFFF", size=11)
     hint_font   = Font(italic=True, color="6B7280", size=9)
     key_font    = Font(color="FFFFFF", size=1)
@@ -381,6 +387,69 @@ def download_schema(
     ws.row_dimensions[2].height = 0   # hide key row
     ws.row_dimensions[3].height = 20
     ws.freeze_panes = "A4"
+
+    # ── One sheet per table field ──────────────────────────────────────────────
+    for tf in table_fields:
+        tbl_key   = tf.get("key", "table")
+        tbl_label = tf.get("label", tbl_key)
+
+        # Only editable, non-calculated columns
+        editable_cols = [
+            c for c in tf.get("columns", [])
+            if c.get("type") not in ("calculated",) and not c.get("read_only")
+        ]
+        if not editable_cols:
+            continue
+
+        # Sheet name: truncate to 31 chars (Excel limit)
+        sheet_name = tbl_label[:31]
+        tws = wb.create_sheet(title=sheet_name)
+
+        # Row 1: visible label  Row 2: machine key (hidden)  Row 3: unit hint
+        for ci, col in enumerate(editable_cols, start=1):
+            col_key   = col.get("key", f"col{ci}")
+            col_label = col.get("label", col_key)
+            col_hint  = col.get("unit", "") or col.get("placeholder", "")
+
+            h = tws.cell(row=1, column=ci, value=col_label)
+            h.font      = header_font
+            h.fill      = table_fill
+            h.alignment = Alignment(horizontal="center", wrap_text=True)
+
+            k = tws.cell(row=2, column=ci, value=col_key)
+            k.font = key_font
+
+            hnt = tws.cell(row=3, column=ci, value=col_hint)
+            hnt.font      = hint_font
+            hnt.fill      = hint_fill
+            hnt.alignment = Alignment(wrap_text=True)
+
+            tws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = max(18, len(col_label) + 4)
+
+        # Row 1 in col 0 (A): store table field key as a hidden marker
+        meta_cell = tws.cell(row=2, column=len(editable_cols) + 1, value=f"__table_key__={tbl_key}")
+        meta_cell.font = key_font
+
+        tws.row_dimensions[1].height = 28
+        tws.row_dimensions[2].height = 0
+        tws.row_dimensions[3].height = 18
+        tws.freeze_panes = "A4"
+
+        # Pre-fill default rows (starting at row 4)
+        default_rows = tf.get("default_rows", [])
+        for ri, drow in enumerate(default_rows, start=4):
+            for ci, col in enumerate(editable_cols, start=1):
+                val = drow.get(col.get("key", ""), "")
+                cell = tws.cell(row=ri, column=ci, value=val if val != "" else None)
+                if ri % 2 == 0:
+                    cell.fill = row_fill
+        # Add 5 blank rows after defaults for extra data
+        start_blank = max(4, 4 + len(default_rows))
+        for ri in range(start_blank, start_blank + 5):
+            for ci in range(1, len(editable_cols) + 1):
+                cell = tws.cell(row=ri, column=ci, value=None)
+                if ri % 2 == 0:
+                    cell.fill = row_fill
 
     buf = io.BytesIO()
     wb.save(buf)

@@ -293,20 +293,73 @@ def _extract_excel(file_bytes: bytes, extractor_type: str, test_type_name: str =
             if not rows:
                 return [], ["Excel file is empty."]
 
-            headers = [str(h).strip() if h is not None else f"col_{i}"
-                       for i, h in enumerate(rows[0])]
+            # Row 1 = visible labels, Row 2 = machine keys, Row 3 = hints, Row 4+ = data
+            # Prefer machine keys (row 2) when available; fall back to label row (row 1).
+            label_row = [str(v).strip() if v is not None else f"col_{i}" for i, v in enumerate(rows[0])]
+            key_row   = [str(v).strip() if v is not None else "" for v in rows[1]] if len(rows) > 1 else []
+            headers   = [
+                (key_row[i] if i < len(key_row) and key_row[i] and not key_row[i].startswith("__") else label_row[i])
+                for i in range(len(label_row))
+            ]
+            # Data starts at row 4 (index 3) when hint row is present, else row 2 (index 1)
+            data_start = 3 if len(rows) > 3 else 1
+
             records = []
-            for row in rows[1:]:
+            for row in rows[data_start:]:
                 if all(v is None for v in row):
                     continue
                 rec: dict = {}
                 for h, v in zip(headers, row):
                     rec[h] = str(v) if v is not None else ""
                 # Map common column names to standard fields
-                rec.setdefault("serial_number", rec.get("Serial Number", rec.get("serial", "")))
-                rec.setdefault("test_date",     rec.get("Date", rec.get("Repair Date", "")))
-                rec.setdefault("sub_station",   rec.get("Station", rec.get("Sub Station", rec.get("Substation", ""))))
+                rec.setdefault("serial_number", rec.get("serial_number", rec.get("Serial Number", rec.get("serial", ""))))
+                rec.setdefault("test_date",     rec.get("test_date",     rec.get("Date of Test", rec.get("Date", ""))))
+                rec.setdefault("sub_station",   rec.get("sub_station",   rec.get("Sub Station", rec.get("Substation", ""))))
                 records.append(rec)
+
+            # ── Read table sheets (one per table field) ────────────────────────
+            # Each table sheet has row1=labels, row2=machine keys, row3=hints, row4+=data
+            # A hidden cell in row2 at the last column+1 stores __table_key__=<field_key>
+            table_data: dict[str, list[dict]] = {}
+            for sheet_name in wb.sheetnames:
+                if sheet_name == ws.title:
+                    continue
+                tws = wb[sheet_name]
+                trows = list(tws.iter_rows(values_only=True))
+                if len(trows) < 2:
+                    continue
+                t_key_row = [str(v).strip() if v is not None else "" for v in trows[1]]
+                # Find the table field key from the hidden marker
+                tbl_field_key = None
+                for cell_val in t_key_row:
+                    if cell_val.startswith("__table_key__="):
+                        tbl_field_key = cell_val.split("=", 1)[1]
+                        break
+                if not tbl_field_key:
+                    # Fall back: use sheet name as key (spaces → underscores)
+                    tbl_field_key = sheet_name.lower().replace(" ", "_")
+                t_label_row = [str(v).strip() if v is not None else f"col_{i}" for i, v in enumerate(trows[0])]
+                t_headers   = [
+                    (t_key_row[i] if i < len(t_key_row) and t_key_row[i] and not t_key_row[i].startswith("__") else t_label_row[i])
+                    for i in range(len(t_label_row))
+                ]
+                t_data_start = 3 if len(trows) > 3 else 1
+                tbl_rows = []
+                for trow in trows[t_data_start:]:
+                    if all(v is None for v in trow):
+                        continue
+                    tbl_row: dict = {}
+                    for h, v in zip(t_headers, trow):
+                        if h and not h.startswith("__"):
+                            tbl_row[h] = str(v) if v is not None else ""
+                    if any(v for v in tbl_row.values()):
+                        tbl_rows.append(tbl_row)
+                if tbl_rows:
+                    table_data[tbl_field_key] = tbl_rows
+
+            # Merge table data into every record
+            for rec in records:
+                rec.update(table_data)
 
             if not records:
                 warnings.append("No data rows found in Excel. Check the file layout.")
