@@ -521,6 +521,31 @@ class AnalyticsEngine:
             template_data, evaluation_result
         )
 
+        # Fallback for cumulative templates (OLTC ops, CB ops) where evaluation_result
+        # may be empty because the reading field had no evaluation block at submission time.
+        # Derive a score from cumulative value vs the rule's default_threshold.
+        if health_score is None and template_data.get("enable_cumulative"):
+            try:
+                from services.cumulative_service import CumulativeService
+                rules = template_data.get("rules", [])
+                threshold = next(
+                    (r["config"].get("default_threshold") for r in rules if r.get("type") == "CUMULATIVE_DIFF"),
+                    None,
+                )
+                if threshold:
+                    cumulative = CumulativeService(self.db).calculate_cumulative(equipment_id)
+                    pct = cumulative / threshold if threshold else 0
+                    if pct >= 1.0:
+                        health_score = 0.0
+                        critical_findings = [{"key": "reading", "label": "Operations Counter Reading",
+                                              "status": "Fail", "message": f"Cumulative ops ({cumulative:.0f}) reached overhaul threshold ({threshold:.0f})"}]
+                    elif pct >= 0.7:
+                        health_score = round(100 * (1 - pct), 1)
+                    else:
+                        health_score = round(100 * (1 - pct * 0.5), 1)
+            except Exception as _cum_err:
+                logger.warning(f"Cumulative fallback scoring failed: {_cum_err}")
+
         evaluated_count = len(evaluation_result.get("fields", []))
         total_params    = sum(
             len(s.get("fields", [])) for s in template_data.get("sections", [])
