@@ -3159,6 +3159,7 @@ TEST_TEMPLATES = {
                     "type": "dropdown",
                     "options": ["220/66/11 kV", "400/220/33 kV"],
                     "required": True,
+                    "import_skip": True,
                 },
             ],
         },
@@ -3174,7 +3175,7 @@ TEST_TEMPLATES = {
                 "options": ["open", "skip"],
             },
             "fields": [
-                {"key": "test_voltage_kv",   "label": "Applied Test Voltage",  "type": "number", "unit": "kV",  "required": True},
+                {"key": "test_voltage_kv",   "label": "Applied Test Voltage",  "type": "number", "unit": "kV",  "required": True, "import_skip": True},
                 {"key": "frequency_hz",      "label": "Supply Frequency",      "type": "number", "unit": "Hz",  "required": True, "default": "50"},
                 {"key": "ambient_temp_c",    "label": "Ambient Temperature",   "type": "number", "unit": "°C", "required": True},
                 {"key": "oil_temp_c",        "label": "Oil Temperature",       "type": "number", "unit": "°C"},
