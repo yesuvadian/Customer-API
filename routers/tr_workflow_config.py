@@ -728,16 +728,22 @@ def get_test_types(
         "inspection": "Inspection",
         "repair_lifecycle": "Repair",
     }
-    return [
-        {
+    # Deduplicate by name — same activity may exist across multiple equipment types
+    seen = set()
+    result = []
+    for r in rows:
+        key = (r.name, r.category_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({
             "id": r.id,
             "name": r.name,
             "equipment_type_id": r.category_master_id,
             "category_type": r.category_type,
             "category_type_label": _type_label.get(r.category_type or "", r.category_type or ""),
-        }
-        for r in rows
-    ]
+        })
+    return result
 
 
 @router.get("/options/roles")

@@ -44,7 +44,10 @@ class OrgTestTemplateService:
         return td.get("is_active", True) is not False
 
     def list_templates(self, org_id: Optional[UUID] = None, active_only: bool = False) -> List[OrgTestTemplate]:
-        """List global defaults (org_id=None) or org-specific rows."""
+        """List global defaults (org_id=None) or org-specific rows.
+        Deduplicates by template_key — keeps the most recently updated row
+        when the same key was accidentally provisioned twice.
+        """
         q = self.db.query(OrgTestTemplate)
         if org_id is None:
             q = q.filter(OrgTestTemplate.org_id == None)  # noqa: E711
@@ -52,7 +55,16 @@ class OrgTestTemplateService:
             q = q.filter(OrgTestTemplate.org_id == org_id)
         if active_only:
             q = q.filter(active_template_filter())
-        return q.order_by(OrgTestTemplate.template_key).all()
+        rows = q.order_by(OrgTestTemplate.template_key, OrgTestTemplate.updated_at.desc().nullslast()).all()
+        # Deduplicate: keep first (most-recently-updated) occurrence per key
+        seen_keys: set = set()
+        unique = []
+        for r in rows:
+            if r.template_key in seen_keys:
+                continue
+            seen_keys.add(r.template_key)
+            unique.append(r)
+        return unique
 
     OVERALL_KEY = "overall_assessment"
 
