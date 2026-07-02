@@ -55,8 +55,8 @@ class OrgTestTemplateService:
             q = q.filter(OrgTestTemplate.org_id == org_id)
         if active_only:
             q = q.filter(active_template_filter())
-        rows = q.order_by(OrgTestTemplate.template_key, OrgTestTemplate.updated_at.desc().nullslast()).all()
-        # Deduplicate: keep first (most-recently-updated) occurrence per key
+        rows = q.order_by(OrgTestTemplate.template_key, OrgTestTemplate.version.desc()).all()
+        # Deduplicate: keep first (highest version) occurrence per key
         seen_keys: set = set()
         unique = []
         for r in rows:
