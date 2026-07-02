@@ -42,6 +42,7 @@ from models import (
     EquipmentAnalytics,
     HierarchyAnalytics,
     OrgDepartment,
+    OrgTestTemplate,
     OverhaulRecommendation,
     ParameterAnalytics,
     RepairWorkflow,
