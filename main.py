@@ -126,6 +126,7 @@ from routers import scada as scada_router               # SCADA Integration
 from routers import tr_workflow_config as tr_wf_config_router  # TR Configurable Workflow Admin
 from routers import doc_support as doc_support_router          # Document Support Workflow
 from routers import file_upload as file_upload_router          # Generic file upload
+from routers.public_registration import router as public_reg_router  # Org self-registration
 
 # Workflow Engine
 from routers import workflows
@@ -253,6 +254,73 @@ scheduler.add_job(
     trigger="interval",
     minutes=5,
     id="notification_retry_job",
+    max_instances=1,
+    coalesce=True,
+)
+
+
+# ── Trial expiry check (runs daily at 01:00 UTC) ──────────────────────────────
+def _check_trial_expiry():
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    try:
+        from models import Organization, SystemConfig, User
+        from utils.email_service import EmailService
+        import os
+
+        now = datetime.now(timezone.utc)
+        alert_row = db.query(SystemConfig).filter(SystemConfig.key == "trial_alert_days").first()
+        alert_days = int(alert_row.value) if alert_row else 7
+        login_url = os.getenv("BASE_URL", "http://localhost:3000")
+        email_svc = EmailService()
+
+        active_trials = db.query(Organization).filter(
+            Organization.is_trial == True,
+            Organization.trial_status == "active",
+            Organization.trial_end_date != None,
+        ).all()
+
+        for org in active_trials:
+            delta = (org.trial_end_date - now).days
+
+            if delta < 0:
+                # Expire
+                org.trial_status = "expired"
+                logger.info(f"[Trial] Expired org={org.id} name={org.name}")
+
+            elif delta <= alert_days:
+                # Send alert email to org admin
+                admin = db.query(User).filter(
+                    User.organization_id == org.id,
+                    User.isactive == True,
+                    User.usertype == "org_admin",
+                ).first()
+                if admin:
+                    try:
+                        email_svc.send_trial_expiry_alert(
+                            to_email=admin.email,
+                            admin_firstname=admin.firstname or "Admin",
+                            org_name=org.name,
+                            days_remaining=max(0, delta),
+                            login_url=login_url,
+                        )
+                        logger.info(f"[Trial] Alert sent org={org.id} days_remaining={delta}")
+                    except Exception as e:
+                        logger.error(f"[Trial] Alert email failed org={org.id}: {e}")
+
+        db.commit()
+    except Exception as e:
+        logger.error(f"[Trial] Expiry job error: {e}")
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_trial_expiry,
+    trigger="cron",
+    hour=1,
+    minute=0,
+    id="trial_expiry_job",
     max_instances=1,
     coalesce=True,
 )
@@ -1105,6 +1173,9 @@ app.include_router(vendor_directory_router)
 # Document Support Workflow
 app.include_router(doc_support_router.router)
 app.include_router(file_upload_router.router)
+
+# Public (no-auth) routes
+app.include_router(public_reg_router)
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")

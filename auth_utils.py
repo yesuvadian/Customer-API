@@ -345,9 +345,10 @@ def login_user(db: Session, email: str, password: str):
                     "plan_limit": plan_obj.plan_limit,
                 }
 
-        from models import Organization
+        from models import Organization, SystemConfig
 
         organization_name = None
+        trial_info = {}
 
         if user.organization_id:
             org = db.query(Organization).filter(
@@ -356,6 +357,22 @@ def login_user(db: Session, email: str, password: str):
 
             if org:
                 organization_name = org.name
+                days_remaining = None
+                alert_active = False
+                if org.is_trial and org.trial_end_date:
+                    delta = (org.trial_end_date - now).days
+                    days_remaining = max(0, delta)
+                    alert_row = db.query(SystemConfig).filter(SystemConfig.key == "trial_alert_days").first()
+                    alert_days = int(alert_row.value) if alert_row else 7
+                    alert_active = days_remaining <= alert_days
+                trial_info = {
+                    "is_trial": org.is_trial,
+                    "trial_status": org.trial_status,
+                    "days_remaining": days_remaining,
+                    "trial_end_date": org.trial_end_date.isoformat() if org.trial_end_date else None,
+                    "alert_active": alert_active,
+                    "onboarding_complete": org.onboarding_complete,
+                }
 
         # Create tokens
         access_token = create_access_token({"sub": str(user.id)})
@@ -394,6 +411,7 @@ def login_user(db: Session, email: str, password: str):
                 "roles": role_names,
                 "dashboard_type": dashboard_type,
                 "plan": plan,
+                **trial_info,
             },
             "privileges": filtered_privileges
         }

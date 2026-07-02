@@ -1321,6 +1321,16 @@ class Organization(Base):
     erp_error_message = Column(Text)
     erp_external_id = Column(String(255))
 
+    # Trial fields
+    is_trial = Column(Boolean, default=True)
+    trial_start_date = Column(DateTime(timezone=True), nullable=True)
+    trial_end_date = Column(DateTime(timezone=True), nullable=True)
+    trial_status = Column(String(20), default="active")  # active | expired | converted
+
+    # Onboarding
+    onboarding_complete = Column(Boolean, default=False)
+    onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     plan = relationship("Plan", back_populates="organizations", foreign_keys=[plan_id])
     users = relationship("User", back_populates="organization", foreign_keys=lambda: [User.organization_id])
@@ -1328,6 +1338,7 @@ class Organization(Base):
     departments = relationship("OrgDepartment", back_populates="organization", cascade="all, delete-orphan")
     roles = relationship("OrgRole", back_populates="organization", cascade="all, delete-orphan")
     invitations = relationship("OrgInvitation", back_populates="organization", cascade="all, delete-orphan")
+    onboarding_steps = relationship("OrgOnboardingSteps", back_populates="organization", uselist=False, cascade="all, delete-orphan")
 
 
 # ------------------------------
@@ -1653,6 +1664,39 @@ class OrgInvitation(Base):
     department = relationship("OrgDepartment", foreign_keys=[department_id])
     inviter = relationship("User", foreign_keys=[invited_by], post_update=True)
     accepted_by_user = relationship("User", foreign_keys=[accepted_by_user_id], post_update=True)
+
+
+class OrgOnboardingSteps(Base):
+    __tablename__ = "org_onboarding_steps"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, unique=True)
+
+    step_org_profile    = Column(Boolean, default=False)
+    step_dept_hierarchy = Column(Boolean, default=False)
+    step_roles_confirmed = Column(Boolean, default=True)   # auto-provisioned on org create
+    step_equip_types    = Column(Boolean, default=False)
+    step_users_invited  = Column(Boolean, default=False)
+
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    organization = relationship("Organization", back_populates="onboarding_steps")
+
+
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    key = Column(String(100), unique=True, nullable=False)
+    value = Column(Text, nullable=False)
+    value_type = Column(String(10), default="str")  # str | int | bool | json
+    description = Column(Text)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class UserAddress(Base):

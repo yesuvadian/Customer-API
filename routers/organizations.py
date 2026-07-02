@@ -3,15 +3,16 @@ Organization management endpoints.
 Provides CRUD operations for organizations.
 """
 
+from datetime import datetime, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from uuid import UUID
 
 from database import get_db
 from auth_utils import get_current_user
 from middleware.org_auth import require_super_admin, require_org_admin, require_org_member
-from models import User
+from models import User, Organization, OrgOnboardingSteps, SystemConfig
 from schemas import (
     OrganizationCreate,
     OrganizationUpdate,
@@ -19,6 +20,11 @@ from schemas import (
     OrganizationWithAdmin
 )
 from services.organization_service import OrganizationService
+
+
+def _cfg_int(db: Session, key: str, default: int) -> int:
+    row = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+    return int(row.value) if row else default
 
 
 router = APIRouter(
@@ -206,3 +212,115 @@ def get_organization_by_code(
             detail=f"Organization with code '{code}' not found"
         )
     return org
+
+
+# ── Onboarding & Trial Status ────────────────────────────────────────────────
+
+@router.get("/onboarding/status")
+def get_onboarding_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.organization_id:
+        raise HTTPException(status_code=404, detail="No organisation assigned")
+
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    steps = db.query(OrgOnboardingSteps).filter(
+        OrgOnboardingSteps.organization_id == org.id
+    ).first()
+
+    steps_data = None
+    if steps:
+        steps_data = {
+            "org_profile": steps.step_org_profile,
+            "dept_hierarchy": steps.step_dept_hierarchy,
+            "roles_confirmed": steps.step_roles_confirmed,
+            "equip_types": steps.step_equip_types,
+            "users_invited": steps.step_users_invited,
+        }
+        all_done = all(steps_data.values())
+        if all_done and not org.onboarding_complete:
+            org.onboarding_complete = True
+            org.onboarding_completed_at = datetime.now(timezone.utc)
+            db.commit()
+
+    return {
+        "onboarding_complete": org.onboarding_complete,
+        "steps": steps_data,
+    }
+
+
+@router.post("/onboarding/step/{step_name}")
+def mark_onboarding_step(
+    step_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    valid_steps = {"org_profile", "dept_hierarchy", "roles_confirmed", "equip_types", "users_invited"}
+    if step_name not in valid_steps:
+        raise HTTPException(status_code=400, detail=f"Unknown step '{step_name}'")
+
+    if not current_user.organization_id:
+        raise HTTPException(status_code=404, detail="No organisation assigned")
+
+    steps = db.query(OrgOnboardingSteps).filter(
+        OrgOnboardingSteps.organization_id == current_user.organization_id
+    ).first()
+
+    if not steps:
+        steps = OrgOnboardingSteps(organization_id=current_user.organization_id)
+        db.add(steps)
+
+    setattr(steps, f"step_{step_name}", True)
+    db.commit()
+    db.refresh(steps)
+
+    all_done = all([
+        steps.step_org_profile,
+        steps.step_dept_hierarchy,
+        steps.step_roles_confirmed,
+        steps.step_equip_types,
+        steps.step_users_invited,
+    ])
+    if all_done:
+        org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+        if org and not org.onboarding_complete:
+            org.onboarding_complete = True
+            org.onboarding_completed_at = datetime.now(timezone.utc)
+            db.commit()
+
+    return {"step": step_name, "marked": True, "all_complete": all_done}
+
+
+@router.get("/trial/status")
+def get_trial_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.organization_id:
+        raise HTTPException(status_code=404, detail="No organisation assigned")
+
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    days_remaining = None
+    alert_active = False
+    if org.is_trial and org.trial_end_date:
+        now = datetime.now(timezone.utc)
+        delta = (org.trial_end_date - now).days
+        days_remaining = max(0, delta)
+        alert_days = _cfg_int(db, "trial_alert_days", 7)
+        alert_active = days_remaining <= alert_days
+
+    return {
+        "is_trial": org.is_trial,
+        "trial_status": org.trial_status,
+        "trial_start_date": org.trial_start_date.isoformat() if org.trial_start_date else None,
+        "trial_end_date": org.trial_end_date.isoformat() if org.trial_end_date else None,
+        "days_remaining": days_remaining,
+        "alert_active": alert_active,
+    }
