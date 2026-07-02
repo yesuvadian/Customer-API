@@ -576,7 +576,6 @@ def _validate_bulk_rows(rows: list, meta: dict, db: Session) -> list:
     import re
     from datetime import datetime
 
-    valid_voltage = {"400", "220", "110", "66", "33", "11"}
     valid_phase   = {"R", "Y", "B"}
 
     results = []
@@ -585,11 +584,6 @@ def _validate_bulk_rows(rows: list, meta: dict, db: Session) -> list:
         row_num = row.get("__row__", "?")
 
         # bay_number — no validation needed (free text)
-
-        # voltage_class
-        vc = row.get("voltage_class")
-        if vc and str(vc).strip() not in valid_voltage:
-            errors.append(f"voltage_class '{vc}' invalid — use: 400/220/110/66/33/11")
 
         # phase
         ph = row.get("phase")
