@@ -17,11 +17,13 @@ Endpoints:
 
 from __future__ import annotations
 
+import io
 import traceback
 from typing import Any, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -305,6 +307,92 @@ def list_categories(
             "test_types": test_types,
         })
     return result
+
+
+@router.get("/schema")
+def download_schema(
+    test_type_name: str = Query(...),
+    _: User = Depends(get_current_user),
+):
+    """Download a blank Excel import template for any test type."""
+    from test_templates import get_template_for_test_type
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    tpl = get_template_for_test_type(test_type_name)
+
+    # Fixed identity columns always present (needed for equipment matching)
+    fixed_cols = [
+        ("sub_station",   "Sub Station",   "Name of substation / location"),
+        ("serial_number", "Serial Number", "Equipment serial number (used to match equipment)"),
+        ("test_date",     "Date of Test",  "YYYY-MM-DD format"),
+    ]
+
+    # Dynamic columns from template fields (skip table / calculated / readonly)
+    dyn_cols: list[tuple[str, str, str]] = []
+    if tpl:
+        for sec in tpl.get("sections", []):
+            sec_title = sec.get("title", "")
+            for f in sec.get("fields", []):
+                ftype = f.get("type", "text")
+                if ftype in ("table", "calculated", "readonly"):
+                    continue
+                if f.get("import_skip"):
+                    continue
+                key   = f.get("key", "")
+                label = f.get("label", key)
+                hint  = f.get("unit", "") or f.get("hint", "") or sec_title
+                if key:
+                    dyn_cols.append((key, label, hint))
+
+    all_cols = fixed_cols + dyn_cols
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Import Data"
+
+    header_fill = PatternFill("solid", fgColor="1E3A5F")
+    hint_fill   = PatternFill("solid", fgColor="EFF6FF")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    hint_font   = Font(italic=True, color="6B7280", size=9)
+    key_font    = Font(color="FFFFFF", size=1)
+
+    for ci, (key, label, hint) in enumerate(all_cols, start=1):
+        # Row 1: visible header label
+        h = ws.cell(row=1, column=ci, value=label)
+        h.font      = header_font
+        h.fill      = header_fill
+        h.alignment = Alignment(horizontal="center", wrap_text=True)
+
+        # Row 2: machine key (hidden — white on white)
+        k = ws.cell(row=2, column=ci, value=key)
+        k.font = key_font
+
+        # Row 3: hint
+        hnt = ws.cell(row=3, column=ci, value=hint)
+        hnt.font      = hint_font
+        hnt.fill      = hint_fill
+        hnt.alignment = Alignment(wrap_text=True)
+
+        # Column width
+        ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = max(18, len(label) + 4)
+
+    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[2].height = 0   # hide key row
+    ws.row_dimensions[3].height = 20
+    ws.freeze_panes = "A4"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    safe_name = test_type_name.replace(" ", "_").replace("/", "-")
+    filename = f"import_schema_{safe_name}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/extract", status_code=status.HTTP_200_OK)
