@@ -375,19 +375,8 @@ def login_user(db: Session, email: str, password: str):
                     alert_row = db.query(SystemConfig).filter(SystemConfig.key == "trial_alert_days").first()
                     alert_days = int(alert_row.value) if alert_row else 7
                     alert_active = days_remaining <= alert_days
-                # Auto-complete onboarding if the org already has departments
-                # (handles seeded orgs that were never walked through the wizard)
-                if not org.onboarding_complete:
-                    from models import OrgDepartment
-                    has_depts = db.query(OrgDepartment).filter_by(
-                        organization_id=org.id, is_active=True
-                    ).first() is not None
-                    if has_depts or not org.is_trial:
-                        org.onboarding_complete = True
-                        from datetime import datetime as _dt, timezone as _tz
-                        org.onboarding_completed_at = _dt.now(_tz.utc)
-                        db.flush()
-                effective_onboarding_complete = org.onboarding_complete
+                effective_onboarding_complete = bool(org.onboarding_complete)
+                print(f"[DEBUG] org={org.name} is_trial={org.is_trial} raw_onboarding={org.onboarding_complete!r} effective={effective_onboarding_complete}")
                 trial_info = {
                     "is_trial": org.is_trial,
                     "trial_status": org.trial_status,
@@ -440,6 +429,7 @@ def login_user(db: Session, email: str, password: str):
         }
 
         print(f"[DEBUG] dashboard_type in result: {result['user'].get('dashboard_type')}")
+        print(f"[DEBUG] onboarding_complete in result: {result['user'].get('onboarding_complete')}")
         return result
 
     except HTTPException:
