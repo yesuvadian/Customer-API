@@ -252,7 +252,9 @@ def login_user(db: Session, email: str, password: str):
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Your organisation has been disabled. Please contact support.",
                 )
+            print(f"[TRIAL-LOGIN] org={org and org.name} is_trial={org and org.is_trial} trial_end={org and org.trial_end_date} now={now}")
             if org and org.is_trial and org.trial_end_date:
+                print(f"[TRIAL-LOGIN] expired={org.trial_end_date < now}")
                 if org.trial_end_date < now:
                     first_expiry = org.trial_status != "expired"
                     if first_expiry:
@@ -270,12 +272,13 @@ def login_user(db: Session, email: str, password: str):
                             send_payment_link(db, org)
                         except Exception as e:
                             print(f"[BILLING] Failed to send payment link: {e}")
+                    from fastapi.responses import JSONResponse
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
-                        detail={
-                            "message": "Your 30-day free trial has ended.",
-                            "payment_token": payment_token,
-                            "org_name": org.name,
+                        detail="TRIAL_EXPIRED",
+                        headers={
+                            "X-Payment-Token": payment_token,
+                            "X-Org-Name": org.name,
                         },
                     )
 

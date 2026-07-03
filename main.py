@@ -1022,6 +1022,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Payment-Token", "X-Org-Name"],
 )
 
 # ── Global Middleware ─────────────────────────────────────────────────────────
