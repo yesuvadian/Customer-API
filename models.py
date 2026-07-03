@@ -270,9 +270,9 @@ class RepairStageDefinition(Base):
 
     # Stage-status gates — which instance statuses activate each permission.
     # Defaults reflect the standard lifecycle; override per stage in seed JSON.
-    assign_statuses  = Column(JSON, nullable=False, server_default='["pending","not_started"]')
-    edit_statuses    = Column(JSON, nullable=False, server_default='["assigned","in_progress"]')
-    approve_statuses = Column(JSON, nullable=False, server_default='["submitted"]')
+    assign_statuses  = Column(JSONB, nullable=False, server_default='["pending","not_started"]')
+    edit_statuses    = Column(JSONB, nullable=False, server_default='["assigned","in_progress"]')
+    approve_statuses = Column(JSONB, nullable=False, server_default='["submitted"]')
 
     created_at = Column(DateTime, server_default=func.now())
 
