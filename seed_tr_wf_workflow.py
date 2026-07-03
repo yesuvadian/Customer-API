@@ -243,9 +243,12 @@ def _get_or_create_transition(session, from_stage, to_stage, action_code,
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def seed_tr_wf_workflow(session):
+def seed_tr_wf_workflow(session, org=None):
     """
     Idempotently seed the TR Configurable Workflow Engine.
+
+    Pass `org` to provision for a specific org (e.g. on new org registration).
+    Without it, resolves KPTCL as the target org.
 
     Must be called after:
       • run_migration_from_file(029_tr_wf_engine.sql)  — tables must exist
@@ -254,7 +257,8 @@ def seed_tr_wf_workflow(session):
     """
     print("\n--- TR Configurable Workflow Engine Seeding ---")
 
-    org = _resolve_org(session)
+    if org is None:
+        org = _resolve_org(session)
     if not org:
         print("  [WARN] No organization found — skipping tr_wf seed")
         return

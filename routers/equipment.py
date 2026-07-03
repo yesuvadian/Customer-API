@@ -407,7 +407,7 @@ def download_bulk_template(
     # ── Build column list ─────────────────────────────────────────────────────
     # Hidden metadata cols (col A, B) — not visible to user
     meta_cols = [
-        ("__department_id__", str(department_id)),
+        ("__department_name__", dept.name),
         ("__equipment_type_id__", str(equipment_type_id)),
     ]
     # Locked display col (col C)
@@ -455,7 +455,7 @@ def download_bulk_template(
     # ── Row 4: Hint/example row ────────────────────────────────────────────────
     ws.row_dimensions[4].height = 18
     hint_values = (
-        [str(department_id), str(equipment_type_id), dept.name]
+        [dept.name, str(equipment_type_id), dept.name]
         + [hint for _, _, hint in fixed_cols]
         + [f.get("placeholder", f"Enter {f.get('label',f['key'])}") for f in nameplate_fields
            if f.get("type") not in _SKIP_FIELD_TYPES]
@@ -544,8 +544,12 @@ def _parse_bulk_excel(contents: bytes) -> tuple[list, list]:
     # Extract metadata from hidden cols (A, B) — values stored in hint row 4
     meta = {}
     for ci, h in enumerate(headers, start=1):
-        if h == "__department_id__":
-            meta["department_id"] = ws.cell(row=4, column=ci).value
+        if h == "__department_name__":
+            meta["department_name"] = ws.cell(row=4, column=ci).value
+        elif h == "__department_id__":
+            meta["department_id"] = ws.cell(row=4, column=ci).value  # legacy: UUID stored here
+        elif h == "department":
+            meta["department_display"] = ws.cell(row=4, column=ci).value  # display name col
         elif h == "__equipment_type_id__":
             meta["equipment_type_id"] = ws.cell(row=4, column=ci).value
 
@@ -673,7 +677,7 @@ async def bulk_validate(
     error_count = len(results) - valid_count
 
     return {
-        "department_id": meta.get("department_id"),
+        "department_name": meta.get("department_name"),
         "equipment_type_id": meta.get("equipment_type_id"),
         "total": len(results),
         "valid": valid_count,
@@ -705,20 +709,48 @@ async def bulk_import(
     if not rows:
         raise HTTPException(status_code=400, detail="No data rows found in the file")
 
-    # Resolve department_id and equipment_type_id from metadata
+    # Resolve equipment_type_id from metadata
     try:
-        dept_id  = UUID(str(meta.get("department_id", "")).strip())
-        eq_type  = int(str(meta.get("equipment_type_id", "")).strip())
+        eq_type = int(str(meta.get("equipment_type_id", "")).strip())
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=400,
-            detail="Could not read department_id / equipment_type_id from template metadata. "
-                   "Please use the template downloaded from this system.",
+            detail="Could not read equipment type from template. Please use the template downloaded from this system.",
         )
 
-    dept = db.query(OrgDepartment).filter(OrgDepartment.id == dept_id).first()
+    # Resolve department — new templates use name, legacy templates use UUID
+    dept = None
+    dept_name = str(meta.get("department_name", "")).strip()
+    if dept_name:
+        dept = db.query(OrgDepartment).filter(
+            OrgDepartment.organization_id == org_id,
+            OrgDepartment.name == dept_name,
+        ).first()
+    if not dept and meta.get("department_id"):
+        # Legacy template: try UUID lookup first
+        try:
+            dept = db.query(OrgDepartment).filter(
+                OrgDepartment.id == UUID(str(meta["department_id"]).strip())
+            ).first()
+            if dept:
+                dept_name = dept.name
+        except (ValueError, TypeError):
+            pass
     if not dept:
-        raise HTTPException(status_code=404, detail="Department in template not found")
+        # UUID missing or stale — resolve by display name embedded in template
+        display_name = str(meta.get("department_display") or meta.get("department_name") or "").strip()
+        if display_name:
+            dept = db.query(OrgDepartment).filter(
+                OrgDepartment.organization_id == org_id,
+                OrgDepartment.name == display_name,
+            ).first()
+            if dept:
+                dept_name = dept.name
+    if not dept:
+        raise HTTPException(
+            status_code=400,
+            detail="Department not found. Please download a fresh template from the Equipment Register page.",
+        )
 
     validated = _validate_bulk_rows(rows, meta, db)
 
@@ -758,7 +790,7 @@ async def bulk_import(
             equipment = EquipmentService.create_equipment(
                 db=db,
                 organization_id=org_id,
-                department_id=dept_id,
+                department_id=dept.id,
                 equipment_type_id=eq_type,
                 voltage_class=str(d["voltage_class"]).strip() if d.get("voltage_class") else None,
                 bay_number=str(d["bay_number"]).strip() if d.get("bay_number") else None,

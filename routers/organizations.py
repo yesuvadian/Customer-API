@@ -322,6 +322,10 @@ def complete_onboarding(
     steps.step_dept_hierarchy = True
     steps.step_users_invited = True
 
+    # Provision TR workflow roles and stages before marking complete
+    from seed_tr_wf_workflow import seed_tr_wf_workflow
+    seed_tr_wf_workflow(db, org=org)
+
     db.commit()
     return {"onboarding_complete": True}
 

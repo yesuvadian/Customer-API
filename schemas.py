@@ -641,12 +641,20 @@ class UserResponse(BaseModel):
     roles: list[str]
     plan: Optional[UserPlanResponse] = None
 
+    # Trial / onboarding fields
+    is_trial: Optional[bool] = None
+    trial_status: Optional[str] = None
+    days_remaining: Optional[int] = None
+    trial_end_date: Optional[str] = None
+    alert_active: Optional[bool] = None
+    onboarding_complete: Optional[bool] = None
+
     class Config:
         from_attributes = True
 
 
 
-    
+
 class LoginResponse(BaseModel):
     access_token: str
     refresh_token: str
