@@ -88,8 +88,8 @@ class OrganizationService(UTCDateTimeMixin):
             # 2b. Clone PermissionMatrix entries so new org gets workflow permissions
             self._provision_workflow_permissions(org.id, default_roles)
 
-            # 2c. Provision TR workflow engine for new org
-            self._provision_tr_workflow(org.id)
+            # 2c. Provision all stage workflows for new org
+            self._provision_all_workflows(org.id)
 
             # 3. Create admin user
             admin_user = User(
@@ -250,21 +250,46 @@ class OrganizationService(UTCDateTimeMixin):
         except Exception as e:
             print(f"[WARN] _provision_workflow_permissions failed: {e}")
 
-    def _provision_tr_workflow(self, org_id: UUID) -> None:
+    def _provision_all_workflows(self, org_id: UUID) -> None:
         """
-        Provision the TR workflow engine for a new org using the canonical seed
-        function from seed_tr_wf_workflow.py (same logic used for KPTCL).
-        Roles are resolved by name against the new org's already-cloned role set.
+        Provision all stage workflows for a new org.
+        Each seed function is org-aware and idempotent.
         """
-        try:
-            from models import Organization
-            from seed_tr_wf_workflow import seed_tr_wf_workflow
-            org = self.db.query(Organization).filter_by(id=org_id).first()
-            seed_tr_wf_workflow(self.db, org=org)
-            print(f"[INFO] TR workflow provisioned for org {org_id}")
-        except Exception as e:
-            import traceback
-            print(f"[WARN] _provision_tr_workflow failed (non-fatal): {e}\n{traceback.format_exc()}")
+        import traceback
+        from models import Organization as OrgModel
+
+        org = self.db.query(OrgModel).filter_by(id=org_id).first()
+
+        def _run(label, fn, *args, **kwargs):
+            try:
+                fn(*args, **kwargs)
+                print(f"[INFO] {label} provisioned for org {org_id}")
+            except Exception as e:
+                print(f"[WARN] {label} failed (non-fatal): {e}\n{traceback.format_exc()}")
+
+        from seed_tr_wf_workflow import seed_tr_wf_workflow
+        _run("TR workflow", seed_tr_wf_workflow, self.db, org=org)
+
+        from seed_overhaul_workflow import seed_overhaul_role_mappings
+        _run("Overhaul role mappings", seed_overhaul_role_mappings, self.db, org_id)
+
+        from seed_calibration_workflow import seed_calibration_role_mappings
+        _run("Calibration role mappings", seed_calibration_role_mappings, self.db, org_id)
+
+        from seed_surveillance_workflow import seed_surveillance_role_mappings
+        _run("Surveillance role mappings", seed_surveillance_role_mappings, self.db, org_id)
+
+        from seed_precommission_workflow import seed_precommission_role_mappings
+        _run("Pre-commission role mappings", seed_precommission_role_mappings, self.db, org_id)
+
+        from seed_annual_audit import seed_annual_audit_role_mappings
+        _run("Annual audit role mappings", seed_annual_audit_role_mappings, self.db, org_id)
+
+        from seed_doc_support_workflow import seed_doc_support_workflow
+        _run("Doc support workflow", seed_doc_support_workflow, self.db, org=org)
+
+        from seed_repair_workflow import seed_repair_role_mappings
+        _run("Repair role mappings", seed_repair_role_mappings, self.db, org_id)
 
     def get_organization(self, org_id: UUID) -> Optional[Organization]:
         """Get organization by ID."""
