@@ -3502,7 +3502,7 @@ def seed_role_templates(session):
             "name": "System Administrator",
             "rename_from": "System Administrator",
             "description": "Manages organisation structure: users, roles and departments.",
-            "is_org_admin": False,
+            "is_org_admin": True,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
@@ -3538,7 +3538,7 @@ def seed_role_templates(session):
             "rename_from": "Maintenance Officer",
             "description": "Field-level maintenance responsible officer. Key repair and overhaul workflow actor.",
             "is_org_admin": False,
-            "is_dept_admin": False,
+            "is_dept_admin": True,
             "auto_provision": True,
             "default_module_id": modules_by_name.get("Asset Dashboard"),
             "permissions_template": (
@@ -3820,6 +3820,125 @@ def seed_role_templates(session):
                 _readwrite(dashboard_module) +
                 _readwrite(procurement_modules) +
                 _readwrite(breakdown_workflows_module)
+            ),
+        },
+
+        # ── 15. AE-R&T ────────────────────────────────────────────────────────
+        {
+            "name": "AE-R&T",
+            "rename_from": "AE-R&T",
+            "description": "Assistant Engineer (Repair & Testing) — executes testing and acts on TR approval queue.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _full([modules_by_name["Testing"]] if "Testing" in modules_by_name else [])
+            ),
+        },
+
+        # ── 16. AE-R&D ────────────────────────────────────────────────────────
+        {
+            "name": "AE-R&D",
+            "rename_from": "AE-R&D",
+            "description": "Assistant Engineer (Research & Development) — executes testing and acts on TR approval queue.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _full([modules_by_name["Testing"]] if "Testing" in modules_by_name else [])
+            ),
+        },
+
+        # ── 17. AEE R&T ───────────────────────────────────────────────────────
+        {
+            "name": "AEE R&T",
+            "rename_from": "AEE R&T",
+            "description": "Assistant Executive Engineer (Repair & Testing) — approves TR queue and reviews results.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _readwrite([modules_by_name["TR Result Review"]] if "TR Result Review" in modules_by_name else [])
+            ),
+        },
+
+        # ── 18. AEE-R&D ───────────────────────────────────────────────────────
+        {
+            "name": "AEE-R&D",
+            "rename_from": "AEE-R&D",
+            "description": "Assistant Executive Engineer (Research & Development) — approves TR queue and reviews results.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _readwrite([modules_by_name["TR Result Review"]] if "TR Result Review" in modules_by_name else [])
+            ),
+        },
+
+        # ── 19. EE-R&T ────────────────────────────────────────────────────────
+        {
+            "name": "EE-R&T",
+            "rename_from": "EE-R&T",
+            "description": "Executive Engineer (Repair & Testing) — senior field officer on the RT track.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _approve(testing_request_approvals_module) +
+                _approve(approvals_module) +
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module)
+            ),
+        },
+
+        # ── 20. EE-R&D ────────────────────────────────────────────────────────
+        {
+            "name": "EE-R&D",
+            "rename_from": "EE-R&D",
+            "description": "Executive Engineer (Research & Development) — senior field officer on the RD track.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _approve(testing_request_approvals_module) +
+                _approve(approvals_module) +
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module)
+            ),
+        },
+
+        # ── 21. Dev Support ───────────────────────────────────────────────────
+        {
+            "name": "Dev Support",
+            "rename_from": "Dev Support",
+            "description": "Document support agent — handles document support queue and receives notifications.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _approve([modules_by_name["Document Support Queue"]] if "Document Support Queue" in modules_by_name else []) +
+                _readonly([modules_by_name["Notifications"]] if "Notifications" in modules_by_name else [])
+            ),
+        },
+
+        # ── 22. Dev Support Manager ───────────────────────────────────────────
+        {
+            "name": "Dev Support Manager",
+            "rename_from": "Dev Support Manager",
+            "description": "Document support manager — full access to document support and queue, receives notifications.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _approve([modules_by_name["Document Support"]] if "Document Support" in modules_by_name else []) +
+                _approve([modules_by_name["Document Support Queue"]] if "Document Support Queue" in modules_by_name else []) +
+                _readonly([modules_by_name["Notifications"]] if "Notifications" in modules_by_name else [])
             ),
         },
     ]
