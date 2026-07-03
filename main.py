@@ -127,6 +127,7 @@ from routers import tr_workflow_config as tr_wf_config_router  # TR Configurable
 from routers import doc_support as doc_support_router          # Document Support Workflow
 from routers import file_upload as file_upload_router          # Generic file upload
 from routers.public_registration import router as public_reg_router  # Org self-registration
+from routers import billing as billing_router                          # Razorpay billing
 
 # Workflow Engine
 from routers import workflows
@@ -1176,6 +1177,7 @@ app.include_router(file_upload_router.router)
 
 # Public (no-auth) routes
 app.include_router(public_reg_router)
+app.include_router(billing_router.router)         # Razorpay billing
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")

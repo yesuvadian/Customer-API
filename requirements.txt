@@ -35,3 +35,5 @@ PyMuPDF
 numpy
 torch
 torchvision
+
+razorpay

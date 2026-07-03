@@ -243,7 +243,7 @@ def login_user(db: Session, email: str, password: str):
                 detail="Account is inactive. Please contact administrator."
             )
 
-        # Step 2b: Block login if the organisation is disabled
+        # Step 2b: Block login if the organisation is disabled or trial has expired
         if user.organization_id:
             from models import Organization
             org = db.query(Organization).filter_by(id=user.organization_id).first()
@@ -252,6 +252,32 @@ def login_user(db: Session, email: str, password: str):
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Your organisation has been disabled. Please contact support.",
                 )
+            if org and org.is_trial and org.trial_end_date:
+                if org.trial_end_date < now:
+                    first_expiry = org.trial_status != "expired"
+                    if first_expiry:
+                        org.trial_status = "expired"
+                        db.commit()
+                    # Short-lived payment token (1 hr, scope=billing only)
+                    payment_token = create_access_token(
+                        {"org_id": str(org.id), "scope": "billing"},
+                        expires_delta=timedelta(hours=1),
+                    )
+                    # Send Razorpay payment link email on first expiry
+                    if first_expiry:
+                        try:
+                            from services.billing_service import send_payment_link
+                            send_payment_link(db, org)
+                        except Exception as e:
+                            print(f"[BILLING] Failed to send payment link: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={
+                            "message": "Your 30-day free trial has ended.",
+                            "payment_token": payment_token,
+                            "org_name": org.name,
+                        },
+                    )
 
         # Step 3: Security record
         security = db.query(UserSecurity).filter_by(user_id=user.id).first()

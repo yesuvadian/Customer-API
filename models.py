@@ -1242,6 +1242,11 @@ class Plan(Base):
     plan_limit = Column(Integer, nullable=False, default=0)
     isactive = Column(Boolean, default=True)
 
+    # Billing / subscription fields
+    price_paise = Column(Integer, nullable=True)           # price in INR paise (e.g. 99900 = ₹999)
+    billing_cycle = Column(String(20), nullable=True)      # monthly | yearly
+    duration_days = Column(Integer, nullable=True)         # 30 | 365
+
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -5344,6 +5349,37 @@ class DocumentRequest(Base):
     assigned_manager = relationship("User", foreign_keys=[assigned_manager_id])
     assigned_processor = relationship("User", foreign_keys=[assigned_processor_id])
     org = relationship("Organization", foreign_keys=[org_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RAZORPAY BILLING
+# ═══════════════════════════════════════════════════════════════════════════
+
+class BillingOrder(Base):
+    __tablename__ = "billing_orders"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=False)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
+
+    razorpay_order_id = Column(String(100), unique=True, nullable=True)    # set for in-app checkout
+    razorpay_payment_link_id = Column(String(100), nullable=True)          # set for email link flow
+    razorpay_payment_id = Column(String(100), nullable=True)
+    razorpay_signature = Column(String(255), nullable=True)
+
+    amount = Column(Integer, nullable=False)       # in paise (INR)
+    currency = Column(String(10), default="INR")
+    duration_days = Column(Integer, default=365)
+
+    # pending | paid | failed
+    status = Column(String(20), default="pending")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    org = relationship("Organization", foreign_keys=[org_id])
+    plan = relationship("Plan", foreign_keys=[plan_id])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
