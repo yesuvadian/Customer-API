@@ -742,7 +742,7 @@ class RepairWorkflowService:
             return {"message": "Workflow completed", "status": "completed", "progress": 100}
 
         workflow.current_stage_id = next_stage_id
-       
+
         workflow.assignment_pending = True
         self._complete_queue_entry(workflow_id, current_stage_id)
 
@@ -1305,6 +1305,7 @@ class RepairWorkflowService:
 
         result = {
             "can_assign": False,
+            "can_edit": False,
             "can_submit": False,
             "can_approve": False,
             "can_reject": False,
@@ -1329,21 +1330,14 @@ class RepairWorkflowService:
             if stage_status in ("pending", "not_started"):
                 result["can_assign"] = True
 
-        # can_submit: assigned actor with can_edit=True
-        if stage_status in ("assigned", "in_progress"):
+        # can_edit: purely role-based — user has can_edit=True on this stage
+        has_edit = self._has_stage_edit(current_stage_id, user_id)
+        if has_edit:
+            result["can_edit"] = True
 
-            is_assignee = (
-                instance.assigned_user_id
-                and str(instance.assigned_user_id) == str(user_id)
-            )
-
-            has_edit = self._has_stage_edit(
-                current_stage_id,
-                user_id,
-            )
-
-            if is_assignee and has_edit:
-                result["can_submit"] = True
+        # can_submit: role has edit permission AND stage is in an editable state
+        if has_edit and stage_status in ("assigned", "in_progress"):
+            result["can_submit"] = True
 
         # can_approve / can_reject: stage actor (can_approve=True) when submitted
         if stage_status == "submitted":
