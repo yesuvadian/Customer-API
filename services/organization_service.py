@@ -141,12 +141,65 @@ class OrganizationService(UTCDateTimeMixin):
 
     def _provision_default_roles(self, org_id: UUID) -> List[OrgRole]:
         """
-        Provision default roles from templates for a new organization.
+        Clone all active roles (+ module permissions) from the KPTCL template org
+        to the new org. Falls back to RoleTemplate provisioning if KPTCL not found.
         """
+        from uuid import uuid4
+        from models import Organization
+
+        template_org = self.db.query(Organization).filter_by(code="KPTCL").first()
+        if template_org:
+            source_roles = self.db.query(OrgRole).filter_by(
+                organization_id=template_org.id, is_active=True
+            ).all()
+            new_roles: List[OrgRole] = []
+            for src in source_roles:
+                existing = self.db.query(OrgRole).filter_by(
+                    organization_id=org_id, name=src.name
+                ).first()
+                if existing:
+                    new_roles.append(existing)
+                    continue
+                role = OrgRole(
+                    id=uuid4(),
+                    organization_id=org_id,
+                    name=src.name,
+                    description=src.description,
+                    role_type=src.role_type or "default",
+                    is_org_admin=src.is_org_admin,
+                    is_dept_admin=src.is_dept_admin,
+                    is_tester_assignable=getattr(src, "is_tester_assignable", False),
+                    is_active=True,
+                    cts=self._utc_now(),
+                    mts=self._utc_now(),
+                )
+                self.db.add(role)
+                self.db.flush()
+                for p in self.db.query(OrgRolePermission).filter_by(org_role_id=src.id).all():
+                    self.db.add(OrgRolePermission(
+                        id=uuid4(),
+                        org_role_id=role.id,
+                        module_id=p.module_id,
+                        can_view=p.can_view,
+                        can_add=p.can_add,
+                        can_edit=p.can_edit,
+                        can_delete=p.can_delete,
+                        can_approve=p.can_approve,
+                        can_assign=p.can_assign,
+                        can_export=p.can_export,
+                        can_import=p.can_import,
+                        cts=self._utc_now(),
+                        mts=self._utc_now(),
+                    ))
+                new_roles.append(role)
+            self.db.flush()
+            print(f"[INFO] Cloned {len(new_roles)} roles from KPTCL → org {org_id}")
+            return new_roles
+
+        # Fallback: RoleTemplate-based provisioning
         templates = self.db.query(RoleTemplate)\
             .filter(RoleTemplate.auto_provision == True)\
             .all()
-
         roles = []
         for template in templates:
             role = OrgRole(
@@ -162,11 +215,9 @@ class OrganizationService(UTCDateTimeMixin):
             )
             self.db.add(role)
             self.db.flush()
-
-            # Create permissions from template
             if template.permissions_template:
                 for perm_data in template.permissions_template:
-                    permission = OrgRolePermission(
+                    self.db.add(OrgRolePermission(
                         org_role_id=role.id,
                         module_id=perm_data.get("module_id"),
                         can_view=perm_data.get("can_view", False),
@@ -179,11 +230,8 @@ class OrganizationService(UTCDateTimeMixin):
                         can_import=perm_data.get("can_import", False),
                         cts=self._utc_now(),
                         mts=self._utc_now()
-                    )
-                    self.db.add(permission)
-
+                    ))
             roles.append(role)
-
         return roles
 
     def _provision_workflow_permissions(self, org_id: UUID, new_roles: list) -> None:
