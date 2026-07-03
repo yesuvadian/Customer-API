@@ -420,11 +420,13 @@ class OrgUserService(UTCDateTimeMixin):
         # Verify user exists in org
         self.get_org_user(user_id, organization_id)
 
-        user_role = self.db.query(OrgUserRole).filter(
+        query = self.db.query(OrgUserRole).filter(
             OrgUserRole.user_id == user_id,
             OrgUserRole.org_role_id == org_role_id,
-            OrgUserRole.department_id == department_id
-        ).first()
+        )
+        if department_id is not None:
+            query = query.filter(OrgUserRole.department_id == department_id)
+        user_role = query.first()
 
         if not user_role:
             raise HTTPException(
