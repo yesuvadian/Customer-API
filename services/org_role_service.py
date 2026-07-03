@@ -4,7 +4,7 @@ from uuid import UUID
 from typing import List, Optional, Dict
 from fastapi import HTTPException, status
 
-from models import OrgRole, Organization, Module, OrgRolePermission
+from models import OrgRole, OrgUserRole, Organization, Module, OrgRolePermission
 from schemas import OrgRoleCreate, OrgRoleUpdate, PermissionSet
 from utils.common_service import UTCDateTimeMixin
 
@@ -12,6 +12,39 @@ from utils.common_service import UTCDateTimeMixin
 class OrgRoleService(UTCDateTimeMixin):
     def __init__(self, db: Session):
         self.db = db
+    from models import OrgUserRole
+
+    def remove_role_from_user(
+        self,
+        organization_id: UUID,
+        user_id: UUID,
+        role_id: UUID,
+        removed_by: Optional[UUID] = None,
+    ):
+        assignment = (
+            self.db.query(OrgUserRole)
+            .join(OrgRole, OrgRole.id == OrgUserRole.org_role_id)
+            .filter(
+                OrgUserRole.user_id == user_id,
+                OrgUserRole.org_role_id == role_id,
+                OrgUserRole.is_active == True,
+                OrgRole.organization_id == organization_id,
+            )
+            .first()
+        )
+
+        if not assignment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User role assignment not found"
+            )
+
+        # Soft delete
+        assignment.is_active = False
+        assignment.modified_by = removed_by
+        assignment.mts = self._utc_now()
+
+        self.db.commit()
 
     def create_role(
         self,

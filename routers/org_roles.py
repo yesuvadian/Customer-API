@@ -49,6 +49,27 @@ def create_role(
     service = OrgRoleService(db)
     return service.create_role(role_data, created_by=current_user.id)
 
+@router.delete(
+    "/organizations/{org_id}/users/{user_id}/roles/{role_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def remove_user_role(
+    org_id: UUID,
+    user_id: UUID,
+    role_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_org_admin),
+):
+    service = OrgRoleService(db)
+
+    service.remove_role_from_user(
+        organization_id=org_id,
+        user_id=user_id,
+        role_id=role_id,
+        removed_by=current_user.id,
+    )
+
+    return None
 
 @router.get("/", response_model=List[OrgRoleOut])
 def list_roles(
