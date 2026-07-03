@@ -1305,7 +1305,6 @@ class RepairWorkflowService:
 
         result = {
             "can_assign": False,
-            "can_edit": False,
             "can_submit": False,
             "can_approve": False,
             "can_reject": False,
@@ -1325,22 +1324,26 @@ class RepairWorkflowService:
 
         stage_status = instance.status
 
-        # can_assign: coordinator (can_assign=True) when stage awaits assignment
-        if self._can_assign_stage(user_id, instance.stage_id):
-            if stage_status in ("pending", "not_started"):
+        # Load stage definition for config-driven status gates
+        stage_def = self.db.query(RepairStageDefinition).filter(
+            RepairStageDefinition.id == current_stage_id
+        ).first()
+        assign_statuses  = stage_def.assign_statuses  if stage_def else ["pending", "not_started"]
+        edit_statuses    = stage_def.edit_statuses    if stage_def else ["assigned", "in_progress"]
+        approve_statuses = stage_def.approve_statuses if stage_def else ["submitted"]
+
+        # can_assign: coordinator role AND stage is in an assignable status
+        if stage_status in assign_statuses:
+            if self._can_assign_stage(user_id, instance.stage_id):
                 result["can_assign"] = True
 
-        # can_edit: purely role-based — user has can_edit=True on this stage
-        has_edit = self._has_stage_edit(current_stage_id, user_id)
-        if has_edit:
-            result["can_edit"] = True
+        # can_submit: edit role AND stage is in an editable status
+        if stage_status in edit_statuses:
+            if self._has_stage_edit(current_stage_id, user_id):
+                result["can_submit"] = True
 
-        # can_submit: role has edit permission AND stage is in an editable state
-        if has_edit and stage_status in ("assigned", "in_progress"):
-            result["can_submit"] = True
-
-        # can_approve / can_reject: stage actor (can_approve=True) when submitted
-        if stage_status == "submitted":
+        # can_approve / can_reject: approve role AND stage is in an approvable status
+        if stage_status in approve_statuses:
             if self._has_stage_approve(current_stage_id, user_id):
                 result["can_approve"] = True
                 result["can_reject"] = True
