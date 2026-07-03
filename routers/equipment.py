@@ -558,7 +558,7 @@ def _parse_bulk_excel(contents: bytes) -> tuple[list, list]:
         return v
 
     rows = []
-    for row_idx in range(5, ws.max_row + 1):
+    for row_idx in range(4, ws.max_row + 1):
         row_vals = {h: _coerce(ws.cell(row=row_idx, column=ci).value)
                     for ci, h in enumerate(headers, start=1)
                     if h and not str(h).startswith("__")}
@@ -666,7 +666,7 @@ async def bulk_validate(
         raise HTTPException(status_code=400, detail=f"Could not parse Excel: {exc}")
 
     if not rows:
-        raise HTTPException(status_code=400, detail="No data rows found in the file (rows start at row 5)")
+        raise HTTPException(status_code=400, detail="No data rows found in the file. Fill in equipment data starting from row 4.")
 
     results = _validate_bulk_rows(rows, meta, db)
     valid_count = sum(1 for r in results if r["status"] == "valid")
