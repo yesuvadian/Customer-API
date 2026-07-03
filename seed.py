@@ -11904,6 +11904,17 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] System Administrator permissions failed (non-fatal): {_e}")
 
+        # Org Registration Config — system_config rows + fix any existing orgs
+        # with no admin role (idempotent, safe to run every time)
+        print("\n--- Org Registration Config ---")
+        try:
+            from seed_org_registration_config import seed_all as seed_org_reg_config
+            seed_org_reg_config(session)
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Org registration config seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
         # Zoho + Notifications — after seacms so roles and users exist
         seed_zoho_import_mapping(session, kptcl_org)
         seed_notifications_module_and_permissions(session)

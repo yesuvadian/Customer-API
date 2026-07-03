@@ -243,6 +243,16 @@ def login_user(db: Session, email: str, password: str):
                 detail="Account is inactive. Please contact administrator."
             )
 
+        # Step 2b: Block login if the organisation is disabled
+        if user.organization_id:
+            from models import Organization
+            org = db.query(Organization).filter_by(id=user.organization_id).first()
+            if org and not org.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your organisation has been disabled. Please contact support.",
+                )
+
         # Step 3: Security record
         security = db.query(UserSecurity).filter_by(user_id=user.id).first()
         if not security:
@@ -365,13 +375,26 @@ def login_user(db: Session, email: str, password: str):
                     alert_row = db.query(SystemConfig).filter(SystemConfig.key == "trial_alert_days").first()
                     alert_days = int(alert_row.value) if alert_row else 7
                     alert_active = days_remaining <= alert_days
+                # Auto-complete onboarding if the org already has departments
+                # (handles seeded orgs that were never walked through the wizard)
+                if not org.onboarding_complete:
+                    from models import OrgDepartment
+                    has_depts = db.query(OrgDepartment).filter_by(
+                        organization_id=org.id, is_active=True
+                    ).first() is not None
+                    if has_depts or not org.is_trial:
+                        org.onboarding_complete = True
+                        from datetime import datetime as _dt, timezone as _tz
+                        org.onboarding_completed_at = _dt.now(_tz.utc)
+                        db.flush()
+                effective_onboarding_complete = org.onboarding_complete
                 trial_info = {
                     "is_trial": org.is_trial,
                     "trial_status": org.trial_status,
                     "days_remaining": days_remaining,
                     "trial_end_date": org.trial_end_date.isoformat() if org.trial_end_date else None,
                     "alert_active": alert_active,
-                    "onboarding_complete": org.onboarding_complete,
+                    "onboarding_complete": effective_onboarding_complete,
                 }
 
         # Create tokens

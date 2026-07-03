@@ -238,7 +238,6 @@ def get_onboarding_status(
             "org_profile": steps.step_org_profile,
             "dept_hierarchy": steps.step_dept_hierarchy,
             "roles_confirmed": steps.step_roles_confirmed,
-            "equip_types": steps.step_equip_types,
             "users_invited": steps.step_users_invited,
         }
         all_done = all(steps_data.values())
@@ -282,7 +281,6 @@ def mark_onboarding_step(
         steps.step_org_profile,
         steps.step_dept_hierarchy,
         steps.step_roles_confirmed,
-        steps.step_equip_types,
         steps.step_users_invited,
     ])
     if all_done:
@@ -293,6 +291,39 @@ def mark_onboarding_step(
             db.commit()
 
     return {"step": step_name, "marked": True, "all_complete": all_done}
+
+
+@router.post("/onboarding/complete")
+def complete_onboarding(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Mark onboarding fully complete — called by wizard Finish or Skip."""
+    if not current_user.organization_id:
+        raise HTTPException(status_code=404, detail="No organisation assigned")
+
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    if not org.onboarding_complete:
+        org.onboarding_complete = True
+        org.onboarding_completed_at = datetime.now(timezone.utc)
+
+    # Also mark all steps so the step table is consistent
+    steps = db.query(OrgOnboardingSteps).filter(
+        OrgOnboardingSteps.organization_id == current_user.organization_id
+    ).first()
+    if not steps:
+        steps = OrgOnboardingSteps(organization_id=current_user.organization_id)
+        db.add(steps)
+    steps.step_org_profile = True
+    steps.step_roles_confirmed = True
+    steps.step_dept_hierarchy = True
+    steps.step_users_invited = True
+
+    db.commit()
+    return {"onboarding_complete": True}
 
 
 @router.get("/trial/status")

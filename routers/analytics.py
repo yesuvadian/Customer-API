@@ -113,6 +113,7 @@ def get_asset_breakdown(
       - dept_equipment_counts: { "<dept-id>": 120, ... }  (direct children)
       - total             : total equipment count in scope
     """
+    org_id   = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
     dept_ids = _collect_department_ids(department_id, db) if department_id else None
 
     # Resolve Testing Kit category IDs to exclude from asset counts
@@ -125,6 +126,8 @@ def get_asset_breakdown(
 
     # Active equipment — split into real assets vs test kits
     active_q = db.query(Equipment).filter(Equipment.status != "retired")
+    if org_id:
+        active_q = active_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
         active_q = active_q.filter(Equipment.department_id.in_(dept_ids))
     _all_active: list[Equipment] = active_q.all()
@@ -311,9 +314,12 @@ def get_analytics_dashboard(
       - department_scores  : one-level child breakdown (for drill-down)
     """
     # ── 1. Resolve equipment IDs in scope ────────────────────────────────────
+    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
     dept_ids = _collect_department_ids(department_id, db) if department_id else None
 
     eq_query = db.query(EquipmentAnalytics)
+    if org_id:
+        eq_query = eq_query.filter(EquipmentAnalytics.organization_id == org_id)
     if dept_ids:
         eq_query = eq_query.filter(EquipmentAnalytics.department_id.in_(dept_ids))
     all_ea: list[EquipmentAnalytics] = eq_query.all()
@@ -324,6 +330,8 @@ def get_analytics_dashboard(
 
     # All equipment IDs in scope (from Equipment table — includes untested equipment)
     _scope_eq_q = db.query(Equipment.id).filter(Equipment.status != "retired")
+    if org_id:
+        _scope_eq_q = _scope_eq_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
         _scope_eq_q = _scope_eq_q.filter(Equipment.department_id.in_(dept_ids))
     all_scope_eq_ids: set = {row[0] for row in _scope_eq_q.all()}
@@ -584,28 +592,21 @@ def get_analytics_dashboard(
         )
     else:
         # No dept selected: return root departments (parent_department_id IS NULL)
-        child_ha_rows = (
-            db.query(HierarchyAnalytics)
-            .filter(HierarchyAnalytics.parent_department_id.is_(None))
-            .all()
+        _scope_org_id = org_id  # use authenticated user's org directly
+        _ha_q = db.query(HierarchyAnalytics).filter(
+            HierarchyAnalytics.parent_department_id.is_(None)
         )
-        # Determine org from scope equipment (or dept_obj if available)
-        _org_id = None
-        if dept_obj:
-            _org_id = dept_obj.organization_id
-        else:
-            _sample = db.query(Equipment.organization_id).filter(
-                Equipment.id.in_(list(all_scope_eq_ids)[:1])
-            ).scalar() if all_scope_eq_ids else None
-            _org_id = _sample
+        if _scope_org_id:
+            _ha_q = _ha_q.filter(HierarchyAnalytics.organization_id == _scope_org_id)
+        child_ha_rows = _ha_q.all()
         all_child_depts = (
             db.query(OrgDepartment)
             .filter(
                 OrgDepartment.parent_department_id.is_(None),
-                OrgDepartment.organization_id == _org_id,
+                OrgDepartment.organization_id == _scope_org_id,
             )
             .all()
-        ) if _org_id else []
+        ) if _scope_org_id else []
 
     # Build lookup from HierarchyAnalytics by department_id
     ha_map: dict = {c.department_id: c for c in child_ha_rows}

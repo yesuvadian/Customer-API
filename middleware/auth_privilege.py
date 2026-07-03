@@ -133,6 +133,16 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                 detail="User not found",
             )
 
+        # Block all requests if the user's organisation is disabled
+        if user.organization_id:
+            from models import Organization
+            org = db.query(Organization).filter_by(id=user.organization_id).first()
+            if org and not org.is_active:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Your organisation has been disabled. Please contact support.",
+                )
+
         request.state.user = user
 
         # --------------------------------------------------
