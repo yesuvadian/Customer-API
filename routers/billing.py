@@ -53,6 +53,9 @@ def _activate_org(org: Organization, order: BillingOrder, db: Session) -> None:
     org.subscription_end_date = now + timedelta(days=order.duration_days)
     if order.plan_id:
         org.plan_id = order.plan_id
+    if not org.onboarding_complete:
+        org.onboarding_complete = True
+        org.onboarding_completed_at = now
     db.commit()
 
 

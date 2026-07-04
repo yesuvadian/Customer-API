@@ -16,7 +16,7 @@ from schemas import (
     TestingRequestResponse,
 )
 from services.testing_request_service import TestingRequestService
-from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
+from utils.common_service import get_dept_subtree_ids, get_user_dept_scope, get_dept_root_ancestor
 
 _DEFAULT_PAGE_SIZE = int(os.getenv("TR_PAGE_SIZE", "20"))
 
@@ -167,15 +167,47 @@ def _enrich(req):
 def get_department_hierarchy(
     org_id: Optional[UUID] = None,
     parent_id: Optional[UUID] = None,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Returns department hierarchy for location selection.
 
-    - Get all organizations:           /department_hierarchy
     - Get root depts for an org:       /department_hierarchy?org_id=<uuid>
     - Get children of a department:    /department_hierarchy?org_id=<uuid>&parent_id=<uuid>
+
+    When fetching root depts (no parent_id), org-admin sees all zones;
+    dept-scoped users see only their root ancestor zone.
     """
-    return TestingRequestService(db).get_department_hierarchy(org_id, parent_id)
+    svc = TestingRequestService(db)
+
+    # When drilling into children, never restrict — parent_id is explicit
+    if parent_id is not None:
+        return svc.get_department_hierarchy(org_id, parent_id)
+
+    # For root-level fetch, scope to user's zone if dept-scoped
+    if org_id is not None:
+        is_admin, user_dept_id = get_user_dept_scope(db, current_user.id, org_id)
+        if not is_admin and user_dept_id:
+            root_id = get_dept_root_ancestor(db, user_dept_id)
+            if root_id:
+                return svc.get_department_hierarchy(org_id, parent_id=None, root_id=root_id)
+
+    return svc.get_department_hierarchy(org_id, parent_id)
+
+
+@router.get("/department_root/{dept_id}")
+def get_department_root(dept_id: UUID, db: Session = Depends(get_db)):
+    """Walk up the hierarchy and return the root ancestor of the given department."""
+    from models import OrgDepartment
+    current = db.query(OrgDepartment).filter_by(id=dept_id).first()
+    if not current:
+        raise HTTPException(status_code=404, detail="Department not found")
+    while current.parent_department_id:
+        parent = db.query(OrgDepartment).filter_by(id=current.parent_department_id).first()
+        if not parent:
+            break
+        current = parent
+    return {"id": str(current.id), "name": current.name}
 
 
 # ─── Equipment Types (for form dropdowns) ───────────────────

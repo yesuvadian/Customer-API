@@ -1585,6 +1585,14 @@ def get_department_hierarchy_with_counts(
     _require_permission(db, current_user, "can_view")
 
     from sqlalchemy import text
+    from utils.common_service import get_user_dept_scope, get_dept_root_ancestor
+
+    # When fetching root cards (no parent_id), scope to user's zone if dept-scoped
+    scoped_root_id = None
+    if parent_id is None:
+        is_admin, user_dept_id = get_user_dept_scope(db, current_user.id, org_id)
+        if not is_admin and user_dept_id:
+            scoped_root_id = get_dept_root_ancestor(db, user_dept_id)
 
     sql = text(
         """
@@ -1598,14 +1606,21 @@ def get_department_hierarchy_with_counts(
         WHERE organization_id = :org_id
           AND is_active = true
           AND (
-                (:parent_id IS NULL AND parent_department_id IS NULL)
-                OR parent_department_id = :parent_id
+                CASE
+                  WHEN :scoped_root_id IS NOT NULL THEN od.id = :scoped_root_id
+                  WHEN :parent_id IS NULL THEN parent_department_id IS NULL
+                  ELSE parent_department_id = :parent_id
+                END
               )
         ORDER BY name
         """
     )
     rows = db.execute(
-        sql, {"org_id": str(org_id), "parent_id": str(parent_id) if parent_id else None}
+        sql, {
+            "org_id": str(org_id),
+            "parent_id": str(parent_id) if parent_id else None,
+            "scoped_root_id": str(scoped_root_id) if scoped_root_id else None,
+        }
     ).fetchall()
 
     result = []

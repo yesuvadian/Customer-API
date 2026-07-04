@@ -115,6 +115,10 @@ def register_org(payload: OrgRegistrationRequest, db: Session = Depends(get_db))
     steps = OrgOnboardingSteps(organization_id=org.id)
     db.add(steps)
 
+    # Trial orgs go straight into the app — no wizard needed
+    org.onboarding_complete = True
+    org.onboarding_completed_at = now
+
     # Set admin usertype
     admin_user.usertype = "org_admin"
 

@@ -838,6 +838,7 @@ class TestingRequestService:
         self,
         org_id: Optional[UUID] = None,
         parent_id: Optional[UUID] = None,
+        root_id: Optional[UUID] = None,
     ) -> list:
         """Return organisations (when org_id is None) or departments.
 
@@ -865,11 +866,12 @@ class TestingRequestService:
             OrgDepartment.is_active.is_(True),
         )
 
-        q = (
-            q.filter(OrgDepartment.parent_department_id.is_(None))
-            if parent_id is None
-            else q.filter(OrgDepartment.parent_department_id == parent_id)
-        )
+        if root_id is not None:
+            q = q.filter(OrgDepartment.id == root_id)
+        elif parent_id is None:
+            q = q.filter(OrgDepartment.parent_department_id.is_(None))
+        else:
+            q = q.filter(OrgDepartment.parent_department_id == parent_id)
 
         depts = q.order_by(OrgDepartment.name).all()
 
