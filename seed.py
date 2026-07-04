@@ -3010,6 +3010,13 @@ def seed_test_type_categories(session, master_ids):
         # Add types for each category (test, maintenance, inspection, repair_lifecycle)
         for category_type, type_list in categories.items():
             for type_name in type_list:
+                # For test types, only create a CategoryDetails row if we have a
+                # template defined — prevents unimplemented test types (e.g. "Load Test")
+                # from appearing in the Data Import test type picker.
+                if category_type == "test":
+                    from test_templates import TEST_TYPE_TO_TEMPLATE, get_template_for_test_type
+                    if type_name not in TEST_TYPE_TO_TEMPLATE and get_template_for_test_type(type_name) is None:
+                        continue
                 _get_or_create_category_detail(
                     session,
                     name=type_name,

@@ -79,7 +79,11 @@ EXTRACTABLE_TEST_TYPES: dict[str, dict] = {
 }
 
 
-def get_test_types_for_category(category_key: str, db: Session) -> list[dict]:
+def get_test_types_for_category(
+    category_key: str,
+    db: Session,
+    active_keys: set | None = None,
+) -> list[dict]:
     """
     Return active CategoryDetails rows for the given import category.
 

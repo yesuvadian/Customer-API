@@ -190,7 +190,7 @@ def seed_default_admin_role_for_existing_orgs(session) -> dict:
         # Find the org admin user (usertype = 'org_admin')
         admin_user = (
             session.query(User)
-            .filter_by(organization_id=org.id, usertype="org_admin", is_active=True)
+            .filter_by(organization_id=org.id, usertype="org_admin", isactive=True)
             .first()
         )
         if not admin_user:
