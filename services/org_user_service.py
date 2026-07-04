@@ -417,11 +417,13 @@ class OrgUserService(UTCDateTimeMixin):
         department_id: Optional[UUID] = None
     ) -> bool:
         """Remove a role from a user."""
-        user_role = self.db.query(OrgUserRole).filter(
+        q = self.db.query(OrgUserRole).filter(
             OrgUserRole.user_id == user_id,
             OrgUserRole.org_role_id == org_role_id,
-            OrgUserRole.department_id == department_id,
-        ).first()
+        )
+        if department_id is not None:
+            q = q.filter(OrgUserRole.department_id == department_id)
+        user_role = q.first()
 
         if not user_role:
             raise HTTPException(
