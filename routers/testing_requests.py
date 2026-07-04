@@ -16,7 +16,7 @@ from schemas import (
     TestingRequestResponse,
 )
 from services.testing_request_service import TestingRequestService
-from utils.common_service import get_dept_subtree_ids, get_user_dept_scope, get_dept_root_ancestor
+from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
 
 _DEFAULT_PAGE_SIZE = int(os.getenv("TR_PAGE_SIZE", "20"))
 
@@ -89,6 +89,15 @@ def _enrich(req):
         ).strip() or req.assigned_tester.email
     else:
         req.assigned_tester_name = None
+
+    # Completed by (who actually submitted test results)
+    if req.completed_by:
+        req.completed_by_name = (
+            f"{req.completed_by.firstname or ''} "
+            f"{req.completed_by.lastname or ''}"
+        ).strip() or req.completed_by.email
+    else:
+        req.completed_by_name = None
 
     # ─────────────────────────────────────────────
     # Repair Workflow Enrichment
@@ -188,9 +197,7 @@ def get_department_hierarchy(
     if org_id is not None:
         is_admin, user_dept_id = get_user_dept_scope(db, current_user.id, org_id)
         if not is_admin and user_dept_id:
-            root_id = get_dept_root_ancestor(db, user_dept_id)
-            if root_id:
-                return svc.get_department_hierarchy(org_id, parent_id=None, root_id=root_id)
+            return svc.get_department_hierarchy(org_id, parent_id=None, root_id=user_dept_id)
 
     return svc.get_department_hierarchy(org_id, parent_id)
 
@@ -208,6 +215,27 @@ def get_department_root(dept_id: UUID, db: Session = Depends(get_db)):
             break
         current = parent
     return {"id": str(current.id), "name": current.name}
+
+
+@router.get("/department_ancestors/{dept_id}")
+def get_department_ancestors(dept_id: UUID, db: Session = Depends(get_db)):
+    """Return the chain from the root down to the given dept (exclusive of dept itself).
+    e.g. [KPTCL, Bangalore Zone, BMAZ South, Hoody] for dept=400kV Hoody"""
+    from models import OrgDepartment
+    chain = []
+    current = db.query(OrgDepartment).filter_by(id=dept_id).first()
+    if not current:
+        raise HTTPException(status_code=404, detail="Department not found")
+    # walk up, collect ancestors (not the dept itself)
+    node = current
+    while node.parent_department_id:
+        parent = db.query(OrgDepartment).filter_by(id=node.parent_department_id).first()
+        if not parent:
+            break
+        chain.append({"id": str(parent.id), "name": parent.name})
+        node = parent
+    chain.reverse()  # root first
+    return chain
 
 
 # ─── Equipment Types (for form dropdowns) ───────────────────
@@ -371,12 +399,15 @@ def list_testing_requests(
     if department_id is None and organization_id:
         is_admin, scoped_dept = service.get_user_scope(current_user.id, organization_id)
         if not is_admin and scoped_dept:
-            department_id = scoped_dept
+            # Don't narrow by dept for users who have approver roles in any TR workflow stage
+            user_is_approver = service.user_has_tr_wf_approver_role(current_user.id, organization_id)
+            if not user_is_approver:
+                department_id = scoped_dept
 
     dept_ids = None
     if department_id:
         subtree = get_dept_subtree_ids(db, department_id)
-        if len(subtree) > 1:
+        if len(subtree) >= 1:
             dept_ids = subtree
 
     from datetime import date as _date
@@ -447,7 +478,7 @@ def get_testing_request_breakdown(
     dept_ids = None
     if department_id:
         subtree = get_dept_subtree_ids(db, department_id)
-        if len(subtree) > 1:
+        if len(subtree) >= 1:
             dept_ids = subtree
 
     from datetime import date as _date

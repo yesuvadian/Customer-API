@@ -955,6 +955,13 @@ def list_equipment(
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
 
+    from utils.common_service import get_user_dept_scope, get_dept_subtree_ids
+    substation_id_list: Optional[list] = None
+    if department_id is None:
+        is_admin, scoped_dept = get_user_dept_scope(db, current_user.id, org_id)
+        if not is_admin and scoped_dept:
+            department_id = scoped_dept
+
     items = EquipmentService.list_equipment(
         db=db,
         organization_id=org_id,
@@ -1134,7 +1141,14 @@ def get_equipment_counts(
     
     # Organization scope
     query = query.filter(Equipment.organization_id == org_id)
-    
+
+    # Auto-scope to user's dept if no explicit filter provided
+    if department_id is None:
+        from utils.common_service import get_user_dept_scope
+        is_admin, scoped_dept = get_user_dept_scope(db, current_user.id, org_id)
+        if not is_admin and scoped_dept:
+            department_id = scoped_dept
+
     # ── Department / substation filter ──────────────────────────────────────
     if department_id:
         from services.equipment_service import EquipmentService as ES
@@ -1585,14 +1599,14 @@ def get_department_hierarchy_with_counts(
     _require_permission(db, current_user, "can_view")
 
     from sqlalchemy import text
-    from utils.common_service import get_user_dept_scope, get_dept_root_ancestor
+    from utils.common_service import get_user_dept_scope
 
-    # When fetching root cards (no parent_id), scope to user's zone if dept-scoped
+    # When fetching root cards (no parent_id), scope to user's own dept directly
     scoped_root_id = None
     if parent_id is None:
         is_admin, user_dept_id = get_user_dept_scope(db, current_user.id, org_id)
         if not is_admin and user_dept_id:
-            scoped_root_id = get_dept_root_ancestor(db, user_dept_id)
+            scoped_root_id = user_dept_id
 
     sql = text(
         """

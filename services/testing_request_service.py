@@ -14,6 +14,7 @@ from models import (
     OrgRole, OrgUserRole,
     OrgTestTemplate,
     Equipment,
+    TrWfStageRole,
 )
 from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
 
@@ -588,6 +589,26 @@ class TestingRequestService:
             .limit(limit)
             .all()
         )
+
+    def user_has_tr_wf_approver_role(self, user_id: UUID, organization_id: UUID) -> bool:
+        """Return True if the user holds any org role that has can_approve on any TR workflow stage."""
+        user_role_ids = [
+            r.role_id for r in
+            self.db.query(OrgUserRole.role_id)
+            .filter(OrgUserRole.user_id == user_id)
+            .all()
+        ]
+        if not user_role_ids:
+            return False
+        count = (
+            self.db.query(func.count(TrWfStageRole.id))
+            .filter(
+                TrWfStageRole.role_id.in_(user_role_ids),
+                TrWfStageRole.can_approve.is_(True),
+            )
+            .scalar()
+        )
+        return (count or 0) > 0
 
     def update_request(self, request_id: UUID, data: dict, modified_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
