@@ -82,7 +82,7 @@ EXTRACTABLE_TEST_TYPES: dict[str, dict] = {
 def get_test_types_for_category(
     category_key: str,
     db: Session,
-    active_keys: set | None = None,
+    active_type_ids: set | None = None,
 ) -> list[dict]:
     """
     Return active CategoryDetails rows for the given import category.
@@ -90,6 +90,9 @@ def get_test_types_for_category(
     Filters by CategoryDetails.category_type (DB column) rather than
     keyword guessing.  Each row is annotated with has_pdf / has_excel
     flags derived from the EXTRACTABLE_TEST_TYPES code registry.
+
+    If active_type_ids is provided, only rows whose id is in that set are
+    returned — this reflects the org's active OrgTestTemplate configuration.
     """
     cfg = CATEGORY_TYPE_MAP.get(category_key)
     if not cfg:
@@ -101,6 +104,8 @@ def get_test_types_for_category(
     query = db.query(CategoryDetails).filter(CategoryDetails.is_active.is_(True))
     if db_category_type:
         query = query.filter(CategoryDetails.category_type == db_category_type)
+    if active_type_ids:
+        query = query.filter(CategoryDetails.id.in_(active_type_ids))
 
     seen_names: set = set()
     results = []
