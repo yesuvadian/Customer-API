@@ -4,7 +4,7 @@ Cleanup a partial/test org registration by removing all related data in FK-safe 
 Usage:
     python cleanup_org.py <org_id>
     python cleanup_org.py <org_id> --dry-run
-    python cleanup_org.py <org_id> --reprovision   # cleanup + re-provision TR workflows
+    python cleanup_org.py <org_id> --reprovision   # cleanup + re-provision all workflows
 """
 
 import sys
@@ -83,6 +83,13 @@ def cleanup_org(org_id: str, dry_run: bool = False) -> None:
             # ── Equipment & kits ──────────────────────────────────────────────
             ("equipment",              "SELECT id FROM equipment WHERE organization_id = :oid"),
 
+            # ── Stage workflow role mappings (all use repair_stage_roles keyed by role_id) ──
+            ("repair_stage_roles",
+             "SELECT id FROM repair_stage_roles WHERE role_id IN "
+             "(SELECT id FROM org_roles WHERE organization_id = :oid)"),
+
+            # ── Doc support + TR workflow (tr_wf_definitions covers both) already cleaned above ──
+
             # ── Org RBAC ──────────────────────────────────────────────────────
             ("org_user_roles",
              "SELECT id FROM org_user_roles WHERE org_role_id IN "
@@ -90,6 +97,10 @@ def cleanup_org(org_id: str, dry_run: bool = False) -> None:
 
             ("org_role_permissions",
              "SELECT id FROM org_role_permissions WHERE org_role_id IN "
+             "(SELECT id FROM org_roles WHERE organization_id = :oid)"),
+
+            ("permission_matrix",
+             "SELECT id FROM permission_matrix WHERE role_id IN "
              "(SELECT id FROM org_roles WHERE organization_id = :oid)"),
 
             ("org_roles",              "SELECT id FROM org_roles WHERE organization_id = :oid"),
@@ -141,9 +152,9 @@ def reprovision_org(org_id: str) -> None:
     db = SessionLocal()
     try:
         svc = OrganizationService(db)
-        svc._provision_tr_workflow(org_id)
+        svc._provision_all_workflows(org_id)
         db.commit()
-        print(f"\nDone — TR workflows re-provisioned for org {org_id}")
+        print(f"\nDone — all workflows re-provisioned for org {org_id}")
     except Exception as e:
         db.rollback()
         print(f"\nERROR during re-provision: {e}")
