@@ -1137,6 +1137,8 @@ class TestingRequestResponse(BaseModel):
     requester_email: Optional[str] = None  # For Flutter UI (originator email)
     assigned_tester_id: Optional[UUID] = None
     assigned_tester_name: Optional[str] = None
+    completed_by_id: Optional[UUID] = None
+    completed_by_name: Optional[str] = None
     assigned_at: Optional[datetime] = None
     accepted_at: Optional[datetime] = None
     requested_date: Optional[datetime] = None

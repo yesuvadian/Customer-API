@@ -781,20 +781,39 @@ def tr_wf_get_pending_queue(
             TrWfStageRole.role_id.in_(caller_role_ids),
         ).all()
     ]
-    if not allowed_stage_ids:
+
+    # Workflow definition IDs where caller has can_act_as_tester on any stage
+    act_as_tester_def_ids = [
+        sr.stage.wf_definition_id for sr in db.query(TrWfStageRole)
+        .join(TrWfStage, TrWfStageRole.stage_id == TrWfStage.id)
+        .filter(
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_act_as_tester.is_(True),
+        ).all()
+    ]
+
+    if not allowed_stage_ids and not act_as_tester_def_ids:
         return []
 
     # Department subtree for this caller — scope to caller's dept + descendants
     caller_dept_ids = _caller_dept_ids(db, current_user)
 
     # Active instances at those stages in this org
+    # Also include instances from workflows where caller has can_act_as_tester
+    from sqlalchemy import or_
+    stage_filter = TrWfInstance.current_stage_id.in_(allowed_stage_ids) if allowed_stage_ids else None
+    act_filter = (
+        TrWfInstance.wf_definition_id.in_(act_as_tester_def_ids)
+        if act_as_tester_def_ids else None
+    )
+    combined_filter = or_(stage_filter, act_filter) if (stage_filter is not None and act_filter is not None) else (stage_filter or act_filter)
     instances_q = (
         db.query(TrWfInstance)
         .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
         .filter(
             TrWfInstance.org_id == org_id,
             TrWfInstance.status == "active",
-            TrWfInstance.current_stage_id.in_(allowed_stage_ids),
+            combined_filter,
         )
     )
     if caller_dept_ids:
@@ -886,6 +905,111 @@ def tr_wf_get_pending_queue(
             "due_date": req.due_date.isoformat() if req.due_date else None,
             "scheduled_start_date": req.scheduled_start_date.isoformat() if req.scheduled_start_date else None,
             "available_actions": actions,
+        })
+
+    return result
+
+
+@router.get("/tr-wf/view-queue", response_model=List[dict])
+def tr_wf_view_queue(
+    organization_id: Optional[UUID] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Read-only queue for roles with can_view on any stage of a workflow.
+    Returns active TRs scoped to caller's dept — no available_actions.
+    """
+    from models import TrWfInstance, TrWfStageRole, TrWfStage, OrgUserRole as OURModel
+    from sqlalchemy.orm import joinedload
+
+    org_id = current_user.organization_id or organization_id
+    if not org_id:
+        raise HTTPException(status_code=400, detail="organization_id required")
+
+    caller_role_ids = [
+        r.org_role_id for r in db.query(OURModel).filter(
+            OURModel.user_id == current_user.id,
+            OURModel.is_active.is_(True),
+        ).all()
+    ]
+    if not caller_role_ids:
+        return []
+
+    # Stages where caller has can_view
+    view_stage_ids = [
+        sr.stage_id for sr in db.query(TrWfStageRole).filter(
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_view.is_(True),
+        ).all()
+    ]
+    if not view_stage_ids:
+        return []
+
+    caller_dept_ids = _caller_dept_ids(db, current_user)
+
+    instances_q = (
+        db.query(TrWfInstance)
+        .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+        .filter(
+            TrWfInstance.org_id == org_id,
+            TrWfInstance.status == "active",
+            TrWfInstance.current_stage_id.in_(view_stage_ids),
+        )
+    )
+    if caller_dept_ids:
+        instances_q = instances_q.filter(
+            TestingRequest.department_id.in_(caller_dept_ids)
+        )
+    instances = instances_q.all()
+
+    result = []
+    for inst in instances:
+        req = (
+            db.query(TestingRequest)
+            .options(
+                joinedload(TestingRequest.equipment_type),
+                joinedload(TestingRequest.test_type),
+                joinedload(TestingRequest.department),
+                joinedload(TestingRequest.originator),
+                joinedload(TestingRequest.equipment),
+            )
+            .filter(TestingRequest.id == inst.testing_request_id)
+            .first()
+        )
+        if not req:
+            continue
+
+        eq = req.equipment
+        cur_stage = db.query(TrWfStage).filter(TrWfStage.id == inst.current_stage_id).first()
+        result.append({
+            "request_id": str(req.id),
+            "request_number": req.request_number,
+            "title": req.title,
+            "description": req.description,
+            "priority": req.priority,
+            "equipment_type": req.equipment_type.name if req.equipment_type else None,
+            "equipment_ueic": eq.ueic if eq else None,
+            "bay_number": eq.bay_number if eq else None,
+            "test_type": req.test_type.name if req.test_type else None,
+            "test_type_id": req.test_type_id,
+            "equipment_id": str(req.equipment_id) if req.equipment_id else None,
+            "equipment_type_id": req.equipment_type_id,
+            "department": req.department.name if req.department else None,
+            "department_id": str(req.department_id) if req.department_id else None,
+            "originator": (
+                f"{req.originator.firstname or ''} {req.originator.lastname or ''}".strip()
+                or req.originator.email
+            ) if req.originator else None,
+            "current_status_code": inst.current_status_code,
+            "current_stage_id": str(inst.current_stage_id) if inst.current_stage_id else None,
+            "stage_name": cur_stage.name if cur_stage else None,
+            "stage_code": cur_stage.code if cur_stage else None,
+            "wf_instance_id": str(inst.id),
+            "request_type": req.request_type,
+            "cts": req.cts.isoformat() if req.cts else None,
+            "due_date": req.due_date.isoformat() if req.due_date else None,
+            "available_actions": [],  # read-only — no actions
         })
 
     return result

@@ -46,6 +46,7 @@ from models import (
     User,
     CategoryMaster,
     CategoryDetails,
+    TestingRequest,
 )
 
 router = APIRouter(prefix="/tr-workflow-config", tags=["Workflow Config"])
@@ -84,6 +85,8 @@ def _stage_out(s: TrWfStage) -> dict:
                 "can_approve": r.can_approve,
                 "can_assign": r.can_assign,
                 "can_edit": r.can_edit,
+                "can_act_as_tester": r.can_act_as_tester,
+                "can_view": r.can_view,
             }
             for r in s.roles
         ],
@@ -460,6 +463,16 @@ def delete_stage(
     stage = db.query(TrWfStage).filter(TrWfStage.id == stage_id).first()
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
+    active_count = (
+        db.query(TestingRequest)
+        .filter(TestingRequest.current_stage_id == stage_id)
+        .count()
+    )
+    if active_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{active_count} test request{'s are' if active_count != 1 else ' is'} currently at this stage. Complete or reassign them before deleting.",
+        )
     db.delete(stage)
     db.commit()
 
@@ -488,6 +501,8 @@ def replace_stage_roles(
             can_approve=r.get("can_approve", False),
             can_assign=r.get("can_assign", False),
             can_edit=r.get("can_edit", False),
+            can_act_as_tester=r.get("can_act_as_tester", False),
+            can_view=r.get("can_view", False),
         ))
     db.commit()
     return _stage_out(_load_stage(db, stage_id))

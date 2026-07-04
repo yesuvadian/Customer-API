@@ -868,6 +868,8 @@ class TrWfStageRole(Base):
     can_approve = Column(Boolean, default=False)
     can_assign = Column(Boolean, default=False)
     can_edit = Column(Boolean, default=False)
+    can_act_as_tester = Column(Boolean, default=False)
+    can_view = Column(Boolean, default=False)
 
     __table_args__ = (
         UniqueConstraint("stage_id", "role_id", name="uq_tr_wf_stage_role"),
@@ -2812,6 +2814,7 @@ class TestingRequest(Base):
     # Assignments
     originator_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
     assigned_tester_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    completed_by_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     assigned_at = Column(DateTime(timezone=True), nullable=True)
     accepted_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -2909,6 +2912,7 @@ class TestingRequest(Base):
     # Relationships
     originator = relationship("User", foreign_keys=[originator_id])
     assigned_tester = relationship("User", foreign_keys=[assigned_tester_id])
+    completed_by = relationship("User", foreign_keys=[completed_by_id])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
@@ -4762,7 +4766,7 @@ class NotificationRoutingRule(Base):
     applicable_status_to        = Column(String(100), nullable=True)
 
     # ── Output ────────────────────────────────────────────────────────────────
-    channels_enabled            = Column(JSONB, nullable=False, server_default='["email","sms","inapp"]')
+    channels_enabled            = Column(JSONB, nullable=False, server_default='["inapp"]')
     recipient_roles_override    = Column(JSONB, nullable=True)   # NULL = use template default
     advanced_conditions         = Column(JSONB, nullable=True)   # e.g. {"activity_types": ["Short Circuit Test HV-IV"]}
     followup_action             = Column(JSONB, nullable=True)   # auto follow-up ticket on alert/critical

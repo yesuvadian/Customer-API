@@ -621,7 +621,25 @@ class WorkflowRoutingService:
             .first()
         )
         if not allowed_role:
-            return []
+            # Also allow if user has can_act_as_tester on any stage of this workflow
+            # (emergency completion case — approver completing tester's step)
+            from sqlalchemy import exists
+            can_act = (
+                self.db.query(TrWfStageRole)
+                .join(TrWfStage, TrWfStageRole.stage_id == TrWfStage.id)
+                .filter(
+                    TrWfStageRole.role_id.in_(user_role_ids),
+                    TrWfStageRole.can_act_as_tester.is_(True),
+                    TrWfStage.wf_definition_id == (
+                        self.db.query(TrWfStage.wf_definition_id)
+                        .filter(TrWfStage.id == current_stage_id)
+                        .scalar_subquery()
+                    ),
+                )
+                .first()
+            )
+            if not can_act:
+                return []
 
         transitions: list[TrWfStageTransition] = (
             self.db.query(TrWfStageTransition)

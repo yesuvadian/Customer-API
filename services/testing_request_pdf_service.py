@@ -27,6 +27,7 @@ class TestingRequestPDFService:
             joinedload(TestingRequest.department),
             joinedload(TestingRequest.originator),
             joinedload(TestingRequest.assigned_tester),
+            joinedload(TestingRequest.completed_by),
             joinedload(TestingRequest.organization),
             joinedload(TestingRequest.equipment),
         ).filter(TestingRequest.id == request_id).first()
@@ -42,13 +43,18 @@ class TestingRequestPDFService:
         doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch)
         story = []
 
-        # Styles
+        NAVY      = colors.HexColor('#0F2B6B')
+        BLUE      = colors.HexColor('#1A56DB')
+        PANEL_BG  = colors.HexColor('#EFF4FF')
+        BORDER    = colors.HexColor('#CBD5E1')
+        TEXT_DARK = colors.HexColor('#1E293B')
+
         styles = getSampleStyleSheet()
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=20,
-            textColor=colors.HexColor('#003366'),
+            textColor=NAVY,
             alignment=TA_CENTER,
             spaceAfter=20,
         )
@@ -56,7 +62,7 @@ class TestingRequestPDFService:
             'CustomHeading',
             parent=styles['Heading2'],
             fontSize=14,
-            textColor=colors.HexColor('#003366'),
+            textColor=NAVY,
             spaceAfter=10,
         )
         normal_style = styles['Normal']
@@ -192,11 +198,11 @@ class TestingRequestPDFService:
             equipment_table.setStyle(TableStyle([
                 ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, -1), 10),
-                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
+                ('TEXTCOLOR', (0, 0), (0, -1), NAVY),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F0F0F0')),
+                ('GRID', (0, 0), (-1, -1), 0.5, BORDER),
+                ('BACKGROUND', (0, 0), (0, -1), PANEL_BG),
                 ('TOPPADDING', (0, 0), (-1, -1), 8),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ]))
@@ -206,28 +212,35 @@ class TestingRequestPDFService:
         # Organization and Requester Information
         story.append(Paragraph("Organization & Requester", heading_style))
 
-        requester_name = '-'
-        requester_email = '-'
-        if testing_request.originator:
-            requester_name = f"{testing_request.originator.firstname or ''} {testing_request.originator.lastname or ''}".strip() or testing_request.originator.email
-            requester_email = testing_request.originator.email
+        def _pdf_user_name(u) -> str:
+            if not u:
+                return '-'
+            return (f"{u.firstname or ''} {u.lastname or ''}".strip()) or u.email or '-'
+
+        requester_name = _pdf_user_name(testing_request.originator)
+        requester_email = testing_request.originator.email if testing_request.originator else '-'
+        tester_name = _pdf_user_name(testing_request.assigned_tester)
+        completed_by_name = _pdf_user_name(testing_request.completed_by) if testing_request.completed_by_id else None
 
         org_data = [
             ['Department:', testing_request.department.name if testing_request.department else '-'],
             ['Requested By:', requester_name],
             ['Requester Email:', requester_email],
+            ['Assigned Tester:', tester_name],
             ['Submitted On:', testing_request.cts.strftime('%Y-%m-%d %H:%M:%S') if testing_request.cts else '-'],
         ]
+        if completed_by_name:
+            org_data.append(['Tested By:', completed_by_name])
 
         org_table = Table(org_data, colWidths=[2*inch, 4*inch])
         org_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
+            ('TEXTCOLOR', (0, 0), (0, -1), NAVY),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F0F0F0')),
+            ('GRID', (0, 0), (-1, -1), 0.5, BORDER),
+            ('BACKGROUND', (0, 0), (0, -1), PANEL_BG),
             ('TOPPADDING', (0, 0), (-1, -1), 8),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
         ]))
@@ -242,11 +255,11 @@ class TestingRequestPDFService:
             notes_table.setStyle(TableStyle([
                 ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, -1), 10),
-                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
+                ('TEXTCOLOR', (0, 0), (0, -1), NAVY),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F0F0F0')),
+                ('GRID', (0, 0), (-1, -1), 0.5, BORDER),
+                ('BACKGROUND', (0, 0), (0, -1), PANEL_BG),
                 ('TOPPADDING', (0, 0), (-1, -1), 8),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ]))

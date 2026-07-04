@@ -200,21 +200,27 @@ def _get_or_create_stage(
 
 
 def _get_or_create_stage_role(session, stage, role,
-                               can_approve=False, can_assign=False, can_edit=False):
+                               can_approve=False, can_assign=False, can_edit=False,
+                               can_act_as_tester=False):
     if not role:
         return
     exists = session.query(TrWfStageRole).filter_by(
         stage_id=stage.id, role_id=role.id
     ).first()
-    if not exists:
-        session.add(TrWfStageRole(
-            id=uuid.uuid4(),
-            stage_id=stage.id,
-            role_id=role.id,
-            can_approve=can_approve,
-            can_assign=can_assign,
-            can_edit=can_edit,
-        ))
+    if exists:
+        # Update can_act_as_tester if it changed
+        if exists.can_act_as_tester != can_act_as_tester:
+            exists.can_act_as_tester = can_act_as_tester
+        return
+    session.add(TrWfStageRole(
+        id=uuid.uuid4(),
+        stage_id=stage.id,
+        role_id=role.id,
+        can_approve=can_approve,
+        can_assign=can_assign,
+        can_edit=can_edit,
+        can_act_as_tester=can_act_as_tester,
+    ))
 
 
 def _get_or_create_transition(session, from_stage, to_stage, action_code,
@@ -351,9 +357,9 @@ def seed_tr_wf_workflow(session, org=None):
     session.flush()
 
     # ── Stage roles ───────────────────────────────────────────────────────────
-    _get_or_create_stage_role(session, sg_l2,    role_ee_tlss,  can_approve=True)
-    _get_or_create_stage_role(session, sg_l3a,   role_aee_rt,   can_assign=True)
-    _get_or_create_stage_role(session, sg_l3a,   role_aee_rd,   can_assign=True)
+    _get_or_create_stage_role(session, sg_l2,    role_ee_tlss,  can_approve=True, can_act_as_tester=True)
+    _get_or_create_stage_role(session, sg_l3a,   role_aee_rt,   can_assign=True,  can_act_as_tester=True)
+    _get_or_create_stage_role(session, sg_l3a,   role_aee_rd,   can_assign=True,  can_act_as_tester=True)
     if role_aee_maint:
         _get_or_create_stage_role(session, sg_l3a, role_aee_maint, can_assign=True)
     _get_or_create_stage_role(session, sg_l4,    role_ae_rt,    can_edit=True)

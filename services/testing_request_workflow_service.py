@@ -798,6 +798,8 @@ class TestingRequestWorkflowService:
                 comment=comment,
             )
             testing_request.modified_by = user.id
+            if action_code == "submit_results":
+                testing_request.completed_by_id = user.id
             return True, f"Action '{action_code}' applied"
 
         except WorkflowConfigError as wce:

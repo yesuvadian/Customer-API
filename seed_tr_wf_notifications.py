@@ -106,7 +106,7 @@ ROUTING_RULES = [
     {
         "event_type": EVENT_STATUS_CHANGED,
         "label": "TR Workflow — Status Changed",
-        "channels_enabled": ["email", "sms", "inapp"],
+        "channels_enabled": ["inapp"],
         "priority": 0,
         "is_active": True,
     },

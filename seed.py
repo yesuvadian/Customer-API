@@ -11436,44 +11436,44 @@ def _seed_notification_routing_rules(session) -> int:
         # ── Equipment Register ────────────────────────────────────────────────
         ("equipment_replacement",
          [], [],
-         ["email", "sms", "inapp"],
-         "Equipment Replacement — Email + SMS + in-app"),
+         ["inapp"],
+         "Equipment Replacement — In-app"),
 
         ("equipment_registered",
          [], [],
-         ["email", "sms", "inapp"],
-         "Equipment Registered — Email + SMS + in-app"),
+         ["inapp"],
+         "Equipment Registered — In-app"),
 
         ("equipment_retired",
          [], [],
-         ["email", "sms", "inapp"],
-         "Equipment Retired — Email + SMS + in-app"),
+         ["inapp"],
+         "Equipment Retired — In-app"),
 
         # ── Evaluation results ────────────────────────────────────────────────
         ("eval_critical",
          ["testing_request", "taqc_inspection"], [],
-         ["email", "sms", "inapp"],
-         "Critical Evaluation — all channels"),
+         ["inapp"],
+         "Critical Evaluation — In-app"),
 
         ("eval_alert",
          ["testing_request", "taqc_inspection"], [],
-         ["email", "sms", "inapp"],
-         "Alert Evaluation — Email + SMS + Dashboard"),
+         ["inapp"],
+         "Alert Evaluation — In-app"),
 
         # ── Test lifecycle — testing_request workflow (test/maintenance/inspection) ──
         ("request_submitted",
          ["testing_request"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Test Request Submitted"),
 
         ("request_submitted",
          ["testing_request"], ["maintenance"],
-         ["email", "sms", "inapp"],
-         "Maintenance Request Submitted — Email + SMS"),
+         ["inapp"],
+         "Maintenance Request Submitted — In-app"),
 
         ("request_submitted",
          ["failure_registry"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Failure Registry Submitted"),
 
         ("request_submitted",
@@ -11484,196 +11484,196 @@ def _seed_notification_routing_rules(session) -> int:
         # ── Tester workflow ───────────────────────────────────────────────────
         ("tester_assigned",
          ["testing_request"], [],
-         ["email", "sms", "inapp"],
-         "Tester Assigned — all channels"),
+         ["inapp"],
+         "Tester Assigned — In-app"),
 
         ("tester_assigned",
          ["taqc_inspection"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "TAQC Inspector Assigned"),
 
         ("tester_declined",
          [], [],
-         ["email", "inapp"],
-         "Tester Declined — all workflows"),
+         ["inapp"],
+         "Tester Declined — In-app"),
 
         ("test_submitted",
          ["testing_request", "taqc_inspection"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Test Results Submitted"),
 
         ("status_changed",
          ["testing_request", "taqc_inspection"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Test Request Status Changed"),
 
         # ── Recommendations ───────────────────────────────────────────────────
         ("recommendation_approved",
          [], [],
-         ["email", "inapp"],
-         "Recommendation Approved — all workflows"),
+         ["inapp"],
+         "Recommendation Approved — In-app"),
 
         ("recommendation_rejected",
          [], [],
-         ["email", "inapp"],
-         "Recommendation Rejected — all workflows"),
+         ["inapp"],
+         "Recommendation Rejected — In-app"),
 
         ("request_rejected",
          ["testing_request"], [],
-         ["email", "inapp"],
-         "Request Rejected — all workflows"),
+         ["inapp"],
+         "Request Rejected — In-app"),
 
         # ── Failure Registry ──────────────────────────────────────────────────
         ("fr_submitted",
          ["failure_registry"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Failure Registry Submitted"),
 
         ("fr_approved",
          ["failure_registry"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Failure Registry Approved"),
 
         ("fr_rejected",
          ["failure_registry"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Failure Registry Rejected"),
 
         # ── Scheduling / Reminders ────────────────────────────────────────────
         ("due_reminder",
          ["testing_request"], _ALL_TEST_TYPES,
-         ["email", "sms", "inapp"],
-         "15-Day Test Due Reminder — Email + SMS"),
+         ["inapp"],
+         "15-Day Test Due Reminder — In-app"),
 
         ("due_reminder_final",
          ["testing_request"], _ALL_TEST_TYPES,
-         ["email", "sms", "inapp"],
-         "7-Day Final Reminder — Email + SMS"),
+         ["inapp"],
+         "7-Day Final Reminder — In-app"),
 
         ("overdue_alert",
          [], _ALL_TEST_TYPES,
-         ["email", "sms", "inapp"],
-         "Test Overdue — Email + SMS + Dashboard"),
+         ["inapp"],
+         "Test Overdue — In-app"),
 
         ("overdue_escalation",
          [], [],
-         ["email", "sms", "inapp"],
-         "Overdue Escalation — Email + SMS"),
+         ["inapp"],
+         "Overdue Escalation — In-app"),
 
         # Maintenance-specific: higher urgency
         ("maintenance_due",
          ["testing_request"], ["maintenance"],
-         ["email", "sms", "inapp"],
-         "Maintenance Due (15 days) — Email + SMS"),
+         ["inapp"],
+         "Maintenance Due (15 days) — In-app"),
 
         # Inspection reminders: lower urgency
         ("due_reminder",
          ["testing_request"], ["inspection"],
-         ["email", "inapp"],
-         "Due Reminder — Inspection: email + in-app"),
+         ["inapp"],
+         "Due Reminder — Inspection: In-app"),
 
         # ── Compliance / Remedial ─────────────────────────────────────────────
         ("remedial_action_due",
          [], [],
-         ["email", "sms"],
-         "Remedial Action Compliance Due — Email + SMS"),
+         ["inapp"],
+         "Remedial Action Compliance Due — In-app"),
 
         ("taqc_observation_overdue",
          ["taqc_inspection"], [],
-         ["email", "sms"],
-         "TA&QC Observation Compliance Overdue — Email + SMS"),
+         ["inapp"],
+         "TA&QC Observation Compliance Overdue — In-app"),
 
         # ── Repair Lifecycle ──────────────────────────────────────────────────
         ("repair_stage_changed",
          ["repair_lifecycle"], [],
-         ["email", "inapp"],
-         "Repair Stage Advanced — Email + in-app"),
+         ["inapp"],
+         "Repair Stage Advanced — In-app"),
 
         ("overhaul_recommended",
          ["repair_lifecycle"], [],
-         ["email", "sms"],
-         "Overhaul Recommended — Email + SMS"),
+         ["inapp"],
+         "Overhaul Recommended — In-app"),
 
         ("repair_delay",
          ["repair_lifecycle"], [],
-         ["email", "sms", "inapp"],
-         "Repair Stage Delay — Email + SMS + in-app"),
+         ["inapp"],
+         "Repair Stage Delay — In-app"),
 
         ("repair_cancelled",
          [], [],
-         ["email", "inapp"],
-         "Repair Workflow Cancelled — Email + in-app"),
+         ["inapp"],
+         "Repair Workflow Cancelled — In-app"),
 
         ("overhaul_cancelled",
          [], [],
-         ["email", "inapp"],
-         "Overhaul Workflow Cancelled — Email + in-app"),
+         ["inapp"],
+         "Overhaul Workflow Cancelled — In-app"),
 
         ("calibration_cancelled",
          [], [],
-         ["email", "inapp"],
-         "Calibration Workflow Cancelled — Email + in-app"),
+         ["inapp"],
+         "Calibration Workflow Cancelled — In-app"),
 
         ("surveillance_cancelled",
          [], [],
-         ["email", "inapp"],
-         "Surveillance Workflow Cancelled — Email + in-app"),
+         ["inapp"],
+         "Surveillance Workflow Cancelled — In-app"),
 
         # ── Overhaul Lifecycle ────────────────────────────────────────────────
         ("overhaul_stage_changed",
          [], [],
-         ["email", "inapp"],
-         "Overhaul Stage Advanced — Email + in-app"),
+         ["inapp"],
+         "Overhaul Stage Advanced — In-app"),
 
         ("overhaul_stage_delay",
          [], [],
-         ["email", "sms", "inapp"],
-         "Overhaul Stage Delay — Email + SMS + in-app"),
+         ["inapp"],
+         "Overhaul Stage Delay — In-app"),
 
         # ── Calibration Lifecycle ─────────────────────────────────────────────
         ("calibration_stage_changed",
          [], [],
-         ["email", "inapp"],
-         "Calibration Stage Advanced — Email + in-app"),
+         ["inapp"],
+         "Calibration Stage Advanced — In-app"),
 
         ("calibration_stage_delay",
          [], [],
-         ["email", "sms", "inapp"],
-         "Calibration Stage Delay — Email + SMS + in-app"),
+         ["inapp"],
+         "Calibration Stage Delay — In-app"),
 
         # ── Surveillance Lifecycle ────────────────────────────────────────────
         ("surveillance_stage_changed",
          [], [],
-         ["email", "inapp"],
-         "Surveillance Stage Advanced — Email + in-app"),
+         ["inapp"],
+         "Surveillance Stage Advanced — In-app"),
 
         ("surveillance_stage_delay",
          [], [],
-         ["email", "sms", "inapp"],
-         "Surveillance Stage Delay — Email + SMS + in-app"),
+         ["inapp"],
+         "Surveillance Stage Delay — In-app"),
 
         # ── Design / Systemic ─────────────────────────────────────────────────
         ("design_problem_alert",
          [], [],
-         ["email", "sms"],
-         "Design Problem Alert — Email + SMS"),
+         ["inapp"],
+         "Design Problem Alert — In-app"),
 
         # ── Reports ───────────────────────────────────────────────────────────
         ("monthly_mis_report",
          [], [],
-         ["email"],
-         "Monthly MIS Report — Email only"),
+         ["inapp"],
+         "Monthly MIS Report — In-app"),
 
         # ── Procurement ───────────────────────────────────────────────────────
         ("procurement_pending",
          [], [],
-         ["email", "inapp"],
-         "Procurement Raised — email + in-app"),
+         ["inapp"],
+         "Procurement Raised — In-app"),
 
         ("procurement_decision",
          [], [],
-         ["email", "inapp"],
-         "Procurement Decision — email + in-app"),
+         ["inapp"],
+         "Procurement Decision — In-app"),
     ]
 
     inserted = 0
