@@ -1208,6 +1208,8 @@ class PreCommissionRequest(Base):
     rejected_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     rejected_at = Column(DateTime(timezone=True), nullable=True)
 
+    dept_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True, index=True)
+
     # Links set after events
     workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True, index=True)
     equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -1221,6 +1223,7 @@ class PreCommissionRequest(Base):
     # Relationships
     organization = relationship("Organization", foreign_keys=[organization_id])
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    department = relationship("OrgDepartment", foreign_keys=[dept_id])
     workflow = relationship("RepairWorkflow", foreign_keys=[workflow_id])
     equipment = relationship("Equipment", foreign_keys=[equipment_id])
     approver = relationship("User", foreign_keys=[approved_by])

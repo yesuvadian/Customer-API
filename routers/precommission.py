@@ -19,6 +19,7 @@ router = APIRouter(
 class PreCommissionRequestCreate(BaseModel):
     vendor_name:                str
     purchase_order_number:      str
+    dept_id:                    Optional[UUID]  = None
     po_date:                    Optional[str]   = None
     rated_mva:                  Optional[float] = None
     voltage_class:              Optional[str]   = None
@@ -96,12 +97,16 @@ def list_unlinked_requests(
 @router.get("/requests")
 def list_requests(
     approval_status: Optional[str] = Query(None, description="pending | approved | rejected | all"),
+    department_id:   Optional[UUID] = Query(None),
     skip:  int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db:   Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    return PreCommissionService(db).list_requests(user, approval_status=approval_status, skip=skip, limit=limit)
+    return PreCommissionService(db).list_requests(
+        user, approval_status=approval_status,
+        department_id=department_id, skip=skip, limit=limit,
+    )
 
 
 @router.get("/requests/{request_id}")
