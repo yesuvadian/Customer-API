@@ -1211,25 +1211,42 @@ def assign_viewer_role_to_new_users(session, new_user_ids, role_ids):
 
 def seed_plans(session):
     plans_data = [
-        {"planname": "Basic", "plan_description": "Basic plan with limited access", "plan_limit": 10, "isactive": True},
-        {"planname": "Standard", "plan_description": "Standard plan with moderate access", "plan_limit": 50, "isactive": True},
-        {"planname": "Premium", "plan_description": "Premium plan with full access", "plan_limit": 100, "isactive": True},
+        {
+            "planname": "Basic",
+            "plan_description": "Up to 5 users, core features",
+            "plan_limit": 5,
+            "isactive": True,
+            "price_paise": 99900,
+            "billing_cycle": "monthly",
+            "duration_days": 30,
+        },
+        {
+            "planname": "Standard",
+            "plan_description": "Up to 20 users, all features",
+            "plan_limit": 20,
+            "isactive": True,
+            "price_paise": 249900,
+            "billing_cycle": "monthly",
+            "duration_days": 30,
+        },
+        {
+            "planname": "Premium",
+            "plan_description": "Unlimited users, priority support",
+            "plan_limit": 9999,
+            "isactive": True,
+            "price_paise": 2399900,
+            "billing_cycle": "yearly",
+            "duration_days": 365,
+        },
     ]
 
     for p in plans_data:
         existing_plan = session.query(Plan).filter_by(planname=p["planname"]).first()
         if not existing_plan:
-            plan = Plan(
-                planname=p["planname"],
-                plan_description=p["plan_description"],
-                plan_limit=p["plan_limit"],
-                isactive=p["isactive"]
-            )
-            session.add(plan)
+            session.add(Plan(**p))
         else:
-            existing_plan.plan_description = p["plan_description"]
-            existing_plan.plan_limit = p["plan_limit"]
-            existing_plan.isactive = p["isactive"]
+            for k, v in p.items():
+                setattr(existing_plan, k, v)
     session.commit()
     print("[OK] Plans seeded successfully.")
 def seed_category_master(session):
