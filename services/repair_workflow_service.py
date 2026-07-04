@@ -62,12 +62,21 @@ class RepairWorkflowService:
         return datetime.now(timezone.utc)
 
     def _user_org_role_ids(self, user_id: UUID) -> list:
-        rows = (
-            self.db.query(OrgUserRole.org_role_id)
+        # Get the names of all active roles the user holds
+        name_rows = (
+            self.db.query(OrgRole.name)
+            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
             .filter(OrgUserRole.user_id == user_id, OrgUserRole.is_active.is_(True))
+            .distinct()
             .all()
         )
-        return [r[0] for r in rows]
+        if not name_rows:
+            return []
+        names = [r[0] for r in name_rows]
+        # Return ALL org_role IDs sharing those names (across orgs) so that
+        # RepairStageRole entries seeded from any org still match.
+        id_rows = self.db.query(OrgRole.id).filter(OrgRole.name.in_(names)).all()
+        return [r[0] for r in id_rows]
 
     def _check_stage_rbac(self, stage_id: UUID, user_id: UUID) -> None:
         role_ids = self._user_org_role_ids(user_id)
