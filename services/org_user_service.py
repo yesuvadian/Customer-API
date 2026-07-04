@@ -417,9 +417,6 @@ class OrgUserService(UTCDateTimeMixin):
         department_id: Optional[UUID] = None
     ) -> bool:
         """Remove a role from a user."""
-        # Verify user exists in org
-        self.get_org_user(user_id, organization_id)
-
         user_role = self.db.query(OrgUserRole).filter(
             OrgUserRole.user_id == user_id,
             OrgUserRole.org_role_id == org_role_id,
