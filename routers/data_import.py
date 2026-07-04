@@ -294,41 +294,17 @@ def _create_tr_from_record(
 @router.get("/categories")
 def list_categories(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
     """Return all import categories with their available test types.
 
-    Filters to only test types that have an active OrgTestTemplate for the org
-    (matched via test_type_id). Falls back to global system templates if the
-    org has no overrides. If no templates have test_type_id set, shows all.
+    CategoryDetails.is_active is synced by the template toggle endpoint,
+    so the existing is_active filter in get_test_types_for_category handles
+    disabled templates automatically.
     """
-    from models import OrgTestTemplate
-    org_id = current_user.organization_id
-
-    def _active_type_ids(query):
-        """Return set of test_type_ids from query, filtering by is_active if column exists."""
-        try:
-            rows = query.filter(OrgTestTemplate.is_active.is_(True), OrgTestTemplate.test_type_id.isnot(None)).all()
-        except Exception:
-            rows = query.filter(OrgTestTemplate.test_type_id.isnot(None)).all()
-        return {row[0] for row in rows}
-
-    org_ids = _active_type_ids(
-        db.query(OrgTestTemplate.test_type_id).filter(OrgTestTemplate.org_id == org_id)
-    )
-    if org_ids:
-        active_type_ids = org_ids
-    else:
-        active_type_ids = _active_type_ids(
-            db.query(OrgTestTemplate.test_type_id).filter(
-                OrgTestTemplate.org_id.is_(None),
-                OrgTestTemplate.is_system.is_(True),
-            )
-        )
-
     result = []
     for key, cfg in IMPORT_CATEGORIES.items():
-        test_types = get_test_types_for_category(key, db, active_type_ids=active_type_ids or None)
+        test_types = get_test_types_for_category(key, db)
         result.append({
             "key": key,
             "label": cfg["label"],
