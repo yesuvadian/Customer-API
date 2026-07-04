@@ -10,7 +10,7 @@ from models import (
     RepairStageTransition,
     OrgRole,
     CategoryMaster,
-    CategoryDetail
+    CategoryDetails
 )
 
 
@@ -25,7 +25,7 @@ def seed_all(db, templates, stages, roles, transitions):
     for key, t in templates.items():
 
         category = db.query(CategoryMaster).filter_by(code=t["category_code"]).first()
-        category_detail = db.query(CategoryDetail).filter_by(code=t["category_detail_code"]).first()
+        category_detail = db.query(CategoryDetails).filter_by(code=t["category_detail_code"]).first()
 
         existing = db.query(OrgTestTemplate).filter_by(template_key=key).first()
 
