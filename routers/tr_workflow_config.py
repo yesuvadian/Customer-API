@@ -43,6 +43,7 @@ from models import (
     TrWfStageRole,
     TrWfStageTransition,
     TrWfStatus,
+    TrWfInstance,
     User,
     CategoryMaster,
     CategoryDetails,
@@ -86,7 +87,6 @@ def _stage_out(s: TrWfStage) -> dict:
                 "can_assign": r.can_assign,
                 "can_edit": r.can_edit,
                 "can_act_as_tester": r.can_act_as_tester,
-                "can_view": r.can_view,
             }
             for r in s.roles
         ],
@@ -464,8 +464,11 @@ def delete_stage(
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
     active_count = (
-        db.query(TestingRequest)
-        .filter(TestingRequest.current_stage_id == stage_id)
+        db.query(TrWfInstance)
+        .filter(
+            TrWfInstance.current_stage_id == stage_id,
+            TrWfInstance.status == "active",
+        )
         .count()
     )
     if active_count:
@@ -502,7 +505,6 @@ def replace_stage_roles(
             can_assign=r.get("can_assign", False),
             can_edit=r.get("can_edit", False),
             can_act_as_tester=r.get("can_act_as_tester", False),
-            can_view=r.get("can_view", False),
         ))
     db.commit()
     return _stage_out(_load_stage(db, stage_id))

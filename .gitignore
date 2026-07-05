@@ -73,6 +73,9 @@ gen_*.js
 # Claude assistant
 .claude/
 
+# Runtime file uploads
+uploads/
+
 # Documentation (work in progress)
 *_STATUS.md
 *_IMPLEMENTATION.md

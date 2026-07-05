@@ -1160,6 +1160,18 @@ class TestingRequestResponse(BaseModel):
     is_calibration: Optional[bool] = False
 
     # ─────────────────────────────────────────────
+    # Closed flag — true for both legacy closed statuses and
+    # completed/terminated TR workflow instances
+    # ─────────────────────────────────────────────
+    is_closed: bool = False
+
+    # ─────────────────────────────────────────────
+    # TR Workflow current stage flags
+    # ─────────────────────────────────────────────
+    current_stage_show_recommendation: Optional[bool] = False
+    current_stage_can_act_as_tester: Optional[bool] = False
+
+    # ─────────────────────────────────────────────
     # Repair Workflow Projection
     # ─────────────────────────────────────────────
     repair_workflow_id: Optional[str] = None

@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from models import RepairWorkflow
+from models import RepairWorkflow, TrWfInstance
 from auth_utils import get_current_user
 from database import get_db
 from models import User
@@ -147,6 +147,32 @@ def _enrich(req):
 
     except Exception:
         pass
+
+    # ─────────────────────────────────────────────
+    # is_closed — supports both legacy and TR workflow requests
+    # Legacy: status in known closed enum values
+    # TR workflow: active TrWfInstance is completed or terminated
+    # ─────────────────────────────────────────────
+    _LEGACY_CLOSED = {
+        "approved", "completed", "closed", "rejected",
+        "pass", "fail", "cancelled",
+    }
+    try:
+        _status_val = req.status.value if hasattr(req.status, "value") else str(req.status)
+        if _status_val in _LEGACY_CLOSED:
+            req.is_closed = True
+        elif req.wf_instance_id:
+            _inst = (
+                req._sa_instance_state.session
+                .query(TrWfInstance)
+                .filter(TrWfInstance.id == req.wf_instance_id)
+                .first()
+            )
+            req.is_closed = bool(_inst and _inst.status in ("completed", "terminated"))
+        else:
+            req.is_closed = False
+    except Exception:
+        req.is_closed = False
 
     # session_types — resolved from template for multi-session requests
     req.session_types = None
@@ -510,7 +536,21 @@ def get_testing_request(
     current_user: User = Depends(get_current_user),
 ):
     service = TestingRequestService(db)
-    return _enrich(service.get_request(request_id))
+    req = _enrich(service.get_request(request_id))
+
+    # Attach current TR workflow stage flags
+    instance = (
+        db.query(TrWfInstance)
+        .filter(
+            TrWfInstance.testing_request_id == request_id,
+            TrWfInstance.status == "active",
+        )
+        .first()
+    )
+    req.current_stage_show_recommendation = bool(
+        instance and instance.current_stage and instance.current_stage.show_recommendation
+    )
+    return req
 
 
 @router.put("/{request_id}", response_model=TestingRequestResponse)
