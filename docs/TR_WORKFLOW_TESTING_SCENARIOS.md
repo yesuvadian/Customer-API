@@ -66,6 +66,40 @@
   4. At assignment stage → tester picker restricted to AE-R&D users only
 - Stage role configuration is unchanged — overrides only affect which role is resolved for this specific TR
 
+### A8b. Override role not configured on any workflow stage — orphaned TR
+- Configure a routing rule with `override_role_id = AEE-R&D`
+- Do NOT add AEE-R&D to any stage in the mapped workflow
+- Create a TR matching that rule → `resolved_l3_role_id = AEE-R&D` is set
+- TR moves normally through non-role-scoped stages (no issue)
+- TR reaches a stage with `is_role_scoped = true` → visibility check: caller's role must match `resolved_l3_role_id`
+- AEE-R&D is not on any stage → **no user passes the check → TR is invisible to everyone**
+- TR is stuck — no one can approve, assign, or act on it
+
+> **Important:** The system does not validate at routing rule save time whether the override role
+> exists on the workflow stages. The routing fires at TR creation and only sets `resolved_l3_role_id`.
+> It does not look ahead at downstream stages. The conflict only surfaces when the TR actually
+> reaches a role-scoped stage.
+>
+> **Rule:** Any role set as `override_role_id` on a routing rule must be added to all
+> role-scoped stages in the target workflow, otherwise TRs routed via that rule will become orphaned.
+
+### A8c. Override role present on some stages but not all
+- Configure `override_role_id = AEE-R&D`
+- Add AEE-R&D to Stage 3 (role-scoped) but NOT to Stage 6 (also role-scoped)
+- TR moves through Stage 3 normally — AEE-R&D users can see and act on it ✓
+- TR reaches Stage 6 → AEE-R&D not on that stage → TR becomes invisible again
+- **Each role-scoped stage must independently have the override role configured**
+
+### A8d. `Use Routing Endpoint on Approve` and `Role-Scoped Queue` are mutually exclusive on the same stage
+- These two flags cannot be ON together on the same stage — the UI enforces this automatically:
+  - Enabling **Use Routing Endpoint on Approve** → Role-Scoped Queue is automatically turned OFF and greyed out
+  - Enabling **Role-Scoped Queue** → Use Routing Endpoint on Approve is automatically turned OFF and greyed out
+  - Disabling either one → both become available again
+- **Why:** `use_l2_route` stages *set* the resolved role (routing fires on approve). `is_role_scoped` stages *use* the resolved role (filter queue visibility by it). A stage cannot do both simultaneously — routing hasn't fired yet when TR arrives, so role-scoping would filter incorrectly before anyone can approve.
+- **Correct pattern:**
+  - L2 stage → `use_l2_route = ON`, `is_role_scoped = OFF` — routing fires on approve, sets resolved role
+  - L3+ stages → `use_l2_route = OFF`, `is_role_scoped = ON` — resolved role filters queue visibility
+
 ### A9. Definition default role — no rule override
 - Set `default_l3_role_id` on the workflow definition, no rule override
 - Create TR with no matching rule → `resolved_l3_role_id` = definition default
@@ -609,4 +643,4 @@
 | Stage Settings — routing rules panel | J1–J6 |
 | TR Routing Config — add/edit rule form | K1–K10 |
 | Nameplate exclusion | L1–L2 |
-| **Total** | **99 scenarios** |
+| **Total** | **102 scenarios** |
