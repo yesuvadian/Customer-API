@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+﻿from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -3106,20 +3106,27 @@ def get_test_coordinator_dashboard(
         TestingRequest.is_schedule_template.is_(False)
     ).scalar() or 0
     
-    # ALERT/CRITICAL Equipment (from latest test results)
-    critical_count = db.query(func.count(func.distinct(TestResult.testing_request_id))).filter(
-        TestResult.organization_id == svc.org_id,
-        TestResult.evaluation_result.isnot(None),
-        TestResult.evaluation_result['overall'].astext == 'CRITICAL'
-    ).scalar() or 0
-    
-    alert_count = db.query(func.count(func.distinct(TestResult.testing_request_id))).filter(
-        TestResult.organization_id == svc.org_id,
+    # ALERT/CRITICAL — count distinct EQUIPMENT (not test requests)
+    # One transformer may have DGA=ALERT + BDV=NORMAL; we count the equipment once.
+    alert_eq_kpi = db.query(func.count(func.distinct(TestingRequest.equipment_id))).join(
+        TestResult, TestResult.testing_request_id == TestingRequest.id
+    ).filter(
+        TestingRequest.organization_id == svc.org_id,
+        TestingRequest.equipment_id.isnot(None),
         TestResult.evaluation_result.isnot(None),
         TestResult.evaluation_result['overall'].astext == 'ALERT'
     ).scalar() or 0
-    
-    alert_critical_total = critical_count + alert_count
+
+    critical_eq_kpi = db.query(func.count(func.distinct(TestingRequest.equipment_id))).join(
+        TestResult, TestResult.testing_request_id == TestingRequest.id
+    ).filter(
+        TestingRequest.organization_id == svc.org_id,
+        TestingRequest.equipment_id.isnot(None),
+        TestResult.evaluation_result.isnot(None),
+        TestResult.evaluation_result['overall'].astext == 'CRITICAL'
+    ).scalar() or 0
+
+    alert_critical_total = alert_eq_kpi + critical_eq_kpi
     
     # Open Remedial Actions
     open_remediation = db.query(func.count(func.distinct(Recommendation.testing_request_id))).filter(
@@ -3453,25 +3460,104 @@ def get_test_coordinator_dashboard(
         TestResult.evaluation_result['overall'].astext.in_(['CRITICAL', 'ALERT'])
     ).order_by(TestResult.cts.desc()).limit(15).all()
     
+    # Load templates for threshold lookup (row_id -> min acceptable value per field)
+    from models import OrgTestTemplate as _OTT
+    _unique_keys = list({r.template_key for r, _, _ in active_alerts if r.template_key})
+    _thr_map = {}
+    if _unique_keys:
+        for _tmpl in db.query(_OTT).filter(_OTT.template_key.in_(_unique_keys)).all():
+            _fld_map = {}
+            for _fdef in (_tmpl.template_data or {}).get('fields', []):
+                _fkey = _fdef.get('key')
+                if not _fkey:
+                    continue
+                _ev = _fdef.get('evaluation') or {}
+                if _ev.get('type') == 'THRESHOLD':
+                    _rows = {}
+                    for _rid, _bands in (_ev.get('thresholds') or {}).items():
+                        if isinstance(_bands, dict):
+                            _fv = next(iter(_bands.values()), None)
+                            if isinstance(_fv, dict):
+                                _bands = _fv
+                        _good_lo = None
+                        for _bn, _br in (_bands if isinstance(_bands, dict) else {}).items():
+                            if _bn.lower().split()[0] in ('good', 'normal', 'pass', 'ok'):
+                                if isinstance(_br, list) and len(_br) >= 1 and _br[0] is not None:
+                                    _good_lo = _br[0]
+                                    break
+                        _rows[str(_rid).lower()] = _good_lo
+                    _fld_map[_fkey] = _rows
+            _thr_map[_tmpl.template_key] = _fld_map
+
     alerts_feed = []
     for result, req, eq in active_alerts:
         overall = result.evaluation_result.get('overall', 'ALERT')
-        
-        # Get flagged fields
-        flagged_fields = []
-        for field in result.evaluation_result.get('fields', []):
-            if field.get('status') in ['CRITICAL', 'ALERT']:
-                flagged_fields.append(f"{field.get('label', '')}: {field.get('value', '')}{field.get('unit', '')}")
-        
+        _f_thr  = _thr_map.get(result.template_key or '', {})
+
+        flagged = []
+        for _field in result.evaluation_result.get('fields', []):
+            if _field.get('status') not in ('CRITICAL', 'ALERT'):
+                continue
+            _flabel = _field.get('label') or _field.get('key', '')
+            _ftype  = _field.get('type', 'number')
+
+            if _ftype == 'table':
+                _agg      = _field.get('aggregate_result') or {}
+                _rows_res = [r for r in (_field.get('row_results') or [])
+                             if r.get('status') in ('CRITICAL', 'ALERT')]
+                _cols_res = [c for c in (_field.get('column_results') or [])
+                             if c.get('status') in ('CRITICAL', 'ALERT')]
+                if _agg.get('value') is not None:
+                    _txt = str(_agg.get('value'))
+                    if _agg.get('threshold') is not None:
+                        _txt = _txt + ' (limit ' + str(_agg.get('threshold')) + ')'
+                    flagged.append(_flabel + ': ' + _txt)
+                elif _rows_res:
+                    _rthr = _f_thr.get(_field.get('key', ''), {})
+                    for _r in _rows_res[:2]:
+                        _rid  = _r.get('row_id') or _r.get('key') or ''
+                        _val  = _r.get('value')
+                        _unit = (_r.get('unit') or '').strip()
+                        _name = str(_rid).replace('_', ' ').title() if _rid else _flabel
+                        _part = _name + ': ' + str(_val)
+                        if _unit:
+                            _part = _part + ' ' + _unit
+                        _thr = (_rthr or {}).get(str(_rid).lower())
+                        if _thr is not None:
+                            _part = _part + ' (min ' + str(_thr) + ')'
+                        flagged.append(_part)
+                elif _cols_res:
+                    for _c in _cols_res[:2]:
+                        _col    = _c.get('column', '')
+                        _val    = _c.get('value')
+                        _clabel = _col.replace('_', ' ').title() if _col else _flabel
+                        flagged.append(_clabel + ': ' + str(_val))
+                else:
+                    flagged.append(_flabel + ' (' + _field.get('status', '') + ')')
+            elif _ftype == 'number':
+                _val  = _field.get('value')
+                _unit = (_field.get('unit') or '').strip()
+                _part = _flabel + ': ' + str(_val)
+                if _unit:
+                    _part = _part + ' ' + _unit
+                flagged.append(_part)
+            else:
+                _fval = _field.get('value') or _field.get('selected_value', '')
+                if _fval:
+                    flagged.append(_flabel + ': ' + str(_fval))
+                else:
+                    flagged.append(_flabel + ' (' + _field.get('status', '') + ')')
+
+        test_name = req.test_type.name if req.test_type else 'Test'
         alerts_feed.append({
             'id': str(result.id),
             'ueic': eq.ueic if eq else '',
-            'title': f"{overall} â€” {req.test_type.name if req.test_type else 'Test'}",
+            'title': overall + ' - ' + test_name,
             'severity': 'critical' if overall == 'CRITICAL' else 'alert',
             'timestamp': result.cts.strftime('%d-%b-%Y %H:%M') if result.cts else None,
-            'message': ' | '.join(flagged_fields[:2]) if flagged_fields else 'Test result requires attention',
+            'message': ' | '.join(flagged[:3]) if flagged else 'Test result requires attention',
             'equipment': eq.manufacturer or eq.ueic if eq else '',
-            'substation': req.department.name if req.department else ''
+            'substation': req.department.name if req.department else '',
         })
     
     # =========================================================================
@@ -3590,10 +3676,10 @@ def get_test_coordinator_dashboard(
                 'label': 'ALERT / CRITICAL',
                 'value': alert_critical_total,
                 'display': str(alert_critical_total),
-                'sub': f"{alert_count} ALERT Â· {critical_count_total} CRITICAL",
+                'sub': f"{alert_eq_kpi} ALERT - {critical_eq_kpi} CRITICAL",
                 'trend': None,
-                'trend_dir': 'up' if critical_count_total > 0 else 'neutral',
-                'colour': 'red' if critical_count_total > 0 else ('amber' if alert_count_total > 0 else 'green')
+                'trend_dir': 'up' if critical_eq_kpi > 0 else 'neutral',
+                'colour': 'red' if critical_eq_kpi > 0 else ('amber' if alert_eq_kpi > 0 else 'green')
             },
             {
                 'label': 'Open Remedial Actions',

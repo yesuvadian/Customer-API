@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 
 from models import User, Organization, OrgDepartment, OrgRole, OrgUserRole
-from schemas import OrgUserCreate, OrgUserUpdate, OrgUserWithRoles, OrgUserRoleInfo
+from schemas import OrgUserCreate, OrgUserUpdate, OrgUserWithRoles, OrgUserRoleInfo, BulkUserImportRow, BulkUserImportRowResult, BulkUserImportResponse
 from security_utils import get_password_hash
 from utils.common_service import UTCDateTimeMixin
 
@@ -435,6 +435,149 @@ class OrgUserService(UTCDateTimeMixin):
         user_role.is_active = False
         self.db.commit()
         return True
+
+    def bulk_import_users(
+        self,
+        organization_id: UUID,
+        rows: List[BulkUserImportRow],
+        created_by: Optional[UUID] = None
+    ) -> BulkUserImportResponse:
+        """
+        Bulk create or update users from import rows.
+        Each row specifies department_name and role_name (by name, not ID).
+        - Department must exist.
+        - Role is created if not found.
+        - Existing users are updated (no password change); roles are replaced.
+        - New users get default password "Welcome@123".
+        """
+        results = []
+        created_count = 0
+        updated_count = 0
+        failed_count = 0
+
+        for idx, row in enumerate(rows, start=1):
+            try:
+                # Resolve department by name
+                dept = self.db.query(OrgDepartment).filter(
+                    OrgDepartment.organization_id == organization_id,
+                    OrgDepartment.name.ilike(row.department_name.strip())
+                ).first()
+                if not dept:
+                    raise ValueError(f"Department '{row.department_name}' not found")
+
+                # Resolve or create role by name
+                role = self.db.query(OrgRole).filter(
+                    OrgRole.organization_id == organization_id,
+                    OrgRole.name.ilike(row.role_name.strip())
+                ).first()
+                if not role:
+                    role = OrgRole(
+                        organization_id=organization_id,
+                        name=row.role_name.strip(),
+                        role_type="custom",
+                        is_org_admin=False,
+                        is_dept_admin=False,
+                        is_active=True,
+                        created_by=created_by,
+                        cts=self._utc_now(),
+                        mts=self._utc_now()
+                    )
+                    self.db.add(role)
+                    self.db.flush()
+
+                # Check if user already exists in org
+                existing_user = self.db.query(User).filter(
+                    User.email == row.email,
+                    User.organization_id == organization_id
+                ).first()
+
+                if existing_user:
+                    # Update user fields (no password change)
+                    if row.firstname:
+                        existing_user.firstname = row.firstname
+                    if row.lastname is not None:
+                        existing_user.lastname = row.lastname
+                    if row.phone_number:
+                        existing_user.phone_number = row.phone_number
+                    if row.employee_id is not None:
+                        existing_user.employee_id = row.employee_id
+                    existing_user.department_id = dept.id
+                    existing_user.modified_by = created_by
+                    existing_user.mts = self._utc_now()
+
+                    # Replace roles: deactivate all existing, add new
+                    self.db.query(OrgUserRole).filter(
+                        OrgUserRole.user_id == existing_user.id
+                    ).update({"is_active": False})
+
+                    new_role_assignment = self.db.query(OrgUserRole).filter(
+                        OrgUserRole.user_id == existing_user.id,
+                        OrgUserRole.org_role_id == role.id,
+                        OrgUserRole.department_id == dept.id
+                    ).first()
+                    if new_role_assignment:
+                        new_role_assignment.is_active = True
+                        new_role_assignment.assigned_by = created_by
+                    else:
+                        self.db.add(OrgUserRole(
+                            user_id=existing_user.id,
+                            org_role_id=role.id,
+                            department_id=dept.id,
+                            assigned_by=created_by,
+                            is_active=True
+                        ))
+
+                    self.db.flush()
+                    updated_count += 1
+                    results.append(BulkUserImportRowResult(row=idx, email=row.email, status="updated"))
+                else:
+                    # Create new user
+                    new_user = User(
+                        email=row.email,
+                        password_hash=get_password_hash("Welcome@123"),
+                        firstname=row.firstname,
+                        lastname=row.lastname,
+                        phone_number=row.phone_number,
+                        organization_id=organization_id,
+                        employee_id=row.employee_id,
+                        department_id=dept.id,
+                        isactive=True,
+                        created_by=created_by,
+                        cts=self._utc_now(),
+                        mts=self._utc_now()
+                    )
+                    self.db.add(new_user)
+                    self.db.flush()
+
+                    self.db.add(OrgUserRole(
+                        user_id=new_user.id,
+                        org_role_id=role.id,
+                        department_id=dept.id,
+                        assigned_by=created_by,
+                        is_active=True
+                    ))
+                    self.db.flush()
+                    created_count += 1
+                    results.append(BulkUserImportRowResult(row=idx, email=row.email, status="created"))
+
+            except ValueError as ve:
+                self.db.rollback()
+                failed_count += 1
+                results.append(BulkUserImportRowResult(row=idx, email=row.email, status="failed", error=str(ve)))
+            except Exception as e:
+                self.db.rollback()
+                failed_count += 1
+                results.append(BulkUserImportRowResult(row=idx, email=row.email if row.email else "", status="failed", error=str(e)))
+            else:
+                self.db.commit()
+
+        return BulkUserImportResponse(
+            total=len(rows),
+            created=created_count,
+            updated=updated_count,
+            failed=failed_count,
+            results=results
+        )
 
     def get_user_roles(
         self,

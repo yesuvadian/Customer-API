@@ -481,18 +481,12 @@ class CumulativeService:
         Create an OVERHAUL RepairWorkflow with all stage instances initialised,
         exactly mirroring how start_workflow() works for BREAKDOWN.
         """
-        # ── 1. Resolve OVERHAUL workflow definition (auto-seed if missing) ──────
+        # ── 1. Ensure OVERHAUL workflow definition + stages always exist ─────────
         import logging as _log
-        wf_def = (
-            self.db.query(RepairWorkflowDefinition)
-            .filter(RepairWorkflowDefinition.workflow_code == OVERHAUL_WORKFLOW_CODE)
-            .first()
-        )
-        if not wf_def:
-            _log.getLogger(__name__).warning(
-                "[CUMULATIVE] OVERHAUL workflow definition missing — auto-seeding now."
-            )
-            wf_def = self._ensure_overhaul_definition()
+        # Always call _ensure_overhaul_definition() so that stages are seeded
+        # even if the workflow definition row already exists but its stage rows
+        # were never created (or were accidentally deleted).
+        wf_def = self._ensure_overhaul_definition()
 
         # ── 2. Get ordered OVERHAUL stage definitions ─────────────────────────
         stages = (
@@ -505,7 +499,11 @@ class CumulativeService:
             .all()
         )
         if not stages:
-            raise ValueError("No active OVERHAUL stages found.")
+            _log.getLogger(__name__).error(
+                "[CUMULATIVE] OVERHAUL stages still empty after _ensure_overhaul_definition() — "
+                "check RepairStageDefinition seeding."
+            )
+            raise ValueError("No active OVERHAUL stages found even after auto-seed.")
 
         first_stage = stages[0]
 
@@ -527,10 +525,13 @@ class CumulativeService:
         workflow_number = f"{prefix}{last_seq + 1:04d}"
 
         # ── 4. Create the RepairWorkflow row ──────────────────────────────────
+        _equipment = self.db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        _org_id = _equipment.organization_id if _equipment else None
         workflow = RepairWorkflow(
             workflow_number=workflow_number,
             workflow_code=OVERHAUL_WORKFLOW_CODE,
             equipment_id=equipment_id,
+            organization_id=_org_id,
             workflow_type="OVERHAUL",
             source="cumulative",
             current_stage_id=first_stage.id,

@@ -88,6 +88,8 @@ class TestFireBody(BaseModel):
     event_type: str
     context: dict = {}
     organization_id: Optional[UUID] = None
+    source_type: Optional[str] = None   # "testing_request" | "equipment" | "test_result" etc.
+    source_id: Optional[UUID] = None    # UUID of the source record; triggers _enrich_context_from_source
 
 
 # ── Template CRUD ─────────────────────────────────────────────────────────────
@@ -211,6 +213,8 @@ def test_fire(
         event_type=body.event_type,
         context=body.context,
         organization_id=body.organization_id,
+        source_type=body.source_type,
+        source_id=body.source_id,
         extra_recipients=[current_user],  # always send to caller so they can verify
     )
     return {"status": "fired", "event_type": body.event_type}

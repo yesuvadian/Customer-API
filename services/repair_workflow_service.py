@@ -1033,6 +1033,12 @@ class RepairWorkflowService:
         if status == "annual_audit":
             q = q.filter(RepairWorkflow.workflow_code == "ANNUAL_AUDIT")
             status = None
+        elif status == "overhaul":
+            q = q.filter(RepairWorkflow.workflow_code == "OVERHAUL")
+            status = None
+        elif status == "calibration":
+            q = q.filter(RepairWorkflow.workflow_code == "CALIBRATION")
+            status = None
         elif status == "pre_commission":
             q = q.filter(RepairWorkflow.workflow_code == "PRE_COMMISSION")
             status = None

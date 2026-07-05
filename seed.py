@@ -1429,56 +1429,56 @@ def seed_country_india(session):
 def seed_modules(session):
     modules_data = [
         {"name": "Roles", "description": "Manage roles (Legacy)", "path": "roles", "group_name": "User & Access", "is_active": False},
-        {"name": "App Modules", "description": "Manage application modules", "path": "modules", "group_name": "User & Access"},
+        {"name": "App Modules", "description": "Manage application modules", "path": "modules", "group_name": "User & Access","is_active": False},
         {"name": "User Roles", "description": "Assign roles to users (Legacy)", "path": "roles", "group_name": "User & Access", "is_active": False},
         {"name": "Role Permissions", "description": "Configure role-based privileges (Legacy)", "path": "role_module_privileges", "group_name": "User & Access", "is_active": False},
        {"name": "Login Sessions", "description": "Track user login sessions", "path": "user_sessions", "group_name": "User & Access", "is_active": False},
-        {"name": "Countries", "description": "Manage country list", "path": "countries", "group_name": "Geography"},
-        {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography"},
-        {"name": "Cities", "description": "Manage cities list", "path": "cities", "group_name": "Geography"},
-        {"name": "Addresses", "description": "User address book", "path": "addresses", "group_name": "User & Access"},
-        {"name": "Tax Information", "description": "Company tax registration details", "path": "company_tax_info", "group_name": "Company"},
+        {"name": "Countries", "description": "Manage country list", "path": "countries", "group_name": "Geography","is_active": False},
+        {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography","is_active": False},
+        {"name": "Cities", "description": "Manage cities list", "path": "cities", "group_name": "Geography","is_active": False},
+        {"name": "Addresses", "description": "User address book", "path": "addresses", "group_name": "User & Access","is_active": False},
+        {"name": "Tax Information", "description": "Company tax registration details", "path": "company_tax_info", "group_name": "Company","is_active": False},
         {"name": "Tax Documents", "description": "Upload company tax documents", "path": "company_tax_documents", "group_name": "Company", "is_active": False},
-        {"name": "Product Categories", "description": "Define product categories", "path": "categories", "group_name": "Inventory"},
-        {"name": "Product Subcategories", "description": "Define product subcategories", "path": "subcategories", "group_name": "Inventory"},
-        {"name": "Products", "description": "Manage product master", "path": "products", "group_name": "Inventory"},
-        {"name": "Users", "description": "Manage users", "path": "users", "group_name": "User & Access"},
-        {"name": "Company Products", "description": "Company-specific product inventory", "path": "company_products", "group_name": "Inventory"},
-        {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access"},
-         {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory"},
-         {"name": "Assign User Roles", "description": "Assign organization roles to users", "path": "user_roles", "group_name": "User & Access"},
-         {"name": "User Product Search", "description": "Filtering user", "path": "user_product_search", "group_name": "User & Access", "is_active": False},
-         {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company"},
+        {"name": "Product Categories", "description": "Define product categories", "path": "categories", "group_name": "Inventory","is_active": False},
+        {"name": "Product Subcategories", "description": "Define product subcategories", "path": "subcategories", "group_name": "Inventory","is_active": False},
+        {"name": "Products", "description": "Manage product master", "path": "products", "group_name": "Inventory","is_active": False},
+        {"name": "Users", "description": "Manage users", "path": "users", "group_name": "User & Access","is_active": False},
+        {"name": "Company Products", "description": "Company-specific product inventory", "path": "company_products", "group_name": "Inventory","is_active": False},
+        {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access","is_active": False},
+         {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory","is_active": False},
+         {"name": "Assign User Roles",("description"): "Assign organization roles to users", "path":("user_roles"),("group_name"): ("User & Access"),("is_active"): (False)},
+         {"name":("User Product Search"),("description"): ("Filtering user"),("path"): ("user_product_search"),("group_name"): ("User & Access"),("is_active"): (False)},
+         {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company","is_active": False},
         {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company", "is_active": False},
-        {"name": "Company Product Certificates", "description": "Upload product performance certificates", "path": "company_product_certificates", "group_name": "Company"},
-{"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company"},
-{"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company"},
-{"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company"},
+        {"name": "Company Product Certificates", "description": "Upload product performance certificates", "path": "company_product_certificates", "group_name": "Company","is_active": False},
+{"name": "Company Product Supply References", "description": "Upload supply reference documents for company products", "path": "company_product_supply_references", "group_name": "Company","is_active": False},
+{"name": "Divisions", "description": "Manage company divisions for approvals", "path": "divisions", "group_name": "Company","is_active": False},
+{"name": "User Documents", "description": "Upload and manage user-specific documents by division", "path": "user_documents", "group_name": "Company","is_active": False},
 {"name": "Sync ERP Vendor", "description": "Sync pending users to ERP", "path": "erp", "group_name": "ERP", "is_active": False},
-{"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category"},
-{"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category"},
-{"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company"},
+{"name": "Category Master", "description": "Manage top-level categories for documents/assets (e.g., Company Documents)", "path": "category_master", "group_name": "Documents category","is_active": False},
+{"name": "Category Details", "description": "Manage detailed items under Category Master (e.g., Quality Manual)", "path": "category_details", "group_name": "Documents category","is_active": False},
+{"name": "KYC Status", "description": "Check user pending KYC sections", "path": "kyc", "group_name": "Company","is_active": False},
 {"name": "ERP Database","description": "Internal ERP DB access (backend only)","path": "erp_database","group_name": "ERP","is_active": False},
 {"name": "Mongo Database","description": "Internal Mongo DB access (backend only)", "path": "mongo_database", "group_name": "ERP", "is_active": False},
-{"name": "zohocontacts", "description": "Manage Zoho Contacts", "path": "zohocontacts", "group_name": "CRM"},
+{"name": "zohocontacts", "description": "Manage Zoho Contacts", "path": "zohocontacts", "group_name": "CRM","is_active": False},
 # ✅ PROCUREMENT / ZOHO PORTAL MODULES
-{"name": "Request Quote", "description": "Request quotes from suppliers", "path": "request_quote", "group_name": "Procurement"},
-{"name": "RQ with Vendor", "description": "Request quotes with vendor selection", "path": "rqWithVendor", "group_name": "Procurement", "is_menu": False},
-{"name": "Request Product", "description": "Request new products", "path": "request_product", "group_name": "Procurement", "is_menu": False},
-{"name": "Quotes", "description": "View and manage quotes", "path": "quotes", "group_name": "Procurement"},
-{"name": "Sales Orders", "description": "View and manage sales orders", "path": "sales_orders", "group_name": "Procurement", "is_menu": False},
-{"name": "Invoices", "description": "View and manage invoices", "path": "invoices", "group_name": "Procurement", "is_menu": False},
-{"name": "Retainer Invoices", "description": "Manage retainer invoices", "path": "retainer_invoices", "group_name": "Procurement", "is_menu": False},
-{"name": "Payments Made", "description": "Track payments made", "path": "payments_made", "group_name": "Procurement", "is_menu": False},
-{"name": "Statements", "description": "View account statements", "path": "statements", "group_name": "Procurement", "is_menu": False},
-{"name": "Enquiry", "description": "Submit and manage enquiries", "path": "enquiry", "group_name": "Procurement", "is_menu": False},
-{"name": "Contact Us", "description": "Customer support", "path": "contact_us", "group_name": "Procurement", "is_menu": False},
+{"name": "Request Quote", "description": "Request quotes from suppliers", "path": "request_quote", "group_name": "Procurement","is_active": False},
+{"name": "RQ with Vendor", "description": "Request quotes with vendor selection", "path": "rqWithVendor", "group_name": "Procurement", "is_active": False},
+{"name": "Request Product", "description": "Request new products", "path": "request_product", "group_name": "Procurement","is_active": False},
+{"name": "Quotes", "description": "View and manage quotes", "path": "quotes", "group_name": "Procurement","is_active": False},
+{"name": "Sales Orders", "description": "View and manage sales orders", "path": "sales_orders", "group_name": "Procurement", "is_active": False},
+{"name": "Invoices", "description": "View and manage invoices", "path": "invoices", "group_name": "Procurement", "is_active": False},
+{"name": "Retainer Invoices", "description": "Manage retainer invoices", "path": "retainer_invoices", "group_name": "Procurement", "is_active": False},
+{"name": "Payments Made", "description": "Track payments made", "path": "payments_made", "group_name": "Procurement", "is_active": False},
+{"name": "Statements", "description": "View account statements", "path": "statements", "group_name": "Procurement", "is_active": False},
+{"name": "Enquiry", "description": "Submit and manage enquiries", "path": "enquiry", "group_name": "Procurement","is_active": False},
+{"name": "Contact Us", "description": "Customer support", "path": "contact_us", "group_name": "Procurement", "is_active": False},
 # ✅ TESTING REQUEST SYSTEM MODULES
 {"name": "Testing Requests", "description": "Create and manage transformer testing requests", "path": "testing_requests", "group_name": "Testing"},
 {"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
 {"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
+{"name": "Test Request Approval", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
 {"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
-{"name": "Testing Request Approvals", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
 # Removed: Validation Requests (not implemented)
 # Removed: Tester Mapping (no longer used)
 {"name": "Test Template Management", "description": "Design and customise per-org test form templates", "path": "test_templates", "group_name": "Testing"},
@@ -1491,13 +1491,13 @@ def seed_modules(session):
 {"name": "Vendor Documents",
  "description": "View vendor uploaded documents",
  "path": "vendor_documents",
- "group_name": "Organization"},
+ "group_name": "Organization","is_active": False},
 # ✅ EQUIPMENT ASSET REGISTER MODULE
 {"name": "Equipment", "description": "Equipment asset register with UEIC auto-generation", "path": "equipment", "group_name": "Testing"},
 # ✅ DASHBOARD KPI MODULES - Role-specific dashboards
 {"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
 {"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
-{"name": "Test Coordinator Dashboard", "description": "Test coordinator operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
+{"name": "Test Monitoring Status", "rename_from": "Test Coordinator Dashboard", "description": "Test Monitoring Status operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
 {"name": "AE Dashboard",    "path": "ae_dashboard",    "description": "Field officer daily work overview — tests due, overdue maintenance, remedial actions", "group_name": "Testing", "is_menu": False},
 {"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
 {"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
@@ -1599,6 +1599,13 @@ def seed_modules(session):
                 "and equipment health trends.",
  "path": "surveillance-dashboard",
  "group_name": "Field Operations"},
+# ✅ AI ANALYTICS DASHBOARD MODULE
+{"name": "AI Analytics Dashboard",
+ "description": "Generic analytics engine dashboard — equipment health scores, trend analysis, "
+                "threshold breach forecasts, anomaly detection, and hierarchy roll-ups. "
+                "Department-scoped drill-down from zone → substation → individual equipment.",
+ "path": "analytics-dashboard",
+ "group_name": "Condition Monitoring"},
 # ✅ TEST SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
 {"name": "Test Schedule Templates",
  "rename_from": "Schedule Templates",
@@ -1621,6 +1628,48 @@ def seed_modules(session):
                 "substation, and compliance band. Accessible to EE TLSS, AEE, org-admin.",
  "path": "schedule_compliance",
  "group_name": "Condition Monitoring"},
+# ✅ DATA IMPORT MODULE
+{"name": "Data Import",
+ "description": "Bulk import historical test reports from PDF/Excel — OCR/Excel extraction, "
+                "multi-record review grid, and one-click submission as closed Testing Requests.",
+ "path": "import-data",
+ "group_name": "Condition Monitoring",
+ "is_menu": True},
+# ✅ AI GRAPH DASHBOARD MODULE
+{"name": "AI Graph Dashboard",
+ "description": "AI-powered fleet analytics dashboard — fleet health score, "
+                "remaining life distribution, ageing risk radar, and dielectric "
+                "condition trends across the substation equipment fleet.",
+ "path": "ai-graph-dashboard",
+ "group_name": "Condition Monitoring",
+ "is_menu": True},
+# ✅ CONFIGURABLE TEST-REQUEST WORKFLOW ENGINE (tr_wf_*) MODULES
+{"name": "TR Approval Queue",
+ "description": "Stage-aware testing request approval queue for L2 routing and L3 tester assignment (Configurable Workflow Engine).",
+ "path": "tr-wf/approval-queue",
+ "group_name": "Testing",
+ "is_menu": True},
+{"name": "TR Result Review",
+ "description": "L3 reviewer queue — approve or reject test result recommendations routed via the Configurable Workflow Engine.",
+ "path": "tr-wf/result-review",
+ "group_name": "Testing",
+ "is_menu": True},
+{"name": "TR Workflow Config",
+ "description": "Admin: define workflow definitions, stages, statuses, roles and transitions for the Configurable Test-Request Workflow Engine.",
+ "path": "config/tr-workflow",
+ "group_name": "Administration",
+ "is_menu": True},
+{"name": "TR Routing Config",
+ "description": "Admin: configure routing rules (equipment type, test type, request type) to map test requests to the correct workflow definition.",
+ "path": "config/tr-routing",
+ "group_name": "Administration",
+ "is_menu": True},
+# ✅ WORKFLOW CONFIGURATION MODULE
+{"name": "Workflow Configuration",
+ "description": "Admin: define repair/overhaul/calibration/audit workflow definitions, stages, roles, transitions, and form templates.",
+ "path": "workflow-config",
+ "group_name": "Administration",
+ "is_menu": True},
     ]
 
     module_ids = {}
@@ -2085,6 +2134,24 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Senior Management Approver",  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "TRC Member",                  "module": "Surveillance Dashboard", "can_view": True, "can_export": True},
         {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
+
+        # ✅ AI ANALYTICS DASHBOARD — all operational roles
+        {"role": "Admin",                             "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",                     "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Reviewing Officer",                 "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",               "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver",        "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "Maintenance Officer",               "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Asset Data Officer",                "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Inspection Engineer",               "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Auditor",                           "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
+        {"role": "TRC Member",                        "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Test & Work Coordinator",           "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Transformer Repair Coordinator",    "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "QA Team",                           "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Finance Officer",                   "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Procurement Officer",               "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Operator",                          "module": "AI Analytics Dashboard", "can_view": True},
 
         # ✅ PRE-COMMISSION QAP — Request tickets (approval queue)
         # Asset Data Officer creates PCR tickets; approvers approve/reject.
@@ -3341,7 +3408,7 @@ def seed_role_templates(session):
     # Role-specific dashboard module IDs
     ee_tlss_dashboard_module_id = modules_by_name.get("EE TLSS Dashboard")
     asset_dashboard_module_id = modules_by_name.get("Asset Dashboard")
-    test_coordinator_dashboard_module_id = modules_by_name.get("Test Coordinator Dashboard")
+    test_coordinator_dashboard_module_id = modules_by_name.get("Test Monitoring Status")
     aee_dashboard_module_id    = modules_by_name.get("AEE Dashboard")
     see_dashboard_module_id    = modules_by_name.get("SEE Dashboard")
     cee_dashboard_module_id    = modules_by_name.get("CEE Dashboard")
@@ -3430,27 +3497,11 @@ def seed_role_templates(session):
     })
 
     templates_data = [
-        # ── 1. Admin (Super Admin) — full access to all modules ──────────────
-        {
-            "name": "Admin",
-            "description": "Super admin with full access to all modules including org management, testing, procurement, and workflows.",
-            "is_org_admin": True,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": admin_dashboard_module_id,
-            "permissions_template": _full(all_module_ids),
-        },
-
-        # ════════════════════════════════════════════════════════════════════
-        # NEW FUNCTIONAL ROLES  (KPTCL v2 designation mapping)
-        # Old name kept in rename_from so idempotent re-seed renames in-place.
-        # ════════════════════════════════════════════════════════════════════
-
-        # ── 2. System Administrator (was: Org Admin) ──────────────────────────
+        # ── 1. System Administrator ───────────────────────────────────────────
         {
             "name": "System Administrator",
             "rename_from": "System Administrator",
-            "description": "Manages organisation structure: users, roles and departments. Reviews and approves Failure Registry recommendations.",
+            "description": "Manages organisation structure: users, roles and departments.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3461,7 +3512,7 @@ def seed_role_templates(session):
             ),
         },
 
-        # ── 3. Asset Data Officer (was: Originator) ───────────────────────────
+        # ── 2. Asset Data Officer ─────────────────────────────────────────────
         {
             "name": "Asset Data Officer",
             "rename_from": "Asset Data Officer",
@@ -3475,21 +3526,21 @@ def seed_role_templates(session):
                 _readwrite(testing_requests_module) +
                 _readwrite(equipment_module) +
                 _readwrite(breakdown_workflows_module) +
-                _readwrite(taqc_inspections_module) +    # can create TA&QC inspection requests
-                _readwrite(precommission_requests_module) +   # can create PCR tickets
-                _readonly(precommission_workflows_module)     # view QAP workflow progress
+                _readwrite(taqc_inspections_module) +
+                _readwrite(precommission_requests_module) +
+                _readonly(precommission_workflows_module)
             ),
         },
 
-        # ── 4. Maintenance Officer (was: AEE Maintenance) ─────────────────────
+        # ── 3. AEE_MAINTENANCE ────────────────────────────────────────────────
         {
-            "name": "Maintenance Officer",
+            "name": "AEE_MAINTENANCE",
             "rename_from": "Maintenance Officer",
             "description": "Field-level maintenance responsible officer. Key repair and overhaul workflow actor.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
-           "default_module_id": modules_by_name.get("Asset Dashboard"),
+            "default_module_id": modules_by_name.get("Asset Dashboard"),
             "permissions_template": (
                 _readonly(dashboard_module) +
                 _readonly(testing_requests_module) +
@@ -3497,16 +3548,16 @@ def seed_role_templates(session):
                 _readonly(recommendations_module) +
                 _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module) +
-                _readwrite(overhaul_workflows_module) +      # OVERHAUL_TRIGGER, OVERHAUL_EXECUTION, COMPLETION_UPLOAD
-                _readwrite(calibration_workflows_module) +   # CAL_REVIEW, CAL_EXECUTION, CAL_CERTIFICATE
-                _readwrite(annual_audit_workflows_module)    # OBSERVATION_REPORTING, OBSERVATION_ASSIGNMENT
+                _readwrite(overhaul_workflows_module) +
+                _readwrite(calibration_workflows_module) +
+                _readwrite(annual_audit_workflows_module)
             ),
         },
 
-        # ── 5. Test Engineer (was: Field Tester, Lab Tester, Tester) ──────────
+        # ── 4. AE_JE ──────────────────────────────────────────────────────────
         {
-            "name": "Test Engineer",
-            "rename_from": "Field Tester",
+            "name": "AE_JE",
+            "rename_from": "Test Engineer",
             "description": "Performs on-site and laboratory transformer testing and repair/overhaul stage execution.",
             "is_org_admin": False,
             "is_dept_admin": False,
@@ -3517,13 +3568,13 @@ def seed_role_templates(session):
                 _readonly(equipment_module) +
                 _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module) +
-                _readwrite(overhaul_workflows_module) +      # OVERHAUL_EXECUTION, COMPLETION_UPLOAD
-                _readwrite(calibration_workflows_module) +   # CAL_EXECUTION, CAL_CERTIFICATE
-                _readonly(annual_audit_workflows_module)     # view-only; TA&QC Inspector is the actor
+                _readwrite(overhaul_workflows_module) +
+                _readwrite(calibration_workflows_module) +
+                _readonly(annual_audit_workflows_module)
             ),
         },
 
-        # ── 6. Test & Work Coordinator (was: Test Assigner + AEE duties) ──────
+        # ── 5. Test & Work Coordinator ────────────────────────────────────────
         {
             "name": "Test & Work Coordinator",
             "rename_from": "Test Assigner",
@@ -3543,11 +3594,11 @@ def seed_role_templates(session):
             ),
         },
 
-        # ── 7. Reviewing Officer (was: Dept Head, EE RT, EE TLSS, Technical Approver) ─
+        # ── 6. EE_TLSS ────────────────────────────────────────────────────────
         {
-            "name": "Reviewing Officer",
+            "name": "EE_TLSS",
             "rename_from": "Reviewing Officer",
-            "description": "Reviews and approves recommendations, testing requests, repair and overhaul workflow stages. Covers EE-level designation responsibilities.",
+            "description": "EE (T&SS) — reviews and approves testing requests, recommendations and workflow stages.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
@@ -3563,21 +3614,51 @@ def seed_role_templates(session):
                 _readonly(procurement_modules) +
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
-                _approve(overhaul_workflows_module) +        # OVERHAUL_TRIGGER review + OFFICER_VERIFICATION
-                _approve(calibration_workflows_module) +     # CAL_REVIEW + CAL_VERIFY
-                _approve(annual_audit_workflows_module) +        # COMPLIANCE_REVIEW
-                _approve(precommission_requests_module) +        # approve/reject PCR tickets
-                _approve(precommission_workflows_module) +       # QAP stage execution (primary actor)
+                _approve(overhaul_workflows_module) +
+                _approve(calibration_workflows_module) +
+                _approve(annual_audit_workflows_module) +
+                _approve(precommission_requests_module) +
+                _approve(precommission_workflows_module) +
                 _readonly(failure_registry_module) +
-                _readonly([ee_rt_dashboard_module_id] if ee_rt_dashboard_module_id else [])  # EE RT track dashboard
+                _readonly([ee_tlss_dashboard_module_id] if ee_tlss_dashboard_module_id else [])
             ),
         },
 
-        # ── 8. Supervisory Officer (was: SEE W&M, SEE RT) ─────────────────────
+        # ── 7. EE_RT ──────────────────────────────────────────────────────────
         {
-            "name": "Supervisory Officer",
+            "name": "EE_RT",
+            "rename_from": "EE_RT",
+            "description": "EE (Repair & Testing track) — same authority as EE_TLSS scoped to the RT circle.",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": True,
+            "default_module_id": ee_rt_dashboard_module_id,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _approve(approvals_module) +
+                _approve(recommendations_module) +
+                _readwrite(testing_requests_module) +
+                _approve(testing_request_approvals_module) +
+                _readwrite(testing_module) +
+                _readonly(equipment_module) +
+                _readonly(procurement_modules) +
+                _readonly(workflow_dashboard_module) +
+                _approve(breakdown_workflows_module) +
+                _approve(overhaul_workflows_module) +
+                _approve(calibration_workflows_module) +
+                _approve(annual_audit_workflows_module) +
+                _approve(precommission_requests_module) +
+                _approve(precommission_workflows_module) +
+                _readonly(failure_registry_module) +
+                _readonly([ee_rt_dashboard_module_id] if ee_rt_dashboard_module_id else [])
+            ),
+        },
+
+        # ── 8. SEE_WM ─────────────────────────────────────────────────────────
+        {
+            "name": "SEE_WM",
             "rename_from": "Supervisory Officer",
-            "description": "Circle-level supervisor. Approves repair workflow stages. Read visibility on overhaul workflows. Covers SEE-level designation responsibilities.",
+            "description": "SEE (W&M) — circle-level supervisor over repair workflows and testing.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3593,20 +3674,49 @@ def seed_role_templates(session):
                 _readonly(equipment_module) +
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
-                _readonly(overhaul_workflows_module) +            # management visibility
-                _readonly(calibration_workflows_module) +         # management visibility
-                _readonly(annual_audit_workflows_module) +        # management visibility
-                _approve(precommission_requests_module) +         # can approve PCR tickets
-                _readonly(precommission_workflows_module) +       # management visibility
-                _readonly([see_rt_dashboard_module_id] if see_rt_dashboard_module_id else [])  # SEE RT track dashboard
+                _readonly(overhaul_workflows_module) +
+                _readonly(calibration_workflows_module) +
+                _readonly(annual_audit_workflows_module) +
+                _approve(precommission_requests_module) +
+                _readonly(precommission_workflows_module) +
+                _readonly([see_rt_dashboard_module_id] if see_rt_dashboard_module_id else [])
             ),
         },
 
-        # ── 9. Senior Management Approver (was: CEE RT&R&D, CEE Transmission Zone) ─
+        # ── 9. SEE_RT ─────────────────────────────────────────────────────────
         {
-            "name": "Senior Management Approver",
+            "name": "SEE_RT",
+            "rename_from": "SEE_RT",
+            "description": "SEE (Repair & Testing track) — same authority as SEE_WM scoped to the RT circle.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "default_module_id": see_rt_dashboard_module_id,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _approve(approvals_module) +
+                _readonly(recommendations_module) +
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module) +
+                _approve(testing_request_approvals_module) +
+                _readonly(vendor_documents_module) +
+                _readonly(equipment_module) +
+                _readonly(workflow_dashboard_module) +
+                _approve(breakdown_workflows_module) +
+                _readonly(overhaul_workflows_module) +
+                _readonly(calibration_workflows_module) +
+                _readonly(annual_audit_workflows_module) +
+                _approve(precommission_requests_module) +
+                _readonly(precommission_workflows_module) +
+                _readonly([see_rt_dashboard_module_id] if see_rt_dashboard_module_id else [])
+            ),
+        },
+
+        # ── 10. CEE_TRANSMISSION_ZONE ─────────────────────────────────────────
+        {
+            "name": "CEE_TRANSMISSION_ZONE",
             "rename_from": "Senior Management Approver",
-            "description": "Zone-level management. Final approver for all workflows including overhaul verification. Covers CEE-level designation responsibilities.",
+            "description": "CEE (Transmission Zone) — zone-level final approver for all workflows.",
             "is_org_admin": False,
             "is_dept_admin": True,
             "auto_provision": True,
@@ -3622,16 +3732,45 @@ def seed_role_templates(session):
                 _readonly(recommendations_module) +
                 _readonly(workflow_dashboard_module) +
                 _approve(breakdown_workflows_module) +
-                _approve(overhaul_workflows_module) +        # OFFICER_VERIFICATION final sign-off
-                _approve(calibration_workflows_module) +     # CAL_VERIFY final sign-off
-                _approve(annual_audit_workflows_module) +        # OBSERVATION_CLOSURE final sign-off
-                _approve(precommission_requests_module) +        # final approval authority for PCR tickets
-                _approve(precommission_workflows_module) +       # QAP_FINAL_DISPATCH escalation approver
-                _readonly([cee_rt_dashboard_module_id] if cee_rt_dashboard_module_id else [])  # CEE RT RD track dashboard
+                _approve(overhaul_workflows_module) +
+                _approve(calibration_workflows_module) +
+                _approve(annual_audit_workflows_module) +
+                _approve(precommission_requests_module) +
+                _approve(precommission_workflows_module) +
+                _readonly([cee_rt_dashboard_module_id] if cee_rt_dashboard_module_id else [])
             ),
         },
 
-        # ── 10. TA&QC Inspector (was: TA&QC Officer) ──────────────────────────
+        # ── 11. CEE_RT_RD ─────────────────────────────────────────────────────
+        {
+            "name": "CEE_RT_RD",
+            "rename_from": "CEE_RT_RD",
+            "description": "CEE (RT & R&D) — zone-level management on the Repair & Testing / R&D track.",
+            "is_org_admin": False,
+            "is_dept_admin": True,
+            "auto_provision": True,
+            "default_module_id": cee_rt_dashboard_module_id,
+            "permissions_template": (
+                _readwrite(dashboard_module) +
+                _approve(approvals_module) +
+                _full(testing_module) +
+                _readwrite(equipment_module) +
+                _readonly(testing_requests_module) +
+                _readonly(procurement_modules) +
+                _readonly(vendor_documents_module) +
+                _readonly(recommendations_module) +
+                _readonly(workflow_dashboard_module) +
+                _approve(breakdown_workflows_module) +
+                _approve(overhaul_workflows_module) +
+                _approve(calibration_workflows_module) +
+                _approve(annual_audit_workflows_module) +
+                _approve(precommission_requests_module) +
+                _approve(precommission_workflows_module) +
+                _readonly([cee_rt_dashboard_module_id] if cee_rt_dashboard_module_id else [])
+            ),
+        },
+
+        # ── 12. TA&QC Inspector ───────────────────────────────────────────────
         {
             "name": "TA&QC Inspector",
             "rename_from": "TA&QC Inspector",
@@ -3641,17 +3780,17 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": (
                 _readwrite(taqc_inspections_module) +
-                _readwrite(annual_audit_workflows_module) +  # OBSERVATION_REPORTING → COMPLIANCE_SUBMISSION
+                _readwrite(annual_audit_workflows_module) +
                 _readonly(failure_registry_module) +
                 _readonly(dashboard_module)
             ),
         },
 
-        # ── 11. Transformer Repair Coordinator (was: Workflow Coordinator) ─────
+        # ── 13. Transformer Repair Coordinator ────────────────────────────────
         {
             "name": "Transformer Repair Coordinator",
             "rename_from": "Transformer Repair Coordinator",
-            "description": "Assigns users to transformer repair and overhaul workflow stages. Manages the assignment queue for both workflow types.",
+            "description": "Assigns users to transformer repair and overhaul workflow stages.",
             "is_org_admin": False,
             "is_dept_admin": False,
             "auto_provision": True,
@@ -3660,16 +3799,16 @@ def seed_role_templates(session):
                 _readwrite(dashboard_module) +
                 _readonly(workflow_dashboard_module) +
                 _readwrite(breakdown_workflows_module) +
-                _readwrite(overhaul_workflows_module) +      # assignment_role for all 4 overhaul stages
-                _readwrite(calibration_workflows_module) +   # assignment_role for all 4 calibration stages
-                _readwrite(annual_audit_workflows_module) +       # assignment_role for all 5 annual audit stages
-                _readwrite(precommission_workflows_module) +      # assignment_role for all 9 QAP stages
-                _readonly(precommission_requests_module) +        # view PCR tickets for context
+                _readwrite(overhaul_workflows_module) +
+                _readwrite(calibration_workflows_module) +
+                _readwrite(annual_audit_workflows_module) +
+                _readwrite(precommission_workflows_module) +
+                _readonly(precommission_requests_module) +
                 _readonly(testing_requests_module)
             ),
         },
 
-        # ── 12. Procurement Officer (was: Purchaser) ──────────────────────────
+        # ── 14. Procurement Officer ───────────────────────────────────────────
         {
             "name": "Procurement Officer",
             "rename_from": "Procurement Officer",
@@ -3682,67 +3821,6 @@ def seed_role_templates(session):
                 _readwrite(procurement_modules) +
                 _readwrite(breakdown_workflows_module)
             ),
-        },
-
-        # ── 13. Procurement Approver (was: Finance Approver) ──────────────────
-        {
-            "name": "Procurement Approver",
-            "rename_from": "Procurement Approver",
-            "description": "Reviews and approves replacement procurement requests.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _approve(procurement_approvals_module) +
-                _readonly(dashboard_module)
-            ),
-        },
-
-        # ── 14. AI / Analytics User (new) ─────────────────────────────────────
-        {
-            "name": "AI / Analytics User",
-            "description": "Read-only access to dashboards, test results and equipment data for analytics.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "default_module_id": admin_dashboard_module_id,
-            "permissions_template": (
-                _readonly(dashboard_module) +
-                _readonly(testing_module) +
-                _readonly(equipment_module) +
-                _readonly(testing_requests_module) +
-                _readonly(recommendations_module)
-            ),
-        },
-
-        # ── 15. Read-Only Auditor / MIS User (new) ────────────────────────────
-        {
-            "name": "Read-Only Auditor / MIS User",
-            "description": "Broad read-only access for audit and management information purposes.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": (
-                _readonly(dashboard_module) +
-                _readonly(testing_requests_module) +
-                _readonly(testing_module) +
-                _readonly(equipment_module) +
-                _readonly(recommendations_module) +
-                _readonly(failure_registry_module) +
-                _readonly(procurement_modules) +
-                _readonly(overhaul_workflows_module) +       # audit trail visibility
-                _readonly(calibration_workflows_module)      # audit trail visibility
-            ),
-        },
-
-        # ── 16. doc-viewer — verifies vendor uploaded documents ───────────────
-        {
-            "name": "doc-viewer",
-            "description": "Verifies vendor uploaded documents. Access to Vendor Documents module only.",
-            "is_org_admin": False,
-            "is_dept_admin": False,
-            "auto_provision": True,
-            "permissions_template": _readonly(vendor_documents_module),
         },
     ]
 
@@ -4842,16 +4920,25 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     # Track created departments by full path
     department_map: Dict[str, str] = {}
 
-    def generate_code(name: str) -> str:
+    _ZONE_CODE_MAP = {
+        "bagalkot zone":   "BK",
+        "bangalore zone":  "BN",
+        "hassan zone":     "HS",
+        "kalaburagi zone": "KL",
+        "mysuru zone":     "MY",
+        "tumkur zone":     "TK",
+    }
+
+    def generate_code(name: str, target_len: int = 3) -> str:
         """Generate a department code from the name."""
         clean_name = name.replace(' Zone', '').replace(' Circle', '').replace(' Division', '')
         clean_name = clean_name.replace(' Section', '').replace('kV', '').strip()
         words = clean_name.split()
         if len(words) > 1:
-            code = ''.join([w[0].upper() for w in words[:3]])
+            code = ''.join([w[0].upper() for w in words])
         else:
-            code = clean_name[:3].upper()
-        return code
+            code = clean_name.upper()
+        return (code[:target_len]).ljust(target_len, 'X')
 
     # No synthetic root — zones from the Excel are the top-level nodes (parent=None)
 
@@ -4908,7 +4995,14 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
                 continue
 
             # Generate code
-            code = generate_code(dept_name)
+            if level_idx == 0:
+                code = _ZONE_CODE_MAP.get(dept_name.strip().lower()) or generate_code(dept_name, 2)
+            elif level_idx == len(levels) - 1:
+                import re as _re
+                base = _re.sub(r"^\d+\s*kV\s*", "", dept_name, flags=_re.IGNORECASE).strip()
+                code = generate_code(base, 4)
+            else:
+                code = generate_code(dept_name, 3)
 
             # Create department - commit immediately to handle unique constraint
             dept_id = str(uuid.uuid4())
@@ -4967,7 +5061,7 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
 
     if excel_path is None:
         project_root = os.path.dirname(os.path.abspath(__file__))
-        excel_path = os.path.join(project_root, "equipment_seed.xlsx")
+        excel_path = os.path.join(project_root, "equipment_seed_with_all_data.xlsx")
 
     if not os.path.exists(excel_path):
         raise FileNotFoundError(f"Equipment seed file not found: {excel_path}")
@@ -5013,15 +5107,23 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         OrgDepartment.organization_id == uuid.UUID(org_id)
     ).all()
     dept_map = {d.name.strip().lower(): d.id for d in depts}
+    print(f"[INFO] {len(dept_map)} departments available for equipment lookup")
 
     created = skipped = 0
 
+    def _safe_str(val):
+        """Convert pandas NaN / float / None to a clean string."""
+        if val is None:
+            return ""
+        s = str(val).strip()
+        return "" if s.lower() in ("nan", "none", "null") else s
+
     for _, row in df.iterrows():
-        substation_name = (row.get("substation") or "").strip()
+        substation_name = _safe_str(row.get("substation"))
         dept_id = dept_map.get(substation_name.lower())
         if not dept_id:
             # Fallback: try parent division name from the row
-            division_name = (row.get("division") or "").strip()
+            division_name = _safe_str(row.get("division"))
             if division_name:
                 dept_id = dept_map.get(division_name.lower())
             if not dept_id:
@@ -5031,7 +5133,7 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             else:
                 print(f"  [INFO] Substation '{substation_name}' mapped to parent division '{division_name}'")
 
-        raw_type = (row.get("equipment_type") or "").strip()
+        raw_type = _safe_str(row.get("equipment_type"))
         equip_type_id = None
         for key in (raw_type.lower(), raw_type.split("(")[0].strip().lower()):
             equip_type_id = type_map.get(key)
@@ -5062,21 +5164,22 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
                 return None
             return str(val).strip() if val else None
 
-        voltage_class = row.get("voltage_class") or ""
+        voltage_class = _safe_str(row.get("voltage_class"))
         # Strip trailing "kV" suffix if present for storage consistency
         voltage_class = voltage_class.replace("kV", "").replace("KV", "").strip() or None
 
         yom = _int(row.get("yom"))
         doc_raw = row.get("doc")
         doc_date = None
-        if doc_raw:
-            try:
-                doc_date = pd.to_datetime(doc_raw, dayfirst=True).date()
-            except Exception:
-                doc_date = None
+        try:
+            parsed = pd.to_datetime(doc_raw, dayfirst=False)
+            if not pd.isna(parsed):
+                doc_date = parsed.date()
+        except Exception:
+            doc_date = None
 
         # Determine status enum  (values: active, retired, scrapped, under_repair)
-        raw_status = (row.get("status") or "In-service").strip().lower()
+        raw_status = (_safe_str(row.get("status")) or "In-service").lower()
         from models import EquipmentStatus
         status_map = {
             "in-service": EquipmentStatus.active,
@@ -7690,13 +7793,6 @@ def seed_calibration_template(session) -> int:
                         "unit": "months",
                     },
                     {
-                        "key": "overall_result",
-                        "label": "Result",
-                        "type": "dropdown",
-                        "options": ["Pass", "Fail"],
-                        "required": True,
-                    },
-                    {
                         "key": "calibrated_by",
                         "label": "Calibrated By (Agency / Lab)",
                         "type": "text",
@@ -7723,10 +7819,10 @@ def seed_calibration_template(session) -> int:
                 "type": "DATE_ADD",
                 "config": {
                     "validity_field": "validity_months",
-                    "result_field": "overall_result",
+                    "result_field": "recommendation_type",
                     "order_by": "calibration_date",
                     "group_by": "equipment_id",
-                    "requires_multi_session": True,
+                    "requires_multi_session": False,
                 },
             }
         ],
@@ -7736,11 +7832,13 @@ def seed_calibration_template(session) -> int:
         OrgTestTemplate.template_key == CAL_KEY,
         OrgTestTemplate.org_id == None,  # noqa: E711
     ).first()
+    from sqlalchemy.orm.attributes import flag_modified
     count = 0
     if existing:
         existing.test_type_id = d.id
         existing.template_data = cal_template_data
         existing.is_system = True
+        flag_modified(existing, "template_data")
     else:
         session.add(OrgTestTemplate(
             template_key=CAL_KEY,
@@ -8031,6 +8129,61 @@ def seed_transformer_oil_template(session) -> int:
 
     session.commit()
     print(f"[OK] Transformer Oil Test template seeded (detail_id={detail.id}).")
+    return count
+
+
+def seed_transformer_dga_template(session) -> int:
+    """Seed the standalone Transformer DGA OrgTestTemplate."""
+    from models import CategoryMaster, CategoryDetails, OrgTestTemplate
+    from test_templates import TEST_TEMPLATES
+    from sqlalchemy.orm.attributes import flag_modified
+
+    master = session.query(CategoryMaster).filter(
+        CategoryMaster.description == "Testing Equipment"
+    ).first()
+    if not master:
+        master = CategoryMaster(
+            name="Testing Equipment",
+            description="Testing Equipment",
+            is_active=True,
+        )
+        session.add(master)
+        session.flush()
+
+    detail = _get_or_create_category_detail(
+        session,
+        name="Transformer Dissolved Gas Analysis (DGA)",
+        category_master_id=master.id,
+        description="Standalone DGA sampling — gas concentration analysis per IS 10593:2017 / IEC 60599",
+        is_active=True,
+    )
+
+    DGA_KEY = "transformer_dga"
+    template_data = TEST_TEMPLATES[DGA_KEY]
+
+    existing = session.query(OrgTestTemplate).filter(
+        OrgTestTemplate.template_key == DGA_KEY,
+        OrgTestTemplate.org_id == None,  # noqa: E711
+    ).first()
+    count = 0
+    if existing:
+        existing.test_type_id = detail.id
+        existing.template_data = template_data
+        existing.is_system = True
+        flag_modified(existing, "template_data")
+    else:
+        session.add(OrgTestTemplate(
+            template_key=DGA_KEY,
+            org_id=None,
+            test_type_id=detail.id,
+            template_data=template_data,
+            is_system=True,
+            version=1,
+        ))
+        count = 1
+
+    session.commit()
+    print(f"[OK] Transformer DGA template seeded (detail_id={detail.id}).")
     return count
 
 
@@ -8576,6 +8729,14 @@ def _seed_notification_variables(session) -> int:
     # Replaces the hardcoded VariableResolver._ALIASES dict.
     _VARIABLES = [
         # ── Reports ──────────────────────────────────────────────────────────
+        dict(var_key="report.lastexecution", label="Last Executed Test Summary",
+             group_name="Reports",          resolver_key="last_execution_html",
+             fallback_keys=["last_execution_html"],
+             description="HTML table summarising the last completed test request for the equipment "
+                         "(request number, title, test type, status, submitted date, due date). "
+                         "Resolved automatically when equipment is the notification source.",
+             sample_value="<table>...</table>",
+             role_template_names=[]),
         dict(var_key="report.retriexls",   label="Report — Excel Download URL",
              group_name="Reports",         resolver_key="report.retriexls",
              fallback_keys=["report_xls_url", "xls_url"],
@@ -8625,6 +8786,14 @@ def _seed_notification_variables(session) -> int:
              fallback_keys=["equipment_status"],
              description="Current operational status of the equipment.",
              sample_value="active",
+             role_template_names=[]),
+        dict(var_key="table.performance",     label="Equipment Performance Table",
+             group_name="Equipment",           resolver_key="performance_table_html",
+             fallback_keys=["performance_table_html"],
+             description="HTML table showing the equipment's analytics health score, risk level, "
+                         "condition summary, tests assessed, and last test date. "
+                         "Resolved automatically when equipment is the notification source.",
+             sample_value="<table>...</table>",
              role_template_names=[]),
         dict(var_key="equipment.manufacturer", label="Manufacturer",
              group_name="Equipment",            resolver_key="manufacturer",
@@ -8706,6 +8875,13 @@ def _seed_notification_variables(session) -> int:
              description="Email / name of the tester the request was assigned to.",
              sample_value="tester@utility.com",
              role_template_names=["Test & Work Coordinator", "Reviewing Officer"]),
+        dict(var_key="table.testkit",        label="Test Kit Availability Table",
+             group_name="Test Request",       resolver_key="kit_availability_html",
+             fallback_keys=["kit_availability_html"],
+             description="HTML table showing kit availability for the assigned test type and department. "
+                         "Populated automatically for tester-assignment notifications.",
+             sample_value="<table>...</table>",
+             role_template_names=[]),
         # ── Evaluation / test result ───────────────────────────────────────────
         dict(var_key="eval.overall",     label="Overall Result (NORMAL / ALERT / CRITICAL)",
              group_name="Evaluation",    resolver_key="eval_overall",
@@ -8782,6 +8958,43 @@ def _seed_notification_variables(session) -> int:
              fallback_keys=["recipient_email", "user_email"],
              description="Email address of the notification recipient.",
              sample_value="jane.smith@utility.com",
+             role_template_names=[]),
+        # ── Testing Kit Calibration ───────────────────────────────────────────
+        dict(var_key="kit.ueic",                   label="Kit UEIC",
+             group_name="Testing Kit",              resolver_key="kit.ueic",
+             fallback_keys=["kit.ueic"],
+             description="Unique Equipment Identity Code of the testing kit.",
+             sample_value="KIT-IR-001",
+             role_template_names=[]),
+        dict(var_key="kit.name",                   label="Kit Name",
+             group_name="Testing Kit",              resolver_key="kit.name",
+             fallback_keys=["kit.name"],
+             description="Name/description of the testing kit.",
+             sample_value="Insulation Resistance Tester",
+             role_template_names=[]),
+        dict(var_key="kit.department",             label="Kit Department",
+             group_name="Testing Kit",              resolver_key="kit.department",
+             fallback_keys=["kit.department"],
+             description="Department or substation where the testing kit is based.",
+             sample_value="Bangalore Zone",
+             role_template_names=[]),
+        dict(var_key="kit.calibration_due_date",   label="Calibration Due Date",
+             group_name="Testing Kit",              resolver_key="kit.calibration_due_date",
+             fallback_keys=["kit.calibration_due_date"],
+             description="Date on which the kit's calibration certificate expires.",
+             sample_value="2025-06-30",
+             role_template_names=[]),
+        dict(var_key="kit.days_remaining",         label="Days Until Calibration Due",
+             group_name="Testing Kit",              resolver_key="kit.days_remaining",
+             fallback_keys=["kit.days_remaining"],
+             description="Number of days remaining before calibration is due.",
+             sample_value="14",
+             role_template_names=[]),
+        dict(var_key="kit.days_overdue",           label="Days Overdue (Calibration)",
+             group_name="Testing Kit",              resolver_key="kit.days_overdue",
+             fallback_keys=["kit.days_overdue"],
+             description="Number of days the calibration has been overdue (0 if not overdue).",
+             sample_value="5",
              role_template_names=[]),
         # ── System ────────────────────────────────────────────────────────────
         # System vars are injected directly in build_context — no fallback lookup needed.
@@ -8965,7 +9178,8 @@ def _seed_notification_event_catalogue(session) -> int:
             group_name="Testing Requests",
             description="Fired when a test request is assigned to a field/lab tester.",
             context_vars=["request.number", "request.title", "request.assigned_to",
-                          "request.due_date", "equipment.ueic"],
+                          "request.due_date", "equipment.ueic",
+                          "table.testkit", "table.performance", "report.lastexecution"],
             default_roles=["AE_JE", "AEE_MAINTENANCE"],
         ),
         dict(
@@ -9191,6 +9405,21 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when an active annual audit workflow is cancelled.",
             context_vars=["equipment", "equipment_type", "department", "cancelled_by", "cancel_reason"],
             default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
+        ),
+        # ── TR Configurable Workflow Engine ───────────────────────────────────
+        dict(
+            event_type="tr_wf_status_changed",
+            label="TR Workflow Status Changed",
+            group_name="Stage Workflows",
+            description=(
+                "Fired on every stage transition in the configurable Test Request workflow. "
+                "Recipients: originator + assignee (if set) + active stage roles."
+            ),
+            context_vars=[
+                "request_number", "equipment", "status_name", "stage_name",
+                "action_code", "originator",
+            ],
+            default_roles=[],
         ),
         dict(
             event_type="precommission_stage_changed",
@@ -9601,26 +9830,33 @@ def _seed_notification_templates(session) -> int:
 
     _tmpl("tester_assigned",
         _e(
-            "Test Request Assigned to You — {{request.number}}",
-            "<h3>You Have Been Assigned a Test Request</h3>"
-            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment.ueic}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Request</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.number}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Due Date</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.due_date}}</td></tr>"
-            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Assigned To</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{request.assigned_to}}</td></tr>"
+            "Testing Assignment: {request_number}",
+            "<h2 style='color:#1E3C72;margin-bottom:4px;'>Testing Request Assigned to You</h2>"
+            "<p style='color:#555;margin-top:0;'>Hi {tester_name}, you have been assigned to carry out a field test.</p>"
+            "<table width='100%' cellpadding='0' cellspacing='0' style='border-collapse:collapse;font-size:13px;margin-bottom:16px;'>"
+            "<tr><td style='padding:8px 0;color:#888;width:160px;'>Request Number</td><td style='padding:8px 0;font-weight:600;color:#0F172A;'>{request_number}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Equipment</td><td style='padding:8px 0;font-weight:600;color:#0F172A;'>{equipment}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Equipment Type</td><td style='padding:8px 0;color:#0F172A;'>{equipment.type}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Station</td><td style='padding:8px 0;color:#0F172A;'>{dept.name}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Test Type</td><td style='padding:8px 0;color:#0F172A;'>{tr.test_type}</td></tr>"
+            "<tr><td style='padding:8px 0;color:#888;'>Priority</td><td style='padding:8px 0;color:#0F172A;'>{request.priority}</td></tr>"
             "</table>"
-            "<p>Please log in to SEACMS to accept or decline this assignment.</p>",
-            ["Test Engineer", "Maintenance Officer"],
+            "{{table.testkit}}"
+            "{{table.performance}}"
+            "{{report.lastexecution}}"
+            "<p style='margin-top:20px;'>Please log in to the SEACMS app to acknowledge and begin testing. "
+            "Collect any required kits before proceeding to the site.</p>",
+            ["@assignee", "Test Engineer", "Maintenance Officer"],
         ),
         _s(
             "[KPTCL-SEACMS] You are assigned test req {{request.number}}"
             " for {{equipment.ueic}}. Due: {{request.due_date}}. Login SEACMS.",
-            ["Test Engineer"],
+            ["@assignee", "Test Engineer"],
         ),
         _i(
             "Assigned — {{request.number}}",
             "You have been assigned {{request.number}} for {{equipment.ueic}}. Due: {{request.due_date}}.",
-            ["Test Engineer", "Maintenance Officer"],
+            ["@assignee", "Test Engineer", "Maintenance Officer"],
         ),
     )
 
@@ -11404,6 +11640,8 @@ def run_seed():
         seed_divisions(session)
         master_ids=seed_category_master(session)
         seed_category_details(session, master_ids)
+        from seed_category_active_flags import sync_category_details_active_flags
+        sync_category_details_active_flags(session)
         seed_test_type_categories(session, master_ids)
         # seed_tester_locations(session)  # DEPRECATED - using org departments instead
         seed_sample_testing_request(session)
@@ -11455,6 +11693,8 @@ def run_seed():
         print(f"[OK] Tan-Delta / Capacitance / IDAX test types: {n5d} seeded.")
         n6 = seed_transformer_oil_template(session)
         print(f"[OK] Transformer Oil Test template: {n6} seeded.")
+        n6b = seed_transformer_dga_template(session)
+        print(f"[OK] Transformer DGA template: {n6b} seeded.")
         n7 = seed_capacitance_tandelta_template(session)
         print(f"[OK] Capacitance & Tan Delta template: {n7} seeded.")
         n8 = seed_inspection_templates(session)
@@ -11489,9 +11729,6 @@ def run_seed():
             # etc. divisions exist for the substation→division fallback lookup
             pass
 
-        # Sample Equipment (after departments + equipment types exist)
-        seed_sample_equipment(session, kptcl_org)
-
         # Master Schedules — blueprint templates for each equipment type
         print("\n--- Master Schedule Seeding ---")
         try:
@@ -11499,6 +11736,16 @@ def run_seed():
         except Exception as _e:
             import traceback
             print(f"[WARN] Master schedule seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # Condition Monitoring Recommendations — score-band master data
+        print("\n--- Condition Monitoring Recommendations Seeding ---")
+        try:
+            from seed_condition_recommendations import run as seed_condition_recommendations
+            seed_condition_recommendations(session)
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Condition monitoring recommendations seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
         # Test & Maintenance Schedule Templates — full access for org-admin roles
@@ -11602,6 +11849,14 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Calibration workflow seed failed (non-fatal): {_e}")
 
+        # Kit Calibration Notifications — variables, events, templates
+        try:
+            from seed_kit_calibration_notifications import seed_kit_calibration_notifications
+            result = seed_kit_calibration_notifications(session)
+            print(f"[OK] Kit calibration notifications seeded: {result}")
+        except Exception as _e:
+            print(f"[WARN] Kit calibration notification seed failed (non-fatal): {_e}")
+
         # Pre-Commission QAP Workflow — 9-stage factory inspection workflow
         print("\n--- Pre-Commission QAP Workflow Seeding ---")
         try:
@@ -11629,15 +11884,6 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Status enum migration (non-fatal): {_e}")
 
-        # Dept-filter test users — always seeded under the default KPTCL org
-        print("\n--- Dept-filter test users (KPTCL org) ---")
-        try:
-            seed_dept_filter_users(session, org=kptcl_org)
-        except Exception as _e:
-            import traceback
-            print(f"[WARN] Dept-filter seed failed (non-fatal): {_e}")
-            traceback.print_exc()
-
         # ── KPTCL Org Roles + Users — LAST, after ALL departments exist ──────────
         # BLR_CIRCLE, RT_NORTH, RT_EAST etc. are created by seed_dept_filter_users.
         # Must run after both seed_kptcl_departments AND seed_dept_filter_users.
@@ -11662,6 +11908,16 @@ def run_seed():
         seed_zoho_import_mapping(session, kptcl_org)
         seed_notifications_module_and_permissions(session)
 
+        # Role templates — must precede notification defaults so _rt_map resolves
+        print("\n--- Role Templates Seeding ---")
+        try:
+            seed_role_templates(session)
+            print("[OK] Role templates seeded.")
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Role templates seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
         # Notification defaults — after seacms so OrgRole names pass _VALID_ROLES check
         print("\n--- Notification Defaults Seeding ---")
         try:
@@ -11674,6 +11930,58 @@ def run_seed():
         except Exception as _e:
             import traceback
             print(f"[WARN] Notification defaults seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── TR Configurable Workflow Engine — DDL + Seed ─────────────────────────
+        # Must run after seed_seacms_roles_users so EE_TLSS role exists.
+        print("\n" + "=" * 80)
+        print("  TR CONFIGURABLE WORKFLOW ENGINE")
+        print("=" * 80)
+        run_migration_from_file(
+            session,
+            "migrations/029_tr_wf_engine.sql",
+            "Migration 029: TR Configurable Workflow Engine Tables",
+        )
+        try:
+            from seed_tr_wf_workflow import seed_tr_wf_workflow
+            seed_tr_wf_workflow(session)
+            session.commit()
+        except Exception as _e:
+            session.rollback()
+            import traceback
+            print(f"[WARN] TR workflow engine seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── Document Support: module, roles, users ────────────────────────────────
+        print("\n--- Doc Support Roles & Users (seed_doc_support_roles_users) ---")
+        try:
+            from seed_doc_support_roles_users import seed_doc_support_roles_users
+            seed_doc_support_roles_users()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Doc support roles/users seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── Document Support Workflow definition ──────────────────────────────────
+        print("\n--- Doc Support Workflow (seed_doc_support_workflow) ---")
+        try:
+            from seed_doc_support_workflow import seed_doc_support_workflow
+            seed_doc_support_workflow(session)
+        except Exception as _e:
+            session.rollback()
+            import traceback
+            print(f"[WARN] Doc support workflow seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── Document Support Notification Templates ───────────────────────────────
+        print("\n--- Doc Support Notifications (seed_doc_support_notifications) ---")
+        try:
+            from seed_doc_support_notifications import seed_doc_support_notifications
+            seed_doc_support_notifications(session)
+        except Exception as _e:
+            session.rollback()
+            import traceback
+            print(f"[WARN] Doc support notifications seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
         # ── All workflow role mappings — after seed_seacms_roles_users ───────────
@@ -11721,9 +12029,11 @@ def run_seed():
                 session.rollback()
                 print(f"[WARN] Pre-commission role mapping failed: {_e}")
 
-        # Equipment + Annual Audit role mappings — after seed_dept_filter_users
-        # so RT_EAST/RT_NORTH/BLR_CIRCLE depts exist for equipment lookup,
-        # and after seed_seacms_roles_users so KPTCL OrgRoles exist for stage mapping
+        # Ensure RT substations that are in equipment_seed.xlsx but not in
+        # KPTCL_Substation_Mapping.xlsx exist before equipment seeding runs.
+        # Each dept is committed individually so a later rollback cannot remove them.
+        
+        # Equipment seeding from equipment_seed.xlsx — after dept hierarchy exists
         if kptcl_org:
             try:
                 seed_kptcl_equipment(session, str(kptcl_org.id))
@@ -11732,6 +12042,8 @@ def run_seed():
             except Exception as e:
                 print(f"[WARN] KPTCL equipment seeding failed: {e}")
 
+        # Annual Audit role mappings — after seed_dept_filter_users
+        if kptcl_org:
             try:
                 session.rollback()
                 from seed_annual_audit import seed_annual_audit_role_mappings
@@ -11747,6 +12059,38 @@ def run_seed():
             print(f"[OK] Renamed {renamed} duplicate templates")
         except Exception as _e:
             print(f"[WARN] Template renaming failed (non-fatal): {_e}")
+
+        # ── Testing Kit module ────────────────────────────────────────────────
+        print("\n--- Testing Kit Module Seeding ---")
+        try:
+            from seed_testing_kit import (
+                ensure_table,
+                run as seed_testing_kit_run,
+                seed_module_and_privileges,
+                seed_kit_mappings,
+                seed_kit_equipment_records,
+                update_tester_assigned_email_template,
+            )
+            ensure_table()
+            seed_testing_kit_run(session)
+            seed_module_and_privileges()
+            seed_kit_mappings(session)
+            seed_kit_equipment_records(session)
+            update_tester_assigned_email_template()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Testing kit seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── AI Graph Dashboard module + role privileges ───────────────────────
+        print("\n--- AI Graph Dashboard Module (seed_ai_graph_module) ---")
+        try:
+            from seed_ai_graph_module import seed_ai_graph_module
+            seed_ai_graph_module()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] AI Graph Dashboard module seed failed (non-fatal): {_e}")
+            traceback.print_exc()
 
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")
@@ -12517,9 +12861,9 @@ _DFT_ROLES = [
 ]
 
 _DFT_DEPTS = [
-    ("north",  "RT North Division",  "north"),
-    ("south",  "RT South Division",  "south"),
-    ("mysuru", "Mysuru Division",     "mysuru"),
+    ("hebbal",  "Hebbal Division",   "hebbal"),
+    ("hoody",   "Hoody Division",    "hoody"),
+    ("kolar",   "Kolar Division",    "kolar"),
 ]
 
 _DFT_ROLE_EMAIL = {
@@ -13030,6 +13374,10 @@ def _dft_get_or_create_dept(session, org_id, name, code,
         parent_department_id=parent_id,
     ).first()
     if d:
+        # Fix code if the existing dept has the wrong code (e.g. old long codes like RT_NORTH)
+        if d.code != code and len(code) <= 4:
+            d.code = code
+            session.flush()
         return d
     now = datetime.now()
     d = OrgDepartment(
@@ -13308,54 +13656,43 @@ def seed_dept_filter_users(session, org=None):
 
     # 2. Department hierarchy
     print("\n[2] Department hierarchy")
-    zone = _dft_get_or_create_dept(
-        session, oid,
-        name="Bangalore Zone", code="BLR_ZONE",
-    )
-    print(f"  Zone   : {zone.name}")
+    # REPLACE with: look up the REAL divisions seeded from Excel by seed_kptcl_departments
+    # (disambiguate by circle parent since some division names repeat, e.g. "Somanahalli")
+    zone = session.query(OrgDepartment).filter_by(organization_id=oid, name="Bangalore Zone").first()
+    if zone is None:
+        print("[WARN] 'Bangalore Zone' not found — run seed_kptcl_departments first. Skipping dept-filter seed.")
+        return
 
-    circle = _dft_get_or_create_dept(
-        session, oid,
-        name="Bangalore Transmission Circle", code="BLR_CIRCLE",
-        parent_id=zone.id,
-    )
-    print(f"  Circle : {circle.name}")
+    circle_bmaz_north = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="BMAZ North", parent_department_id=zone.id
+    ).first()
+    circle_bmaz_south = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="BMAZ South", parent_department_id=zone.id
+    ).first()
+    circle_braz = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="BRAZ", parent_department_id=zone.id
+    ).first()
 
-    div_north  = _dft_get_or_create_dept(
-        session, oid,
-        name="RT North Division", code="RT_NORTH",
-        parent_id=circle.id,
-    )
-    div_south  = _dft_get_or_create_dept(
-        session, oid,
-        name="RT South Division", code="RT_SOUTH",
-        parent_id=circle.id,
-    )
-    div_east   = _dft_get_or_create_dept(
-        session, oid,
-        name="RT East Division", code="RT_EAST",
-        parent_id=circle.id,
-    )
-    div_mysuru = _dft_get_or_create_dept(
-        session, oid,
-        name="Mysuru Division", code="MYSURU",
-        parent_id=circle.id,
-    )
-    dept_map = {"north": div_north, "south": div_south, "east": div_east, "mysuru": div_mysuru}
+    if not all([circle_bmaz_north, circle_bmaz_south, circle_braz]):
+        print("[WARN] One or more BMAZ/BRAZ circles not found — skipping dept-filter seed.")
+        return
+
+    div_hebbal = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="Hebbal", parent_department_id=circle_bmaz_north.id
+    ).first()
+    div_hoody = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="Hoody", parent_department_id=circle_bmaz_south.id
+    ).first()
+    div_kolar = session.query(OrgDepartment).filter_by(
+        organization_id=oid, name="Kolar", parent_department_id=circle_braz.id
+    ).first()
+
+    dept_map = {"hebbal": div_hebbal, "hoody": div_hoody, "kolar": div_kolar}
     for slug, dept in dept_map.items():
-        print(f"  Div [{slug:6s}]: {dept.name}  ({dept.id})")
-
-    # Seed RT substations missing from KPTCL_Substation_Mapping.xlsx
-    # so equipment_seed.xlsx rows for these substations resolve to a dept
-    _rt_substations = [
-        ("220kV EDC",             "RT_EDC",       div_east.id),
-        ("400kV DHP",             "RT_DHP",       div_east.id),
-        ("220kV Kanakapura",      "RT_KANAKAPURA", div_south.id),
-        ("220kV Manyatha Tech Park", "RT_MANYATHA", div_north.id),
-    ]
-    for sub_name, sub_code, parent_id in _rt_substations:
-        _dft_get_or_create_dept(session, oid, name=sub_name, code=sub_code, parent_id=parent_id)
-    session.flush()
+        if dept is None:
+            print(f"[WARN] Real division for '{slug}' not found — run seed_kptcl_departments first. Skipping dept-filter seed.")
+            return
+    session.commit()
 
     # 3. Roles  (org-scoped, shared across all 3 divisions)
     print("\n[3] Roles")
@@ -13388,11 +13725,10 @@ def seed_dept_filter_users(session, org=None):
     # 5. Top-level users: circle & zone levels
     print("\n[5] Top-level hierarchy users  (circle + zone)")
     _top_level_users = [
-        # (email,                   fname,  lname,    role_name,             dept_obj)
-        ("ee.circle@utility.com",   "EE",   "Circle", "EE_TLSS",             circle),
-        ("see.circle@utility.com",  "SEE",  "Circle", "SEE_WM",              circle),
-        ("cee.zone@utility.com",    "CEE",  "Zone",   "CEE_TRANSMISSION_ZONE", zone),
-        ("see.zone@utility.com",    "SEE",  "Zone",   "SEE_WM",              zone),
+    ("ee.circle@utility.com",   "EE",   "Circle", "EE_TLSS",             circle_braz),
+    ("see.circle@utility.com",  "SEE",  "Circle", "SEE_WM",              circle_braz),
+    ("cee.zone@utility.com",    "CEE",  "Zone",   "CEE_TRANSMISSION_ZONE", zone),
+    ("see.zone@utility.com",    "SEE",  "Zone",   "SEE_WM",              zone),
     ]
     for email, fname, lname, role_name, dept_obj in _top_level_users:
         phone = "9000000099"
@@ -13403,13 +13739,6 @@ def seed_dept_filter_users(session, org=None):
         if r:
             _dft_assign_role(session, u.id, r.id, dept_obj.id)
         print(f"  {email:48s}  {role_name:22s}  {dept_obj.name}")
-
-    # ── 6. Sample equipment in each division ────────────────────────────────
-    # Without this, originator/tester users see no equipment in the TR form
-    # because seed_sample_equipment() only seeds into the Excel-based KPTCL
-    # substations, which are in a different branch of the dept tree.
-    print("\n[6] Sample equipment per division")
-    _seed_dft_equipment(session, org, dept_map)
 
     session.commit()
 

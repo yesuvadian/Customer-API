@@ -626,6 +626,188 @@ class TestingRequestWorkflowService:
             return False, f"Error rejecting request: {str(e)}"
 
 
+    # ========================================
+    # TR_WF_* NEW WORKFLOW PATH (parallel engine)
+    # ========================================
+
+    def tr_wf_l2_approve_and_route(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        comment: Optional[str] = None,
+    ) -> tuple[bool, str]:
+        """
+        L2 approve path for the new configurable workflow engine.
+
+        Instead of assigning a tester directly, this:
+          1. Sets legacy status → pending_assignment (backward compat)
+          2. Resolves routing → creates TrWfInstance at first stage
+          3. Fires notification
+
+        Caller must db.commit() after this returns True.
+        """
+        from services.tr_workflow_routing_service import WorkflowRoutingService, WorkflowConfigError
+        from models import TrWfInstance
+
+        try:
+            routing_svc = WorkflowRoutingService(self.db)
+
+            # Instance is created at submission; fall back to creating here if missing
+            instance: TrWfInstance = (
+                self.db.query(TrWfInstance)
+                .filter(TrWfInstance.id == testing_request.wf_instance_id)
+                .first()
+            ) if testing_request.wf_instance_id else None
+
+            if instance is None:
+                instance = routing_svc.instantiate_workflow(
+                    testing_request=testing_request,
+                    performed_by_id=user.id,
+                )
+
+            # Advance past l2_approve_route / fr_l2_review stage
+            routing_svc.advance_stage(
+                testing_request=testing_request,
+                action_code="approve",
+                performed_by_id=user.id,
+                comment=comment,
+            )
+
+            # Keep legacy status populated for old dashboards
+            testing_request.status = TestingRequestStatus.pending_assignment
+            testing_request.modified_by = user.id
+
+            try:
+                from services.notification_service import NotificationService
+                NotificationService(self.db).fire(
+                    event_type="status_changed",
+                    context={
+                        "request.number": testing_request.request_number or str(testing_request.id),
+                        "request.status": "pending_assignment",
+                        "changed_by": getattr(user, "full_name", None) or getattr(user, "email", ""),
+                    },
+                    organization_id=testing_request.organization_id,
+                    department_id=getattr(testing_request, "department_id", None),
+                    source_id=testing_request.id,
+                    source_type="testing_request",
+                    severity="info",
+                )
+            except Exception as _ne:
+                import logging
+                logging.getLogger(__name__).warning(f"L2 route notification failed: {_ne}")
+
+            return True, f"Request approved and routed to workflow '{instance.wf_definition_id}'"
+
+        except WorkflowConfigError as wce:
+            return False, wce.detail
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("tr_wf_l2_approve_and_route error")
+            return False, str(exc)
+
+    def tr_wf_l3_assign_tester(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        tester_id: UUID,
+        tester_role_id: UUID,
+        comment: Optional[str] = None,
+    ) -> tuple[bool, str]:
+        """
+        L3 assigner (AEE R&T / AEE R&D) assigns a Level-4 tester from their
+        department hierarchy using the new configurable workflow engine.
+
+        Advances the workflow instance via 'assign' action_code.
+        Caller must db.commit() after this returns True.
+        """
+        from services.tr_workflow_routing_service import WorkflowRoutingService, WorkflowConfigError
+        from models import User as UserModel, OrgUserRole
+
+        try:
+            # Validate tester
+            tester = self.db.query(UserModel).filter(
+                UserModel.id == tester_id,
+                UserModel.isactive.is_(True),
+            ).first()
+            if not tester:
+                return False, "Selected tester not found or inactive"
+
+            has_role = self.db.query(OrgUserRole).filter(
+                OrgUserRole.user_id == tester_id,
+                OrgUserRole.org_role_id == tester_role_id,
+                OrgUserRole.is_active.is_(True),
+            ).first()
+            if not has_role:
+                return False, "Selected tester does not have the specified role"
+
+            routing_svc = WorkflowRoutingService(self.db)
+            routing_svc.advance_stage(
+                testing_request=testing_request,
+                action_code="assign",
+                performed_by_id=user.id,
+                role_id=tester_role_id,
+                comment=comment,
+                assigned_user_id=tester_id,
+                assigned_role_id=tester_role_id,
+            )
+
+            # Keep legacy fields populated for old code paths
+            testing_request.assigned_tester_id = tester_id
+            testing_request.status = TestingRequestStatus.in_progress
+            testing_request.modified_by = user.id
+
+            try:
+                from services.notification_service import NotificationService
+                self.db.flush()
+                self.db.refresh(testing_request)
+                NotificationService(self.db).notify_tester_assigned(testing_request)
+            except Exception as _ne:
+                import logging
+                logging.getLogger(__name__).warning(f"L3 assign notification failed: {_ne}")
+
+            return True, f"Tester assigned successfully"
+
+        except WorkflowConfigError as wce:
+            return False, wce.detail
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("tr_wf_l3_assign_tester error")
+            return False, str(exc)
+
+    def tr_wf_advance(
+        self,
+        testing_request: TestingRequest,
+        user: User,
+        action_code: str,
+        role_id: Optional[UUID] = None,
+        comment: Optional[str] = None,
+    ) -> tuple[bool, str]:
+        """
+        Generic advance for any tr_wf_* action (return, complete, close, reject, etc.).
+        Caller must db.commit() after this returns True.
+        """
+        from services.tr_workflow_routing_service import WorkflowRoutingService, WorkflowConfigError
+
+        try:
+            routing_svc = WorkflowRoutingService(self.db)
+            routing_svc.advance_stage(
+                testing_request=testing_request,
+                action_code=action_code,
+                performed_by_id=user.id,
+                role_id=role_id,
+                comment=comment,
+            )
+            testing_request.modified_by = user.id
+            return True, f"Action '{action_code}' applied"
+
+        except WorkflowConfigError as wce:
+            return False, wce.detail
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("tr_wf_advance error")
+            return False, str(exc)
+
+
 # Import models at the end to avoid circular imports
 from models import TestingRequestStatus
 import models

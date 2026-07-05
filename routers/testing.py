@@ -18,6 +18,7 @@ from schemas import (
     SubmitTestResultsBody,
 )
 from services.testing_service import TestingService
+from services.test_result_pdf_service import TestResultPDFService
 
 router = APIRouter(
     prefix="/testing",
@@ -157,6 +158,8 @@ def get_test_results(
             cts=r.cts,
             mts=r.mts,
             table_columns=table_cols or None,
+            testing_kit_id=r.testing_kit_id,
+            testing_kit=_kit_dict(r.testing_kit) if r.testing_kit_id else None,
         )
         response.append(resp)
     return response
@@ -453,6 +456,25 @@ def submit_test_results(
             replacement_products=repl_prods or None,
         )
 
+    # ── TR WF engine: advance l4_test_execution → l3_review_result ──────────────
+    _wf_advance_ok: Optional[bool] = None
+    _wf_advance_msg: str = ""
+    if getattr(req, "wf_instance_id", None):
+        try:
+            from services.testing_request_workflow_service import TestingRequestWorkflowService
+            wf_svc = TestingRequestWorkflowService(db)
+            _wf_advance_ok, _wf_advance_msg = wf_svc.tr_wf_advance(req, current_user, action_code="complete")
+            if _wf_advance_ok:
+                db.commit()
+                db.refresh(req)
+            else:
+                import logging
+                logging.getLogger(__name__).warning(f"tr_wf_advance complete failed: {_wf_advance_msg}")
+        except Exception as _wf:
+            import logging
+            _wf_advance_msg = str(_wf)
+            logging.getLogger(__name__).warning(f"tr_wf_advance complete error: {_wf}")
+
     # ── Fire test_submitted notification (both rec_type and non-rec_type paths) ─
     try:
         from services.notification_service import NotificationService
@@ -475,6 +497,13 @@ def submit_test_results(
         "summary":             summary,
         "notes":               detailed,
         "replacement_products": repl_prods,
+    }
+    enriched["wf_advance"] = {
+        "ok": _wf_advance_ok,
+        "msg": _wf_advance_msg,
+        "wf_instance_id": str(req.wf_instance_id) if getattr(req, "wf_instance_id", None) else None,
+        "current_wf_stage_id": str(req.current_wf_stage_id) if getattr(req, "current_wf_stage_id", None) else None,
+        "current_status_code": getattr(req, "current_status_code", None),
     }
     return enriched
 
@@ -609,14 +638,15 @@ def get_test_template_by_request_category(
             status_code=404,
             detail=f"No template mapped for request_category='{request_category}'",
         )
+    from services.org_test_template_service import active_template_filter
     tmpl = (
         db.query(OrgTestTemplate)
-        .filter(OrgTestTemplate.template_key == template_key)
+        .filter(OrgTestTemplate.template_key == template_key, active_template_filter())
         .first()
     )
     if not tmpl:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail=f"Template '{template_key}' not seeded — run /org-test-templates/provision/global")
+        raise HTTPException(status_code=404, detail=f"Template '{template_key}' not found or is disabled")
     svc = __import__('services.org_test_template_service', fromlist=['OrgTestTemplateService']).OrgTestTemplateService(db)
     from services.testing_service import _deduplicated_overall_sections
     data = copy.deepcopy(tmpl.template_data or {})
@@ -695,17 +725,32 @@ def create_structured_result(
 ):
     """Submit structured test results with JSONB data. Supports multi-session via test_session_id."""
     service = TestingService(db)
+    
+    # Validate tan delta test data before saving
+    test_data = data.test_data
+    if data.template_key in ["capacitance_tandelta_transformer", "tandelta_nct", "tandelta_comparison"]:
+        try:
+            pdf_service = TestResultPDFService(db)
+            test_data = pdf_service.process_tandelta_test_data(
+                test_data=test_data,
+                template_key=data.template_key,
+                request_id=request_id
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+    
     result = service.create_structured_result(
         request_id=request_id,
         template_key=data.template_key,
-        test_data=data.test_data,
+        test_data=test_data,
         overall_result=data.overall_result,
         remarks=data.remarks,
         tester_id=current_user.id,
         replacement_products=data.replacement_products,
-        test_session_id=data.test_session_id,  # Pass session_id for multi-session support
+        test_session_id=data.test_session_id,
+        testing_kit_id=data.testing_kit_id,
+        finalize=data.finalize,
     )
-    # Build response with images list
     return _build_structured_response(result)
 
 
@@ -749,6 +794,24 @@ def download_result_image(
     )
 
 
+def _kit_dict(kit) -> Optional[dict]:
+    """Serialize an Equipment testing-kit row to a plain dict for API responses."""
+    if kit is None:
+        return None
+    np = kit.nameplate_data or {}
+    kit_type = np.get("kit_subtype") or kit.bay_number or (kit.equipment_type.name if kit.equipment_type else "Testing Kit")
+    return {
+        "id": str(kit.id),
+        "ueic": kit.ueic,
+        "kit_type": kit_type,
+        "manufacturer": kit.manufacturer,
+        "model_number": kit.model_number,
+        "factory_serial_number": kit.factory_serial_number,
+        "department_name": kit.department.name if kit.department else "",
+        "location_label": "at_station",
+    }
+
+
 def _build_structured_response(result) -> TestResultStructuredResponse:
     """Build a structured response with image metadata."""
     images = [
@@ -779,6 +842,8 @@ def _build_structured_response(result) -> TestResultStructuredResponse:
         images=images,
         cts=result.cts,
         mts=result.mts,
+        testing_kit_id=result.testing_kit_id,
+        testing_kit=_kit_dict(result.testing_kit) if result.testing_kit_id else None,
     )
 
 
@@ -960,6 +1025,26 @@ def preview_test_result(
         fields_html += '<div class="section"><h3>Test Data</h3>'
         fields_html += render_test_data_structure(test_data)
         fields_html += '</div>'
+
+    # ── Testing Kit Used ────────────────────────────────────────────────────────
+    if result.testing_kit_id and result.testing_kit:
+        kit = result.testing_kit
+        np = kit.nameplate_data or {}
+        kit_type = np.get("kit_subtype") or kit.bay_number or (kit.equipment_type.name if kit.equipment_type else "Testing Kit")
+        kit_loc = kit.department.name if kit.department else "-"
+        fields_html += f'''
+        <div class="section">
+            <h3>Testing Kit Used</h3>
+            <div class="fields">
+                <div class="field"><label>UEIC</label><div class="value">{kit.ueic or "-"}</div></div>
+                <div class="field"><label>Kit Type</label><div class="value">{kit_type}</div></div>
+                <div class="field"><label>Manufacturer</label><div class="value">{kit.manufacturer or "-"}</div></div>
+                <div class="field"><label>Model</label><div class="value">{kit.model_number or "-"}</div></div>
+                <div class="field"><label>Serial No.</label><div class="value">{kit.factory_serial_number or "-"}</div></div>
+                <div class="field"><label>Location</label><div class="value">{kit_loc}</div></div>
+            </div>
+        </div>
+        '''
 
     # Add remarks if present
     if result.remarks:

@@ -7,6 +7,55 @@ from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 
+
+# ==========================================
+# Enums for Tan Delta Test Validation
+# ==========================================
+
+class WindingConfigurationEnum(str, PyEnum):
+    """Valid winding test configurations"""
+    HV_IV = "HV-IV"
+    HV_GND = "HV-GND"
+    IV_LV = "IV-LV"
+    IV_GND = "IV-GND"
+    LV_GND = "LV-GND"
+    HV_LV = "HV-LV"
+    IV_TV = "IV-TV"
+    LV_TV = "LV-TV"
+    TV_GND = "TV-GND"
+    HV_TV = "HV-TV"
+
+
+class BushingTypeEnum(str, PyEnum):
+    """Valid bushing types"""
+    HV_PHASE = "HV-Phase"
+    HV_GROUND = "HV-Ground"
+    HV_NEUTRAL = "HV-Neutral"
+    R_PHASE = "R Phase"
+    Y_PHASE = "Y Phase"
+    B_PHASE = "B Phase"
+    NEUTRAL = "Neutral"
+
+
+class TanDeltaReadingSchema(BaseModel):
+    """Single tan delta reading row in table"""
+    # For Winding Data
+    winding_pair: Optional[str] = None
+    # For Bushing Data  
+    bushing_type: Optional[str] = None
+    
+    # Common fields
+    test_voltage_kv: Optional[float] = None
+    freq_hz: Optional[float] = None
+    current_ma: Optional[float] = None
+    cap_pf: Optional[float] = None
+    tandelta_pct: Optional[float] = None
+    tandelta_temp_corrected: Optional[float] = None
+    
+    class Config:
+        from_attributes = True
+
+
 class CategorySchema(BaseModel):
     id: int
     name: str
@@ -446,9 +495,6 @@ class IdList(BaseModel):
     ids: List[int]
 
 
-
-
-
 class ProductUpdateSchema(BaseModel):
     name: Optional[str] = None
     sku: Optional[str] = None
@@ -582,9 +628,12 @@ class UserResponse(BaseModel):
     phone_confirmed: bool
 
     usertype: Optional[str] = None
+
     organization_id: Optional[str] = None
-    department_id: Optional[str] = None  # User's assigned department
-    default_module_path: Optional[str] = None  # Default module path to navigate on login
+    organization_name: Optional[str] = None   # <-- ADD THIS
+
+    department_id: Optional[str] = None
+    default_module_path: Optional[str] = None
 
     cts: datetime
     mts: datetime
@@ -639,9 +688,6 @@ class RoleResponse(RoleBase):
 
     class Config:
         orm_mode = True
-
-
-
 
 
 class UserRolesBulkCreate(BaseModel):
@@ -858,9 +904,6 @@ class UserDocumentUpdate(BaseModel):
     company_product_id: Optional[int] = None
 
 
-
-
-
 class UserDocumentResponse(UserDocumentBase):
 
     id: UUID
@@ -1056,6 +1099,12 @@ class TestingRequestResponse(BaseModel):
     # Equipment Asset Register
     equipment_id: Optional[UUID] = None
     equipment_ueic: Optional[str] = None  # Computed from equipment relationship
+    bay_number: Optional[str] = None      # Computed from equipment.bay_number
+    serial_in_bay: Optional[str] = None   # Computed from equipment.serial_in_bay
+    voltage_class: Optional[str] = None   # Computed from equipment.voltage_class
+    equipment_make: Optional[str] = None  # Computed from equipment.manufacturer
+    commissioned_year: Optional[str] = None  # Computed from equipment.commissioned_date
+    capacity_mva: Optional[str] = None    # Computed from equipment.rated_mva
 
     # Request category
     request_category: Optional[str] = "test"
@@ -1100,17 +1149,14 @@ class TestingRequestResponse(BaseModel):
     is_cumulative: Optional[bool] = False
     is_calibration: Optional[bool] = False
 
-        # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────
     # Repair Workflow Projection
     # ─────────────────────────────────────────────
-
     repair_workflow_id: Optional[str] = None
-
     repair_current_stage: Optional[str] = None
-
     repair_status: Optional[str] = None
-
     repair_progress: Optional[int] = None
+
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
@@ -1238,6 +1284,9 @@ class TestResultResponse(BaseModel):
     images: List["TestResultImageResponse"] = []
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    testing_kit_id: Optional[UUID] = None
+    testing_kit: Optional[dict] = None  # {ueic, kit_type, manufacturer, model_number, factory_serial_number, department_name, location_label}
+    table_columns: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -1254,7 +1303,9 @@ class TestResultStructuredCreate(BaseModel):
     remarks: Optional[str] = None
     replacement_products: Optional[list] = None
     organization_id: Optional[UUID] = None
-    test_session_id: Optional[UUID] = None  # Link result to specific session
+    test_session_id: Optional[UUID] = None
+    testing_kit_id: Optional[UUID] = None
+    finalize: bool = True  # False = draft save, skips auto-evaluation
 
 class TestResultImageResponse(BaseModel):
     id: UUID
@@ -1285,6 +1336,8 @@ class TestResultStructuredResponse(BaseModel):
     images: List[TestResultImageResponse] = []
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
+    testing_kit_id: Optional[UUID] = None
+    testing_kit: Optional[dict] = None  # {ueic, kit_type, manufacturer, model_number, factory_serial_number, department_name, location_label}
     # Template column definitions per table field — used by Flutter approval/review
     # screens to render table data with correct column order and labels.
     # { "dfr_measurements": [{key, label, type}, ...], "analysis_results": [...] }
@@ -1467,6 +1520,22 @@ class SubmitTestResultsBody(BaseModel):
     test_types: Optional[list] = None           # [{id, name}] — recommended follow-up test types
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# RecommendationResponse
+#
+# IMPORTANT — computed fields from _enrich():
+#   equipment_ueic       — set from rec.testing_request.equipment.ueic
+#   equipment_type_name  — set from rec.testing_request.equipment.equipment_type.name
+#   request_number       — set from rec.testing_request.request_number
+#   request_title        — set from rec.testing_request.title
+#   submitted_by_name    — set from rec.submitter display name
+#   approved_by_name     — set from rec.approver display name
+#
+# These fields are NOT columns on the Recommendation table.  They are
+# attached in-memory by RecommendationService._enrich().  Pydantic must
+# declare them here or it silently drops them during serialisation, causing
+# Flutter to receive null and fall back to "Unknown Equipment Type" / "Unknown UEIC".
+# ──────────────────────────────────────────────────────────────────────────────
 class RecommendationResponse(BaseModel):
     id: UUID
     testing_request_id: UUID
@@ -1477,24 +1546,26 @@ class RecommendationResponse(BaseModel):
     replacement_products: Optional[list] = None
     next_action: Optional[str] = None
     schedule_frequency: Optional[str] = None
-    test_types: Optional[list] = None          # [{id, name}] — recommended follow-up test types
+    test_types: Optional[list] = None
     approval_status: Optional[str] = None
     approved_by: Optional[UUID] = None
-    approved_by_name: Optional[str] = None   # resolved display name
     approved_at: Optional[datetime] = None
     approval_notes: Optional[str] = None
     submitted_by: Optional[UUID] = None
-    submitted_by_name: Optional[str] = None  # resolved display name
     submitted_at: Optional[datetime] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
-    # Enriched from related TR + equipment
-    request_number: Optional[str] = None
-    request_title: Optional[str] = None
-    equipment_ueic: Optional[str] = None
-    equipment_type_name: Optional[str] = None
+
+    # ── Computed by _enrich() — MUST be declared or Pydantic silently drops them ──
+    approved_by_name: Optional[str] = None       # resolved from rec.approver
+    submitted_by_name: Optional[str] = None      # resolved from rec.submitter
+    request_number: Optional[str] = None         # from rec.testing_request.request_number
+    request_title: Optional[str] = None          # from rec.testing_request.title
+    equipment_ueic: Optional[str] = None         # from rec.testing_request.equipment.ueic
+    equipment_type_name: Optional[str] = None    # from rec.testing_request.equipment.equipment_type.name
+                                                 # ↑ THIS was None → caused "Unknown Equipment Type" grouping
 
     class Config:
         from_attributes = True
@@ -1680,12 +1751,16 @@ class OrgRoleUpdate(BaseModel):
     is_org_admin: Optional[bool] = None
     is_dept_admin: Optional[bool] = None
     is_active: Optional[bool] = None
+    default_module_id: Optional[int] = None
 
 class OrgRoleOut(OrgRoleBase):
     id: UUID
     organization_id: UUID
     role_type: str
     is_active: bool
+    default_module_id: Optional[int] = None
+    default_module_path: Optional[str] = None
+    default_module_name: Optional[str] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
@@ -1693,6 +1768,14 @@ class OrgRoleOut(OrgRoleBase):
 
     class Config:
         from_attributes = True
+
+    @classmethod
+    def model_validate(cls, obj, *args, **kwargs):
+        instance = super().model_validate(obj, *args, **kwargs)
+        if hasattr(obj, 'default_module') and obj.default_module:
+            instance.default_module_path = obj.default_module.path
+            instance.default_module_name = obj.default_module.name
+        return instance
 
 
 # ==========================================
@@ -1850,6 +1933,33 @@ class OrgUserWithRoles(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==========================================
+# Bulk User Import Schemas
+# ==========================================
+
+class BulkUserImportRow(BaseModel):
+    email: EmailStr
+    firstname: str
+    lastname: Optional[str] = None
+    phone_number: str
+    employee_id: Optional[str] = None
+    department_name: str
+    role_name: str
+
+class BulkUserImportRowResult(BaseModel):
+    row: int
+    email: str
+    status: str  # "created" | "updated" | "failed"
+    error: Optional[str] = None
+
+class BulkUserImportResponse(BaseModel):
+    total: int
+    created: int
+    updated: int
+    failed: int
+    results: List[BulkUserImportRowResult]
 
 
 # ==========================================
@@ -2316,6 +2426,7 @@ class EquipmentCreate(BaseModel):
     pt_ratio: Optional[str] = None
     vector_group: Optional[str] = None
     impedance_pct: Optional[float] = None
+    scada_tag: Optional[str] = None
     precommission_request_id: Optional[UUID] = None   # optional PCR link on registration
 
 
@@ -2388,7 +2499,7 @@ class EquipmentResponse(BaseModel):
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
     mts: Optional[datetime] = None
-    latitude: Optional[float] = None   
+    latitude: Optional[float] = None
     longitude: Optional[float] = None
 
     class Config:

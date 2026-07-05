@@ -16,6 +16,8 @@ from routers import (
     surveillance_dashboard,
     websocket_routes,
     workflow_dashboard,
+    workflow_config,
+    workflow_config,
 )
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.test_request_schedule_service import TestRequestScheduleService
@@ -102,6 +104,8 @@ from routers import organizations, org_departments, org_users, org_roles
 
 # Equipment Asset Register
 from routers import equipment
+from routers import equipment_type_kit_mappings
+from routers import condition_monitoring_recommendations
 
 # Notification & Alert Engine
 from routers import notifications as notifications_router
@@ -114,6 +118,14 @@ from routers import dashboard_role_kpi
 
 # Reporting Suite
 from routers import reporting as reporting_router
+# Analytics Engine
+from routers import analytics as analytics_router
+from routers import ai_graph as ai_graph_router          # AI Graph Dashboard
+from routers import data_import as data_import_router  # Import Data module
+from routers import scada as scada_router               # SCADA Integration
+from routers import tr_workflow_config as tr_wf_config_router  # TR Configurable Workflow Admin
+from routers import doc_support as doc_support_router          # Document Support Workflow
+from routers import file_upload as file_upload_router          # Generic file upload
 
 # Workflow Engine
 from routers import workflows
@@ -162,6 +174,34 @@ scheduler.add_job(
     trigger="cron",
     minute=0,  # Run at the start of every hour
     id="hourly_elapsed_test_check",
+)
+
+
+# ── SCADA Analytics — runs every hour ────────────────────────────────────────
+def _run_scada_analytics():
+    db = SessionLocal()
+    try:
+        from models import Organization
+        from services.scada_analytics_runner import run_for_organization
+        orgs = db.query(Organization).filter(Organization.is_active == True).all()
+        for org in orgs:
+            try:
+                run_for_organization(db, org.id)
+            except Exception as exc:
+                logger.warning(f"[SCADA Analytics] org={org.id} error={exc}")
+    except Exception as exc:
+        logger.error(f"[SCADA Analytics] scheduler error: {exc}")
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _run_scada_analytics,
+    trigger="cron",
+    minute=30,
+    id="scada_analytics_job",
+    max_instances=1,
+    coalesce=True,
 )
 
 
@@ -1013,6 +1053,8 @@ app.include_router(precommission_router.router)  # Pre-Commission QAP
 
 # Equipment Asset Register
 app.include_router(equipment.router)
+app.include_router(equipment_type_kit_mappings.router)
+app.include_router(condition_monitoring_recommendations.router)
 
 # Notification & Alert Engine
 app.include_router(notifications_router.router)
@@ -1025,6 +1067,12 @@ app.include_router(dashboard_role_kpi.router)
 
 # Reporting Suite
 app.include_router(reporting_router.router)
+# Analytics Engine
+app.include_router(analytics_router.router)
+app.include_router(ai_graph_router.router)   # AI Graph Dashboard
+app.include_router(data_import_router.router)  # Import Data module
+app.include_router(scada_router.router)         # SCADA Integration
+app.include_router(tr_wf_config_router.router)  # TR Configurable Workflow Admin
 
 # Organization Multi-Tenancy
 app.include_router(organizations.router)
@@ -1045,11 +1093,18 @@ app.include_router(surveillance_dashboard.router)
 # Unified Workflow Operations Dashboard
 app.include_router(workflow_dashboard.router)
 
+# Workflow Configuration (super_admin only)
+app.include_router(workflow_config.router)
+
 # WebSocket
 app.include_router(websocket_routes.router)
 
 # ✅ Vendor Directory — fetches vendors from supplier portal
 app.include_router(vendor_directory_router)
+
+# Document Support Workflow
+app.include_router(doc_support_router.router)
+app.include_router(file_upload_router.router)
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")

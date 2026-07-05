@@ -119,8 +119,12 @@ class EvaluationService:
                 if field_type == "number":
                     result = EvaluationService._eval_number_field(field, test_data)
                 elif field_type == "table":
+                    # Try standard table_evaluation first; fall back to
+                    # rule-based THRESHOLD calculated-column evaluation.
                     result = EvaluationService._eval_table_field(field, test_data)
-                elif field_type in ("dropdown", "radio"):
+                    if result is None:
+                        result = EvaluationService._eval_threshold_table(field, test_data)
+                elif field_type in ("dropdown", "radio", "readonly"):
                     result = EvaluationService._eval_dropdown_field(field, test_data)
                 elif field_type == "date":
                     result = EvaluationService._eval_date_field(field, test_data)
@@ -185,9 +189,25 @@ class EvaluationService:
 
     @staticmethod
     def _eval_table_field(field: dict, test_data: dict) -> Optional[dict]:
-        """Evaluate a table field: aggregate rules + per-column evaluation."""
-        ev = field.get("table_evaluation")
-        if not ev or not ev.get("enabled"):
+        """
+        Evaluate a table field using any combination of:
+          • table_evaluation.column_evaluations  — numeric threshold per column
+          • table_evaluation aggregate rules     — aggregate threshold
+          • column_evaluation on column def      — dropdown severity map per column
+                                                   (template-driven, no table_evaluation
+                                                    block required for this path)
+        """
+        ev = field.get("table_evaluation") or {}
+        table_ev_enabled = bool(ev.get("enabled"))
+
+        # Also fire when any column carries a dropdown column_evaluation map
+        has_col_ev = any(
+            col.get("column_evaluation")
+            for col in field.get("columns", [])
+            if col.get("type") in ("dropdown", "radio")
+        )
+
+        if not table_ev_enabled and not has_col_ev:
             return None
 
         key = field.get("key")
@@ -195,35 +215,63 @@ class EvaluationService:
         if not isinstance(table_data, list) or not table_data:
             return None
 
-        # Aggregate evaluation
         agg_status = NORMAL
         agg_result = None
-        if ev.get("aggregate_type") and ev.get("aggregate_column"):
-            agg_status, agg_result = EvaluationService._eval_table_aggregate(
-                table_data, ev
-            )
+        col_results: list[dict] = []
 
-        # Per-column evaluation
-        col_results = []
-        col_evals = ev.get("column_evaluations") or {}
-        for col_key, col_ev in col_evals.items():
-            for row_idx, row in enumerate(table_data):
-                val = row.get(col_key)
-                if val is None:
+        if table_ev_enabled:
+            # Aggregate evaluation
+            if ev.get("aggregate_type") and ev.get("aggregate_column"):
+                agg_status, agg_result = EvaluationService._eval_table_aggregate(
+                    table_data, ev
+                )
+
+            # Numeric per-column evaluation
+            for col_key, col_ev in (ev.get("column_evaluations") or {}).items():
+                for row_idx, row in enumerate(table_data):
+                    val = row.get(col_key)
+                    if val is None:
+                        continue
+                    try:
+                        num_val = float(val)
+                        col_status = EvaluationService._classify_number(num_val, col_ev)
+                        col_results.append({
+                            "column": col_key,
+                            "row": row_idx,
+                            "value": num_val,
+                            "status": col_status,
+                        })
+                        if _STATUS_RANK[col_status] > _STATUS_RANK[agg_status]:
+                            agg_status = col_status
+                    except (ValueError, TypeError):
+                        continue
+
+        # Dropdown per-column evaluation — reads column_evaluation from column defs
+        if has_col_ev:
+            for col in field.get("columns", []):
+                if col.get("type") not in ("dropdown", "radio"):
                     continue
-                try:
-                    num_val = float(val)
-                    col_status = EvaluationService._classify_number(num_val, col_ev)
+                col_ev = col.get("column_evaluation")
+                if not col_ev:
+                    continue
+                col_key = col.get("key")
+                for row_idx, row in enumerate(table_data):
+                    val = row.get(col_key)
+                    if val is None:
+                        continue
+                    col_status = col_ev.get(str(val), NORMAL)
                     col_results.append({
                         "column": col_key,
                         "row": row_idx,
-                        "value": num_val,
+                        "value": val,
                         "status": col_status,
                     })
-                    if _STATUS_RANK[col_status] > _STATUS_RANK[agg_status]:
+                    if _STATUS_RANK.get(col_status, 0) > _STATUS_RANK[agg_status]:
                         agg_status = col_status
-                except (ValueError, TypeError):
-                    continue
+
+        # If no cells were evaluatable (all blank), treat the section as unentered
+        if not col_results and agg_result is None:
+            return None
 
         return {
             "key": key,
@@ -236,6 +284,185 @@ class EvaluationService:
                 if agg_status in (ALERT, CRITICAL) else None,
             "suggested_products": ev.get("suggested_products") or []
                 if agg_status in (ALERT, CRITICAL) else [],
+        }
+
+    @staticmethod
+    def _eval_threshold_table(field: dict, test_data: dict) -> Optional[dict]:
+        """
+        Generic evaluator for table fields whose condition column uses
+        rule.type == "THRESHOLD".
+
+        Algorithm (fully template-driven):
+          1. Find the first column with type="calculated" and rule.type="THRESHOLD".
+          2. Read config: input_field, lookup_fields, thresholds.
+          3. lookup_fields is a list where:
+               - plain strings  → column key in each row  (row-identifier, e.g. "gas")
+               - dicts          → {"field": "$form.<key>", "mapping": {...}}
+                                   resolve $form.<key> from test_data and map through
+                                   the provided mapping to get the sub-key used to
+                                   narrow the threshold table (e.g. standard name,
+                                   voltage band).
+          4. thresholds structure:
+               { row_id: { sub_key: { band_name: [lo, hi], ... }, ... } }
+             OR flat (no sub_key level):
+               { row_id: { band_name: [lo, hi], ... } }
+          5. For each table row: read value from input_field, look up the band,
+             map to NORMAL / ALERT / CRITICAL.
+        """
+        key = field.get("key")
+        table_data = test_data.get(key)
+        if not isinstance(table_data, list) or not table_data:
+            return None
+
+        # 1. Find the THRESHOLD calculated column
+        threshold_col = None
+        for col in field.get("columns", []):
+            rule = col.get("rule") or {}
+            if col.get("type") == "calculated" and rule.get("type") == "THRESHOLD":
+                threshold_col = col
+                break
+        if threshold_col is None:
+            return None
+
+        cfg           = threshold_col["rule"]["config"]
+        input_field   = cfg.get("input_field")
+        lookup_fields = cfg.get("lookup_fields", [])
+        thresholds    = cfg.get("thresholds", {})
+
+        if not input_field or not thresholds:
+            return None
+
+        # 2. Parse lookup_fields:
+        #    - row_id_key:  plain string → key inside each table row
+        #    - sub_key:     resolved from $form.<field> via mapping dict
+        #    - empty list   → global threshold, applies to all rows regardless of row identity
+        row_id_key = None
+        resolved_sub_key: Optional[str] = None
+
+        for lf in lookup_fields:
+            if isinstance(lf, str):
+                if row_id_key is None:
+                    row_id_key = lf
+            elif isinstance(lf, dict):
+                field_ref = lf.get("field", "")          # "$form.dga_standard"
+                mapping   = lf.get("mapping") or {}
+                if field_ref.startswith("$form."):
+                    form_key = field_ref[len("$form."):]  # "dga_standard"
+                    form_val = str(test_data.get(form_key, ""))
+                    resolved_sub_key = mapping.get(form_val)  # e.g. "IS 10593:2017" or "<=72.5kV"
+
+        # When lookup_fields is empty → global threshold; flatten first entry to bands
+        global_bands: Optional[dict] = None
+        if not row_id_key:
+            if not thresholds:
+                return None
+            first_entry = next(iter(thresholds.values()))
+            if isinstance(first_entry, dict):
+                # Could be { band: [lo,hi] } or { sub_key: { band: [lo,hi] } }
+                first_sub = next(iter(first_entry.values()), None)
+                if isinstance(first_sub, list):
+                    global_bands = first_entry   # flat: { band: [lo,hi] }
+                elif isinstance(first_sub, dict):
+                    # two-level: pick first sub-key
+                    global_bands = first_sub
+            if global_bands is None:
+                return None
+
+        # Band name → NORMAL / ALERT / CRITICAL (template bands are free-text)
+        _cond_rank: dict = {
+            "good": 0, "normal": 0, "pass": 0, "ok": 0,
+            "fair": 1, "alert": 1, "warning": 1, "monitor": 1,
+            "poor": 2, "critical": 2, "abnormal": 2, "fail": 2,
+        }
+
+        row_results: list = []
+        worst_rank  = 0
+
+        for row_idx, row in enumerate(table_data):
+            raw_val = row.get(input_field)
+            if raw_val is None:
+                continue
+            try:
+                value = float(raw_val)
+            except (ValueError, TypeError):
+                continue
+
+            if global_bands is not None:
+                # Global-threshold path: same bands apply to every row
+                bands = global_bands
+                row_id = row_idx
+            else:
+                # Per-row lookup path
+                row_id = row.get(row_id_key)
+                if row_id is None:
+                    continue
+
+                # 3. Find threshold entry for this row_id
+                row_thresholds = None
+                for tkey, tval in thresholds.items():
+                    if tkey.lower() == str(row_id).lower():
+                        row_thresholds = tval
+                        break
+                if not row_thresholds:
+                    continue
+
+                # 4. Narrow to sub_key if the threshold is two-level (standard/band)
+                # Detect structure by inspecting the first value:
+                #   flat:      { band_name: [lo, hi] }      → first_val is a list
+                #   two-level: { sub_key: { band: [lo,hi] } } → first_val is a dict
+                first_val = next(iter(row_thresholds.values()), None) if row_thresholds else None
+                if isinstance(first_val, list):
+                    bands = row_thresholds          # flat: { band_name: [lo, hi] }
+                else:
+                    # Two-level: { sub_key: { band_name: [lo, hi] } }
+                    if resolved_sub_key and resolved_sub_key in row_thresholds:
+                        bands = row_thresholds[resolved_sub_key]
+                    else:
+                        # fallback: use first sub_key's bands
+                        bands = first_val if isinstance(first_val, dict) else {}
+
+            # 5. Find which band the value falls into
+            row_status = NORMAL
+            row_breach_limit = None
+            for band_name, band_range in bands.items():
+                if not isinstance(band_range, list) or len(band_range) < 2:
+                    continue
+                lo, hi = band_range[0], band_range[1]
+                if lo is not None and value < lo:
+                    continue
+                if hi is not None and value >= hi:
+                    continue
+                rank = _cond_rank.get(band_name.lower().split()[0], 0)
+                row_status = [NORMAL, ALERT, CRITICAL][min(rank, 2)]
+                # breach_limit: the boundary that was exceeded
+                if rank >= 1:
+                    row_breach_limit = lo  # value fell into this band from below
+                break
+
+            rank = _STATUS_RANK.get(row_status, 0)
+            if rank > worst_rank:
+                worst_rank = rank
+
+            row_results.append({
+                "row_id":       row_id,
+                "value":        value,
+                "unit":         row.get("unit"),
+                "status":       row_status,
+                "breach_limit": row_breach_limit,
+            })
+
+        if not row_results:
+            return None
+
+        overall_status = [NORMAL, ALERT, CRITICAL][worst_rank]
+        return {
+            "key":            key,
+            "label":          field.get("label", key),
+            "type":           "table",
+            "status":         overall_status,
+            "row_results":    row_results,
+            "aggregate_result": None,
+            "column_results": [],
         }
 
     @staticmethod

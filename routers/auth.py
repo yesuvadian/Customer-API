@@ -26,7 +26,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     from sqlalchemy import text
     user_id = result["user"]["id"]
 
-    # Query default_module_path directly from database
+    # Query default_module_path — from org role first, then user's own setting
     query = text("""
         SELECT m.path
         FROM public.org_user_roles our
@@ -39,11 +39,58 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     result_row = db.execute(query, {"user_id": user_id}).fetchone()
     default_module_path = result_row[0] if (result_row and result_row[0]) else None
 
+    # Fallback: System Admin has no org_user_roles entry — use the is_system_admin org role's default module
+    if not default_module_path:
+        fallback_query = text("""
+            SELECT m.path
+            FROM public.org_roles oroles
+            LEFT JOIN public.modules m ON oroles.default_module_id = m.id
+            WHERE oroles.role_type = 'system' AND oroles.is_active = true
+            LIMIT 1
+        """)
+        fallback_row = db.execute(fallback_query).fetchone()
+        default_module_path = fallback_row[0] if (fallback_row and fallback_row[0]) else None
+
     print(f"[DEBUG] user_id: {user_id}")
     print(f"[DEBUG] default_module_path: {default_module_path}")
 
     result["user"]["default_module_path"] = default_module_path
     return result
+
+
+@router.get("/me")
+def get_me(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return fresh user profile including department_id (no re-login needed)."""
+    from models import OrgUserRole
+    roles = db.query(OrgUserRole).filter(
+        OrgUserRole.user_id == current_user.id,
+        OrgUserRole.is_active == True,
+    ).all()
+    role_names = [r.org_role.name for r in roles if r.org_role]
+    primary_dept_id = None
+    if roles:
+        primary_dept_id = roles[0].department_id
+    if primary_dept_id is None and getattr(current_user, 'department_id', None):
+        primary_dept_id = current_user.department_id
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "firstname": current_user.firstname,
+        "lastname": current_user.lastname,
+        "phone_number": current_user.phone_number,
+        "is_active": current_user.isactive,
+        "email_confirmed": current_user.email_confirmed,
+        "phone_confirmed": current_user.phone_confirmed,
+        "usertype": current_user.usertype,
+        "organization_id": str(current_user.organization_id) if current_user.organization_id else None,
+        "department_id": str(primary_dept_id) if primary_dept_id else None,
+        "roles": role_names,
+        "cts": current_user.cts,
+        "mts": current_user.mts,
+    }
 
 
 @router.get("/privileges")

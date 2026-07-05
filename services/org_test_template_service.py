@@ -8,9 +8,18 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from models import CategoryDetails, OrgTestTemplate
+
+
+def active_template_filter():
+    """SQLAlchemy filter clause: keep templates where is_active is missing or true."""
+    return or_(
+        ~OrgTestTemplate.template_data.has_key("is_active"),  # noqa: W601
+        OrgTestTemplate.template_data["is_active"].astext == "true",
+    )
 
 
 class OrgTestTemplateService:
@@ -26,14 +35,36 @@ class OrgTestTemplateService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
         return tmpl
 
-    def list_templates(self, org_id: Optional[UUID] = None) -> List[OrgTestTemplate]:
-        """List global defaults (org_id=None) or org-specific rows."""
+    @staticmethod
+    def _is_active(tpl: OrgTestTemplate) -> bool:
+        """Return False only when is_active is explicitly set to false in template_data."""
+        td = tpl.template_data
+        if not isinstance(td, dict):
+            return True
+        return td.get("is_active", True) is not False
+
+    def list_templates(self, org_id: Optional[UUID] = None, active_only: bool = False) -> List[OrgTestTemplate]:
+        """List global defaults (org_id=None) or org-specific rows.
+        Deduplicates by template_key — keeps the most recently updated row
+        when the same key was accidentally provisioned twice.
+        """
         q = self.db.query(OrgTestTemplate)
         if org_id is None:
             q = q.filter(OrgTestTemplate.org_id == None)  # noqa: E711
         else:
             q = q.filter(OrgTestTemplate.org_id == org_id)
-        return q.order_by(OrgTestTemplate.template_key).all()
+        if active_only:
+            q = q.filter(active_template_filter())
+        rows = q.order_by(OrgTestTemplate.template_key, OrgTestTemplate.version.desc()).all()
+        # Deduplicate: keep first (highest version) occurrence per key
+        seen_keys: set = set()
+        unique = []
+        for r in rows:
+            if r.template_key in seen_keys:
+                continue
+            seen_keys.add(r.template_key)
+            unique.append(r)
+        return unique
 
     OVERALL_KEY = "overall_assessment"
 
@@ -101,7 +132,7 @@ class OrgTestTemplateService:
             detail=f"No template found for test_type_id={test_type_id}",
         )
 
-    def get_by_template_key(self, template_key: str) -> OrgTestTemplate:
+    def get_by_template_key(self, template_key: str, respect_active: bool = True) -> OrgTestTemplate:
         """Lookup an org template by its template_key (any org or global)."""
         tmpl = (
             self.db.query(OrgTestTemplate)
@@ -109,6 +140,11 @@ class OrgTestTemplateService:
             .first()
         )
         if tmpl:
+            if respect_active and not self._is_active(tmpl):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Template '{template_key}' is disabled. Enable it in the Template Designer to use it.",
+                )
             return tmpl
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -391,11 +427,13 @@ class OrgTestTemplateService:
                 .all()
             )
             for detail in details:
+                # Check by template_key first — avoid duplicate global rows when
+                # the same activity name exists under multiple equipment masters
                 existing = (
                     self.db.query(OrgTestTemplate)
                     .filter(
                         OrgTestTemplate.org_id == None,  # noqa: E711
-                        OrgTestTemplate.test_type_id == detail.id,
+                        OrgTestTemplate.template_key == template_key,
                     )
                     .first()
                 )

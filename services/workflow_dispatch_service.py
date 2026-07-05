@@ -120,7 +120,8 @@ class WorkflowDispatchService:
 
         elif action == NextActionType.test:
             numbers = self._create_schedules_for_action(
-                tr, rec, approver_id, category=RequestCategory.test
+                tr, rec, approver_id, category=RequestCategory.test,
+                force_immediate_ticket=True,
             )
             tr.status = TestingRequestStatus.outcome_active
             tr.completed_at = datetime.now(timezone.utc)

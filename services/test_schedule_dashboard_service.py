@@ -136,6 +136,13 @@ class TestScheduleDashboardService:
 
         eq_ids = [e.id for e in equipments]
 
+        # 2b. Equipment type name map
+        type_ids = list({e.equipment_type_id for e in equipments if e.equipment_type_id})
+        type_name_map: dict = {}
+        if type_ids:
+            type_rows = self.db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
+            type_name_map = {r.id: r.name for r in type_rows}
+
         # 3. All operational schedules for these equipment
         schedules = (
             self.db.query(TestRequestSchedule)
@@ -149,10 +156,14 @@ class TestScheduleDashboardService:
 
         # Index: equipment_id → {test_type_id → schedule}
         sched_idx: dict[UUID, dict[int, TestRequestSchedule]] = {}
+        # Index: equipment_id → list of frequency values
+        freq_idx: dict[UUID, list[str]] = {}
         test_type_ids_ordered: list[int] = []
         _seen_tt: set[int] = set()
         for s in schedules:
             sched_idx.setdefault(s.equipment_id, {})[s.test_type_id] = s
+            if s.frequency:
+                freq_idx.setdefault(s.equipment_id, []).append(s.frequency.value)
             if s.test_type_id not in _seen_tt:
                 test_type_ids_ordered.append(s.test_type_id)
                 _seen_tt.add(s.test_type_id)
@@ -176,10 +187,12 @@ class TestScheduleDashboardService:
         # 5. Batch: last completed TestingRequest per (equipment_id, test_type_id)
         last_completed = self._batch_last_completed(eq_ids, test_type_ids_ordered)
 
-        # 6. Build rows
+        # 6. Build rows — only equipment that have at least one schedule
         rows = []
         for eq in equipments:
             eq_scheds = sched_idx.get(eq.id, {})
+            if not eq_scheds:
+                continue
             cells: dict[str, dict] = {}
             worst_status = "na"
 
@@ -220,16 +233,21 @@ class TestScheduleDashboardService:
                 }
 
             health = _health_index(cells)
+            # Dominant frequency: most common among this equipment's schedules
+            freqs = freq_idx.get(eq.id, [])
+            dominant_freq = max(set(freqs), key=freqs.count) if freqs else None
             rows.append({
-                "equipment_id":  str(eq.id),
-                "ueic":          eq.ueic,
-                "voltage_class": eq.voltage_class,
-                "manufacturer":  eq.manufacturer,
-                "year_of_manufacture": eq.year_of_manufacture,
-                "model_number":  eq.model_number,
-                "overall_status": _OVERALL_LABEL[worst_status],
-                "health_index":  health,
-                "cells":         cells,
+                "equipment_id":       str(eq.id),
+                "ueic":               eq.ueic,
+                "voltage_class":      eq.voltage_class,
+                "manufacturer":       eq.manufacturer,
+                "year_of_manufacture":eq.year_of_manufacture,
+                "model_number":       eq.model_number,
+                "overall_status":     _OVERALL_LABEL[worst_status],
+                "health_index":       health,
+                "cells":              cells,
+                "equipment_type_name": type_name_map.get(eq.equipment_type_id, "Unknown") if eq.equipment_type_id else "Unknown",
+                "dominant_frequency":  dominant_freq,
             })
 
         # 7. KPIs
@@ -368,17 +386,27 @@ class TestScheduleDashboardService:
 
     def get_filter_options(self, org_id: UUID) -> dict:
         """
-        Returns equipment types and voltage classes available
-        for the organisation (drives the filter dropdowns).
+        Returns equipment types, voltage classes, and departments with
+        equipment/schedule counts — drives the compliance tab filter UI.
         """
-        # Equipment types that have operational schedules in this org
+        # Equipment types that have active equipment in this org
         eq_types = (
             self.db.query(CategoryMaster)
             .join(Equipment, Equipment.equipment_type_id == CategoryMaster.id)
             .filter(Equipment.organization_id == org_id, Equipment.status == "active")
             .distinct()
+            .order_by(CategoryMaster.name)
             .all()
         )
+
+        # Equipment count per equipment type
+        type_count_rows = (
+            self.db.query(Equipment.equipment_type_id, func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id, Equipment.status == "active")
+            .group_by(Equipment.equipment_type_id)
+            .all()
+        )
+        type_counts = {row[0]: row[1] for row in type_count_rows}
 
         # Voltage classes present for this org
         vc_rows = (
@@ -393,7 +421,7 @@ class TestScheduleDashboardService:
             .all()
         )
 
-        # Departments (substations) for this org
+        # Departments (leaf substations) for this org
         depts = (
             self.db.query(OrgDepartment)
             .filter(OrgDepartment.organization_id == org_id, OrgDepartment.is_active == True)
@@ -401,10 +429,92 @@ class TestScheduleDashboardService:
             .all()
         )
 
+        # Equipment count per department (direct + descendants via subtree)
+        dept_eq_counts: dict = {}
+        eq_dept_rows = (
+            self.db.query(Equipment.department_id, func.count(Equipment.id))
+            .filter(Equipment.organization_id == org_id, Equipment.status == "active",
+                    Equipment.department_id.isnot(None))
+            .group_by(Equipment.department_id)
+            .all()
+        )
+        for dept_id, cnt in eq_dept_rows:
+            dept_eq_counts[dept_id] = cnt
+
+        # Schedule count per department — org-level (equipment_id IS NULL)
+        dept_sched_counts: dict = {}
+        sched_dept_rows = (
+            self.db.query(TestRequestSchedule.department_id, func.count(TestRequestSchedule.id))
+            .filter(
+                TestRequestSchedule.organization_id == org_id,
+                TestRequestSchedule.equipment_id.is_(None),
+                TestRequestSchedule.is_active == True,
+                TestRequestSchedule.is_deleted == False,
+                TestRequestSchedule.department_id.isnot(None),
+            )
+            .group_by(TestRequestSchedule.department_id)
+            .all()
+        )
+        for dept_id, cnt in sched_dept_rows:
+            dept_sched_counts[dept_id] = cnt
+
+        # Schedule count per department — equipment-linked (via equipment.department_id)
+        eq_sched_dept_rows = (
+            self.db.query(Equipment.department_id, func.count(TestRequestSchedule.id))
+            .join(TestRequestSchedule, TestRequestSchedule.equipment_id == Equipment.id)
+            .filter(
+                TestRequestSchedule.organization_id == org_id,
+                TestRequestSchedule.is_active == True,
+                TestRequestSchedule.is_deleted == False,
+                Equipment.department_id.isnot(None),
+            )
+            .group_by(Equipment.department_id)
+            .all()
+        )
+        for dept_id, cnt in eq_sched_dept_rows:
+            dept_sched_counts[dept_id] = dept_sched_counts.get(dept_id, 0) + cnt
+
+        # Build parent lookup {str(id): str(parent_id)}
+        parent_map: dict = {}
+        for d in depts:
+            if d.parent_department_id:
+                parent_map[str(d.id)] = str(d.parent_department_id)
+
+        # Propagate schedule counts up to all ancestors (string-keyed)
+        str_sched_counts = {str(k): v for k, v in dept_sched_counts.items()}
+        for dept_id_str, cnt in list(str_sched_counts.items()):
+            pid = parent_map.get(dept_id_str)
+            while pid:
+                str_sched_counts[pid] = str_sched_counts.get(pid, 0) + cnt
+                pid = parent_map.get(pid)
+        dept_sched_counts = str_sched_counts
+
+        # Only include departments that have equipment OR org-level schedules
+        dept_list = []
+        for d in depts:
+            eq_cnt    = dept_eq_counts.get(d.id, 0)
+            sched_cnt = dept_sched_counts.get(str(d.id), 0)
+            if sched_cnt > 0:
+                parent_id_str = parent_map.get(str(d.id))
+                dept_list.append({
+                    "id":              str(d.id),
+                    "name":            d.name,
+                    "equipment_count": eq_cnt,
+                    "schedule_count":  sched_cnt,
+                    "parent_id":       parent_id_str,
+                    "parent_name":     None,
+                })
+
+        # Sort departments by equipment count descending
+        dept_list.sort(key=lambda x: x["equipment_count"], reverse=True)
+
         return {
-            "equipment_types": [{"id": e.id, "name": e.name} for e in eq_types],
-            "voltage_classes":  [r[0] for r in vc_rows if r[0]],
-            "departments":      [{"id": str(d.id), "name": d.name} for d in depts],
+            "equipment_types": [
+                {"id": str(e.id), "name": e.name, "equipment_count": type_counts.get(e.id, 0)}
+                for e in eq_types
+            ],
+            "voltage_classes": [r[0] for r in vc_rows if r[0]],
+            "departments":     dept_list,
         }
 
     # ─────────────────────────────────────────────────────────────

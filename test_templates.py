@@ -17,6 +17,50 @@ Multi-session support:
 - typical_total_sessions: Typical number of sessions for this test type
 """
 
+# ─── Shared evaluation severity maps (referenced by field/column definitions) ────
+# Template-driven: the code reads these from column_evaluation / dropdown_evaluation.
+# No test-type knowledge in evaluation_service.py — severity comes entirely from here.
+
+_EV_PF     = {"Pass": "NORMAL", "Fail": "CRITICAL"}
+_EV_PFNA   = {"Pass": "NORMAL", "Fail": "CRITICAL", "N/A": "NORMAL"}
+_EV_PFNT   = {"Pass": "NORMAL", "Fail": "CRITICAL", "Not Tested": "NORMAL"}
+_EV_PFCR   = {"Pass": "NORMAL", "Fail": "CRITICAL", "Conditional": "ALERT", "Retest": "ALERT"}
+_EV_PFC    = {"Pass": "NORMAL", "Fail": "CRITICAL", "Conditional": "ALERT"}
+_EV_PFM    = {"Pass": "NORMAL", "Fail": "CRITICAL", "Monitor": "ALERT", "Marginal": "ALERT"}
+_EV_PFTP   = {"Pass": "NORMAL", "Fail": "CRITICAL", "Topped Up - Pass": "NORMAL"}
+_EV_PFGR   = {"Pass": "NORMAL", "Fail": "CRITICAL", "Gas Replaced - Pass": "NORMAL"}
+_EV_PAF    = {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}
+_EV_PCF    = {"PASS": "NORMAL", "CONDITIONAL": "ALERT", "FAIL": "CRITICAL"}
+_EV_NAC    = {
+    "Normal": "NORMAL", "Alert": "ALERT",
+    "Critical": "CRITICAL", "Critical / Abnormal": "CRITICAL", "Abnormal": "CRITICAL",
+}
+_EV_NHC    = {"Normal": "NORMAL", "High": "ALERT", "Low": "ALERT",
+              "Critical": "CRITICAL", "Critical Low": "CRITICAL"}
+_EV_GFP    = {"Good": "NORMAL", "Fair": "ALERT", "Poor": "CRITICAL", "Damaged": "CRITICAL"}
+_EV_SAT    = {
+    "Satisfactory": "NORMAL",
+    "Satisfactory with Observations": "ALERT",
+    "Unsatisfactory": "CRITICAL",
+    "Unsatisfactory — Rework Required": "CRITICAL",
+    "Action Required": "CRITICAL",
+}
+_EV_TRIP   = {"Trip": "NORMAL", "No Trip": "CRITICAL",
+              "Stable (No Trip)": "NORMAL", "Unstable (Tripped)": "CRITICAL"}
+_EV_COMPLY = {"Compliant": "NORMAL", "Partial": "ALERT", "Non-Compliant": "CRITICAL"}
+_EV_SFRA_ASSESS = {
+    "Normal": "NORMAL", "Slight Deviation": "ALERT",
+    "Marginal": "ALERT", "Abnormal": "CRITICAL",
+}
+_EV_MOISTURE = {
+    "As new": "NORMAL", "Dry": "NORMAL",
+    "Moderately Wet": "ALERT", "Wet": "CRITICAL", "Very Wet": "CRITICAL",
+}
+_EV_OIL_COND = {
+    "As new": "NORMAL", "Acceptable": "NORMAL", "Poor": "ALERT", "Bad": "CRITICAL",
+}
+
+
 TEST_TEMPLATES = {
     # ────────────────────────────────────────────────────────────
     # 1. Relay Testing Report (Feeder protection relays)
@@ -49,7 +93,7 @@ TEST_TEMPLATES = {
                     {"key": "oc_phase_tms", "label": "TMS Setting", "type": "number", "required": True},
                     {"key": "oc_phase_curve", "label": "Curve Type", "type": "dropdown", "options": ["Normal Inverse", "Very Inverse", "Extremely Inverse", "Definite Time"], "required": True},
                     {"key": "oc_phase_operating_time", "label": "Operating Time at 2x", "type": "number", "unit": "sec"},
-                    {"key": "oc_phase_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True},
+                    {"key": "oc_phase_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                 ]
             },
             {
@@ -59,7 +103,7 @@ TEST_TEMPLATES = {
                     {"key": "ef_pickup_actual", "label": "EF Pickup Current (Actual)", "type": "number", "unit": "A", "required": True},
                     {"key": "ef_tms", "label": "EF TMS Setting", "type": "number"},
                     {"key": "ef_operating_time", "label": "EF Operating Time", "type": "number", "unit": "sec"},
-                    {"key": "ef_result", "label": "EF Test Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True},
+                    {"key": "ef_result", "label": "EF Test Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                 ]
             },
             {
@@ -74,7 +118,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks / Observations", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -121,8 +165,8 @@ TEST_TEMPLATES = {
                             {"key": "hv_current", "label": "HV Current (A)", "type": "number"},
                             {"key": "lv_current", "label": "LV Current (A)", "type": "number"},
                             {"key": "diff_current", "label": "Diff Current (A)", "type": "number"},
-                            {"key": "relay_operation", "label": "Relay Op.", "type": "dropdown", "options": ["Trip", "No Trip"]},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "relay_operation", "label": "Relay Op.", "type": "dropdown", "options": ["Trip", "No Trip"], "column_evaluation": _EV_TRIP},
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -138,7 +182,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -175,7 +219,7 @@ TEST_TEMPLATES = {
                             {"key": "diff_current_pickup", "label": "Diff Pickup (A)", "type": "number"},
                             {"key": "expected_pickup", "label": "Expected Pickup (A)", "type": "number"},
                             {"key": "deviation", "label": "Deviation (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -192,7 +236,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -229,7 +273,7 @@ TEST_TEMPLATES = {
                             {"key": "set_value", "label": "Set Value", "type": "text"},
                             {"key": "measured_value", "label": "Measured Value", "type": "text"},
                             {"key": "tolerance", "label": "Tolerance (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -248,7 +292,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -293,7 +337,7 @@ TEST_TEMPLATES = {
                                 "type": "calculated",
                                 "formula": "ratio(ir_value_10min, ir_value_1min)"
                             },
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ],
                         "column_summaries": {
                             "ir_value_1min": "avg",
@@ -308,7 +352,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "min_acceptable_ir", "label": "Min Acceptable IR", "type": "number", "unit": "MOhm"},
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -346,7 +390,7 @@ TEST_TEMPLATES = {
                             {"key": "secondary_current", "label": "Secondary (A)", "type": "number"},
                             {"key": "measured_ratio", "label": "Measured Ratio", "type": "number"},
                             {"key": "error_percent", "label": "Error (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -362,7 +406,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -398,7 +442,7 @@ TEST_TEMPLATES = {
                             {"key": "core_id", "label": "Core ID", "type": "text"},
                             {"key": "test_voltage", "label": "Test Voltage (V)", "type": "number"},
                             {"key": "ir_value", "label": "IR Value (MOhm)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -407,7 +451,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -444,7 +488,7 @@ TEST_TEMPLATES = {
                             {"key": "relay_make_model", "label": "Relay Make/Model", "type": "text"},
                             {"key": "setting_verified", "label": "Setting Verified", "type": "dropdown", "options": ["Yes", "No"]},
                             {"key": "trip_test_ok", "label": "Trip Test OK", "type": "dropdown", "options": ["Yes", "No"]},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -463,7 +507,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -504,7 +548,7 @@ TEST_TEMPLATES = {
                             {"key": "reference_reading", "label": "Ref Reading", "type": "number"},
                             {"key": "meter_reading", "label": "Meter Reading", "type": "number"},
                             {"key": "error_percent", "label": "Error (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -513,7 +557,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -549,11 +593,11 @@ TEST_TEMPLATES = {
             {
                 "title": "External Condition",
                 "fields": [
-                    {"key": "body_condition", "label": "Body/Tank Condition", "type": "dropdown", "options": ["Good", "Fair", "Poor", "Damaged"], "required": True},
+                    {"key": "body_condition", "label": "Body/Tank Condition", "type": "dropdown", "options": ["Good", "Fair", "Poor", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_GFP}},
                     {"key": "paint_condition", "label": "Paint Condition", "type": "dropdown", "options": ["Good", "Faded", "Peeling", "Rusted"], "required": True},
                     {"key": "oil_leak", "label": "Oil Leakage Observed", "type": "boolean", "required": True},
                     {"key": "oil_leak_location", "label": "Leakage Location", "type": "text"},
-                    {"key": "oil_level", "label": "Oil Level", "type": "dropdown", "options": ["Normal", "Low", "Very Low", "Empty"], "required": True},
+                    {"key": "oil_level", "label": "Oil Level", "type": "dropdown", "options": ["Normal", "Low", "Very Low", "Empty"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Normal": "NORMAL", "Low": "ALERT", "Very Low": "CRITICAL", "Empty": "CRITICAL"}}},
                     {"key": "oil_color", "label": "Oil Color", "type": "dropdown", "options": ["Clear", "Light Yellow", "Dark Yellow", "Brown", "Black"]},
                     {"key": "silica_gel_condition", "label": "Silica Gel Condition", "type": "dropdown", "options": ["Blue (Good)", "Pink (Saturated)", "Not Available"]},
                 ]
@@ -561,9 +605,9 @@ TEST_TEMPLATES = {
             {
                 "title": "Bushings & Connections",
                 "fields": [
-                    {"key": "hv_bushing_condition", "label": "HV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True},
-                    {"key": "lv_bushing_condition", "label": "LV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True},
-                    {"key": "terminal_connections", "label": "Terminal Connections", "type": "dropdown", "options": ["Tight", "Loose", "Corroded"], "required": True},
+                    {"key": "hv_bushing_condition", "label": "HV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Cracked": "ALERT", "Chipped": "ALERT", "Damaged": "CRITICAL"}}},
+                    {"key": "lv_bushing_condition", "label": "LV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Cracked": "ALERT", "Chipped": "ALERT", "Damaged": "CRITICAL"}}},
+                    {"key": "terminal_connections", "label": "Terminal Connections", "type": "dropdown", "options": ["Tight", "Loose", "Corroded"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Tight": "NORMAL", "Loose": "ALERT", "Corroded": "CRITICAL"}}},
                     {"key": "earthing_ok", "label": "Earthing Proper", "type": "boolean", "required": True},
                 ]
             },
@@ -581,7 +625,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks / Observations", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -623,7 +667,7 @@ TEST_TEMPLATES = {
                             {"key": "phase_b", "label": "Phase B", "type": "number"},
                             {"key": "expected_ratio", "label": "Expected", "type": "number"},
                             {"key": "deviation_percent", "label": "Dev (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -633,7 +677,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "max_deviation", "label": "Max Deviation", "type": "number", "unit": "%"},
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -671,7 +715,7 @@ TEST_TEMPLATES = {
                             {"key": "secondary_current", "label": "Secondary (A)", "type": "number"},
                             {"key": "measured_ratio", "label": "Ratio", "type": "number"},
                             {"key": "error_percent", "label": "Error (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -680,7 +724,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -737,7 +781,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -790,7 +834,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -828,7 +872,7 @@ TEST_TEMPLATES = {
                             {"key": "voltage_phase_2", "label": "V Phase 2 (V)", "type": "number"},
                             {"key": "voltage_phase_3", "label": "V Phase 3 (V)", "type": "number"},
                             {"key": "balance_ratio", "label": "Balance (%)", "type": "number"},
-                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"]}
+                            {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
                 ]
@@ -838,7 +882,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "max_imbalance", "label": "Max Imbalance", "type": "number", "unit": "%"},
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
                 ]
             }
         ]
@@ -1915,8 +1959,8 @@ TEST_TEMPLATES = {
                     {"key": "earth_connections_applied",   "label": "Earth connections applied before commencing work",     "type": "checkbox", "required": True},
                     {"key": "general_cleaning_done",       "label": "General cleaning and housekeeping completed",          "type": "checkbox", "required": True},
                     {"key": "lubrication_done",            "label": "Lubrication of mechanical moving parts done",          "type": "checkbox", "required": True},
-                    {"key": "open_close_trip_check",       "label": "Operational check – open / close / trip operations",   "type": "dropdown", "required": True,  "options": ["Pass", "Fail", "N/A"]},
-                    {"key": "alignment_check",             "label": "Alignment checks (isolators, CB mechanism)",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "N/A"]},
+                    {"key": "open_close_trip_check",       "label": "Operational check – open / close / trip operations",   "type": "dropdown", "required": True,  "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "alignment_check",             "label": "Alignment checks (isolators, CB mechanism)",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "indicators_lamps_ok",         "label": "Local / remote indicators and status lamps healthy",   "type": "checkbox", "required": True},
                     {"key": "annunciation_panel_ok",       "label": "Annunciation panel – all alarms healthy",              "type": "checkbox", "required": True},
                     {"key": "pressure_gauges_ok",          "label": "Pressure gauges reading normal",                       "type": "checkbox", "required": True},
@@ -1960,8 +2004,8 @@ TEST_TEMPLATES = {
                     {"key": "oltc_count_at_overhaul",    "label": "Cumulative OLTC operations at overhaul",     "type": "number",   "required": False},
                     {"key": "oltc_overhaul_scope",       "label": "Scope of OLTC overhaul",                     "type": "textarea", "required": False},
                     {"key": "oltc_parts_replaced",       "label": "Parts replaced during OLTC overhaul",        "type": "textarea", "required": False},
-                    {"key": "oltc_test_result_before",   "label": "OLTC test result before overhaul",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"]},
-                    {"key": "oltc_test_result_after",    "label": "OLTC test result after overhaul",            "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"]},
+                    {"key": "oltc_test_result_before",   "label": "OLTC test result before overhaul",           "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNT}},
+                    {"key": "oltc_test_result_after",    "label": "OLTC test result after overhaul",            "type": "dropdown", "required": False, "options": ["Pass", "Fail", "Not Tested"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNT}},
                     {"key": "active_part_drying_done",   "label": "Active part drying performed",               "type": "checkbox", "required": False},
                     {"key": "drying_method",             "label": "Drying Method",                              "type": "dropdown", "required": False, "options": ["Vapour Phase Drying", "Hot Air Circulation", "Oven Drying", "Other"]},
                     {"key": "drying_duration_hrs",       "label": "Drying Duration",                            "type": "number",   "required": False, "unit": "hours"},
@@ -1995,7 +2039,7 @@ TEST_TEMPLATES = {
                     {"key": "pi_ratio",                  "label": "Polarisation Index (PI)",          "type": "number",   "required": False},
                     {"key": "winding_resistance_hv_ohm", "label": "Winding Resistance — HV Phase",   "type": "number",   "required": False, "unit": "Ohm"},
                     {"key": "winding_resistance_lv_ohm", "label": "Winding Resistance — LV Phase",   "type": "number",   "required": False, "unit": "Ohm"},
-                    {"key": "ir_test_result",            "label": "IR Test Overall Result",           "type": "dropdown", "required": False, "options": ["Normal", "Alert", "Critical / Abnormal"]},
+                    {"key": "ir_test_result",            "label": "IR Test Overall Result",           "type": "dropdown", "required": False, "options": ["Normal", "Alert", "Critical / Abnormal"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_NAC}},
                 ],
             },
             # ── SRS §4.1.1: Post-Maintenance Verification ──
@@ -2008,7 +2052,7 @@ TEST_TEMPLATES = {
                     {"key": "ptw_closed",                "label": "Permit to Work closed",                      "type": "checkbox", "required": True},
                     {"key": "next_maintenance_due",      "label": "Next Maintenance Due Date",                  "type": "date",     "required": False},
                     {"key": "ad_hoc_maintenance_desc",   "label": "Any other ad-hoc maintenance (description)", "type": "textarea", "required": False},
-                    {"key": "post_maintenance_status",   "label": "Post-Maintenance Overall Status",            "type": "dropdown", "required": True, "options": ["All Healthy", "Punch Points Pending", "Deficiency — Action Required"]},
+                    {"key": "post_maintenance_status",   "label": "Post-Maintenance Overall Status",            "type": "dropdown", "required": True, "options": ["All Healthy", "Punch Points Pending", "Deficiency — Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": {"All Healthy": "NORMAL", "Punch Points Pending": "ALERT", "Deficiency — Action Required": "CRITICAL"}}},
                     {"key": "punch_points",              "label": "Open Punch Points (with target closure date)","type": "textarea", "required": False},
                     {"key": "responsible_officer",       "label": "Responsible Officer Sign-off",               "type": "text",     "required": True},
                 ],
@@ -2320,7 +2364,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Protection Relay",
         "description": "Calibration record for protection relays — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
         "enable_calibration": True,
-        "multi_session": True,
+        "multi_session": False,
         "sections": [
             {
                 "title": "Relay Identification",
@@ -2350,7 +2394,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "calibration_date",    "label": "Calibration Date",                  "type": "date",     "required": True},
                     {"key": "validity_months",     "label": "Validity (Months)",                 "type": "number",   "required": True,  "unit": "months"},
-                    {"key": "overall_result",      "label": "Calibration Result",                "type": "dropdown", "required": True,  "options": ["Pass", "Fail"]},
                     {"key": "calibrated_by",       "label": "Calibrated By (Agency / Lab)",      "type": "text",     "required": False},
                     {"key": "certificate_number",  "label": "Certificate Number",                "type": "text",     "required": False},
                     {"key": "next_calibration_due","label": "Next Calibration Due (computed)",   "type": "calculated", "formula": "date_add(calibration_date, validity_months)", "required": False, "read_only": True},
@@ -2364,10 +2407,10 @@ TEST_TEMPLATES = {
                 "type": "DATE_ADD",
                 "config": {
                     "validity_field": "validity_months",
-                    "result_field": "overall_result",
+                    "result_field": "recommendation_type",
                     "order_by": "calibration_date",
                     "group_by": "equipment_id",
-                    "requires_multi_session": True,
+                    "requires_multi_session": False,
                 },
             }
         ],
@@ -2383,7 +2426,7 @@ TEST_TEMPLATES = {
         "equipment_type": "Electronic Tri-vector Meter",
         "description": "Calibration record for electronic tri-vector meters — DATE_ADD rule, pre-due scheduling, FAIL → repair trigger.",
         "enable_calibration": True,
-        "multi_session": True,
+        "multi_session": False,
         "sections": [
             {
                 "title": "Meter Identification",
@@ -2417,7 +2460,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "calibration_date",   "label": "Calibration Date",                 "type": "date",     "required": True},
                     {"key": "validity_months",    "label": "Validity (Months)",                "type": "number",   "required": True,  "unit": "months"},
-                    {"key": "overall_result",     "label": "Calibration Result",               "type": "dropdown", "required": True,  "options": ["Pass", "Fail"]},
                     {"key": "calibrated_by",      "label": "Calibrated By (Agency / Lab)",     "type": "text",     "required": False},
                     {"key": "certificate_number", "label": "Certificate Number",               "type": "text",     "required": False},
                     {"key": "next_calibration_due","label": "Next Calibration Due (computed)", "type": "calculated", "formula": "date_add(calibration_date, validity_months)", "required": False, "read_only": True},
@@ -2431,10 +2473,10 @@ TEST_TEMPLATES = {
                 "type": "DATE_ADD",
                 "config": {
                     "validity_field": "validity_months",
-                    "result_field": "overall_result",
+                    "result_field": "recommendation_type",
                     "order_by": "calibration_date",
                     "group_by": "equipment_id",
-                    "requires_multi_session": True,
+                    "requires_multi_session": False,
                 },
             }
         ],
@@ -2465,7 +2507,16 @@ TEST_TEMPLATES = {
             {
                 "title": "Operations Reading",
                 "fields": [
-                    {"key": "reading",       "label": "Operations Counter Reading", "type": "number", "required": True,  "unit": "ops"},
+                    {"key": "reading",       "label": "Operations Counter Reading", "type": "number", "required": True,  "unit": "ops",
+                     "evaluation": {
+                         "type": "THRESHOLD",
+                         "weight": 2.0,
+                         "thresholds": [
+                             {"max": 1400,  "status": "Pass",    "label": "Within safe range"},
+                             {"max": 1800,  "status": "Warning", "label": "Approaching overhaul threshold"},
+                             {"max": 2000,  "status": "Fail",    "label": "At or beyond overhaul threshold"},
+                         ],
+                     }},
                     {"key": "reading_date",  "label": "Reading Date",              "type": "date",   "required": True},
                     {"key": "reading_by",    "label": "Recorded By",               "type": "text",   "required": False},
                     {"key": "notes",         "label": "Notes / Observations",      "type": "textarea","required": False},
@@ -2513,7 +2564,16 @@ TEST_TEMPLATES = {
             {
                 "title": "Operations Reading",
                 "fields": [
-                    {"key": "reading",       "label": "Tap-Change Counter Reading", "type": "number", "required": True,  "unit": "ops"},
+                    {"key": "reading",       "label": "Tap-Change Counter Reading", "type": "number", "required": True,  "unit": "ops",
+                     "evaluation": {
+                         "type": "THRESHOLD",
+                         "weight": 2.0,
+                         "thresholds": [
+                             {"max": 3500,  "status": "Pass",    "label": "Within safe range"},
+                             {"max": 4500,  "status": "Warning", "label": "Approaching overhaul threshold"},
+                             {"max": 5000,  "status": "Fail",    "label": "At or beyond overhaul threshold"},
+                         ],
+                     }},
                     {"key": "reading_date",  "label": "Reading Date",               "type": "date",   "required": True},
                     {"key": "reading_by",    "label": "Recorded By",                "type": "text",   "required": False},
                     {"key": "notes",         "label": "Notes / Observations",       "type": "textarea","required": False},
@@ -2551,25 +2611,42 @@ TEST_TEMPLATES = {
     # overall_condition aggregates oil_test_results.condition via AGGREGATE_STATUS.
     # ────────────────────────────────────────────────────────────────────────────
     "transformer_oil_test": {
-    "key": "transformer_oil_test",
-    "name": "Transformer Oil Test",
-    "equipment_type": "Power Transformer",
-    "description": "Insulating oil sample analysis as per IS 1866:2017.",
-    "supports_multi_session": False,
-    "typical_session_interval_days": 365,
-    "typical_total_sessions": 1,
-    # Automatically inject equipment fields into the form context.
-    # Keys are form field names; values are "namespace.field" paths.
-    # Supported namespaces: "equipment" (top-level), "nameplate" (nameplate_data JSONB).
-    "context_bindings": {
-        "transformer_voltage": "equipment.voltage_class",
-    },
-    "sections": [
+        "key": "transformer_oil_test",
+        "name": "Transformer Oil Test",
+        "equipment_type": "Power Transformer",
+        "description": "Insulating oil sample analysis as per IS 1866:2017.",
+        "supports_multi_session": False,
+        "typical_session_interval_days": 365,
+        "typical_total_sessions": 1,
+        "context_bindings": {
+            "sub_station":         "equipment.department_name",
+            "make":                "equipment.manufacturer",
+            "serial_number":       "equipment.factory_serial_number",
+            "capacity_mva":        "nameplate.rated_mva",
+            "year_of_manufacture": "equipment.year_of_manufacture",
+            "vector_group":        "equipment.vector_group",
+            "transformer_voltage": "equipment.voltage_class",
+        },
+        "sections": [
+            # ── Equipment Details (auto-filled) ──────────────────────────────
+            {
+                "title": "Equipment Details",
+                "collapsed": True,
+                "fields": [
+                    {"key": "sub_station",          "label": "Sub Station",         "type": "readonly"},
+                    {"key": "make",                "label": "Manufacturer",        "type": "readonly"},
+                    {"key": "serial_number",        "label": "Serial Number",       "type": "readonly"},
+                    {"key": "capacity_mva",         "label": "Rated MVA",           "type": "readonly"},
+                    {"key": "year_of_manufacture",  "label": "Year of Manufacture", "type": "readonly"},
+                    {"key": "vector_group",         "label": "Vector Group",        "type": "readonly"},
+                    {"key": "transformer_voltage",  "label": "Voltage Class (kV)",  "type": "readonly"},
+                ],
+            },
 
-        # ── Oil Test Results ─────────────────────────────────────────────────
-        {
-            "title": "Oil Test Measurements",
-            "fields": [
+            # ── Oil Test Results ─────────────────────────────────────────────
+            {
+                "title": "Oil Test Measurements",
+                "fields": [
                 {
                     "key": "oil_test_results",
                     "label": "Test Results as per IS 1866:2017",
@@ -2666,508 +2743,1182 @@ TEST_TEMPLATES = {
             ],
         },
 
+        # ── Dissolved Gas Analysis ───────────────────────────────────────────
+        {
+            "title": "Dissolved Gas Analysis (DGA)",
+            "fields": [
+                {
+                    "key": "dga_standard",
+                    "label": "Standard",
+                    "type": "dropdown",
+                    "options": ["IS 10593:2017", "IS 10593:2000", "IEC 60599:2022"],
+                    "default": "IS 10593:2017",
+                    "required": False,
+                },
+                {
+                    "key": "dga_sample_location",
+                    "label": "Sample Location",
+                    "type": "dropdown",
+                    "options": ["Bottom", "Top", "Middle", "Both (Top & Bottom)"],
+                    "default": "Bottom",
+                    "required": False,
+                },
+                {
+                    "key": "dga_results",
+                    "label": "Dissolved Gas Analysis Results (ppm)",
+                    "type": "table",
+                    "allow_add_rows": False,
+                    "allow_delete_rows": False,
+                    "columns": [
+                        {"key": "gas",         "label": "Gas",            "type": "readonly"},
+                        {"key": "formula",     "label": "Formula",        "type": "readonly"},
+                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number"},
+                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number"},
+                        {
+                            "key": "condition",
+                            "label": "Status",
+                            "type": "calculated",
+                            "hidden": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "value_bottom",
+                                    "lookup_fields": [
+                                        "gas",
+                                        {
+                                            "field": "$form.dga_standard",
+                                            "mapping": {
+                                                "IS 10593:2017":  "IS 10593:2017",
+                                                "IS 10593:2000":  "IS 10593:2000",
+                                                "IEC 60599:2022": "IEC 60599:2022",
+                                            },
+                                        },
+                                    ],
+                                    "thresholds": {
+                                        "Methane": {
+                                            "IS 10593:2017":  {"Normal": [0, 30],    "Alert": [30,    130],   "Abnormal / Critical": [130,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 100],   "Alert": [100,   300],   "Abnormal / Critical": [300,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 30],    "Alert": [30,    130],   "Abnormal / Critical": [130,   None]},
+                                        },
+                                        "Ethane": {
+                                            "IS 10593:2017":  {"Normal": [0, 20],    "Alert": [20,    90],    "Abnormal / Critical": [90,    None]},
+                                            "IS 10593:2000":  {"Normal": [0, 300],   "Alert": [300,   1000],  "Abnormal / Critical": [1000,  None]},
+                                            "IEC 60599:2022": {"Normal": [0, 20],    "Alert": [20,    90],    "Abnormal / Critical": [90,    None]},
+                                        },
+                                        "Ethylene": {
+                                            "IS 10593:2017":  {"Normal": [0, 60],    "Alert": [60,    280],   "Abnormal / Critical": [280,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 100],   "Alert": [100,   400],   "Abnormal / Critical": [400,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 60],    "Alert": [60,    280],   "Abnormal / Critical": [280,   None]},
+                                        },
+                                        "Acetylene": {
+                                            "IS 10593:2017":  {"Normal": [0, 2],     "Alert": [2,     20],    "Abnormal / Critical": [20,    None]},
+                                            "IS 10593:2000":  {"Normal": [0, 50],    "Alert": [50,    200],   "Abnormal / Critical": [200,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 2],     "Alert": [2,     20],    "Abnormal / Critical": [20,    None]},
+                                        },
+                                        "Hydrogen": {
+                                            "IS 10593:2017":  {"Normal": [0, 50],    "Alert": [50,    150],   "Abnormal / Critical": [150,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 100],   "Alert": [100,   300],   "Abnormal / Critical": [300,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 50],    "Alert": [50,    150],   "Abnormal / Critical": [150,   None]},
+                                        },
+                                        "Carbon Dioxide": {
+                                            "IS 10593:2017":  {"Normal": [0, 3800],  "Alert": [3800,  14000], "Abnormal / Critical": [14000, None]},
+                                            "IS 10593:2000":  {"Normal": [0, 5000],  "Alert": [5000,  12000], "Abnormal / Critical": [12000, None]},
+                                            "IEC 60599:2022": {"Normal": [0, 3800],  "Alert": [3800,  14000], "Abnormal / Critical": [14000, None]},
+                                        },
+                                        "Carbon Monoxide": {
+                                            "IS 10593:2017":  {"Normal": [0, 400],   "Alert": [400,   600],   "Abnormal / Critical": [600,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 300],   "Alert": [300,   700],   "Abnormal / Critical": [700,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 400],   "Alert": [400,   600],   "Abnormal / Critical": [600,   None]},
+                                        },
+                                        "TGC": {
+                                            "IS 10593:2017":  {"Normal": [0, 200],   "Alert": [200,   500],   "Abnormal / Critical": [500,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 200],   "Alert": [200,   500],   "Abnormal / Critical": [500,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 200],   "Alert": [200,   500],   "Abnormal / Critical": [500,   None]},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        {"key": "remarks", "label": "Remarks", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"gas": "Methane",         "formula": "CH4"},
+                        {"gas": "Ethane",          "formula": "C2H6"},
+                        {"gas": "Ethylene",        "formula": "C2H4"},
+                        {"gas": "Acetylene",       "formula": "C2H2"},
+                        {"gas": "Hydrogen",        "formula": "H2"},
+                        {"gas": "Carbon Dioxide",  "formula": "CO2"},
+                        {"gas": "Carbon Monoxide", "formula": "CO"},
+                        {"gas": "TGC",             "formula": "TGC"},
+                    ],
+                },
+                {
+                    "key": "dga_overall",
+                    "label": "DGA Overall Assessment",
+                    "type": "readonly",
+                    "required": False,
+                    "rule": {
+                        "type": "AGGREGATE_STATUS",
+                        "config": {
+                            "sources": ["dga_results.condition"],
+                            "priority": ["Abnormal / Critical", "Alert", "Normal"],
+                            "value_map": {
+                                "Alert":               "Alert — Monitor closely",
+                                "Normal":              "Normal — Gases within limits",
+                                "Abnormal / Critical": "Abnormal / Critical — Investigate",
+                            },
+                            "default": "Normal — Gases within limits",
+                        },
+                    },
+                    "dropdown_evaluation": {
+                        "enabled": True,
+                        "value_severities": {
+                            "Normal — Gases within limits":       "NORMAL",
+                            "Alert — Monitor closely":            "ALERT",
+                            "Abnormal / Critical — Investigate":  "CRITICAL",
+                        },
+                    },
+                },
+                {
+                    "key": "dga_remarks",
+                    "label": "DGA Remarks",
+                    "type": "textarea",
+                    "required": False,
+                },
+            ],
+        },
+
+        # ── Overall Assessment ────────────────────────────────────────────────
+        {
+            "title": "Overall Assessment",
+            "fields": [
+                {
+                    "key": "overall_result",
+                    "label": "Overall Result",
+                    "type": "dropdown",
+                    "options": ["PASS", "CONDITIONAL", "FAIL"],
+                    "required": True,
+                    "dropdown_evaluation": {
+                        "enabled": True,
+                        "value_severities": {
+                            "PASS":        "NORMAL",
+                            "CONDITIONAL": "ALERT",
+                            "FAIL":        "CRITICAL",
+                        },
+                    },
+                },
+                {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+            ],
+        },
     ],
 },
     # ────────────────────────────────────────────────────────────────────────────
-    # Capacitance & Tan Delta Test (Transformer)
-    # Point-in-time insulation quality measurement — no multi-session.
-    # Measurements: C(pF), tan δ, temperature → auto-calculates expected current,
-    # temperature-corrected tan δ, and trend change from previous reading.
+    # Dissolved Gas Analysis — standalone (Power Transformer)
+    # Independent DGA sampling — not tied to a full oil test.
+    # Thresholds per IS 10593:2017 (>10 yr transformer limits).
     # ────────────────────────────────────────────────────────────────────────────
-    "capacitance_tandelta_transformer": {
-  "key": "capacitance_tandelta_transformer",
-  "name": "Capacitance & Tan Delta Test (Transformer)",
-  "equipment_type": "Power Transformer",
-  "description": "Capacitance and tan delta insulation quality test per IEC 60450",
-  "supports_multi_session": False,
-  "typical_session_interval_days": None,
-  "typical_total_sessions": 1,
-  "sections": [
-    {
-      "title": "Test Conditions",
-      "fields": [
+    "transformer_dga": {
+    "key": "transformer_dga",
+    "name": "Transformer Dissolved Gas Analysis (DGA)",
+    "equipment_type": "Power Transformer",
+    "description": "Standalone DGA sampling as per IS 10593:2017 / IEC 60599.",
+    "supports_multi_session": False,
+    "typical_session_interval_days": 180,
+    "typical_total_sessions": 1,
+    "sections": [
         {
-          "key": "test_voltage_kv",
-          "label": "Applied Test Voltage",
-          "type": "number",
-          "unit": "kV",
-          "required": True
+            "title": "Sample Details",
+            "fields": [
+                {
+                    "key": "sample_reference",
+                    "label": "Sample Reference No.",
+                    "type": "text",
+                    "required": False,
+                },
+                {
+                    "key": "dga_standard",
+                    "label": "Standard",
+                    "type": "dropdown",
+                    "options": ["IS 10593:2017", "IS 10593:2000", "IEC 60599:2022"],
+                    "default": "IS 10593:2017",
+                    "required": False,
+                },
+                {
+                    "key": "sample_location",
+                    "label": "Sample Location",
+                    "type": "dropdown",
+                    "options": ["Bottom", "Top", "Middle", "Both (Top & Bottom)"],
+                    "default": "Bottom",
+                    "required": True,
+                },
+                {
+                    "key": "transformer_age_category",
+                    "label": "Transformer Age",
+                    "type": "dropdown",
+                    "options": ["< 4 Years", "4–10 Years", "> 10 Years"],
+                    "required": False,
+                },
+                {
+                    "key": "oil_temperature_c",
+                    "label": "Oil Temperature at Sampling",
+                    "type": "number",
+                    "unit": "°C",
+                    "required": False,
+                },
+                {
+                    "key": "load_at_sampling",
+                    "label": "Load at Time of Sampling",
+                    "type": "text",
+                    "required": False,
+                },
+            ],
         },
         {
-          "key": "frequency_hz",
-          "label": "Supply Frequency",
-          "type": "number",
-          "unit": "Hz",
-          "required": True,
-          "default": "50"
+            "title": "Dissolved Gas Analysis Results",
+            "fields": [
+                {
+                    "key": "dga_results",
+                    "label": "Gas Concentrations (ppm)",
+                    "type": "table",
+                    "allow_add_rows": False,
+                    "allow_delete_rows": False,
+                    "columns": [
+                        {"key": "gas",         "label": "Gas",            "type": "readonly"},
+                        {"key": "formula",     "label": "Formula",        "type": "readonly"},
+                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number"},
+                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number"},
+                        {
+                            "key": "condition",
+                            "label": "Status",
+                            "type": "calculated",
+                            "hidden": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "value_bottom",
+                                    "lookup_fields": [
+                                        "gas",
+                                        {
+                                            "field": "$form.dga_standard",
+                                            "mapping": {
+                                                "IS 10593:2017":  "IS 10593:2017",
+                                                "IS 10593:2000":  "IS 10593:2000",
+                                                "IEC 60599:2022": "IEC 60599:2022",
+                                            },
+                                        },
+                                    ],
+                                    "thresholds": {
+                                        "Methane": {
+                                            "IS 10593:2017":  {"Normal": [0, 30],    "Alert": [30,    130],   "Abnormal / Critical": [130,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 100],   "Alert": [100,   300],   "Abnormal / Critical": [300,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 30],    "Alert": [30,    130],   "Abnormal / Critical": [130,   None]},
+                                        },
+                                        "Ethane": {
+                                            "IS 10593:2017":  {"Normal": [0, 20],    "Alert": [20,    90],    "Abnormal / Critical": [90,    None]},
+                                            "IS 10593:2000":  {"Normal": [0, 300],   "Alert": [300,   1000],  "Abnormal / Critical": [1000,  None]},
+                                            "IEC 60599:2022": {"Normal": [0, 20],    "Alert": [20,    90],    "Abnormal / Critical": [90,    None]},
+                                        },
+                                        "Ethylene": {
+                                            "IS 10593:2017":  {"Normal": [0, 60],    "Alert": [60,    280],   "Abnormal / Critical": [280,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 100],   "Alert": [100,   400],   "Abnormal / Critical": [400,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 60],    "Alert": [60,    280],   "Abnormal / Critical": [280,   None]},
+                                        },
+                                        "Acetylene": {
+                                            "IS 10593:2017":  {"Normal": [0, 2],     "Alert": [2,     20],    "Abnormal / Critical": [20,    None]},
+                                            "IS 10593:2000":  {"Normal": [0, 50],    "Alert": [50,    200],   "Abnormal / Critical": [200,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 2],     "Alert": [2,     20],    "Abnormal / Critical": [20,    None]},
+                                        },
+                                        "Hydrogen": {
+                                            "IS 10593:2017":  {"Normal": [0, 50],    "Alert": [50,    150],   "Abnormal / Critical": [150,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 100],   "Alert": [100,   300],   "Abnormal / Critical": [300,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 50],    "Alert": [50,    150],   "Abnormal / Critical": [150,   None]},
+                                        },
+                                        "Carbon Dioxide": {
+                                            "IS 10593:2017":  {"Normal": [0, 3800],  "Alert": [3800,  14000], "Abnormal / Critical": [14000, None]},
+                                            "IS 10593:2000":  {"Normal": [0, 5000],  "Alert": [5000,  12000], "Abnormal / Critical": [12000, None]},
+                                            "IEC 60599:2022": {"Normal": [0, 3800],  "Alert": [3800,  14000], "Abnormal / Critical": [14000, None]},
+                                        },
+                                        "Carbon Monoxide": {
+                                            "IS 10593:2017":  {"Normal": [0, 400],   "Alert": [400,   600],   "Abnormal / Critical": [600,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 300],   "Alert": [300,   700],   "Abnormal / Critical": [700,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 400],   "Alert": [400,   600],   "Abnormal / Critical": [600,   None]},
+                                        },
+                                        "TGC": {
+                                            "IS 10593:2017":  {"Normal": [0, 200],   "Alert": [200,   500],   "Abnormal / Critical": [500,   None]},
+                                            "IS 10593:2000":  {"Normal": [0, 200],   "Alert": [200,   500],   "Abnormal / Critical": [500,   None]},
+                                            "IEC 60599:2022": {"Normal": [0, 200],   "Alert": [200,   500],   "Abnormal / Critical": [500,   None]},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        {"key": "remarks", "label": "Remarks", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"gas": "Methane",         "formula": "CH4"},
+                        {"gas": "Ethane",          "formula": "C2H6"},
+                        {"gas": "Ethylene",        "formula": "C2H4"},
+                        {"gas": "Acetylene",       "formula": "C2H2"},
+                        {"gas": "Hydrogen",        "formula": "H2"},
+                        {"gas": "Carbon Dioxide",  "formula": "CO2"},
+                        {"gas": "Carbon Monoxide", "formula": "CO"},
+                        {"gas": "TGC",             "formula": "TGC"},
+                    ],
+                },
+            ],
         },
         {
-          "key": "ambient_temp_c",
-          "label": "Ambient Temperature",
-          "type": "number",
-          "unit": "°C",
-          "required": True
+            "title": "Assessment",
+            "fields": [
+                {
+                    "key": "overall_assessment",
+                    "label": "Overall DGA Assessment",
+                    "type": "dropdown",
+                    "options": [
+                        "Normal — Gases within limits",
+                        "Alert — Monitor closely",
+                        "Abnormal / Critical — Investigate immediately",
+                    ],
+                    "required": False,
+                    "dropdown_evaluation": {
+                        "enabled": True,
+                        "value_severities": {
+                            "Normal — Gases within limits":             "NORMAL",
+                            "Alert — Monitor closely":                  "ALERT",
+                            "Abnormal / Critical — Investigate immediately": "CRITICAL",
+                        },
+                    },
+                },
+                {
+                    "key": "key_gases_identified",
+                    "label": "Key Gas(es) of Concern",
+                    "type": "text",
+                    "required": False,
+                },
+                {
+                    "key": "probable_fault",
+                    "label": "Probable Fault Type",
+                    "type": "dropdown",
+                    "options": [
+                        "None — Normal aging",
+                        "Partial Discharge",
+                        "Low-energy Discharge",
+                        "High-energy Discharge (Arcing)",
+                        "Thermal Fault < 300°C",
+                        "Thermal Fault 300–700°C",
+                        "Thermal Fault > 700°C",
+                        "Cellulose Degradation",
+                        "Inconclusive",
+                    ],
+                    "required": False,
+                },
+                {
+                    "key": "recommended_action",
+                    "label": "Recommended Action",
+                    "type": "dropdown",
+                    "options": [
+                        "Continue normal monitoring",
+                        "Increase monitoring frequency",
+                        "Schedule detailed investigation",
+                        "Take offline for inspection",
+                    ],
+                    "required": False,
+                },
+                {
+                    "key": "remarks",
+                    "label": "Remarks",
+                    "type": "textarea",
+                    "required": False,
+                },
+            ],
         },
-        {
-          "key": "oil_temp_c",
-          "label": "Oil Temperature",
-          "type": "number",
-          "unit": "°C",
-          "required": False
-        },
-        {
-          "key": "test_mode",
-          "label": "Test Mode",
-          "type": "dropdown",
-          "options": [
-            "UST (Ungrounded Specimen)",
-            "GST (Grounded Specimen)",
-            "GST-Guard"
-          ],
-          "required": True
-        },
-        {
-          "key": "instrument_make",
-          "label": "Instrument Make/Model",
-          "type": "text",
-          "required": False
-        }
-      ]
-    },
-
-    {
-      "title": "Winding Test Results",
-      "fields": [
-        {
-          "key": "winding_test_results",
-          "label": "Winding Test Data",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            {
-              "key": "sl_no",
-              "label": "Sl. No.",
-              "type": "readonly"
-            },
-            {
-              "key": "test_configuration",
-              "label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)",
-              "type": "readonly"
-            },
-            {
-              "key": "voltage_kv",
-              "label": "KV",
-              "type": "number"
-            },
-            {
-              "key": "capacitance_pf",
-              "label": "Capacitance Measured C(pF)",
-              "type": "number"
-            },
-            {
-              "key": "df_measured",
-              "label": "% D.F Measured",
-              "type": "number"
-            },
-            {
-              "key": "df_measured_on_date",
-              "label": "% D.F After Temp Correction at 20°C",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "FORMULA",
-                "config": {
-                  "formula": "TEMP_CORRECTED_TAND",
-                  "inputs": {
-                    "tan_delta": "df_measured",
-                    "temperature": "$form.oil_temp_c"
-                  },
-                  "precision": 4
-                }
-              },
-              "alert": {
-                "thresholds": [
-                  { "operator": ">", "value": 1.0, "result": "FAIL" },
-                  { "operator": ">", "value": 0.5, "result": "ALERT" }
-                ],
-                "default": "PASS"
-              }
-            },
-            {
-              "key": "df_previous_date",
-              "label": "% D.F After Temp Correction at 20°C (Previous Test)",
-              "type": "number",
-            },
-            {
-              "key": "condition",
-              "label": "Condition",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "THRESHOLD",
-                "config": {
-                  "input_field": "df_measured_on_date",
-                  "thresholds": {
-                    "Winding % D.F @ 20°C": {
-                      "Good": [None, 0.5],
-                      "Fair": [0.5,  1.0],
-                      "Poor": [1.0,  None],
-                    }
-                  }
-                }
-              }
-            },
-          ],
-          "default_rows": [
-            { "sl_no": "1", "test_configuration": "HV-GND" },
-            { "sl_no": "2", "test_configuration": "HV-LV" },
-            { "sl_no": "3", "test_configuration": "LV-GND" },
-            { "sl_no": "4", "test_configuration": "LV-TV" },
-            { "sl_no": "5", "test_configuration": "TV-GND" },
-            { "sl_no": "6", "test_configuration": "TV-HV" }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "HV Bushing Details",
-      "fields": [
-        {
-          "key": "hv_bushing_details",
-          "label": "HV Bushing Details",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "detail",  "label": "Details",       "type": "readonly" },
-            { "key": "r_phase", "label": "HV 'R' Phase",  "type": "text" },
-            { "key": "y_phase", "label": "HV 'Y' Phase",  "type": "text" },
-            { "key": "b_phase", "label": "HV 'B' Phase",  "type": "text" }
-          ],
-          "default_rows": [
-            { "detail": "Make" },
-            { "detail": "Sl. No." },
-            { "detail": "Y.O. Mfg." }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "HV Bushing Test Results",
-      "fields": [
-        {
-          "key": "hv_bushing_test_results",
-          "label": "HV Bushing Test Data",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "sl_no",   "label": "Sl. No.",  "type": "readonly" },
-            { "key": "bushing", "label": "Bushing",  "type": "readonly" },
-            {
-              "key": "voltage_kv",
-              "label": "KV",
-              "type": "number"
-            },
-            {
-              "key": "capacitance_pf",
-              "label": "Capacitance Measured C(pF)",
-              "type": "number"
-            },
-            {
-              "key": "df_measured",
-              "label": "% D.F Measured",
-              "type": "number"
-            },
-            {
-              "key": "df_corrected_20c",
-              "label": "% D.F Corrected at 20°C (IEC)",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "FORMULA",
-                "config": {
-                  "formula": "TEMP_CORRECTED_TAND",
-                  "inputs": {
-                    "tan_delta": "df_measured",
-                    "temperature": "$form.ambient_temp_c"
-                  },
-                  "precision": 4
-                }
-              },
-              "alert": {
-                "thresholds": [
-                  { "operator": ">", "value": 1.0, "result": "FAIL" },
-                  { "operator": ">", "value": 0.5, "result": "ALERT" }
-                ],
-                "default": "PASS"
-              }
-            },
-            {
-              "key": "df_previous_date",
-              "label": "% D.F Corrected at 20°C (Previous Test)",
-              "type": "number"
-            },
-            {
-              "key": "condition",
-              "label": "Condition",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "THRESHOLD",
-                "config": {
-                  "input_field": "df_corrected_20c",
-                  "thresholds": {
-                    "HV Bushing % D.F @ 20°C": {
-                      "Good":  [None, 0.5],
-                      "Alert": [0.5,  0.7],
-                      "Poor":  [0.7,  None],
-                    }
-                  }
-                }
-              }
-            },
-          ],
-          "default_rows": [
-            { "sl_no": "1", "bushing": "R Phase" },
-            { "sl_no": "2", "bushing": "Y Phase" },
-            { "sl_no": "3", "bushing": "B Phase" }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "DFR Test Results for HV 'Y' Phase Bushing",
-      "fields": [
-        {
-          "key": "dfr_test_voltage",
-          "label": "Test Voltage",
-          "type": "text"
-        },
-        {
-          "key": "dfr_test_results",
-          "label": "DFR Test Data",
-          "type": "table",
-          "allow_add_rows": True,
-          "allow_delete_rows": True,
-          "lock_default_rows": False,
-          "columns": [
-            {
-              "key": "test_frequency",
-              "label": "Test Frequency (Hz)",
-              "type": "number"
-            },
-            {
-              "key": "df_percent",
-              "label": "HV Y Phase Bushing (%DF)",
-              "type": "number"
-            }
-          ],
-          "default_rows": [
-            { "test_frequency": "470" },
-            { "test_frequency": "220" },
-            { "test_frequency": "110" },
-            { "test_frequency": "70" },
-            { "test_frequency": "40" },
-            { "test_frequency": "20" },
-            { "test_frequency": "10" },
-            { "test_frequency": "5" },
-            { "test_frequency": "2" },
-            { "test_frequency": "1" }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "LV Bushing Details",
-      "fields": [
-        {
-          "key": "lv_bushing_details",
-          "label": "LV Bushing Details",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "detail",  "label": "Details",       "type": "readonly" },
-            { "key": "r_phase", "label": "LV 'R' Phase",  "type": "text" },
-            { "key": "y_phase", "label": "LV 'Y' Phase",  "type": "text" },
-            { "key": "b_phase", "label": "LV 'B' Phase",  "type": "text" }
-          ],
-          "default_rows": [
-            { "detail": "Make" },
-            { "detail": "Sl. No." },
-            { "detail": "Y.O. Mfg." }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "LV Bushing Test Results",
-      "fields": [
-        {
-          "key": "lv_bushing_test_results",
-          "label": "LV Bushing Test Data",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "sl_no",   "label": "Sl. No.",  "type": "readonly" },
-            { "key": "bushing", "label": "Bushing",  "type": "readonly" },
-            {
-              "key": "voltage_kv",
-              "label": "KV",
-              "type": "number"
-            },
-            {
-              "key": "capacitance_pf",
-              "label": "Capacitance Measured C(pF)",
-              "type": "number"
-            },
-            {
-              "key": "df_measured",
-              "label": "% D.F Measured",
-              "type": "number"
-            },
-            {
-              "key": "df_corrected_20c",
-              "label": "% D.F Corrected at 20°C (IEC)",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "FORMULA",
-                "config": {
-                  "formula": "TEMP_CORRECTED_TAND",
-                  "inputs": {
-                    "tan_delta": "df_measured",
-                    "temperature": "$form.ambient_temp_c"
-                  },
-                  "precision": 4
-                }
-              },
-              "alert": {
-                "thresholds": [
-                  { "operator": ">", "value": 1.0, "result": "FAIL" },
-                  { "operator": ">", "value": 0.5, "result": "ALERT" }
-                ],
-                "default": "PASS"
-              }
-            },
-            {
-              "key": "df_previous_date",
-              "label": "% D.F Corrected at 20°C (Previous Test)",
-              "type": "number"
-            },
-            {
-              "key": "df_change_pct",
-              "label": "% Change from Previous",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "FORMULA",
-                "config": {
-                  "formula": "TREND_CHANGE",
-                  "inputs": {
-                    "current":  "df_corrected_20c",
-                    "previous": "df_previous_date"
-                  },
-                  "precision": 2
-                }
-              },
-              "alert": {
-                "thresholds": [
-                  { "operator": ">", "value": 20, "result": "FAIL" },
-                  { "operator": ">", "value": 10, "result": "ALERT" }
-                ],
-                "default": "PASS"
-              }
-            },
-            {
-              "key": "condition",
-              "label": "Condition",
-              "type": "calculated",
-              "read_only": True,
-              "rule": {
-                "type": "THRESHOLD",
-                "config": {
-                  "input_field": "df_corrected_20c",
-                  "thresholds": {
-                    "LV Bushing % D.F @ 20°C": {
-                      "Good":  [None, 0.5],
-                      "Alert": [0.5,  0.7],
-                      "Poor":  [0.7,  None],
-                    }
-                  }
-                }
-              }
-            },
-          ],
-          "default_rows": [
-            { "sl_no": "1", "bushing": "R Phase" },
-            { "sl_no": "2", "bushing": "Y Phase" },
-            { "sl_no": "3", "bushing": "B Phase" }
-          ]
-        }
-      ]
-    },
-
-    {
-      "title": "IDAX Test Results (Insulation Diagnostics)",
-      "fields": [
-        {
-          "key": "idax_testing_kit",
-          "label": "Testing Kit Used",
-          "type": "text"
-        },
-        {
-          "key": "idax_test_results",
-          "label": "IDAX Test Data",
-          "type": "table",
-          "allow_add_rows": False,
-          "allow_delete_rows": False,
-          "lock_default_rows": False,
-          "columns": [
-            { "key": "sl_no",             "label": "Sl. No.",                                              "type": "readonly" },
-            { "key": "test_configuration","label": "Test Configuration\n(HV – 220 kV / LV – 66 kV / TV – 11 kV)", "type": "readonly" },
-            { "key": "moisture_percent",  "label": "% Moisture",                                           "type": "number" },
-            { "key": "tr_analysis_moisture","label": "Tr. Analysis on Basis of % Moisture",               "type": "text" },
-            { "key": "oil_conductivity",  "label": "Oil Conductivity (pS/m)",                              "type": "number" },
-            { "key": "moisture_percent_oil","label": "% Moisture (from Oil)",                              "type": "number" },
-            { "key": "tr_analysis_oil",   "label": "Tr. Analysis on Basis of Oil Conductivity",           "type": "text" }
-          ],
-          "default_rows": [
-            { "sl_no": "1", "test_configuration": "HV-GND" },
-            { "sl_no": "2", "test_configuration": "HV-LV" },
-            { "sl_no": "3", "test_configuration": "LV-GND" },
-            { "sl_no": "4", "test_configuration": "LV-TV" },
-            { "sl_no": "5", "test_configuration": "TV-GND" },
-            { "sl_no": "6", "test_configuration": "TV-HV" }
-          ]
-        },
-        {
-          "key": "idax_observation",
-          "label": "Observation",
-          "type": "textarea"
-        }
-      ]
-    }
-  ]
+    ],
 },
-    # ════════════════════════════════════════════════════════════════════════════
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # Capacitance & Tan Delta Test (Transformer) — KPTCL R&D Centre format
+    # Covers: winding C/tanδ + 220kV bushing + 66kV bushing + IDAX insulation diagnostics.
+    # ITC correction factor stored at section level (one factor per section, not per row).
+    # df_corrected_20c is auto-calculated via FORMULA rule (PRODUCT of df_measured * form-level ITC factor).
+    # ────────────────────────────────────────────────────────────────────────────
+ "capacitance_tandelta_transformer": {
+    "key": "capacitance_tandelta_transformer",
+    "name": "Capacitance & Tan Delta Test (Transformer)",
+    "equipment_type": "Power Transformer",
+    "description": "Combined Tan-Delta/Capacitance and IDAX insulation diagnostics per KPTCL R&D Centre format — winding, 400kV/220kV/66kV/33kV/11kV bushing, and moisture/oil conductivity measurements. Supports 220/66/11kV and 400/220/33kV transformer types.",
+    "supports_multi_session": False,
+    "typical_session_interval_days": None,
+    "typical_total_sessions": 1,
+    "context_bindings": {
+        "sub_station":         "equipment.department_name",
+        "make":                "equipment.manufacturer",
+        "capacity_mva":        "nameplate.rated_mva",
+        "serial_number":       "equipment.factory_serial_number",
+        "year_of_manufacture": "equipment.year_of_manufacture",
+        "vector_group":        "equipment.vector_group",
+        "voltage_ratio":       "equipment.voltage_class",
+    },
+    "sections": [
+        # ── Equipment Details (auto-filled) ──────────────────────────────
+        {
+            "title": "Equipment Details",
+            "collapsed": True,
+            "fields": [
+                {"key": "sub_station",         "label": "Sub Station",         "type": "readonly"},
+                {"key": "make",                "label": "Manufacturer",        "type": "readonly"},
+                {"key": "serial_number",       "label": "Serial Number",       "type": "readonly"},
+                {"key": "capacity_mva",        "label": "Rated MVA",           "type": "readonly"},
+                {"key": "year_of_manufacture", "label": "Year of Manufacture", "type": "readonly"},
+                {"key": "vector_group",        "label": "Vector Group",        "type": "readonly"},
+                {"key": "voltage_ratio",       "label": "Voltage Ratio",       "type": "readonly"},
+                {
+                    "key": "transformer_type",
+                    "label": "Transformer Type",
+                    "type": "dropdown",
+                    "options": ["220/66/11 kV", "400/220/33 kV"],
+                    "required": True,
+                    "import_skip": True,
+                },
+            ],
+        },
+        # ── Test Conditions ───────────────────────────────────────────────
+        {
+            "title": "Test Conditions",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "test_conditions_enabled",
+                "label": "Test Conditions",
+                "type": "section_toggle",
+                "default": "open",
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "test_voltage_kv",   "label": "Applied Test Voltage",  "type": "number", "unit": "kV",  "required": True, "import_skip": True},
+                {"key": "frequency_hz",      "label": "Supply Frequency",      "type": "number", "unit": "Hz",  "required": True, "default": "50"},
+                {"key": "ambient_temp_c",    "label": "Ambient Temperature",   "type": "number", "unit": "°C", "required": True},
+                {"key": "oil_temp_c",        "label": "Oil Temperature",       "type": "number", "unit": "°C"},
+                {"key": "weather_condition", "label": "Weather Condition",     "type": "text",   "placeholder": "e.g. Cloudy, Sunny"},
+                {"key": "bushing_condition", "label": "Condition of Bushings", "type": "text",   "placeholder": "e.g. Clean & Dry"},
+                {"key": "instrument_make",   "label": "Instrument Make/Model", "type": "text",   "placeholder": "e.g. Megger IDAX 300"},
+            ],
+        },
+        # ── Winding Test Results ──────────────────────────────────────────
+        {
+            "title": "Winding Test Results",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "winding_enabled",
+                "label": "Winding Test",
+                "type": "section_toggle",
+                "default": "open",
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "winding_itc_factor", "label": "ITC Correction Factor (Winding)", "type": "number"},
+                # ── NEW: previous test date for this table (one date applies to whole winding table) ──
+                {
+                    "key": "winding_previous_test_date",
+                    "label": "Previous Test Date (Winding)",
+                    "type": "date",
+                    "placeholder": "Select date of previous winding test",
+                },
+                {
+                    "key": "winding_test_results",
+                    "label": "Winding Test Data",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "test_configuration", "label": "Test Configuration", "type": "text",   "placeholder": "e.g. HV-GND, CHG, HV-Ground, HV-IV"},
+                        {"key": "voltage_kv",          "label": "kV",                "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",      "label": "Capacitance C (pF)","type": "number", "unit": "pF"},
+                        {"key": "df_measured",         "label": "% D.F Measured",    "type": "number", "unit": "%"},
+                        {
+                            "key": "df_corrected_20c",
+                            "label": "% D.F @ 20°C (ITC Corrected)",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "FORMULA",
+                                "config": {
+                                    "formula": "PRODUCT",
+                                    "inputs": {"a": "df_measured", "b": "$form.winding_itc_factor"},
+                                    "precision": 4,
+                                },
+                            },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
+                        },
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "df_corrected_20c",
+                                    "thresholds": {
+                                        "Winding % D.F @ 20°C (IEEE/IEC)": {
+                                            "Good": [None, 0.5],
+                                            "Fair": [0.5,  1.0],
+                                            "Poor": [1.0,  None],
+                                        }
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    "default_rows": [
+                        {"test_configuration": "HV-GND"},
+                        {"test_configuration": "HV-LV"},
+                        {"test_configuration": "LV-GND"},
+                        {"test_configuration": "LV-TV"},
+                        {"test_configuration": "TV-GND"},
+                        {"test_configuration": "HV-TV"},
+                        {"test_configuration": "(HV+LV)-GND"},
+                        {"test_configuration": "(HV+LV)-TV"},
+                    ],
+                    "table_evaluation": {
+                        "enabled": True,
+                        "column_evaluations": {
+                            "df_corrected_20c": {
+                                "normal_min": None, "normal_max": 0.5,
+                                "alert_min":  None, "alert_max":  None,
+                                "critical_below": None, "critical_above": 1.0,
+                                "trend_watch": True,
+                                "weight": 2.0,
+                                "remedial_action_text": "Winding insulation deteriorating — schedule drying or oil reconditioning.",
+                            },
+                        },
+                    },
+                },
+                {"key": "winding_observations", "label": "Observations (Winding)", "type": "textarea"},
+            ],
+        },
+
+        # ═══════════════════════════════════════════════════════════════════
+        # BUSHING TEST RESULTS — one separate section per voltage class.
+        # Each section is independently collapsible (skip if not applicable).
+        # 220/66/11 kV transformer  → use 220kV + 66kV sections
+        # 400/220/33 kV transformer → use 400kV + 220kV + 33kV sections
+        # ═══════════════════════════════════════════════════════════════════
+
+        # ── 400 kV Bushing Test Results ───────────────────────────────────
+        # Applicable to 400/220/33 kV transformers only.
+        {
+            "title": "400 kV Bushing Test Results",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "bushing_400kv_enabled",
+                "label": "400 kV Bushing Test",
+                "type": "section_toggle",
+                "default": "skip",          # default skip — only open for 400kV transformers
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "bushing_400kv_itc_factor", "label": "ITC Correction Factor (400 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_400kv_previous_test_date",
+                    "label": "Previous Test Date (400 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 400 kV bushing test",
+                },
+                {
+                    "key": "bushing_400kv_test_results",
+                    "label": "400 kV Bushing Test Data",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "bushing",          "label": "Bushing",                        "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                             "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",             "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                 "type": "number", "unit": "%"},
+                        {
+                            "key": "df_corrected_20c",
+                            "label": "% D.F @ 20°C (ITC Corrected)",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "FORMULA",
+                                "config": {
+                                    "formula": "PRODUCT",
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_400kv_itc_factor"},
+                                    "precision": 4,
+                                },
+                            },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
+                        },
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "df_corrected_20c",
+                                    "thresholds": {
+                                        "400 kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                            "Good":  [None, 0.5],
+                                            "Alert": [0.5,  0.7],
+                                            "Poor":  [0.7,  None],
+                                        }
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    "default_rows": [
+                        {"bushing": "'R' Phase"},
+                        {"bushing": "'Y' Phase"},
+                        {"bushing": "'B' Phase"},
+                    ],
+                    "table_evaluation": {
+                        "enabled": True,
+                        "column_evaluations": {
+                            "df_corrected_20c": {
+                                "normal_min": None, "normal_max": 0.5,
+                                "alert_min":  0.5,  "alert_max":  0.7,
+                                "critical_below": None, "critical_above": 0.7,
+                                "trend_watch": True,
+                                "weight": 1.5,
+                                "remedial_action_text": "400 kV bushing insulation degraded — inspect and consider replacement.",
+                            },
+                        },
+                    },
+                },
+                {"key": "bushing_400kv_observations", "label": "Observations (400 kV Bushing)", "type": "textarea"},
+            ],
+        },
+
+        # ── 220 kV Bushing Test Results ───────────────────────────────────
+        # Applicable to BOTH transformer types:
+        #   220/66/11 kV  → primary HV bushing
+        #   400/220/33 kV → secondary MV bushing
+        {
+            "title": "220 kV Bushing Test Results",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "bushing_220kv_enabled",
+                "label": "220 kV Bushing Test",
+                "type": "section_toggle",
+                "default": "open",
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "bushing_220kv_itc_factor", "label": "ITC Correction Factor (220 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_220kv_previous_test_date",
+                    "label": "Previous Test Date (220 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 220 kV bushing test",
+                },
+                {
+                    "key": "bushing_220kv_test_results",
+                    "label": "220 kV Bushing Test Data",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "bushing",          "label": "Bushing",                        "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                             "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",             "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                 "type": "number", "unit": "%"},
+                        {
+                            "key": "df_corrected_20c",
+                            "label": "% D.F @ 20°C (ITC Corrected)",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "FORMULA",
+                                "config": {
+                                    "formula": "PRODUCT",
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_220kv_itc_factor"},
+                                    "precision": 4,
+                                },
+                            },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
+                        },
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "df_corrected_20c",
+                                    "thresholds": {
+                                        "220 kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                            "Good":  [None, 0.5],
+                                            "Alert": [0.5,  0.7],
+                                            "Poor":  [0.7,  None],
+                                        }
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    "default_rows": [
+                        {"bushing": "'R' Phase"},
+                        {"bushing": "'Y' Phase"},
+                        {"bushing": "'B' Phase"},
+                    ],
+                    "table_evaluation": {
+                        "enabled": True,
+                        "column_evaluations": {
+                            "df_corrected_20c": {
+                                "normal_min": None, "normal_max": 0.5,
+                                "alert_min":  0.5,  "alert_max":  0.7,
+                                "critical_below": None, "critical_above": 0.7,
+                                "trend_watch": True,
+                                "weight": 1.5,
+                                "remedial_action_text": "220 kV bushing insulation degraded — inspect and consider replacement.",
+                            },
+                        },
+                    },
+                },
+                {"key": "bushing_220kv_observations", "label": "Observations (220 kV Bushing)", "type": "textarea"},
+            ],
+        },
+
+        # ── 66 kV Bushing Test Results ────────────────────────────────────
+        # Applicable to 220/66/11 kV transformers (LV bushing).
+        {
+            "title": "66 kV Bushing Test Results",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "bushing_66kv_enabled",
+                "label": "66 kV Bushing Test",
+                "type": "section_toggle",
+                "default": "open",
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "bushing_66kv_itc_factor", "label": "ITC Correction Factor (66 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_66kv_previous_test_date",
+                    "label": "Previous Test Date (66 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 66 kV bushing test",
+                },
+                {
+                    "key": "bushing_66kv_test_results",
+                    "label": "66 kV Bushing Test Data",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "bushing",          "label": "Bushing",                       "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                            "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",            "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                "type": "number", "unit": "%"},
+                        {
+                            "key": "df_corrected_20c",
+                            "label": "% D.F @ 20°C (ITC Corrected)",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "FORMULA",
+                                "config": {
+                                    "formula": "PRODUCT",
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_66kv_itc_factor"},
+                                    "precision": 4,
+                                },
+                            },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
+                        },
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "df_corrected_20c",
+                                    "thresholds": {
+                                        "66 kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                            "Good":  [None, 0.7],
+                                            "Alert": [0.7,  1.0],
+                                            "Poor":  [1.0,  None],
+                                        }
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    "default_rows": [
+                        {"bushing": "'R' Phase"},
+                        {"bushing": "'Y' Phase"},
+                        {"bushing": "'B' Phase"},
+                    ],
+                    "table_evaluation": {
+                        "enabled": True,
+                        "column_evaluations": {
+                            "df_corrected_20c": {
+                                "normal_min": None, "normal_max": 0.7,
+                                "alert_min":  0.7,  "alert_max":  1.0,
+                                "critical_below": None, "critical_above": 1.0,
+                                "trend_watch": True,
+                                "weight": 1.5,
+                                "remedial_action_text": "66 kV bushing insulation degraded — inspect and consider replacement.",
+                            },
+                        },
+                    },
+                },
+                {"key": "bushing_66kv_observations", "label": "Observations (66 kV Bushing)", "type": "textarea"},
+            ],
+        },
+
+        # ── 33 kV Bushing Test Results ────────────────────────────────────
+        # Applicable to 400/220/33 kV transformers (TV bushing).
+        {
+            "title": "33 kV Bushing Test Results",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "bushing_33kv_enabled",
+                "label": "33 kV Bushing Test",
+                "type": "section_toggle",
+                "default": "skip",          # default skip — only open for 400/220/33kV
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "bushing_33kv_itc_factor", "label": "ITC Correction Factor (33 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_33kv_previous_test_date",
+                    "label": "Previous Test Date (33 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 33 kV bushing test",
+                },
+                {
+                    "key": "bushing_33kv_test_results",
+                    "label": "33 kV Bushing Test Data",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "bushing",          "label": "Bushing",                       "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                            "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",            "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                "type": "number", "unit": "%"},
+                        {
+                            "key": "df_corrected_20c",
+                            "label": "% D.F @ 20°C (ITC Corrected)",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "FORMULA",
+                                "config": {
+                                    "formula": "PRODUCT",
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_33kv_itc_factor"},
+                                    "precision": 4,
+                                },
+                            },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
+                        },
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "df_corrected_20c",
+                                    "thresholds": {
+                                        "33 kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                            "Good":  [None, 1.0],
+                                            "Alert": [1.0,  1.5],
+                                            "Poor":  [1.5,  None],
+                                        }
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    "default_rows": [
+                        {"bushing": "'R' Phase"},
+                        {"bushing": "'Y' Phase"},
+                        {"bushing": "'B' Phase"},
+                    ],
+                    "table_evaluation": {
+                        "enabled": True,
+                        "column_evaluations": {
+                            "df_corrected_20c": {
+                                "normal_min": None, "normal_max": 1.0,
+                                "alert_min":  1.0,  "alert_max":  1.5,
+                                "critical_below": None, "critical_above": 1.5,
+                                "trend_watch": True,
+                                "weight": 1.0,
+                                "remedial_action_text": "33 kV bushing insulation degraded — inspect and consider replacement.",
+                            },
+                        },
+                    },
+                },
+                {"key": "bushing_33kv_observations", "label": "Observations (33 kV Bushing)", "type": "textarea"},
+            ],
+        },
+
+        # ── 11 kV Bushing Test Results ────────────────────────────────────
+        # Applicable to 220/66/11 kV transformers (TV bushing).
+        {
+            "title": "11 kV Bushing Test Results",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "bushing_11kv_enabled",
+                "label": "11 kV Bushing Test",
+                "type": "section_toggle",
+                "default": "skip",          # default skip — fill only if 11kV bushing tested
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "bushing_11kv_itc_factor", "label": "ITC Correction Factor (11 kV Bushing)", "type": "number"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "bushing_11kv_previous_test_date",
+                    "label": "Previous Test Date (11 kV Bushing)",
+                    "type": "date",
+                    "placeholder": "Select date of previous 11 kV bushing test",
+                },
+                {
+                    "key": "bushing_11kv_test_results",
+                    "label": "11 kV Bushing Test Data",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "bushing",          "label": "Bushing",                       "type": "text",   "placeholder": "e.g. 'R' Phase"},
+                        {"key": "voltage_kv",        "label": "kV",                            "type": "number", "unit": "kV"},
+                        {"key": "capacitance_pf",    "label": "Capacitance C (pF)",            "type": "number", "unit": "pF"},
+                        {"key": "df_measured",       "label": "% D.F Measured",                "type": "number", "unit": "%"},
+                        {
+                            "key": "df_corrected_20c",
+                            "label": "% D.F @ 20°C (ITC Corrected)",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "FORMULA",
+                                "config": {
+                                    "formula": "PRODUCT",
+                                    "inputs": {"a": "df_measured", "b": "$form.bushing_11kv_itc_factor"},
+                                    "precision": 4,
+                                },
+                            },
+                        },
+                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
+                        {
+                            "key": "df_previous_corrected",
+                            "label": "% D.F @ 20°C (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
+                        },
+                        {
+                            "key": "condition",
+                            "label": "Condition",
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "df_corrected_20c",
+                                    "thresholds": {
+                                        "11 kV Bushing % D.F @ 20°C (IEC OIP)": {
+                                            "Good":  [None, 1.0],
+                                            "Alert": [1.0,  1.5],
+                                            "Poor":  [1.5,  None],
+                                        }
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    "default_rows": [
+                        {"bushing": "'R' Phase"},
+                        {"bushing": "'Y' Phase"},
+                        {"bushing": "'B' Phase"},
+                    ],
+                    "table_evaluation": {
+                        "enabled": True,
+                        "column_evaluations": {
+                            "df_corrected_20c": {
+                                "normal_min": None, "normal_max": 1.0,
+                                "alert_min":  1.0,  "alert_max":  1.5,
+                                "critical_below": None, "critical_above": 1.5,
+                                "trend_watch": True,
+                                "weight": 1.0,
+                                "remedial_action_text": "11 kV bushing insulation degraded — inspect and consider replacement.",
+                            },
+                        },
+                    },
+                },
+                {"key": "bushing_11kv_observations", "label": "Observations (11 kV Bushing)", "type": "textarea"},
+            ],
+        },
+
+        # ── IDAX Insulation Diagnostics ───────────────────────────────────
+        {
+            "title": "IDAX Test Results (Insulation Diagnostics)",
+            "collapsible": True,
+            "collapse_control": {
+                "key": "idax_enabled",
+                "label": "IDAX Test",
+                "type": "section_toggle",
+                "default": "open",
+                "options": ["open", "skip"],
+            },
+            "fields": [
+                {"key": "idax_testing_kit", "label": "Testing Kit Used", "type": "text", "placeholder": "e.g. Megger IDAX 300"},
+                # ── NEW: previous test date for this table ──
+                {
+                    "key": "idax_previous_test_date",
+                    "label": "Previous Test Date (IDAX)",
+                    "type": "date",
+                    "placeholder": "Select date of previous IDAX test",
+                },
+                {
+                    "key": "idax_test_results",
+                    "label": "IDAX Test Data",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": False,
+                    "columns": [
+                        {"key": "test_configuration",    "label": "Test Configuration",              "type": "text",   "placeholder": "e.g. HV-GND, CHG, HV-Ground"},
+                        {"key": "moisture_percent",      "label": "% Moisture",                      "type": "number", "unit": "%"},
+                        # ── NEW: previous test's %Moisture, entered manually for now ──
+                        {
+                            "key": "moisture_percent_previous",
+                            "label": "% Moisture (Previous Test)",
+                            "type": "number",
+                            "unit": "%",
+                            "placeholder": "Enter value from previous test report",
+                        },
+                        {
+                            "key": "tr_analysis_moisture",
+                            "label": "Tr. Analysis (% Moisture)",
+                            "type": "dropdown",
+                            "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"],
+                        },
+                        {"key": "oil_conductivity_psm",  "label": "Oil Conductivity (pS/m)",         "type": "number", "unit": "pS/m"},
+                        {
+                            "key": "tr_analysis_oil",
+                            "label": "Tr. Analysis (Oil Conductivity)",
+                            "type": "dropdown",
+                            "options": ["As new", "Acceptable", "Poor", "Bad"],
+                        },
+                    ],
+                    "default_rows": [
+                        {"test_configuration": "HV-GND"},
+                        {"test_configuration": "HV-LV"},
+                        {"test_configuration": "LV-GND"},
+                        {"test_configuration": "LV-TV"},
+                        {"test_configuration": "TV-GND"},
+                        {"test_configuration": "HV-TV"},
+                        {"test_configuration": "(HV+LV)-GND"},
+                        {"test_configuration": "(HV+LV)-TV"},
+                    ],
+                    "table_evaluation": {
+                        "enabled": True,
+                        "column_evaluations": {
+                            "moisture_percent": {
+                                "normal_min": None, "normal_max": 2.0,
+                                "alert_min":  None, "alert_max":  None,
+                                "critical_below": None, "critical_above": 3.0,
+                                "trend_watch": True,
+                                "weight": 2.0,
+                                "remedial_action_text": "High moisture content — arrange drying treatment.",
+                            },
+                            "oil_conductivity_psm": {
+                                "normal_min": None, "normal_max": 0.1,
+                                "alert_min":  None, "alert_max":  None,
+                                "critical_below": None, "critical_above": 1.0,
+                                "trend_watch": True,
+                                "weight": 1.0,
+                                "remedial_action_text": "High oil conductivity — arrange oil reconditioning or replacement.",
+                            },
+                        },
+                    },
+                },
+                {"key": "idax_observation", "label": "Observation", "type": "textarea"},
+            ],
+        },
+
+        # ── Overall Assessment ────────────────────────────────────────────
+        {
+            "title": "Overall Assessment",
+            "fields": [
+                {
+                    "key": "overall_result",
+                    "label": "Overall Result",
+                    "type": "dropdown",
+                    "options": ["PASS", "CONDITIONAL", "FAIL"],
+                    "required": True,
+                    "dropdown_evaluation": {
+                        "enabled": True,
+                        "value_severities": {
+                            "PASS":        "NORMAL",
+                            "CONDITIONAL": "ALERT",
+                            "FAIL":        "CRITICAL",
+                        },
+                    },
+                },
+                {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+            ],
+        },
+    ],
+},
     # CIRCUIT BREAKER TEMPLATES
     # ════════════════════════════════════════════════════════════════════════════
-
-    "circuit_breaker_contact_resistance": {
+ 
+  "circuit_breaker_contact_resistance": {
         "key": "circuit_breaker_contact_resistance",
         "name": "Contact Resistance Test",
         "equipment_type": "Circuit Breaker",
@@ -3217,7 +3968,7 @@ TEST_TEMPLATES = {
                             {"key": "reading_2",     "label": "Reading 2 (µΩ)", "type": "number"},
                             {"key": "average",       "label": "Average (µΩ)",   "type": "number"},
                             {"key": "max_limit",     "label": "Max Limit (µΩ)", "type": "number"},
-                            {"key": "result",        "label": "Result",         "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",        "label": "Result",         "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"pole": "R Phase"},
@@ -3231,7 +3982,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",         "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result",  "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result",  "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",       "type": "text",     "required": True},
                 ],
             },
@@ -3318,7 +4069,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -3372,7 +4123,7 @@ TEST_TEMPLATES = {
                             {"key": "pressure_bar",   "label": "Measured (bar)",      "type": "number"},
                             {"key": "temp_c",         "label": "Ambient Temp (°C)",   "type": "number"},
                             {"key": "corrected_bar",  "label": "Corrected to 20°C",   "type": "number"},
-                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Normal", "Low", "Critical"]},
+                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Normal", "Low", "Critical"], "column_evaluation": _EV_NHC},
                         ],
                         "default_rows": [
                             {"pole": "R Phase"},
@@ -3388,7 +4139,7 @@ TEST_TEMPLATES = {
                     {"key": "top_up_done",    "label": "Gas Top-up Done",    "type": "boolean"},
                     {"key": "top_up_qty_kg",  "label": "Gas Added",          "type": "number",   "unit": "kg"},
                     {"key": "remarks",        "label": "Remarks",            "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result",     "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Topped Up - Pass"]},
+                    {"key": "overall_result", "label": "Overall Result",     "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Topped Up - Pass"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFTP}},
                     {"key": "tested_by",      "label": "Tested By",          "type": "text",     "required": True},
                 ],
             },
@@ -3442,7 +4193,7 @@ TEST_TEMPLATES = {
                             {"key": "moisture_ppm",   "label": "Moisture (ppmv)",     "type": "number"},
                             {"key": "dew_point_c",    "label": "Dew Point (°C)",      "type": "number"},
                             {"key": "so2_ppm",        "label": "SO₂ (ppm)",           "type": "number"},
-                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",         "label": "Result",              "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"pole": "R Phase"},
@@ -3457,7 +4208,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "gas_replacement_done", "label": "Gas Replacement Done", "type": "boolean"},
                     {"key": "remarks",              "label": "Remarks",              "type": "textarea"},
-                    {"key": "overall_result",       "label": "Overall Result",       "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Gas Replaced - Pass"]},
+                    {"key": "overall_result",       "label": "Overall Result",       "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Gas Replaced - Pass"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFGR}},
                     {"key": "tested_by",            "label": "Tested By",            "type": "text",     "required": True},
                 ],
             },
@@ -3511,7 +4262,7 @@ TEST_TEMPLATES = {
                             {"key": "y_phase_ms",  "label": "Y Phase (ms)",     "type": "number"},
                             {"key": "b_phase_ms",  "label": "B Phase (ms)",     "type": "number"},
                             {"key": "limit_ms",    "label": "Max Limit (ms)",   "type": "number"},
-                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"operation": "Opening Time"},
@@ -3550,14 +4301,14 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "co_open_time_ms",  "label": "CO — Open Time",     "type": "number", "unit": "ms"},
                     {"key": "co_dead_time_ms",  "label": "CO — Dead Time",     "type": "number", "unit": "ms"},
-                    {"key": "co_result",        "label": "CO Result",          "type": "dropdown", "options": ["Pass", "Fail", "Not Tested"]},
+                    {"key": "co_result",        "label": "CO Result",          "type": "dropdown", "options": ["Pass", "Fail", "Not Tested"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNT}},
                 ],
             },
             {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -3614,7 +4365,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -3663,7 +4414,7 @@ TEST_TEMPLATES = {
                     {"key": "sf6_pressure_checked",    "label": "SF6 gas pressure checked",                "type": "checkbox", "required": True},
                     {"key": "general_cleaning",        "label": "General cleaning completed",              "type": "checkbox", "required": True},
                     {"key": "mechanism_lubricated",    "label": "Operating mechanism lubricated",          "type": "checkbox"},
-                    {"key": "trip_close_ops_checked",  "label": "Trip / close operations verified",        "type": "dropdown", "options": ["Pass", "Fail", "N/A"]},
+                    {"key": "trip_close_ops_checked",  "label": "Trip / close operations verified",        "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "heater_working",          "label": "Anti-condensation heater working",        "type": "checkbox"},
                     {"key": "control_cables_ok",       "label": "Control cables and connections intact",   "type": "checkbox"},
                     {"key": "earthing_ok",             "label": "Earthing connections intact",             "type": "checkbox"},
@@ -3675,7 +4426,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
                     {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
                     {"key": "maintained_by",  "label": "Maintained By",  "type": "text",     "required": True},
                 ],
@@ -3728,7 +4479,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -3789,7 +4540,7 @@ TEST_TEMPLATES = {
                             {"key": "leakage_ua",     "label": "Leakage Current (µA)", "type": "number"},
                             {"key": "prev_leakage_ua","label": "Previous Reading (µA)","type": "number"},
                             {"key": "deviation_pct",  "label": "Deviation (%)",        "type": "number"},
-                            {"key": "result",         "label": "Result",               "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",         "label": "Result",               "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"phase": "R Phase"},
@@ -3803,7 +4554,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -3875,7 +4626,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFC}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -3929,7 +4680,7 @@ TEST_TEMPLATES = {
                             {"key": "test_voltage_kv",   "label": "Test Voltage (kVrms)",    "type": "number"},
                             {"key": "duration_sec",      "label": "Duration (s)",            "type": "number"},
                             {"key": "flashover",         "label": "Flashover / Breakdown",   "type": "dropdown", "options": ["No", "Yes"]},
-                            {"key": "result",            "label": "Result",                  "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",            "label": "Result",                  "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"phase": "R Phase"},
@@ -3943,7 +4694,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -3998,7 +4749,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
                     {"key": "maintained_by",  "label": "Maintained By",  "type": "text",     "required": True},
                 ],
             },
@@ -4048,7 +4799,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -4104,7 +4855,7 @@ TEST_TEMPLATES = {
                             {"key": "cell_no",      "label": "Cell No.",               "type": "text"},
                             {"key": "sg_value",     "label": "SG Reading",             "type": "number"},
                             {"key": "sg_corrected", "label": "Temp-Corrected SG",      "type": "number"},
-                            {"key": "condition",    "label": "Condition",              "type": "dropdown", "options": ["Good", "Low", "Critical"]},
+                            {"key": "condition",    "label": "Condition",              "type": "dropdown", "options": ["Good", "Low", "Critical"], "column_evaluation": {"Good": "NORMAL", "Low": "ALERT", "Critical": "CRITICAL"}},
                         ],
                         "default_rows": [
                             {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
@@ -4121,7 +4872,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "water_added",    "label": "Distilled Water Added",  "type": "boolean"},
                     {"key": "remarks",        "label": "Remarks",                "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result",         "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"]},
+                    {"key": "overall_result", "label": "Overall Result",         "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFM}},
                     {"key": "tested_by",      "label": "Tested By",              "type": "text",     "required": True},
                 ],
             },
@@ -4170,7 +4921,7 @@ TEST_TEMPLATES = {
                             {"key": "cell_no",  "label": "Cell No.",         "type": "text"},
                             {"key": "voltage_v","label": "Voltage (V)",      "type": "number"},
                             {"key": "deviation","label": "Deviation from Rated (V)","type": "number"},
-                            {"key": "condition","label": "Condition",        "type": "dropdown", "options": ["Normal", "High", "Low"]},
+                            {"key": "condition","label": "Condition",        "type": "dropdown", "options": ["Normal", "High", "Low"], "column_evaluation": _EV_NHC},
                         ],
                         "default_rows": [
                             {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
@@ -4186,7 +4937,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFM}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -4254,7 +5005,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Marginal"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Marginal"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFM}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -4298,7 +5049,7 @@ TEST_TEMPLATES = {
                         "type": "table",
                         "columns": [
                             {"key": "cell_no",     "label": "Cell No.",      "type": "text"},
-                            {"key": "level",       "label": "Level",         "type": "dropdown", "options": ["Normal", "Low", "High", "Critical Low"]},
+                            {"key": "level",       "label": "Level",         "type": "dropdown", "options": ["Normal", "Low", "High", "Critical Low"], "column_evaluation": _EV_NHC},
                             {"key": "water_added_ml", "label": "Water Added (ml)", "type": "number"},
                             {"key": "remarks",     "label": "Remarks",       "type": "text"},
                         ],
@@ -4314,7 +5065,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Normal", "Low — Topped Up", "Critical — Action Required"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Normal", "Low — Topped Up", "Critical — Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Normal": "NORMAL", "Low — Topped Up": "ALERT", "Critical — Action Required": "CRITICAL"}}},
                     {"key": "checked_by",     "label": "Checked By",     "type": "text",     "required": True},
                 ],
             },
@@ -4366,7 +5117,7 @@ TEST_TEMPLATES = {
                         "columns": [
                             {"key": "cell_no",   "label": "Cell No.",    "type": "text"},
                             {"key": "voltage_v", "label": "Voltage (V)", "type": "number"},
-                            {"key": "condition", "label": "Condition",   "type": "dropdown", "options": ["Normal", "High", "Low"]},
+                            {"key": "condition", "label": "Condition",   "type": "dropdown", "options": ["Normal", "High", "Low"], "column_evaluation": _EV_NHC},
                         ],
                         "default_rows": [
                             {"cell_no": "Cell 1"}, {"cell_no": "Cell 2"}, {"cell_no": "Cell 3"},
@@ -4379,7 +5130,7 @@ TEST_TEMPLATES = {
                 "title": "Overall Assessment",
                 "fields": [
                     {"key": "remarks",        "label": "Remarks",        "type": "textarea"},
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Monitor"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFM}},
                     {"key": "tested_by",      "label": "Tested By",      "type": "text",     "required": True},
                 ],
             },
@@ -4424,7 +5175,7 @@ TEST_TEMPLATES = {
                     {"key": "vent_plugs_ok",        "label": "Vent plugs / caps clean and intact",      "type": "checkbox"},
                     {"key": "tray_cleaned",         "label": "Battery tray / room cleaned",             "type": "checkbox"},
                     {"key": "earthing_ok",          "label": "Earthing connections checked",            "type": "checkbox"},
-                    {"key": "charger_output_ok",    "label": "Charger output voltage checked",          "type": "dropdown", "options": ["Normal", "High", "Low", "Not Checked"]},
+                    {"key": "charger_output_ok",    "label": "Charger output voltage checked",          "type": "dropdown", "options": ["Normal", "High", "Low", "Not Checked"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Normal": "NORMAL", "High": "ALERT", "Low": "ALERT", "Not Checked": "NORMAL"}}},
                     {"key": "electrolyte_checked",  "label": "Electrolyte level checked",               "type": "checkbox"},
                     {"key": "water_added",          "label": "Distilled water added if required",       "type": "checkbox"},
                     {"key": "sg_checked",           "label": "Specific gravity checked",                "type": "checkbox"},
@@ -4435,7 +5186,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"]},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
                     {"key": "maintained_by",  "label": "Maintained By",  "type": "text",     "required": True},
                 ],
             },
@@ -4486,7 +5237,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -4542,7 +5293,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -4595,7 +5346,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Overall Assessment",
                 "fields": [
-                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"]},
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
                     {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
                     {"key": "inspected_by",      "label": "Inspected By",      "type": "text",     "required": True},
                 ],
@@ -4653,7 +5404,8 @@ TEST_TEMPLATES = {
                     {"key": "defects_found", "label": "Defects / Issues Found", "type": "textarea"},
                     {"key": "recommendations", "label": "Recommendations", "type": "textarea"},
                     {"key": "test_result", "label": "Overall Test Result", "type": "dropdown", "required": True,
-                     "options": ["Pass", "Fail", "Conditional", "Retest Required"]},
+                     "options": ["Pass", "Fail", "Conditional", "Retest Required"],
+                     "dropdown_evaluation": {"enabled": True, "value_severities": {"Pass": "NORMAL", "Fail": "CRITICAL", "Conditional": "ALERT", "Retest Required": "ALERT"}}},
                 ],
             },
         ],
@@ -5247,7 +5999,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",      "label": "Capacitance C (pF)",              "type": "number"},
                             {"key": "df_measured",         "label": "% D.F Measured",                  "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",          "type": "number"},
-                            {"key": "df_corrected_20c",    "label": "% D.F @ 20°C (ITC Corrected)",   "type": "number"},
+                            {"key": "df_corrected_20c",    "label": "% D.F @ 20°C (ITC Corrected)",   "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",    "label": "% D.F Previous Test",             "type": "number"},
                             {
                                 "key": "condition",
@@ -5294,7 +6046,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",               "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                   "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",            "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",              "type": "number"},
                             {
                                 "key": "condition",
@@ -5336,7 +6088,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",               "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                   "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",            "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (ITC Corrected)",    "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",              "type": "number"},
                             {
                                 "key": "condition",
@@ -5472,7 +6224,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
                             {
                                 "key": "condition",
@@ -5560,7 +6312,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
                             {
                                 "key": "condition",
@@ -5641,7 +6393,7 @@ TEST_TEMPLATES = {
                             {"key": "capacitance_pf",       "label": "Capacitance C (pF)",            "type": "number"},
                             {"key": "df_measured",          "label": "% D.F Measured",                "type": "number"},
                             {"key": "itc_correction_factor","label": "ITC Correction Factor",         "type": "number"},
-                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "number"},
+                            {"key": "df_corrected_20c",     "label": "% D.F @ 20°C (Corrected)",     "type": "calculated", "formula": "multiply(df_measured, itc_correction_factor)"},
                             {"key": "df_previous_test",     "label": "% D.F Previous Test",           "type": "number"},
                             {
                                 "key": "condition",
@@ -5720,10 +6472,10 @@ TEST_TEMPLATES = {
                         "columns": [
                             {"key": "test_configuration",        "label": "Test Configuration",              "type": "readonly"},
                             {"key": "moisture_percent",          "label": "% Moisture",                      "type": "number"},
-                            {"key": "moisture_analysis",         "label": "Tr. Analysis (% Moisture)",       "type": "dropdown", "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]},
+                            {"key": "moisture_analysis",         "label": "Tr. Analysis (% Moisture)",       "type": "dropdown", "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"], "column_evaluation": _EV_MOISTURE},
                             {"key": "moisture_previous_test",    "label": "% Moisture Previous Test",        "type": "number"},
                             {"key": "oil_conductivity_psm",      "label": "Oil Conductivity (pS/m)",         "type": "number"},
-                            {"key": "oil_conductivity_analysis", "label": "Tr. Analysis (Oil Conductivity)", "type": "dropdown", "options": ["As new", "Acceptable", "Poor", "Bad"]},
+                            {"key": "oil_conductivity_analysis", "label": "Tr. Analysis (Oil Conductivity)", "type": "dropdown", "options": ["As new", "Acceptable", "Poor", "Bad"], "column_evaluation": _EV_OIL_COND},
                         ],
                         "default_rows": [
                             {"test_configuration": "HV-GND"},
@@ -5875,7 +6627,8 @@ TEST_TEMPLATES = {
                             {"key": "cc_mf",     "label": "CC — MF (100k–600kHz)", "type": "number"},
                             {"key": "cc_hf",     "label": "CC — HF (600k–1MHz)",   "type": "number"},
                             {"key": "assessment","label": "Assessment", "type": "dropdown",
-                             "options": ["Normal", "Slight Deviation", "Marginal", "Abnormal"]},
+                             "options": ["Normal", "Slight Deviation", "Marginal", "Abnormal"],
+                             "column_evaluation": _EV_SFRA_ASSESS},
                         ],
                         "default_rows": [
                             {"winding": "HV-N"}, {"winding": "LV-N"}, {"winding": "TV-N"},
@@ -5989,6 +6742,11 @@ TEST_TYPE_TO_TEMPLATE = {
     "Transformer Oil Test":             "transformer_oil_test",
     "Insulating Oil Test":              "transformer_oil_test",
     "Oil BDV Test":                     "transformer_oil_test",
+
+    # ── DGA ──
+    "Transformer Dissolved Gas Analysis (DGA)": "transformer_dga",
+    "Dissolved Gas Analysis":                   "transformer_dga",
+    "DGA Test":                                 "transformer_dga",
 
     # ── Calibration test types (enable_calibration=True, DATE_ADD rule) ──
     "Protection Relay Calibration and History": "protection_relay_calibration",

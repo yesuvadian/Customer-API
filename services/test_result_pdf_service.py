@@ -8,10 +8,13 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from sqlalchemy.orm import Session
 from uuid import UUID
+from typing import Dict, Any, Optional
 
 from models import TestResult, TestSession, TestSessionReading, TestingRequest, User
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func
+from services.tan_delta_extractor import TanDeltaExtractor
+from services.tan_delta_validator import TanDeltaValidator
 
 
 class TestResultPDFService:
@@ -19,6 +22,121 @@ class TestResultPDFService:
 
     def __init__(self, db: Session):
         self.db = db
+
+    def process_tandelta_test_data(
+        self, 
+        test_data: Dict[str, Any], 
+        template_key: str,
+        request_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Process and validate tan delta test data before database save.
+        
+        Performs two-tier validation:
+        1. Extraction: Normalizes field names and values (handles PDF variations)
+        2. Validation: Checks ranges and enums
+        
+        Returns processed test_data with validation report added.
+        Raises ValueError if critical validation issues found.
+        """
+        if template_key not in ["capacitance_tandelta_transformer", "tandelta_nct", "tandelta_comparison"]:
+            return test_data  # Not a tan delta test, skip processing
+        
+        extractor = TanDeltaExtractor()
+        validator = TanDeltaValidator()
+        errors = []
+        warnings = []
+        
+        # Process table sections if they exist
+        table_sections = [
+            "hv_bushing_readings",
+            "lv_bushing_readings", 
+            "winding_ust_readings",
+            "winding_gst_readings",
+            "neutral_bushing",
+            "primary_winding",
+            "secondary_winding",
+            "comparison_values"
+        ]
+        
+        processed_data = test_data.copy()
+        
+        for section_key in table_sections:
+            if section_key not in processed_data:
+                continue
+            
+            rows = processed_data[section_key]
+            if not isinstance(rows, list):
+                continue
+            
+            processed_rows = []
+            for idx, row in enumerate(rows):
+                if not isinstance(row, dict):
+                    processed_rows.append(row)
+                    continue
+                
+                processed_row = row.copy()
+                
+                # Normalize winding_pair if present
+                if "winding_pair" in processed_row and processed_row["winding_pair"]:
+                    normalized = extractor.normalize_config(
+                        processed_row["winding_pair"], 
+                        config_type="winding"
+                    )
+                    if normalized:
+                        processed_row["winding_pair"] = normalized
+                
+                # Normalize bushing_type if present
+                if "bushing_type" in processed_row and processed_row["bushing_type"]:
+                    normalized = extractor.normalize_config(
+                        processed_row["bushing_type"], 
+                        config_type="bushing"
+                    )
+                    if normalized:
+                        processed_row["bushing_type"] = normalized
+                
+                # Validate numeric fields
+                for field in ["cap_pf", "tandelta_pct", "tandelta_temp_corrected", "test_voltage_kv"]:
+                    if field in processed_row and processed_row[field] is not None:
+                        try:
+                            value = float(processed_row[field])
+                            processed_row[field] = value
+                            
+                            # Range validation
+                            if field == "cap_pf":
+                                is_valid, msg = validator.validate_capacitance(value, "bushing")
+                                if msg:
+                                    warnings.append(f"Row {idx}, {field}: {msg}")
+                            elif field == "tandelta_pct":
+                                is_valid, msg = validator.validate_tandelta(value)
+                                if msg:
+                                    warnings.append(f"Row {idx}, {field}: {msg}")
+                            elif field == "test_voltage_kv":
+                                is_valid, msg = validator.validate_voltage(value)
+                                if msg and not is_valid:
+                                    errors.append(f"Row {idx}, {field}: {msg}")
+                        except (ValueError, TypeError):
+                            errors.append(f"Row {idx}, {field}: Not a valid number")
+                
+                processed_rows.append(processed_row)
+            
+            processed_data[section_key] = processed_rows
+        
+        # Add validation report to metadata
+        if not hasattr(processed_data, 'get'):
+            # Ensure processed_data is dict-like
+            if isinstance(processed_data, dict):
+                processed_data["_validation_report"] = {
+                    "errors": errors,
+                    "warnings": warnings,
+                    "status": "failed" if errors else "passed",
+                }
+        
+        # Raise error if critical issues found
+        if errors:
+            raise ValueError(f"Test data validation failed: {'; '.join(errors)}")
+        
+        return processed_data
 
     def _render_test_data_structure(self, data, story, heading_style, subheading_style, normal_style):
         """
@@ -603,6 +721,42 @@ class TestResultPDFService:
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#DDDDDD')),
             ]))
             story.append(request_table)
+            story.append(Spacer(1, 0.3*inch))
+
+        # ============================================================
+        # TESTING KIT USED
+        # ============================================================
+        if result.testing_kit_id and result.testing_kit:
+            kit = result.testing_kit
+            np = kit.nameplate_data or {}
+            kit_type = (
+                np.get("kit_subtype")
+                or kit.bay_number
+                or (kit.equipment_type.name if kit.equipment_type else "Testing Kit")
+            )
+            story.append(Paragraph("Testing Kit Used", heading_style))
+            kit_data = [
+                ['UEIC:', kit.ueic or '-'],
+                ['Kit Type:', kit_type],
+                ['Manufacturer:', kit.manufacturer or '-'],
+                ['Model Number:', kit.model_number or '-'],
+                ['Serial Number:', kit.factory_serial_number or '-'],
+                ['Location:', kit.department.name if kit.department else '-'],
+            ]
+            kit_table = Table(kit_data, colWidths=[2*inch, 4.5*inch])
+            kit_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#EBF5FB')),
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1A5276')),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#AED6F1')),
+            ]))
+            story.append(kit_table)
             story.append(Spacer(1, 0.3*inch))
 
         # ============================================================

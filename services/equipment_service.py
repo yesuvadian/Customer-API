@@ -2,6 +2,7 @@
 Equipment Asset Register Service
 Handles UEIC generation, CRUD, lifecycle management, and department-based querying.
 """
+import re
 from uuid import UUID
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -17,29 +18,36 @@ class EquipmentService:
 
     # ── Equipment Type Code Mapping (from SRS Appendix A) ──
     EQUIPMENT_TYPE_CODES = {
-        "Power Transformer": "PT",
-        "Circuit Breaker": "CB",
-        "Current Transformer": "CT",
-        "Potential Transformer": "VT",
-        "Voltage Transformer": "VT",
-        "CVT": "CV",
-        "Capacitor Voltage Transformer": "CV",
-        "Surge Arrestor": "SA",
-        "Isolator": "IS",
-        "Disconnector": "IS",
-        "Control & Relay Panel": "CR",
-        "Battery Set": "BS",
-        "Battery Charger": "BC",
-        "Wave Trap": "WT",
+        "Power Transformer":             "PT",
+        "Circuit Breaker":               "CB",
+        "Current Transformer":           "CT",
+        "Potential Transformer":         "VT",
+        "Voltage Transformer":           "VT",
+        "Capacitor Voltage Transformer": "VT",
+        "CVT":                           "VT",
+        "Surge Arrestor":                "SA",
+        "Isolator":                      "IS",
+        "Isolator / Disconnector":       "IS",
+        "Disconnector":                  "IS",
+        "Control & Relay Panel":         "CR",
+        "Battery Set":                   "BS",
+        "Battery Charger":               "BC",
+        "Wave Trap":                     "WT",
         "Station Auxiliary Transformer": "AT",
-        "LTAC Panel": "LA",
-        "Fire Fighting System": "FF",
-        "PLCC Panel": "PL",
-        "Digital Communication Panel": "DC",
-        "Diesel Generator Set": "DG",
-        "Electronic Tri-vector Meter": "EM",
-        "ETV Meter": "EM",
-        "Protection Relay": "RL",
+        "LTAC Panel":                    "LP",
+        "Fire Fighting System":          "FF",
+        "PLCC Panel":                    "PL",
+        "Digital Communication Panel":   "DC",
+        "Diesel Generator Set":          "DG",
+        "Electronic Tri-vector Meter":   "EM",
+        "ETV Meter":                     "EM",
+        "Protection Relay":              "RL",
+        "Distribution Transformer":      "DT",
+        "Bus Bar":                       "BB",
+        "Cable":                         "CA",
+        "Capacitor Bank":                "CP",
+        "Reactor":                       "RC",
+        "Lightning Arrester":            "LA",
     }
 
     @classmethod
@@ -161,13 +169,35 @@ class EquipmentService:
     ) -> str:
         """
         Generate UEIC: {zone_code}-{substation_code}-{voltage}-{bay}-{type_code}-{serial}
-        Example: BZ-PNYA-220-01-CB-01
+        Example: BN-HEBL-220-04-PT-01
+
+        Requires:
+          - Zone department (depth=0) must have a 2-char code
+          - Substation department (depth=3) must have a 4-char code
         """
         zone_dept = cls._get_department_ancestor(db, department_id, target_level=0)
-        zone_code = (zone_dept.code or zone_dept.name[:2]).upper()[:2] if zone_dept else "XX"
+        if not zone_dept or not zone_dept.code or len(zone_dept.code) != 2:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Zone department has invalid code '{getattr(zone_dept, 'code', None)}' — must be exactly 2 characters. Update OrgDepartment.code before registering equipment.",
+            )
 
         substation = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
-        substation_code = (substation.code or substation.name[:4]).upper()[:4] if substation else "XXXX"
+        if not substation:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Department '{department_id}' not found.",
+            )
+
+        zone_code = zone_dept.code.upper()
+
+        if substation.code and len(substation.code) == 4:
+            substation_code = substation.code.upper()
+        else:
+            base = re.sub(r"^\d+\s*kV\s*", "", substation.name or "", flags=re.IGNORECASE).strip()
+            cleaned = re.sub(r"[^A-Za-z0-9 ]", "", base)
+            letters = re.sub(r"\s+", "", cleaned)
+            substation_code = (letters[:4]).upper().ljust(4, "X")
 
         type_code = cls.EQUIPMENT_TYPE_CODES.get(equipment_type_name, "XX")
 
@@ -209,6 +239,7 @@ class EquipmentService:
         pt_ratio: Optional[str] = None,
         vector_group: Optional[str] = None,
         impedance_pct: Optional[float] = None,
+        scada_tag: Optional[str] = None,
         created_by: Optional[UUID] = None,
     ) -> Equipment:
         """Register a new equipment unit with auto-generated UEIC."""
@@ -251,6 +282,7 @@ class EquipmentService:
             pt_ratio=pt_ratio,
             vector_group=vector_group,
             impedance_pct=impedance_pct,
+            scada_tag=scada_tag,
             created_by=created_by,
         )
         db.add(equipment)
@@ -304,6 +336,7 @@ class EquipmentService:
         replacement_year: Optional[int] = None,
         replacement_year_from: Optional[int] = None,
         replacement_year_to: Optional[int] = None,
+        has_tests: bool = False,
     ) -> List[Equipment]:
         from sqlalchemy import extract
 
@@ -335,6 +368,7 @@ class EquipmentService:
         if search:
             query = query.filter(
                 (Equipment.ueic.ilike(f"%{search}%")) |
+                (Equipment.bay_number.ilike(f"%{search}%")) |
                 (Equipment.manufacturer.ilike(f"%{search}%")) |
                 (Equipment.model_number.ilike(f"%{search}%")) |
                 (Equipment.factory_serial_number.ilike(f"%{search}%"))
@@ -408,6 +442,13 @@ class EquipmentService:
             query = query.filter(
                 Equipment.replaces_equipment_id.isnot(None),
                 extract('year', Equipment.commissioned_date) <= replacement_year_to
+            )
+
+        if has_tests:
+            from models import TestingRequest
+            from sqlalchemy import exists as sa_exists
+            query = query.filter(
+                sa_exists().where(TestingRequest.equipment_id == Equipment.id)
             )
 
         return (

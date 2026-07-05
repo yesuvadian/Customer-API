@@ -23,6 +23,9 @@ from models import (
 )
 
 from utils.common_service import UTCDateTimeMixin
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -556,6 +559,25 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             )
 
             db.flush()
+
+            # Enroll in TR workflow engine so the ticket enters the L2→L3→L4
+            # approval/assignment/test flow instead of the old direct-approval path.
+            try:
+                from services.tr_workflow_routing_service import WorkflowRoutingService
+                WorkflowRoutingService(db).instantiate_workflow(
+                    new_request,
+                    performed_by_id=schedule.created_by,
+                )
+                db.flush()
+                logger.info(
+                    "[ScheduleService] WF instance created for new ticket %s",
+                    new_request.request_number,
+                )
+            except Exception as _wf_err:
+                logger.error(
+                    "[ScheduleService] WF enrollment FAILED for ticket %s: %s",
+                    new_request.request_number, _wf_err, exc_info=True,
+                )
 
             log_entry = TestRequestScheduleLog(
                 schedule_id=schedule.id,

@@ -175,6 +175,37 @@ def assign_users_to_department(
     }
 
 
+@router.get("/{dept_id}/ancestors")
+def get_department_ancestors(
+    org_id: UUID,
+    dept_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_org_member)
+):
+    """Return the ancestor chain from root down to dept_id as an ordered list."""
+    from models import OrgDepartment
+    ancestors = []
+    current_id = dept_id
+    seen = set()
+    while current_id:
+        if current_id in seen:
+            break
+        seen.add(current_id)
+        dept = db.query(OrgDepartment).filter(
+            OrgDepartment.id == current_id,
+            OrgDepartment.organization_id == org_id,
+        ).first()
+        if not dept:
+            break
+        ancestors.append({"id": str(dept.id), "name": dept.name})
+        current_id = dept.parent_department_id
+    ancestors.reverse()
+    # Assign level based on depth position (1 = root)
+    for i, a in enumerate(ancestors):
+        a["level"] = i + 1
+    return ancestors
+
+
 @router.get("/{dept_id}/users", response_model=List[UserSchema])
 def get_department_users(
     org_id: UUID,

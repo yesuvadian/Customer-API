@@ -132,6 +132,8 @@ class TestingRequestStatus(PyEnum):
     outcome_active = "outcome_active"   # approved + dispatched (terminal)
     commissioned = "commissioned"       # TAQC approved + equipment created (terminal)
     closed = "closed"                   # next_action=none terminal state (no downstream action)
+    # tr_wf_* engine states (bridge between legacy and new configurable workflow)
+    pending_assignment = "pending_assignment"  # L2 approved, awaiting L3 tester assignment
 
 class RecommendationType(PyEnum):
     pass_test = "pass"
@@ -764,6 +766,262 @@ class RepairAssignmentQueue(Base):
     )
 
 
+# =============================================================================
+# Test Request Configurable Workflow Engine (tr_wf_*)
+# Parallel engine for testing request workflows — RepairStage* untouched.
+# =============================================================================
+
+class TrWfDefinition(Base):
+    """Workflow definition for a test request type (Normal / Failure / Special)."""
+    __tablename__ = "tr_wf_definitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    request_type = Column(String(50), nullable=True)  # normal | failure | special | None=all
+    is_default = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    default_l3_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+    default_tester_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    statuses = relationship("TrWfStatus", back_populates="definition", cascade="all, delete-orphan")
+    stages = relationship("TrWfStage", back_populates="definition", cascade="all, delete-orphan")
+    instances = relationship("TrWfInstance", back_populates="definition")
+    default_l3_role = relationship("OrgRole", foreign_keys=[default_l3_role_id])
+    default_tester_role = relationship("OrgRole", foreign_keys=[default_tester_role_id])
+
+
+class TrWfStatus(Base):
+    """Configurable status for a workflow definition. Each stage maps to one status."""
+    __tablename__ = "tr_wf_statuses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    wf_definition_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_definitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    status_code = Column(String(100), nullable=False)   # stable API identifier
+    status_name = Column(String(200), nullable=False)   # editable display label
+    sequence = Column(Integer, nullable=False, default=0)
+    color = Column(String(20), nullable=True)            # hex color for badge
+    approval_required = Column(Boolean, default=False)
+    assignment_required = Column(Boolean, default=False)
+    is_terminal = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+
+    __table_args__ = (
+        UniqueConstraint("wf_definition_id", "status_code", name="uq_tr_wf_status_code"),
+    )
+
+    definition = relationship("TrWfDefinition", back_populates="statuses")
+    stages = relationship("TrWfStage", back_populates="status")
+
+
+class TrWfStage(Base):
+    """A single stage in a test request workflow definition."""
+    __tablename__ = "tr_wf_stages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    wf_definition_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_definitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    status_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_statuses.id", ondelete="SET NULL"), nullable=True)
+    name = Column(String(200), nullable=False)
+    code = Column(String(100), nullable=False)
+    sequence = Column(Integer, nullable=False)
+    weight = Column(Integer, default=10)
+    is_mandatory = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True)
+    default_duration_days = Column(Integer, nullable=True)
+    show_recommendation = Column(Boolean, default=False, server_default="false")
+    is_result_stage = Column(Boolean, default=False, server_default="false")
+    use_l2_route = Column(Boolean, default=False, server_default="false")
+    is_role_scoped = Column(Boolean, default=False, server_default="false")
+    created_at = Column(DateTime, server_default=func.now())
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("wf_definition_id", "code", name="uq_tr_wf_stage_code"),
+    )
+
+    definition = relationship("TrWfDefinition", back_populates="stages")
+    status = relationship("TrWfStatus", back_populates="stages")
+    roles = relationship("TrWfStageRole", back_populates="stage", cascade="all, delete-orphan")
+    transitions = relationship("TrWfStageTransition", back_populates="from_stage",
+                               foreign_keys="TrWfStageTransition.from_stage_id",
+                               cascade="all, delete-orphan")
+    stage_instances = relationship("TrWfStageInstance", back_populates="stage")
+
+
+class TrWfStageRole(Base):
+    """Role → stage permission mapping. can_approve=act on approval stages, can_assign=assign testers."""
+    __tablename__ = "tr_wf_stage_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+    can_approve = Column(Boolean, default=False)
+    can_assign = Column(Boolean, default=False)
+    can_edit = Column(Boolean, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("stage_id", "role_id", name="uq_tr_wf_stage_role"),
+    )
+
+    stage = relationship("TrWfStage", back_populates="roles")
+    role = relationship("OrgRole", foreign_keys=[role_id])
+
+
+class TrWfStageTransition(Base):
+    """Directed transition from one stage to another.
+    to_stage_id=NULL → terminal.
+    Send-back rule: if target stage has 0 active roles → apply terminal_status_id → workflow ends.
+    """
+    __tablename__ = "tr_wf_stage_transitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    from_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="CASCADE"), nullable=False)
+    to_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="SET NULL"), nullable=True)
+    action_code = Column(String(50), nullable=False)  # approve|reject|assign|return|cancel|complete|close|create_child|reassign
+    label = Column(String(100), nullable=True)  # display label; falls back to action_code.title() if null
+    requires_comment = Column(Boolean, default=False)
+    is_rejection = Column(Boolean, default=False)
+    terminal_status_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_statuses.id", ondelete="SET NULL"), nullable=True)
+    post_action = Column(String(100), nullable=True)  # key into BaseWfAction registry, fired after transition
+
+    __table_args__ = (
+        UniqueConstraint("from_stage_id", "action_code", name="uq_tr_wf_transition_action"),
+    )
+
+    from_stage = relationship("TrWfStage", back_populates="transitions", foreign_keys=[from_stage_id])
+    to_stage = relationship("TrWfStage", foreign_keys=[to_stage_id])
+    terminal_status = relationship("TrWfStatus", foreign_keys=[terminal_status_id])
+
+
+class TrWfInstance(Base):
+    """Runtime workflow instance for a single testing request."""
+    __tablename__ = "tr_wf_instances"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    wf_definition_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_definitions.id", ondelete="SET NULL"), nullable=True)
+    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=True, unique=True, index=True)
+    entity_type = Column(String(50), nullable=True, index=True)   # 'testing_request' | 'document_request' | …
+    entity_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="SET NULL"), nullable=True)
+    current_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="SET NULL"), nullable=True)
+    current_status_code = Column(String(100), nullable=True, index=True)  # denormalized from tr_wf_statuses for fast querying
+    status = Column(String(20), default="active")  # active | completed | terminated | cancelled
+    resolved_l3_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+    resolved_tester_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+    started_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    definition = relationship("TrWfDefinition", back_populates="instances")
+    current_stage = relationship("TrWfStage", foreign_keys=[current_stage_id])
+    resolved_l3_role = relationship("OrgRole", foreign_keys=[resolved_l3_role_id])
+    resolved_tester_role = relationship("OrgRole", foreign_keys=[resolved_tester_role_id])
+    stage_instances = relationship("TrWfStageInstance", back_populates="wf_instance", cascade="all, delete-orphan")
+    audit_logs = relationship("TrWfAuditLog", back_populates="wf_instance", cascade="all, delete-orphan")
+    testing_request = relationship("TestingRequest", foreign_keys="TestingRequest.wf_instance_id", back_populates=None, uselist=False, overlaps="wf_instance")
+
+
+class TrWfStageInstance(Base):
+    """Runtime instance of a single stage within a TrWfInstance."""
+    __tablename__ = "tr_wf_stage_instances"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    wf_instance_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_instances.id", ondelete="CASCADE"), nullable=False)
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(30), default="not_started")  # not_started | in_progress | completed | rejected | returned
+    action_taken = Column(String(50), nullable=True)    # action_code that completed this instance
+    assigned_user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    assigned_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id"), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    comment = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    wf_instance = relationship("TrWfInstance", back_populates="stage_instances")
+    stage = relationship("TrWfStage", back_populates="stage_instances")
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+    completed_user = relationship("User", foreign_keys=[completed_by])
+    assigned_role = relationship("OrgRole", foreign_keys=[assigned_role_id])
+
+
+class TrWfAuditLog(Base):
+    """Immutable audit trail — one row per stage transition."""
+    __tablename__ = "tr_wf_audit_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    wf_instance_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    testing_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=True, index=True)
+    from_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="SET NULL"), nullable=True)
+    to_stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="SET NULL"), nullable=True)
+    action_code = Column(String(50), nullable=False)
+    performed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id"), nullable=True)
+    from_status_code = Column(String(100), nullable=True)
+    to_status_code = Column(String(100), nullable=True)
+    comment = Column(Text, nullable=True)
+    is_send_back = Column(Boolean, default=False)
+    is_terminal = Column(Boolean, default=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    wf_instance = relationship("TrWfInstance", back_populates="audit_logs")
+    from_stage = relationship("TrWfStage", foreign_keys=[from_stage_id])
+    to_stage = relationship("TrWfStage", foreign_keys=[to_stage_id])
+    performer = relationship("User", foreign_keys=[performed_by])
+    role = relationship("OrgRole", foreign_keys=[role_id])
+
+
+class TrWfRoutingRule(Base):
+    """Maps (request_type, equipment_type, test_type) → a workflow definition.
+    Lookup order by specificity: all three set > two set > one set > catch-all.
+    Priority column breaks ties at equal specificity.
+    """
+    __tablename__ = "tr_wf_routing_rules"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    wf_definition_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_definitions.id", ondelete="CASCADE"), nullable=True)
+    override_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+    override_tester_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
+    request_type = Column(String(50), nullable=True)       # normal | failure | special | NULL=any
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="SET NULL"), nullable=True)
+    test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"), nullable=True)
+    priority = Column(Integer, default=0)                  # higher wins on equal specificity
+    is_active = Column(Boolean, default=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    wf_definition = relationship("TrWfDefinition", foreign_keys=[wf_definition_id])
+    override_role = relationship("OrgRole", foreign_keys=[override_role_id])
+    override_tester_role = relationship("OrgRole", foreign_keys=[override_tester_role_id])
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+
+
+class TrWfRoutingDefault(Base):
+    """Per-org default workflow definition. Used when no routing rule matches.
+    One row per org — explicit placeholder, never a NULL row in routing_rules.
+    """
+    __tablename__ = "tr_wf_routing_defaults"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, unique=True)
+    wf_definition_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_definitions.id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    wf_definition = relationship("TrWfDefinition", foreign_keys=[wf_definition_id])
+
+
+# =============================================================================
+
 class EquipmentOverhaulConfig(Base):
     """Per-equipment threshold for cumulative operations before overhaul is required."""
     __tablename__ = "equipment_overhaul_configs"
@@ -1225,6 +1483,9 @@ class Equipment(Base):
 
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
+
+    # SCADA integration
+    scada_tag = Column(String(120), nullable=True, index=True)
 
     # Relationships
     organization = relationship("Organization", foreign_keys=[organization_id])
@@ -2534,6 +2795,42 @@ class TestingRequest(Base):
         nullable=True,
     )
 
+    # -------------------------------------------------------------------------
+    # tr_wf_* Configurable Workflow Engine fields
+    # -------------------------------------------------------------------------
+    # request_type: normal | failure | special (drives routing rule lookup)
+    request_type = Column(String(50), default="normal", nullable=True)
+
+    # wf_instance_id: set by WorkflowRoutingService when L2 approves + routes
+    wf_instance_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tr_wf_instances.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # current_wf_stage_id: denormalized from wf_instance.current_stage_id for fast querying
+    current_wf_stage_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tr_wf_stages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # current_status_code: denormalized from tr_wf_statuses for fast list/filter queries
+    # Updated on every stage advance. Legacy requests leave this NULL.
+    current_status_code = Column(String(100), nullable=True, index=True)
+
+    # parent_request_id: set when this request is auto-created as a child
+    # (e.g. Failure Request → creates Normal Test Request child via create_child action)
+    # Different from source_failure_id which tracks FR → repair_lifecycle lineage
+    parent_request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.testing_requests.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Test Register: master catalogue template row (equipment_id=NULL, equipment_type_id set)
     is_schedule_template = Column(Boolean, default=False, nullable=False)  # True = register entry
 
@@ -2566,7 +2863,79 @@ class TestingRequest(Base):
     test_sessions = relationship("TestSession", back_populates="testing_request", cascade="all, delete-orphan")
     source_failure = relationship("TestingRequest", foreign_keys=[source_failure_id], remote_side="TestingRequest.id")
 
+    # tr_wf_* relationships
+    wf_instance = relationship("TrWfInstance", foreign_keys=[wf_instance_id], back_populates=None, overlaps="testing_request")
+    current_wf_stage = relationship("TrWfStage", foreign_keys=[current_wf_stage_id])
+    parent_request = relationship(
+        "TestingRequest",
+        foreign_keys=[parent_request_id],
+        remote_side="TestingRequest.id",
+        backref="child_requests",
+    )
 
+# ═══════════════════════════════════════════════════════════════════════════
+# DATA IMPORT — PENDING RECORDS (unlinked/unserialed extractions)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class PendingDataImport(Base):
+    """
+    Holds extracted-but-not-yet-submitted import records so nothing from a
+    parsed PDF is ever silently lost — specifically covers the case where
+    OCR could not find (or match) a transformer serial number.
+
+    Lifecycle:
+      POST /data-import/extract  → row created here, status="pending"
+      User edits serial/form_data in the "REVIEW" UI list
+      POST /data-import/submit   → on success, status="submitted"
+                                    (or the row is deleted — implementation
+                                    choice, doesn't affect this model)
+
+    Nothing here touches TestingRequest, Equipment, or the standard
+    create_request() flow — a pending row only becomes a real TR once a
+    person supplies a serial/equipment and submits it through the existing,
+    unmodified endpoint.
+    """
+    __tablename__ = "pending_data_imports"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    source_filename = Column(String(500), nullable=True)
+    test_type_name  = Column(String(255), nullable=False)
+    template_key    = Column(String(100), nullable=True)
+
+    report    = Column(JSONB, nullable=False)   # raw extractor output (report dict)
+    form_data = Column(JSONB, nullable=True)    # pre-built form values, editable by user
+
+    # Denormalized for fast list/search in the UI without unpacking `report`
+    serial_number = Column(String(100), nullable=True, index=True)
+    test_date     = Column(String(20),  nullable=True)
+    sub_station   = Column(String(255), nullable=True)
+
+    # Set once the user manually attaches equipment (before final submit)
+    equipment_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.equipment.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    status = Column(String(20), nullable=False, default="pending")  # pending | submitted | discarded
+    warnings = Column(JSONB, nullable=False, server_default="[]")
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    equipment    = relationship("Equipment", foreign_keys=[equipment_id])
+    creator      = relationship("User", foreign_keys=[created_by])
 # ============================================================
 # TEST REQUEST SCHEDULE MODEL
 # ============================================================
@@ -3036,6 +3405,9 @@ class TestResult(Base):
     # {overall: "NORMAL"|"ALERT"|"CRITICAL", evaluated_at, fields: [{key, label, value, unit, status, thresholds}]}
     evaluation_result = Column(JSONB, nullable=True)
 
+    # Testing kit used for this result (optional — links to Equipment record of type "Testing Kit")
+    testing_kit_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True)
+
     tested_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     tested_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -3049,6 +3421,7 @@ class TestResult(Base):
     test_session = relationship("TestSession", foreign_keys=[test_session_id])
     organization = relationship("Organization", foreign_keys=[organization_id])
     images = relationship("TestResultImage", back_populates="test_result", cascade="all, delete-orphan")
+    testing_kit = relationship("Equipment", foreign_keys=[testing_kit_id])
     tester = relationship("User", foreign_keys=[tested_by])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
@@ -3605,7 +3978,7 @@ class TesterRoleModuleRequirement(Base):
     """
     __tablename__ = "tester_role_module_requirements"
     __table_args__ = (
-        UniqueConstraint('organization_id', name='uq_tester_role_config_org'),
+        UniqueConstraint('organization_id', 'wf_stage_id', name='uq_tester_role_config_org_stage'),
         {"schema": "public"}
     )
 
@@ -3615,6 +3988,13 @@ class TesterRoleModuleRequirement(Base):
     organization_id = Column(
         UUID(as_uuid=True),
         ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True
+    )
+
+    # Optional: scope to a specific TR workflow stage (NULL = org/global default)
+    wf_stage_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tr_wf_stages.id", ondelete="SET NULL"),
         nullable=True
     )
 
@@ -3633,6 +4013,7 @@ class TesterRoleModuleRequirement(Base):
 
     # Relationships
     organization = relationship("Organization", foreign_keys=[organization_id])
+    wf_stage = relationship("TrWfStage", foreign_keys=[wf_stage_id])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
 
@@ -4554,6 +4935,371 @@ class RepairSurveillanceTest(Base):
     surveillance_workflow = relationship("RepairWorkflow", foreign_keys=[surveillance_workflow_id])
     testing_request = relationship("TestingRequest", foreign_keys=[testing_request_id])
     test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ANALYTICS ENGINE
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestAnalytics(Base):
+    """Analytics computed for a single test result.  One row per test_result_id."""
+    __tablename__ = "test_analytics"
+    __table_args__ = (
+        UniqueConstraint("test_result_id", name="uq_test_analytics_result"),
+        {"schema": "public"},
+    )
+
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id     = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id        = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=False)
+    test_result_id      = Column(UUID(as_uuid=True), ForeignKey("public.test_results.id",  ondelete="CASCADE"), nullable=False)
+    testing_request_id  = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="SET NULL"), nullable=True)
+    template_key        = Column(String(100), nullable=False)
+
+    health_score        = Column(Numeric(5, 2), nullable=True)
+    risk_level          = Column(String(20), nullable=True)     # Low | Medium | High | Critical
+    condition_summary   = Column(String(20), nullable=True)     # Good | Fair | Poor
+
+    trend_summary       = Column(Text, nullable=True)
+    critical_findings   = Column(JSONB, default=list)
+    recommendations     = Column(JSONB, default=list)
+
+    parameter_count     = Column(Integer, default=0)
+    evaluated_count     = Column(Integer, default=0)
+    tested_at           = Column(DateTime(timezone=True), nullable=True)   # actual test date
+    calculated_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    test_result     = relationship("TestResult",     foreign_keys=[test_result_id])
+    equipment       = relationship("Equipment",      foreign_keys=[equipment_id])
+    organization    = relationship("Organization",   foreign_keys=[organization_id])
+
+
+class ParameterAnalytics(Base):
+    """Analytics computed per parameter for a test result.  One row per (test_result_id, parameter_key)."""
+    __tablename__ = "parameter_analytics"
+    __table_args__ = (
+        UniqueConstraint("test_result_id", "parameter_key", name="uq_param_analytics"),
+        {"schema": "public"},
+    )
+
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id     = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id        = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=False)
+    test_result_id      = Column(UUID(as_uuid=True), ForeignKey("public.test_results.id",  ondelete="CASCADE"), nullable=False)
+    template_key        = Column(String(100), nullable=False)
+    parameter_key       = Column(String(100), nullable=False)
+    parameter_label     = Column(String(255), nullable=True)
+    parameter_type      = Column(String(50),  nullable=True)   # number | dropdown | table | date
+
+    current_value       = Column(Numeric, nullable=True)
+    unit                = Column(String(50), nullable=True)
+    condition           = Column(String(20), nullable=True)    # Good | Fair | Poor
+    status              = Column(String(20), nullable=True)    # NORMAL | ALERT | CRITICAL
+    score               = Column(Numeric(5, 2), nullable=True) # 0–100
+
+    trend               = Column(String(30), nullable=True)    # Increasing | Decreasing | Stable | Insufficient_Data
+    trend_slope         = Column(Numeric, nullable=True)       # units per day
+    trend_r_squared     = Column(Numeric(5, 4), nullable=True)
+    history_count       = Column(Integer, default=0)
+
+    annual_change       = Column(Numeric, nullable=True)
+    pct_change_annual   = Column(Numeric(8, 2), nullable=True)
+
+    breach_threshold    = Column(Numeric, nullable=True)
+    breach_predicted_at = Column(DateTime(timezone=True), nullable=True)
+    days_to_breach      = Column(Integer, nullable=True)
+
+    is_anomaly          = Column(Boolean, default=False)
+    anomaly_type        = Column(String(50), nullable=True)    # sudden_increase | sudden_decrease | outlier
+    anomaly_detail      = Column(Text, nullable=True)
+
+    calculated_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    equipment   = relationship("Equipment",  foreign_keys=[equipment_id])
+    test_result = relationship("TestResult", foreign_keys=[test_result_id])
+
+
+class EquipmentAnalytics(Base):
+    """Aggregated health analytics for an equipment asset.  One row per equipment_id."""
+    __tablename__ = "equipment_analytics"
+    __table_args__ = (
+        UniqueConstraint("equipment_id", name="uq_equipment_analytics"),
+        {"schema": "public"},
+    )
+
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id     = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id        = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=False)
+    department_id       = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+
+    health_score        = Column(Numeric(5, 2), nullable=True)
+    risk_level          = Column(String(20), nullable=True)
+    condition_summary   = Column(String(20), nullable=True)
+
+    test_type_scores    = Column(JSONB, default=dict)     # {template_key: {score, risk, tested_at}}
+    critical_findings   = Column(JSONB, default=list)
+    parameters_at_risk  = Column(Integer, default=0)
+
+    test_types_assessed = Column(Integer, default=0)
+    last_test_date      = Column(DateTime(timezone=True), nullable=True)
+    calculated_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    equipment   = relationship("Equipment",     foreign_keys=[equipment_id])
+    department  = relationship("OrgDepartment", foreign_keys=[department_id])
+    organization= relationship("Organization",  foreign_keys=[organization_id])
+
+
+class HierarchyAnalytics(Base):
+    """Aggregated analytics at any node in the department hierarchy.  One row per department_id."""
+    __tablename__ = "hierarchy_analytics"
+    __table_args__ = (
+        UniqueConstraint("department_id", name="uq_hierarchy_analytics_dept"),
+        {"schema": "public"},
+    )
+
+    id                   = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id      = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id",    ondelete="CASCADE"), nullable=False)
+    department_id        = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id",  ondelete="CASCADE"), nullable=False)
+    parent_department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id",  ondelete="SET NULL"), nullable=True)
+    level_type           = Column(String(50), nullable=True)   # substation | division | circle | zone
+
+    health_score         = Column(Numeric(5, 2), nullable=True)
+    risk_level           = Column(String(20), nullable=True)
+
+    equipment_count      = Column(Integer, default=0)
+    equipment_critical   = Column(Integer, default=0)
+    equipment_high       = Column(Integer, default=0)
+    equipment_medium     = Column(Integer, default=0)
+    equipment_low        = Column(Integer, default=0)
+
+    child_count          = Column(Integer, default=0)
+    child_breakdown      = Column(JSONB, default=dict)         # {child_dept_id: {name, score, risk}}
+
+    calculated_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    department        = relationship("OrgDepartment", foreign_keys=[department_id])
+    parent_department = relationship("OrgDepartment", foreign_keys=[parent_department_id])
+    organization      = relationship("Organization",  foreign_keys=[organization_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TESTING KIT MAPPING
+# ═══════════════════════════════════════════════════════════════════════════
+
+class EquipmentTypeKitMapping(Base):
+    """Maps which testing kit types are required/optional for each equipment type."""
+    __tablename__ = "equipment_type_kit_mappings"
+    __table_args__ = (
+        UniqueConstraint("equipment_type_id", "kit_type_id", name="uq_eq_type_kit_type"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
+    kit_type_id       = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"), nullable=False)
+    is_required       = Column(Boolean, default=True)   # True = required, False = optional/recommended
+    notes             = Column(Text, nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment_type = relationship("CategoryMaster",  foreign_keys=[equipment_type_id])
+    kit_type       = relationship("CategoryDetails", foreign_keys=[kit_type_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONDITION MONITORING RECOMMENDATIONS
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ConditionMonitoringRecommendation(Base):
+    """Score-band recommendation config: which test to schedule, how often, for what score range."""
+    __tablename__ = "condition_monitoring_recommendations"
+    __table_args__ = ({"schema": "public"},)
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id   = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id",   ondelete="CASCADE"),   nullable=True)
+    equipment_type_id = Column(Integer,             ForeignKey("public.CategoryMaster.id",  ondelete="CASCADE"),   nullable=False, index=True)
+    score_from        = Column(Numeric(5, 2), nullable=False)
+    score_to          = Column(Numeric(5, 2), nullable=False)
+    test_type_id      = Column(Integer,             ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"),   nullable=False)
+    frequency         = Column(Enum(ScheduleFrequency), nullable=False)
+    is_active         = Column(Boolean, default=True,  nullable=False)
+    display_order     = Column(Integer, default=0,     nullable=False)
+    created_by        = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    cts               = Column(DateTime(timezone=True), server_default=func.now())
+    mts               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment_type = relationship("CategoryMaster",  foreign_keys=[equipment_type_id])
+    test_type      = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    organization   = relationship("Organization",    foreign_keys=[organization_id])
+
+
+class ConditionRecommendationActivation(Base):
+    """Tracks which recommendations have been activated (schedule created) per equipment."""
+    __tablename__ = "condition_recommendation_activations"
+    __table_args__ = (
+        UniqueConstraint("recommendation_id", "equipment_id", name="uq_rec_activation"),
+        {"schema": "public"},
+    )
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    recommendation_id = Column(UUID(as_uuid=True), ForeignKey("public.condition_monitoring_recommendations.id", ondelete="CASCADE"),  nullable=False, index=True)
+    equipment_id      = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",                           ondelete="CASCADE"),  nullable=False, index=True)
+    schedule_id       = Column(UUID(as_uuid=True), ForeignKey("public.test_request_schedules.id",              ondelete="SET NULL"), nullable=True)
+    status            = Column(String(20), default="recommended", nullable=False)
+    activated_by      = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    activated_at      = Column(DateTime(timezone=True), nullable=True)
+    organization_id   = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=True)
+    cts               = Column(DateTime(timezone=True), server_default=func.now())
+    mts               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    recommendation = relationship("ConditionMonitoringRecommendation", foreign_keys=[recommendation_id])
+    schedule       = relationship("TestRequestSchedule",               foreign_keys=[schedule_id])
+    equipment      = relationship("Equipment",                         foreign_keys=[equipment_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SCADA INTEGRATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ScadaTagMap(Base):
+    __tablename__ = "scada_tag_map"
+    __table_args__ = (UniqueConstraint("organization_id", "scada_tag", name="uq_scada_tag_map_org_tag"), {"schema": "public"})
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    scada_tag       = Column(String(120), nullable=False)
+    equipment_id    = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="CASCADE"), nullable=False)
+    parameter_name  = Column(String(120), nullable=True)
+    unit            = Column(String(30),  nullable=True)
+    is_active       = Column(Boolean, default=True, nullable=False)
+    created_by      = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    cts             = Column(DateTime(timezone=True), server_default=func.now())
+    equipment       = relationship("Equipment",    foreign_keys=[equipment_id])
+    organization    = relationship("Organization", foreign_keys=[organization_id])
+
+
+class ScadaUnresolved(Base):
+    __tablename__ = "scada_unresolved"
+    __table_args__ = (UniqueConstraint("organization_id", "scada_tag", name="uq_scada_unresolved_org_tag"), {"schema": "public"})
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    scada_tag       = Column(String(120), nullable=False)
+    sample_payload  = Column(JSONB, nullable=True)
+    first_seen_at   = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at    = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    resolved        = Column(Boolean, default=False, nullable=False)
+    resolved_at     = Column(DateTime(timezone=True), nullable=True)
+    resolved_by     = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    organization    = relationship("Organization", foreign_keys=[organization_id])
+
+
+class ScadaAlertRule(Base):
+    __tablename__ = "scada_alert_rules"
+    __table_args__ = {"schema": "public"}
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id   = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id      = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=True)
+    equipment_type_id = Column(Integer,             ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=True)
+    scada_tag         = Column(String(120), nullable=False)
+    parameter_name    = Column(String(120), nullable=True)
+    unit              = Column(String(30),  nullable=True)
+    warning_min       = Column(Numeric(18, 6), nullable=True)
+    warning_max       = Column(Numeric(18, 6), nullable=True)
+    alarm_min         = Column(Numeric(18, 6), nullable=True)
+    alarm_max         = Column(Numeric(18, 6), nullable=True)
+    critical_min      = Column(Numeric(18, 6), nullable=True)
+    critical_max      = Column(Numeric(18, 6), nullable=True)
+    is_active         = Column(Boolean, default=True, nullable=False)
+    created_by        = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    cts               = Column(DateTime(timezone=True), server_default=func.now())
+    mts               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    equipment         = relationship("Equipment",      foreign_keys=[equipment_id])
+    equipment_type    = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    organization      = relationship("Organization",   foreign_keys=[organization_id])
+
+
+class ScadaReading(Base):
+    __tablename__ = "scada_readings"
+    __table_args__ = {"schema": "public"}
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id    = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="SET NULL"), nullable=True)
+    scada_tag       = Column(String(120), nullable=False)
+    parameter_name  = Column(String(120), nullable=True)
+    value           = Column(Numeric(18, 6), nullable=False)
+    unit            = Column(String(30),  nullable=True)
+    alarm_condition = Column(String(20),  nullable=False, default="NORMAL")
+    recorded_at     = Column(DateTime(timezone=True), nullable=False)
+    received_at     = Column(DateTime(timezone=True), server_default=func.now())
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    equipment       = relationship("Equipment",    foreign_keys=[equipment_id])
+    organization    = relationship("Organization", foreign_keys=[organization_id])
+
+
+class ScadaParameterAnalytics(Base):
+    __tablename__ = "scada_parameter_analytics"
+    __table_args__ = (UniqueConstraint("equipment_id", "scada_tag", name="uq_scada_param_analytics"), {"schema": "public"})
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id     = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    equipment_id        = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id",     ondelete="CASCADE"), nullable=False)
+    scada_tag           = Column(String(120), nullable=False)
+    parameter_name      = Column(String(120), nullable=True)
+    computed_at         = Column(DateTime(timezone=True), server_default=func.now())
+    history_count       = Column(Integer,       nullable=True)
+    trend               = Column(String(30),    nullable=True)
+    trend_slope         = Column(Numeric(18,8), nullable=True)
+    trend_r_squared     = Column(Numeric(6,4),  nullable=True)
+    annual_change       = Column(Numeric(18,6), nullable=True)
+    pct_change_annual   = Column(Numeric(8,2),  nullable=True)
+    is_anomaly          = Column(Boolean, default=False)
+    anomaly_type        = Column(String(50),  nullable=True)
+    anomaly_detail      = Column(Text,        nullable=True)
+    breach_threshold    = Column(Numeric(18,6), nullable=True)
+    breach_predicted_at = Column(DateTime(timezone=True), nullable=True)
+    days_to_breach      = Column(Numeric(8,2),  nullable=True)
+    equipment           = relationship("Equipment",    foreign_keys=[equipment_id])
+    organization        = relationship("Organization", foreign_keys=[organization_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DOCUMENT SUPPORT WORKFLOW
+# ═══════════════════════════════════════════════════════════════════════════
+
+class DocumentRequest(Base):
+    """A document uploaded by a user that enters the Document Support Workflow."""
+    __tablename__ = "document_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_number = Column(String(50), nullable=True, unique=True)
+    title = Column(String(300), nullable=False)
+    description = Column(Text, nullable=True)
+    file_url = Column(String(500), nullable=True)
+    file_name = Column(String(300), nullable=True)
+    file_size = Column(Integer, nullable=True)   # bytes
+    mime_type = Column(String(100), nullable=True)
+    notes = Column(Text, nullable=True)          # additional notes from submitter
+    submitted_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False, index=True)
+    assigned_manager_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    assigned_processor_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    wf_instance_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_instances.id", ondelete="SET NULL"), nullable=True, index=True)
+    priority = Column(String(20), nullable=True, default="normal")  # low / normal / high / urgent
+    target_date = Column(DateTime(timezone=True), nullable=True)
+    current_status_code = Column(String(100), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    submitter = relationship("User", foreign_keys=[submitted_by])
+    assigned_manager = relationship("User", foreign_keys=[assigned_manager_id])
+    assigned_processor = relationship("User", foreign_keys=[assigned_processor_id])
+    org = relationship("Organization", foreign_keys=[org_id])
 
 
 # ═══════════════════════════════════════════════════════════════════════════

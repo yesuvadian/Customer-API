@@ -8,7 +8,7 @@ Data flow:
     └─ TestResult.test_data = {
            "calibration_date": "2025-01-01",
            "validity_months": 12,
-           "overall_result": "Pass" | "Fail",
+           "recommendation_type": "Pass" | "Fail" | "Conditional" | "Retest",
            "calibrated_by": "...",       (optional)
            "certificate_number": "...",  (optional)
            "notes": "...",               (optional)
@@ -57,6 +57,31 @@ from models import (
     TestResult,
 )
 
+def _fire_calibration_notification(db: Session, equipment: Equipment, event_type: str,
+                                    next_due_date: date, days: int) -> None:
+    """Fire a kit calibration notification without crashing if service unavailable."""
+    try:
+        from services.notification_service import NotificationService
+        dept_name = equipment.department.name if equipment.department else ""
+        NotificationService(db).fire(
+            event_type=event_type,
+            context={
+                "kit.ueic":              equipment.ueic or str(equipment.id),
+                "kit.name":              equipment.name or equipment.ueic or "",
+                "kit.department":        dept_name,
+                "kit.calibration_due_date": next_due_date.isoformat(),
+                "kit.days_remaining":    str(max(0, days)),
+                "kit.days_overdue":      str(abs(min(0, days))),
+            },
+            organization_id=equipment.organization_id,
+            source_id=equipment.id,
+            source_type="equipment",
+            severity="alert" if event_type == "kit_calibration_due" else "critical",
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("calibration notification failed: %s", exc)
+
 CALIBRATION_WORKFLOW_CODE = "CALIBRATION"
 
 CALIBRATION_KEY = "calibration"
@@ -74,7 +99,6 @@ CALIBRATION_TEMPLATE: dict = {
             "fields": [
                 {"key": "calibration_date", "label": "Calibration Date", "type": "date", "required": True},
                 {"key": "validity_months", "label": "Validity (Months)", "type": "number", "required": True, "unit": "months"},
-                {"key": "overall_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "required": True},
                 {"key": "calibrated_by", "label": "Calibrated By (Agency / Lab)", "type": "text", "required": False},
                 {"key": "certificate_number", "label": "Certificate Number", "type": "text", "required": False},
                 {"key": "notes", "label": "Notes", "type": "textarea", "required": False},
@@ -87,10 +111,10 @@ CALIBRATION_TEMPLATE: dict = {
             "type": "DATE_ADD",
             "config": {
                 "validity_field": "validity_months",
-                "result_field": "overall_result",
+                "result_field": "recommendation_type",
                 "order_by": "calibration_date",
                 "group_by": "equipment_id",
-                "requires_multi_session": True,
+                "requires_multi_session": False,
             },
         }
     ],
@@ -177,9 +201,8 @@ class CalibrationService:
             )
             self.db.add(tpl)
             created.append(f"OrgTestTemplate: {CALIBRATION_KEY}")
-        else:
-            tpl.template_data = CALIBRATION_TEMPLATE
-            tpl.version = (tpl.version or 1) + 1
+        # else: template already exists — seed.py is the authoritative source,
+        # so do NOT overwrite here (that would undo seed.py's fixes).
 
         self.db.commit()
         return {"status": "ok", "created": created, "template_id": str(tpl.id)}
@@ -270,8 +293,14 @@ class CalibrationService:
             "submitted_at": result.cts,
             "calibration_date": data["calibration_date"],
             "validity_months": int(data["validity_months"]),
-            # overall_result: prefer test_data field, fall back to top-level column
-            "overall_result": (data.get("overall_result") or result.overall_result or "").strip() or None,
+            # overall_result: wizard saves as recommendation_type (Pass/Fail/Conditional/Retest)
+            # fall back to legacy test_data field, then top-level column
+            "overall_result": (
+                data.get("recommendation_type")
+                or data.get("overall_result")
+                or result.overall_result
+                or ""
+            ).strip() or None,
             "calibrated_by": data.get("calibrated_by"),
             "certificate_number": data.get("certificate_number"),
             "notes": data.get("notes"),
@@ -312,7 +341,7 @@ class CalibrationService:
                 "submitted_at": r.cts.isoformat() if r.cts else None,
                 "calibration_date": data.get("calibration_date"),
                 "validity_months": data.get("validity_months"),
-                "overall_result": data.get("overall_result") or r.overall_result,
+                "overall_result": data.get("recommendation_type") or data.get("overall_result") or r.overall_result,
                 "calibrated_by": data.get("calibrated_by"),
                 "certificate_number": data.get("certificate_number"),
                 "notes": data.get("notes"),
@@ -490,10 +519,13 @@ class CalibrationService:
             f"CAL-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{count + 1:04d}"
         )
 
+        _equipment = self.db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        _org_id = _equipment.organization_id if _equipment else None
         workflow = RepairWorkflow(
             workflow_number=workflow_number,
             workflow_code=CALIBRATION_WORKFLOW_CODE,
             equipment_id=equipment_id,
+            organization_id=_org_id,
             workflow_type="CALIBRATION",
             source="calibration",
             current_stage_id=first_stage.id,
@@ -799,6 +831,11 @@ class CalibrationService:
             )
             self.db.add(new_req)
             created.append(str(equipment_id))
+
+            # Fire notification
+            days_until = (next_due - today).days
+            event = "kit_calibration_overdue" if days_until < 0 else "kit_calibration_due"
+            _fire_calibration_notification(self.db, equipment, event, next_due, days_until)
 
         self.db.commit()
         return {
