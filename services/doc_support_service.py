@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from models import DocumentRequest, TrWfInstance, TrWfStatus, TrWfStage
+from models import DocumentRequest, TrWfInstance, TrWfStatus, TrWfStage, NotificationRoutingRule
 from services.workflow_factory import WorkflowFactory
 from services.generic_workflow_service import GenericWorkflowService
 
@@ -169,7 +169,7 @@ class DocSupportService:
                 "action_code": action_code,
             }
 
-            # Fire general status-change notification (email + SMS + inapp via template)
+            # Fire status-change notification — routing rules handle per-status recipient overrides
             try:
                 _svc.fire(
                     event_type="ds_wf_status_changed",
@@ -183,19 +183,32 @@ class DocSupportService:
             except Exception as _n_err:
                 log.warning("DS status-changed notification failed (non-fatal): %s", _n_err)
 
-            # Extra notification when originator review stage is reached
-            if instance.current_status_code == "ds_originator_review":
-                try:
-                    _svc.fire(
-                        event_type="ds_wf_originator_review",
-                        context=_ctx,
-                        organization_id=doc.org_id,
-                        source_id=doc_id,
-                        source_type="document_request",
-                        recipient_roles_override=["@originator"],
+            # Fire any secondary event configured in routing rules for this status
+            # (e.g. ds_wf_originator_review when applicable_status_to matches current status)
+            if instance.current_status_code:
+                _extra_rules = (
+                    self.db.query(NotificationRoutingRule)
+                    .filter(
+                        NotificationRoutingRule.applicable_status_to == instance.current_status_code,
+                        NotificationRoutingRule.is_active.is_(True),
+                        NotificationRoutingRule.organization_id.is_(None),
                     )
-                except Exception as _n_err:
-                    log.warning("DS originator-review notification failed (non-fatal): %s", _n_err)
+                    .all()
+                )
+                for _rule in _extra_rules:
+                    if _rule.event_type == "ds_wf_status_changed":
+                        continue  # already fired above
+                    try:
+                        _svc.fire(
+                            event_type=_rule.event_type,
+                            context=_ctx,
+                            organization_id=doc.org_id,
+                            source_id=doc_id,
+                            source_type="document_request",
+                            recipient_roles_override=list(_rule.recipient_roles_override) if _rule.recipient_roles_override else None,
+                        )
+                    except Exception as _n_err:
+                        log.warning("DS secondary notification failed (non-fatal): %s", _n_err)
 
         return instance
 
