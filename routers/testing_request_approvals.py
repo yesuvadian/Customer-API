@@ -782,32 +782,50 @@ def tr_wf_get_pending_queue(
         ).all()
     ]
 
-    # Workflow definition IDs where caller has can_act_as_tester on any stage
-    act_as_tester_def_ids = [
-        sr.stage.wf_definition_id for sr in db.query(TrWfStageRole)
-        .join(TrWfStage, TrWfStageRole.stage_id == TrWfStage.id)
+    # Stage IDs where caller has can_act_as_tester — only those specific stages
+    act_as_tester_stage_ids = [
+        sr.stage_id for sr in db.query(TrWfStageRole)
         .filter(
             TrWfStageRole.role_id.in_(caller_role_ids),
             TrWfStageRole.can_act_as_tester.is_(True),
         ).all()
+        if sr.stage_id not in allowed_stage_ids  # avoid duplicates
     ]
 
-    if not allowed_stage_ids and not act_as_tester_def_ids:
+    if not allowed_stage_ids and not act_as_tester_stage_ids:
         return []
 
     # Department subtree for this caller — scope to caller's dept + descendants
     caller_dept_ids = _caller_dept_ids(db, current_user)
 
+    all_visible_stage_ids = list(set(allowed_stage_ids + act_as_tester_stage_ids))
+
+    # Workflow definition IDs where caller has can_act_as_tester on any stage —
+    # used to show assigned-execution TRs even if the current stage isn't in allowed_stage_ids
+    from models import TrWfStage as _TrWfStage
+    tester_wf_def_ids = [
+        str(sr.stage.wf_definition_id)
+        for sr in db.query(TrWfStageRole)
+        .join(_TrWfStage, _TrWfStage.id == TrWfStageRole.stage_id)
+        .filter(
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_act_as_tester.is_(True),
+        ).all()
+        if sr.stage and sr.stage.wf_definition_id
+    ]
+
     from sqlalchemy import or_
     filters = []
-    if allowed_stage_ids:
-        filters.append(TrWfInstance.current_stage_id.in_(allowed_stage_ids))
-    if act_as_tester_def_ids:
-        filters.append(TrWfInstance.wf_definition_id.in_(act_as_tester_def_ids))
-    combined_filter = or_(*filters)
+    if all_visible_stage_ids:
+        filters.append(TrWfInstance.current_stage_id.in_(all_visible_stage_ids))
+    if tester_wf_def_ids:
+        filters.append(TrWfInstance.wf_definition_id.in_(tester_wf_def_ids))
+    combined_filter = or_(*filters) if filters else or_(False)
+    from models import TrWfStageInstance
     instances_q = (
         db.query(TrWfInstance)
         .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+        .options(joinedload(TrWfInstance.stage_instances))
         .filter(
             TrWfInstance.org_id == org_id,
             TrWfInstance.status == "active",
@@ -822,7 +840,21 @@ def tr_wf_get_pending_queue(
 
     from models import TrWfStage as TrWfStageModel
 
+    tester_def_ids = set(tester_wf_def_ids)
+
     def _caller_sees_instance(inst: TrWfInstance) -> bool:
+        # When a stage instance is assigned (ticket in execution), all roles with
+        # can_act_as_tester anywhere in the workflow can see it to perform execution
+        active_si = next(
+            (si for si in inst.stage_instances
+             if si.stage_id == inst.current_stage_id
+             and si.status not in ("completed", "rejected")),
+            None,
+        )
+        if active_si and active_si.assigned_user_id:
+            if str(inst.wf_definition_id) in tester_def_ids:
+                return True
+
         if not inst.resolved_l3_role_id:
             return True  # no role restriction — all eligible roles see it
         current_stage = db.query(TrWfStageModel).filter(

@@ -521,7 +521,11 @@ def replace_stage_roles(
     db.query(TrWfStageRole).filter(TrWfStageRole.stage_id == stage_id).delete()
     db.flush()
 
+    seen_roles: set = set()
     for r in body:
+        if r["role_id"] in seen_roles:
+            continue  # silently skip duplicate roles
+        seen_roles.add(r["role_id"])
         db.add(TrWfStageRole(
             stage_id=stage_id,
             role_id=r["role_id"],
@@ -546,7 +550,6 @@ def replace_stage_transitions(
     stage = db.query(TrWfStage).filter(TrWfStage.id == stage_id).first()
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
-    _assert_no_active_instances(db, stage.wf_definition_id)
 
     db.query(TrWfStageTransition).filter(
         TrWfStageTransition.from_stage_id == stage_id

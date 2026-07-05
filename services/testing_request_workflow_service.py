@@ -128,38 +128,7 @@ class TestingRequestWorkflowService:
             testing_request.status = TestingRequestStatus[new_state_code]
             testing_request.modified_by = user.id
             self.db.commit()
-
-            try:
-                from services.notification_service import NotificationService
-                _changed_by = (
-                    getattr(user, "full_name", None)
-                    or getattr(user, "firstname", None)
-                    or str(user.id)
-                )
-                NotificationService(self.db).fire(
-                    event_type="status_changed",
-                    context={
-                        "request.number":  testing_request.request_number or str(testing_request.id),
-                        "request.status":  new_state_code,
-                        "request.title":   getattr(testing_request, "title", "") or "",
-                        "status_from":     from_state,
-                        "status_to":       new_state_code,
-                        "changed_by":      _changed_by,
-                    },
-                    organization_id=testing_request.organization_id,
-                    department_id=getattr(testing_request, "department_id", None),
-                    source_id=testing_request.id,
-                    source_type="testing_request",
-                    severity="info",
-                    workflow_type=self.WORKFLOW_TYPE,
-                    equipment_type=(testing_request.equipment_type.name if testing_request.equipment_type else None),
-                    test_type=(testing_request.request_category.value if testing_request.request_category else None),
-                    status_from=from_state,
-                    status_to=new_state_code,
-                )
-            except Exception as _em:
-                import logging
-                logging.getLogger(__name__).warning(f"Status change notification failed: {_em}")
+            # tr_wf_status_changed is fired by generic_workflow_service on every stage advance
 
         return success, message
 
@@ -677,25 +646,7 @@ class TestingRequestWorkflowService:
             testing_request.status = TestingRequestStatus.pending_assignment
             testing_request.modified_by = user.id
 
-            try:
-                from services.notification_service import NotificationService
-                NotificationService(self.db).fire(
-                    event_type="status_changed",
-                    context={
-                        "request.number": testing_request.request_number or str(testing_request.id),
-                        "request.status": "pending_assignment",
-                        "changed_by": getattr(user, "full_name", None) or getattr(user, "email", ""),
-                    },
-                    organization_id=testing_request.organization_id,
-                    department_id=getattr(testing_request, "department_id", None),
-                    source_id=testing_request.id,
-                    source_type="testing_request",
-                    severity="info",
-                )
-            except Exception as _ne:
-                import logging
-                logging.getLogger(__name__).warning(f"L2 route notification failed: {_ne}")
-
+            # tr_wf_status_changed is fired by generic_workflow_service on stage advance
             return True, f"Request approved and routed to workflow '{instance.wf_definition_id}'"
 
         except WorkflowConfigError as wce:

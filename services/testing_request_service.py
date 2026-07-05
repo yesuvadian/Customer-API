@@ -1106,6 +1106,7 @@ class TestingRequestService:
                 CategoryMaster.description == "Testing Equipment",
                 CategoryMaster.is_active.is_(True),
                 CategoryDetails.is_active.is_(True),
+                CategoryDetails.category_type != "nameplate",
             )
         )
         if category:

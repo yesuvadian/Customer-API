@@ -189,6 +189,7 @@ def _types_by_category_for_equipment(db, eq) -> dict:
         .filter(
             CategoryDetails.category_master_id == eq.equipment_type_id,
             CategoryDetails.is_active.is_(True),
+            CategoryDetails.category_type != "nameplate",
         )
         .order_by(CategoryDetails.name)
         .all()
