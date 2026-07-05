@@ -1023,15 +1023,14 @@ def tr_wf_advance_stage(
     )
 
 
-@router.get("/{request_id}/tr-wf/audit-log", response_model=List[dict])
+@router.get("/{request_id}/tr-wf/audit-log")
 def tr_wf_get_audit_log(
     request_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return the full audit trail for the request's configurable workflow instance."""
-    from models import TrWfAuditLog, TrWfStage, User as UserModel
-    from sqlalchemy.orm import joinedload
+    """Return the full audit trail plus pending future stages for the request's workflow instance."""
+    from models import TrWfAuditLog, TrWfStage, TrWfInstance, User as UserModel
 
     logs = (
         db.query(TrWfAuditLog)
@@ -1054,7 +1053,7 @@ def tr_wf_get_audit_log(
             return None
         return f"{u.firstname or ''} {u.lastname or ''}".strip() or u.email
 
-    return [
+    entries = [
         {
             "id": str(log.id),
             "from_stage": _stage_name(log.from_stage_id),
@@ -1070,3 +1069,30 @@ def tr_wf_get_audit_log(
         }
         for log in logs
     ]
+
+    # Build pending stages: ordered stages in the workflow def beyond the current stage
+    pending_stages: list = []
+    instance = (
+        db.query(TrWfInstance)
+        .filter(
+            TrWfInstance.testing_request_id == request_id,
+            TrWfInstance.status == "active",
+        )
+        .first()
+    )
+    if instance and instance.current_stage_id and instance.wf_definition_id:
+        cur = db.query(TrWfStage).filter(TrWfStage.id == instance.current_stage_id).first()
+        if cur:
+            future = (
+                db.query(TrWfStage)
+                .filter(
+                    TrWfStage.wf_definition_id == instance.wf_definition_id,
+                    TrWfStage.sequence > cur.sequence,
+                    TrWfStage.is_active.is_(True),
+                )
+                .order_by(TrWfStage.sequence)
+                .all()
+            )
+            pending_stages = [{"name": s.name, "order_index": s.sequence} for s in future]
+
+    return {"entries": entries, "pending_stages": pending_stages}

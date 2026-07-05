@@ -747,10 +747,36 @@ def recompute_all_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
-    """Re-runs score_test + equipment aggregation for every TestResult in the DB.
+    """Re-runs score_test + equipment aggregation for every submitted TestResult in the DB.
+    Skips results whose testing request is still in draft/in-progress/assigned state.
     Use after changing the scoring formula to backfill historical scores."""
-    from models import TestResult
+    from models import TestResult, TestingRequest, TestingRequestStatus, TrWfInstance
+    from sqlalchemy import or_
+
+    _SKIP_STATUSES = {
+        TestingRequestStatus.draft,
+        TestingRequestStatus.submitted,
+        TestingRequestStatus.assigned,
+        TestingRequestStatus.accepted,
+        TestingRequestStatus.in_progress,
+    }
+
+    # Collect IDs of TRs that are wf-active (not yet completed)
+    wf_active_ids = {
+        row.testing_request_id
+        for row in db.query(TrWfInstance.testing_request_id).filter(
+            TrWfInstance.status == "active"
+        ).all()
+    }
+
     results = db.query(TestResult).all()
+    # Filter: only run on results whose TR is in a terminal/submitted state
+    results = [
+        r for r in results
+        if r.testing_request
+        and r.testing_request.status not in _SKIP_STATUSES
+        and r.testing_request_id not in wf_active_ids
+    ]
     engine  = AnalyticsEngine(db)
     done, failed = 0, 0
     for tr in results:
@@ -1102,9 +1128,35 @@ def get_equipment_test_history(
       - template_key, tested_at, health_score, risk_level, critical_findings
       - links.analytics, links.raw
     """
+    from models import TestResult as _TR2, TestingRequest as _TReq, TestingRequestStatus as _TRS, TrWfInstance as _TWI
+    from sqlalchemy import or_ as _or
+
+    _SKIP = [
+        _TRS.draft, _TRS.submitted, _TRS.assigned,
+        _TRS.accepted, _TRS.in_progress,
+    ]
+    # Sub-select: test_result_ids whose TR is closed/completed
+    _wf_done = db.query(_TWI.testing_request_id).filter(
+        _TWI.status.in_(["completed", "terminated"])
+    ).scalar_subquery()
+    _closed_result_ids = (
+        db.query(_TR2.id)
+        .join(_TReq, _TR2.testing_request_id == _TReq.id)
+        .filter(
+            _or(
+                _TReq.status.notin_(_SKIP),
+                _TReq.id.in_(_wf_done),
+            )
+        )
+        .scalar_subquery()
+    )
+
     q = (
         db.query(TestAnalytics)
-        .filter(TestAnalytics.equipment_id == equipment_id)
+        .filter(
+            TestAnalytics.equipment_id == equipment_id,
+            TestAnalytics.test_result_id.in_(_closed_result_ids),
+        )
         .order_by(TestAnalytics.calculated_at.desc())
     )
     if template_key:

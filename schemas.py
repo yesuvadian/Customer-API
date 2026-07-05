@@ -1166,6 +1166,12 @@ class TestingRequestResponse(BaseModel):
     is_closed: bool = False
 
     # ─────────────────────────────────────────────
+    # Dynamic workflow status (from TrWfStatus config)
+    # ─────────────────────────────────────────────
+    wf_status_name:  Optional[str] = None
+    wf_status_color: Optional[str] = None
+
+    # ─────────────────────────────────────────────
     # TR Workflow current stage flags
     # ─────────────────────────────────────────────
     current_stage_show_recommendation: Optional[bool] = False

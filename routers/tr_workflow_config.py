@@ -370,6 +370,29 @@ def delete_status(
 # Stages
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _active_instance_count(db: Session, def_id) -> int:
+    """Return number of active TrWfInstances using this workflow definition."""
+    return (
+        db.query(TrWfInstance)
+        .filter(
+            TrWfInstance.wf_definition_id == def_id,
+            TrWfInstance.status == "active",
+        )
+        .count()
+    )
+
+
+def _assert_no_active_instances(db: Session, def_id) -> None:
+    """Raise 409 if there are active TR instances using this workflow definition."""
+    count = _active_instance_count(db, def_id)
+    if count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This workflow has {count} active Testing Request{'s' if count != 1 else ''}. "
+                   f"Stage structure cannot be modified while requests are in progress.",
+        )
+
+
 def _load_stage(db: Session, stage_id: UUID) -> TrWfStage:
     stage = (
         db.query(TrWfStage)
@@ -408,6 +431,15 @@ def list_stages(
     return [_stage_out(s) for s in stages]
 
 
+@router.get("/definitions/{def_id}/active-instance-count")
+def get_active_instance_count(
+    def_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return {"count": _active_instance_count(db, def_id)}
+
+
 @router.post("/definitions/{def_id}/stages", status_code=status.HTTP_201_CREATED)
 def create_stage(
     def_id: UUID,
@@ -415,6 +447,7 @@ def create_stage(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _assert_no_active_instances(db, def_id)
     stage = TrWfStage(
         wf_definition_id=def_id,
         status_id=body.get("status_id"),
@@ -443,6 +476,9 @@ def patch_stage(
     stage = db.query(TrWfStage).filter(TrWfStage.id == stage_id).first()
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
+    _STRUCTURAL_FIELDS = {"name", "code", "sequence", "weight", "status_id", "is_mandatory", "is_active", "default_duration_days"}
+    if any(k in body for k in _STRUCTURAL_FIELDS):
+        _assert_no_active_instances(db, stage.wf_definition_id)
     for k in ("name", "code", "sequence", "weight", "status_id",
               "is_mandatory", "is_active", "default_duration_days",
               "show_recommendation", "is_result_stage", "use_l2_route", "is_role_scoped"):
@@ -463,19 +499,7 @@ def delete_stage(
     stage = db.query(TrWfStage).filter(TrWfStage.id == stage_id).first()
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
-    active_count = (
-        db.query(TrWfInstance)
-        .filter(
-            TrWfInstance.current_stage_id == stage_id,
-            TrWfInstance.status == "active",
-        )
-        .count()
-    )
-    if active_count:
-        raise HTTPException(
-            status_code=409,
-            detail=f"{active_count} test request{'s are' if active_count != 1 else ' is'} currently at this stage. Complete or reassign them before deleting.",
-        )
+    _assert_no_active_instances(db, stage.wf_definition_id)
     db.delete(stage)
     db.commit()
 
@@ -522,6 +546,7 @@ def replace_stage_transitions(
     stage = db.query(TrWfStage).filter(TrWfStage.id == stage_id).first()
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
+    _assert_no_active_instances(db, stage.wf_definition_id)
 
     db.query(TrWfStageTransition).filter(
         TrWfStageTransition.from_stage_id == stage_id

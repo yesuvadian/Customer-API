@@ -15,6 +15,7 @@ from models import (
     OrgTestTemplate,
     Equipment,
     TrWfStageRole,
+    TrWfInstance,
 )
 from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
 
@@ -209,6 +210,7 @@ class TestingRequestService:
     def _base_request_query(
         self,
         status_filter: Optional[str] = None,
+        is_closed: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -256,13 +258,19 @@ class TestingRequestService:
                 )
 
             elif status_filter == "closed":
+                completed_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                    TrWfInstance.status.in_(["completed", "terminated"])
+                ).scalar_subquery()
                 query = query.filter(
-                    TestingRequest.status.in_([
-                        TestingRequestStatus.closed,
-                        TestingRequestStatus.completed,
-                        TestingRequestStatus.approved,
-                        TestingRequestStatus.rejected,
-                    ])
+                    or_(
+                        TestingRequest.status.in_([
+                            TestingRequestStatus.closed,
+                            TestingRequestStatus.completed,
+                            TestingRequestStatus.approved,
+                            TestingRequestStatus.rejected,
+                        ]),
+                        TestingRequest.id.in_(completed_wf_ids),
+                    )
                 )
 
             elif status_filter == "rejected":
@@ -273,18 +281,53 @@ class TestingRequestService:
             # Direct enum values (for existing API compatibility)
             else:
                 statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+                _closed_like = {"completed", "closed", "approved", "rejected"}
+                _include_wf = bool(_closed_like.intersection(set(statuses)))
 
-                if len(statuses) == 1:
+                if _include_wf:
+                    completed_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                        TrWfInstance.status.in_(["completed", "terminated"])
+                    ).scalar_subquery()
+                    enum_statuses = [TestingRequestStatus(s) for s in statuses]
+                    query = query.filter(
+                        or_(
+                            TestingRequest.status.in_(enum_statuses),
+                            TestingRequest.id.in_(completed_wf_ids),
+                        )
+                    )
+                elif len(statuses) == 1:
                     query = query.filter(
                         TestingRequest.status == TestingRequestStatus(statuses[0])
                     )
-
                 elif statuses:
                     query = query.filter(
                         TestingRequest.status.in_(
                             [TestingRequestStatus(s) for s in statuses]
                         )
                     )
+        if is_closed is not None:
+            _LEGACY_CLOSED_STATUSES = [
+                TestingRequestStatus.approved,
+                TestingRequestStatus.completed,
+                TestingRequestStatus.closed,
+                TestingRequestStatus.rejected,
+            ]
+            wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                TrWfInstance.status.in_(["completed", "terminated"])
+            ).scalar_subquery()
+            if is_closed:
+                query = query.filter(
+                    or_(
+                        TestingRequest.status.in_(_LEGACY_CLOSED_STATUSES),
+                        TestingRequest.id.in_(wf_done_ids),
+                    )
+                )
+            else:
+                query = query.filter(
+                    TestingRequest.status.notin_(_LEGACY_CLOSED_STATUSES),
+                    TestingRequest.id.notin_(wf_done_ids),
+                )
+
         if category_filter:
             query = query.filter(TestingRequest.request_category == category_filter)
         if originator_id:
@@ -366,6 +409,7 @@ class TestingRequestService:
         skip: int = 0,
         limit: int = 100,
         status_filter: Optional[str] = None,
+        is_closed: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -385,6 +429,7 @@ class TestingRequestService:
     ) -> List[TestingRequest]:
         query = self._base_request_query(
             status_filter=status_filter,
+            is_closed=is_closed,
             category_filter=category_filter,
             originator_id=originator_id,
             tester_id=tester_id,
@@ -560,13 +605,19 @@ class TestingRequestService:
                 )
 
             elif status_filter == "closed":
+                completed_wf_ids2 = self.db.query(TrWfInstance.testing_request_id).filter(
+                    TrWfInstance.status.in_(["completed", "terminated"])
+                ).scalar_subquery()
                 query = query.filter(
-                    TestingRequest.status.in_([
-                        TestingRequestStatus.closed,           # <-- add this
-                        TestingRequestStatus.completed,
-                        TestingRequestStatus.approved,
-                        TestingRequestStatus.rejected,         # <-- add this
-                    ])
+                    or_(
+                        TestingRequest.status.in_([
+                            TestingRequestStatus.closed,
+                            TestingRequestStatus.completed,
+                            TestingRequestStatus.approved,
+                            TestingRequestStatus.rejected,
+                        ]),
+                        TestingRequest.id.in_(completed_wf_ids2),
+                    )
                 )
 
             elif status_filter == "rejected":
@@ -593,8 +644,8 @@ class TestingRequestService:
     def user_has_tr_wf_approver_role(self, user_id: UUID, organization_id: UUID) -> bool:
         """Return True if the user holds any org role that has can_approve on any TR workflow stage."""
         user_role_ids = [
-            r.role_id for r in
-            self.db.query(OrgUserRole.role_id)
+            r.org_role_id for r in
+            self.db.query(OrgUserRole.org_role_id)
             .filter(OrgUserRole.user_id == user_id)
             .all()
         ]

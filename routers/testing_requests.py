@@ -174,6 +174,44 @@ def _enrich(req):
     except Exception:
         req.is_closed = False
 
+    # wf_status_name / wf_status_color — current workflow stage status (dynamic)
+    req.wf_status_name  = None
+    req.wf_status_color = None
+    try:
+        if req.wf_instance_id:
+            from models import TrWfStage, TrWfStatus as _TrWfStatus
+            _inst2 = (
+                req._sa_instance_state.session
+                .query(TrWfInstance)
+                .filter(TrWfInstance.id == req.wf_instance_id)
+                .first()
+            )
+            if _inst2:
+                if _inst2.status in ("completed", "terminated"):
+                    req.wf_status_name  = "Completed"
+                    req.wf_status_color = "#16A34A"
+                elif _inst2.current_stage_id:
+                    _stage = (
+                        req._sa_instance_state.session
+                        .query(TrWfStage)
+                        .filter(TrWfStage.id == _inst2.current_stage_id)
+                        .first()
+                    )
+                    if _stage and _stage.status_id:
+                        _st = (
+                            req._sa_instance_state.session
+                            .query(_TrWfStatus)
+                            .filter(_TrWfStatus.id == _stage.status_id)
+                            .first()
+                        )
+                        if _st:
+                            req.wf_status_name  = _st.status_name
+                            req.wf_status_color = _st.color
+                    if not req.wf_status_name and _stage:
+                        req.wf_status_name = _stage.name
+    except Exception:
+        pass
+
     # session_types — resolved from template for multi-session requests
     req.session_types = None
     try:
@@ -413,6 +451,7 @@ def list_testing_requests(
     capacity_mva: Optional[str] = Query(None, description="Asset-dashboard filter: capacity label"),
     date_from: Optional[str] = Query(None, description="Filter completed_at >= YYYY-MM-DD"),
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
+    is_closed: Optional[bool] = Query(None, description="True = legacy-closed or wf-completed; False = still active"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -445,6 +484,7 @@ def list_testing_requests(
 
     common = dict(
         status_filter=status,
+        is_closed=is_closed,
         category_filter=category,
         originator_id=originator_id,
         tester_id=tester_id,
