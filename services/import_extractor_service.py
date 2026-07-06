@@ -68,15 +68,16 @@ EXTRACTABLE_TEST_TYPES: dict[str, dict] = {
     "Transformer Oil Test":                              {"pdf": "oil_test",  "excel": "oil_test"},
     "Insulating Oil Test":                               {"pdf": "oil_test",  "excel": "oil_test"},
     "Oil BDV Test":                                      {"pdf": "oil_test",  "excel": "oil_test"},
-    "Transformer Dissolved Gas Analysis (DGA)":          {"pdf": "oil_test"},
-    "Dissolved Gas Analysis":                            {"pdf": "oil_test"},
-    "DGA Test":                                          {"pdf": "oil_test"},
-    "Capacitance & Tan Delta Test (Transformer)":        {"pdf": "tan_delta"},
-    "Tan-Delta, Capacitance & Insulation Diagnostics":   {"pdf": "tan_delta"},
-    "Winding Tan-Delta & Capacitance Test":              {"pdf": "tan_delta"},
-    "220kV Bushing Tan-Delta Test":                      {"pdf": "tan_delta"},
-    "66kV Bushing Tan-Delta Test":                       {"pdf": "tan_delta"},
+    "Transformer Dissolved Gas Analysis (DGA)":          {"pdf": "oil_test", "excel": "oil_test"},
+    "Dissolved Gas Analysis":                            {"pdf": "oil_test", "excel": "oil_test"},
+    "DGA Test":                                          {"pdf": "oil_test", "excel": "oil_test"},
+    "Capacitance & Tan Delta Test (Transformer)":        {"pdf": "tan_delta", "excel": "tan_delta"},
+    "Tan-Delta, Capacitance & Insulation Diagnostics":   {"pdf": "tan_delta", "excel": "tan_delta"},
+    "Winding Tan-Delta & Capacitance Test":              {"pdf": "tan_delta", "excel": "tan_delta"},
+    "220kV Bushing Tan-Delta Test":                      {"pdf": "tan_delta", "excel": "tan_delta"},
+    "66kV Bushing Tan-Delta Test":                       {"pdf": "tan_delta", "excel": "tan_delta"},
 }
+
 
 
 def get_test_types_for_category(
@@ -307,11 +308,12 @@ def _extract_excel(file_bytes: bytes, extractor_type: str, test_type_name: str =
             if not records:
                 warnings.append("No data rows found in the schema template. Fill in rows from row 4 onwards.")
             else:
-                # Read table sheets and merge into every record
                 table_data = _read_table_sheets(_wb, _wb.active.title)
                 if table_data:
                     for rec in records:
                         rec.update(table_data)
+                for rec in records:
+                    rec["_flat_schema"] = True          # NEW
             return records, warnings
 
         if extractor_type == "oil_test":
@@ -328,6 +330,22 @@ def _extract_excel(file_bytes: bytes, extractor_type: str, test_type_name: str =
 
             if not records:
                 warnings.append("No records extracted from Excel. Check sheet layout.")
+            return records, warnings
+        
+        elif extractor_type == "tan_delta":
+            from seed_tandelta_from_excel import parse_excel
+
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                tmp.write(file_bytes)
+                tmp_path = Path(tmp.name)
+
+            try:
+                records = parse_excel(tmp_path)
+            finally:
+                tmp_path.unlink(missing_ok=True)
+
+            if not records:
+                warnings.append("No records extracted from Excel. Check sheet/block layout.")
             return records, warnings
 
         elif extractor_type == "repair":
@@ -393,23 +411,13 @@ def _extract_excel(file_bytes: bytes, extractor_type: str, test_type_name: str =
 
 # ── Form data builder ─────────────────────────────────────────────────────────
 
-def build_form_data(
-    report: dict,
-    test_type_name: str,
-    equipment: Optional[object] = None,
-) -> dict:
-    """
-    Build test_data matching the Flutter form's _collectData() output.
-    Mirrors what the seed scripts do before create_structured_result().
-    """
+def build_form_data(report, test_type_name, equipment=None):
     extractor = EXTRACTABLE_TEST_TYPES.get(test_type_name, {})
     extractor_type = extractor.get("pdf") or extractor.get("excel")
 
-    # Flat-schema reports already use template field keys directly (including
-    # table fields stored as lists). Skip the legacy builder in that case.
-    has_table_data = any(isinstance(v, list) for v in report.values())
-    if has_table_data:
-        return report
+    if report.get("_flat_schema"):
+        clean = {k: v for k, v in report.items() if k != "_flat_schema"}
+        return clean
 
     if extractor_type == "oil_test":
         from seed_oil_tests_from_pdf import _oil_test_data
