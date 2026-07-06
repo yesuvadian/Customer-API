@@ -177,6 +177,8 @@ def _enrich(req):
     # wf_status_name / wf_status_color — current workflow stage status (dynamic)
     req.wf_status_name  = None
     req.wf_status_color = None
+    req.wf_stage_name   = None
+    req.wf_stage_roles  = []
     try:
         if req.wf_instance_id:
             from models import TrWfStage, TrWfStatus as _TrWfStatus
@@ -209,6 +211,12 @@ def _enrich(req):
                             req.wf_status_color = _st.color
                     if not req.wf_status_name and _stage:
                         req.wf_status_name = _stage.name
+                    if _stage:
+                        req.wf_stage_name = _stage.name
+                        req.wf_stage_roles = [
+                            r.role.name for r in _stage.roles
+                            if r.role_id and r.role
+                        ]
     except Exception:
         pass
 
