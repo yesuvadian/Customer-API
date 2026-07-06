@@ -81,8 +81,9 @@ def _stage_out(s: TrWfStage) -> dict:
         "roles": [
             {
                 "id": str(r.id),
-                "role_id": str(r.role_id),
-                "role_name": r.role.name if r.role else None,
+                "role_id": str(r.role_id) if r.role_id else None,
+                "role_name": r.role.name if r.role else r.system_token,
+                "system_token": r.system_token,
                 "can_approve": r.can_approve,
                 "can_assign": r.can_assign,
                 "can_edit": r.can_edit,
@@ -523,12 +524,16 @@ def replace_stage_roles(
 
     seen_roles: set = set()
     for r in body:
-        if r["role_id"] in seen_roles:
-            continue  # silently skip duplicate roles
-        seen_roles.add(r["role_id"])
+        role_id = r.get("role_id")
+        system_token = r.get("system_token") or (role_id if role_id and role_id.startswith("@") else None)
+        key = system_token if system_token else role_id
+        if key in seen_roles:
+            continue
+        seen_roles.add(key)
         db.add(TrWfStageRole(
             stage_id=stage_id,
-            role_id=r["role_id"],
+            role_id=None if system_token else role_id,
+            system_token=system_token,
             can_approve=r.get("can_approve", False),
             can_assign=r.get("can_assign", False),
             can_edit=r.get("can_edit", False),
@@ -803,10 +808,11 @@ def get_org_roles(
         .order_by(OrgRole.name)
         .all()
     )
-    return [
-        {"id": str(r.id), "name": r.name, "description": r.description}
-        for r in rows
+    tokens = [
+        {"id": "@originator", "name": "@ Originator (Submitter)", "description": "Automatically assigns this stage to the person who created the request.", "is_system_token": True},
     ]
+    org_roles = [{"id": str(r.id), "name": r.name, "description": r.description, "is_system_token": False} for r in rows]
+    return tokens + org_roles
 
 
 @router.get("/options/action-codes")

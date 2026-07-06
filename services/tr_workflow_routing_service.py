@@ -360,7 +360,6 @@ class WorkflowRoutingService:
                 .scalar()
             )
             if active_roles == 0:
-                # Send-back to a stage with no roles → terminate
                 is_terminal = True
                 to_stage = None
         else:
@@ -401,12 +400,18 @@ class WorkflowRoutingService:
             instance.completed_at = datetime.now(timezone.utc)
             to_status_code = terminal_status_code
         else:
+            # If next stage has the @originator token role, auto-assign to the request creator
+            effective_assigned_user_id = assigned_user_id
+            has_originator_token = any(r.system_token == "@originator" for r in to_stage.roles)
+            if has_originator_token and testing_request.originator_id:
+                effective_assigned_user_id = testing_request.originator_id
+
             # Open next stage
             new_stage_inst = TrWfStageInstance(
                 wf_instance_id=instance.id,
                 stage_id=to_stage.id,
                 status="in_progress",
-                assigned_user_id=assigned_user_id,
+                assigned_user_id=effective_assigned_user_id,
                 assigned_role_id=assigned_role_id,
                 started_at=datetime.now(timezone.utc),
             )
@@ -591,6 +596,7 @@ class WorkflowRoutingService:
         self,
         testing_request: TestingRequest,
         user_role_ids: list[UUID],
+        caller_user_id: Optional[UUID] = None,
     ) -> list[dict]:
         """
         Return allowed transitions for the current stage filtered by the
@@ -621,25 +627,56 @@ class WorkflowRoutingService:
             .first()
         )
         if not allowed_role:
-            # Also allow if user has can_act_as_tester on any stage of this workflow
-            # (emergency completion case — approver completing tester's step)
-            from sqlalchemy import exists
-            can_act = (
-                self.db.query(TrWfStageRole)
-                .join(TrWfStage, TrWfStageRole.stage_id == TrWfStage.id)
-                .filter(
-                    TrWfStageRole.role_id.in_(user_role_ids),
-                    TrWfStageRole.can_act_as_tester.is_(True),
-                    TrWfStage.wf_definition_id == (
-                        self.db.query(TrWfStage.wf_definition_id)
-                        .filter(TrWfStage.id == current_stage_id)
-                        .scalar_subquery()
-                    ),
+            # Generic: if the active stage instance is assigned to this user, allow actions.
+            if caller_user_id:
+                active_si = (
+                    self.db.query(TrWfStageInstance)
+                    .filter(
+                        TrWfStageInstance.wf_instance_id == instance.id,
+                        TrWfStageInstance.stage_id == current_stage_id,
+                        TrWfStageInstance.status == "in_progress",
+                        TrWfStageInstance.assigned_user_id == caller_user_id,
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if not can_act:
-                return []
+                if active_si:
+                    pass  # allowed — fall through to return transitions
+                else:
+                    # Also allow if user has can_act_as_tester on any stage of this workflow
+                    can_act = (
+                        self.db.query(TrWfStageRole)
+                        .join(TrWfStage, TrWfStageRole.stage_id == TrWfStage.id)
+                        .filter(
+                            TrWfStageRole.role_id.in_(user_role_ids),
+                            TrWfStageRole.can_act_as_tester.is_(True),
+                            TrWfStage.wf_definition_id == (
+                                self.db.query(TrWfStage.wf_definition_id)
+                                .filter(TrWfStage.id == current_stage_id)
+                                .scalar_subquery()
+                            ),
+                        )
+                        .first()
+                    )
+                    if not can_act:
+                        return []
+            else:
+                # Also allow if user has can_act_as_tester on any stage of this workflow
+                can_act = (
+                    self.db.query(TrWfStageRole)
+                    .join(TrWfStage, TrWfStageRole.stage_id == TrWfStage.id)
+                    .filter(
+                        TrWfStageRole.role_id.in_(user_role_ids),
+                        TrWfStageRole.can_act_as_tester.is_(True),
+                        TrWfStage.wf_definition_id == (
+                            self.db.query(TrWfStage.wf_definition_id)
+                            .filter(TrWfStage.id == current_stage_id)
+                            .scalar_subquery()
+                        ),
+                    )
+                    .first()
+                )
+                if not can_act:
+                    return []
 
         transitions: list[TrWfStageTransition] = (
             self.db.query(TrWfStageTransition)

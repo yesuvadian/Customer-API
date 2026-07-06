@@ -843,27 +843,31 @@ def tr_wf_get_pending_queue(
     tester_def_ids = set(tester_wf_def_ids)
 
     def _caller_sees_instance(inst: TrWfInstance) -> bool:
-        # When a stage instance is assigned (ticket in execution), all roles with
-        # can_act_as_tester anywhere in the workflow can see it to perform execution
         active_si = next(
             (si for si in inst.stage_instances
              if si.stage_id == inst.current_stage_id
              and si.status not in ("completed", "rejected")),
             None,
         )
+
+        # Generic: if the engine assigned this stage instance to the caller, always show it.
         if active_si and active_si.assigned_user_id:
+            if str(active_si.assigned_user_id) == str(current_user.id):
+                return True
             if str(inst.wf_definition_id) in tester_def_ids:
                 return True
 
-        if not inst.resolved_l3_role_id:
-            return True  # no role restriction — all eligible roles see it
         current_stage = db.query(TrWfStageModel).filter(
             TrWfStageModel.id == inst.current_stage_id
         ).first()
-        if not current_stage or not current_stage.is_role_scoped:
-            return True  # role filter only applies at role-scoped stages
-        # Caller must have the resolved AEE role for this stream
-        return str(inst.resolved_l3_role_id) in caller_role_ids
+        if not current_stage:
+            return True
+        # Stage roles define who sees the ticket at this stage.
+        # If no roles are configured, fall through to all eligible users.
+        current_stage_role_ids = {str(r.role_id) for r in current_stage.roles if r.role_id}
+        if not current_stage_role_ids:
+            return True
+        return bool(current_stage_role_ids & set(caller_role_ids))
 
     instances = [inst for inst in instances if _caller_sees_instance(inst)]
 
@@ -885,7 +889,7 @@ def tr_wf_get_pending_queue(
         if not req:
             continue
 
-        actions = routing_svc.get_available_actions(req, caller_role_ids)
+        actions = routing_svc.get_available_actions(req, caller_role_ids, caller_user_id=current_user.id)
 
         eq = req.equipment
         result.append({

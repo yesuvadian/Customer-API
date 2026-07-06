@@ -864,7 +864,8 @@ class TrWfStageRole(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="CASCADE"), nullable=False)
-    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=True)
+    system_token = Column(String, nullable=True)
     can_approve = Column(Boolean, default=False)
     can_assign = Column(Boolean, default=False)
     can_edit = Column(Boolean, default=False)
