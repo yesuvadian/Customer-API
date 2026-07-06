@@ -850,20 +850,38 @@ def tr_wf_get_pending_queue(
             None,
         )
 
-        # Generic: if the engine assigned this stage instance to the caller, always show it.
-        if active_si and active_si.assigned_user_id:
-            if str(active_si.assigned_user_id) == str(current_user.id):
-                return True
-            if str(inst.wf_definition_id) in tester_def_ids:
-                return True
-
         current_stage = db.query(TrWfStageModel).filter(
             TrWfStageModel.id == inst.current_stage_id
         ).first()
         if not current_stage:
             return True
-        # Stage roles define who sees the ticket at this stage.
-        # If no roles are configured, fall through to all eligible users.
+
+        # Check if caller has can_approve on the current stage —
+        # approvers/reviewers always see every request in their stage.
+        caller_can_approve = db.query(TrWfStageRole).filter(
+            TrWfStageRole.stage_id == inst.current_stage_id,
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_approve.is_(True),
+        ).first() is not None
+
+        if caller_can_approve:
+            return True
+
+        # If this stage instance is assigned to a specific user, only that
+        # user sees it — other role members (e.g. other testers) are excluded.
+        if active_si and active_si.assigned_user_id:
+            return str(active_si.assigned_user_id) == str(current_user.id)
+
+        # Unassigned — routing via can_act_as_tester group:
+        # only callers who have can_act_as_tester on this stage can see it.
+        stage_tester_role_ids = {
+            str(r.role_id) for r in current_stage.roles
+            if r.role_id and r.can_act_as_tester
+        }
+        if stage_tester_role_ids:
+            return bool(stage_tester_role_ids & set(caller_role_ids))
+
+        # No routing rule configured — fall back to any role member on this stage.
         current_stage_role_ids = {str(r.role_id) for r in current_stage.roles if r.role_id}
         if not current_stage_role_ids:
             return True

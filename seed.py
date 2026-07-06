@@ -11109,6 +11109,33 @@ def _seed_notification_templates(session) -> int:
         ),
     )
 
+    # ── TR Configurable Workflow Engine ───────────────────────────────────────
+    _tmpl("tr_wf_status_changed",
+        _e(
+            "[TEST REQUEST] {{request_number}} — {{status_name}}",
+            "<h3 style='color:#3FA9F5'>Test Request Status Update</h3>"
+            "<p>The status of your test request has changed.</p>"
+            + _html([
+                ("Request No.", "request_number"),
+                ("Equipment",   "equipment"),
+                ("New Status",  "status_name"),
+                ("Stage",       "stage_name"),
+            ])
+            + "<p style='margin-top:20px;'>Please log in to <strong>SEACMS</strong> to "
+            "view the request details or take any required action.</p>",
+            ["@originator", "@assignee"],
+        ),
+        _s(
+            "[SEACMS] Test request {{request_number}} ({{equipment}}) status: {{status_name}}. Login for details.",
+            ["@originator", "@assignee"],
+        ),
+        _i(
+            "Test request {{request_number}} — {{status_name}}",
+            "Your test request {{request_number}} for {{equipment}} has moved to: {{status_name}} ({{stage_name}}).",
+            ["@originator", "@assignee"],
+        ),
+    )
+
     # ── Upsert into DB ────────────────────────────────────────────────────────
     inserted = 0
     for tpl in _TEMPLATES:
@@ -11674,6 +11701,12 @@ def _seed_notification_routing_rules(session) -> int:
          [], [],
          ["inapp"],
          "Procurement Decision — In-app"),
+
+        # ── TR Configurable Workflow Engine ───────────────────────────────────
+        ("tr_wf_status_changed",
+         [], [],
+         ["inapp"],
+         "TR Workflow Status Changed — In-app"),
     ]
 
     inserted = 0
