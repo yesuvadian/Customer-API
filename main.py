@@ -1226,13 +1226,12 @@ async def startup_event():
     # Seed DFR + Tan-Delta/IDAX templates — idempotent upsert on every restart
     try:
         _db = SessionLocal()
-        from seed import seed_dfr_template, seed_tan_delta_templates
-        seed_dfr_template(_db)
-        seed_tan_delta_templates(_db)
+
+        # Template seeding disabled
+
         _db.close()
-        logger.info("[Seed] DFR + Tan-Delta/IDAX templates upserted on startup")
     except Exception as _e:
-        logger.warning(f"[Seed] DFR/Tan-Delta template seed failed on startup (non-fatal): {_e}")
+        logger.warning(f"...")
 
     # Seed all notification defaults (event catalogue, variables, templates,
     # schedule rules, routing rules) — idempotent, safe to run on every restart
