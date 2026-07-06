@@ -1446,20 +1446,20 @@ def _get_stages_by_workflow(db: Session) -> dict:
     - repair_lifecycle uses RepairStageDefinition names from DB.
     - Equipment and standalone types get their own fixed event stages.
     """
-    from models import RepairStageDefinition
+    from models import RepairStageDefinition, TrWfStatus
 
-    tr_statuses = [
-        {"value": "submitted",       "label": "Submitted"},
-        {"value": "assigned",        "label": "Assigned"},
-        {"value": "accepted",        "label": "Accepted"},
-        {"value": "in_progress",     "label": "In Progress"},
-        {"value": "under_review",    "label": "Under Review"},
-        {"value": "test_submitted",  "label": "Test Submitted"},
-        {"value": "under_approval",  "label": "Under Approval"},
-        {"value": "approved",        "label": "Approved"},
-        {"value": "rejected",        "label": "Rejected"},
-        {"value": "completed",       "label": "Completed"},
-    ]
+    # Load live statuses from all active TR workflow definitions (deduplicated by status_code)
+    seen_codes: set = set()
+    tr_statuses = []
+    for s in (
+        db.query(TrWfStatus)
+        .filter(TrWfStatus.is_active.is_(True))
+        .order_by(TrWfStatus.sequence)
+        .all()
+    ):
+        if s.status_code not in seen_codes:
+            seen_codes.add(s.status_code)
+            tr_statuses.append({"value": s.status_code, "label": s.status_name})
 
     repair_stages = [
         {"value": s.name, "label": s.name}
