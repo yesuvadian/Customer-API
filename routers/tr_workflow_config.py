@@ -175,18 +175,27 @@ def _get_org_id(current_user: User) -> UUID:
 
 @router.get("/definitions")
 def list_definitions(
+    name: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     org_id = _get_org_id(current_user)
-    defs = (
-        db.query(TrWfDefinition)
-        .options(joinedload(TrWfDefinition.stages), joinedload(TrWfDefinition.statuses))
-        .filter(TrWfDefinition.org_id == org_id)
-        .all()
-    )
-    return [_def_out(d) for d in defs]
 
+    query = (
+        db.query(TrWfDefinition)
+        .options(
+            joinedload(TrWfDefinition.stages),
+            joinedload(TrWfDefinition.statuses),
+        )
+        .filter(TrWfDefinition.org_id == org_id)
+    )
+
+    if name:
+        query = query.filter(TrWfDefinition.name == name)
+
+    defs = query.all()
+
+    return [_def_out(d) for d in defs]
 
 @router.post("/definitions", status_code=status.HTTP_201_CREATED)
 def create_definition(
