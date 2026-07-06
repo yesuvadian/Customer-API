@@ -16,8 +16,35 @@ from models import (
     Equipment,
     TrWfStageRole,
     TrWfInstance,
+    TrWfStatus,
 )
 from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
+
+# Legacy TestingRequestStatus enum -> display label/color, used to label
+# get_breakdown() buckets for requests that never entered the tr_wf_* engine
+# (current_status_code is NULL). Mirrors the color choices already used by
+# the Flutter _statusColor() switch in testing_requests_screen.dart.
+_LEGACY_STATUS_CATALOG = {
+    "draft":                  {"label": "Draft",                  "color": "#9CA3AF"},
+    "submitted":               {"label": "Submitted",              "color": "#3FA9F5"},
+    "pending_approval":        {"label": "Pending Approval",       "color": "#7C3AED"},
+    "assigned":                {"label": "Assigned",               "color": "#0891B2"},
+    "accepted":                {"label": "Accepted",               "color": "#0F766E"},
+    "scheduled":                {"label": "Scheduled",              "color": "#0891B2"},
+    "in_progress":              {"label": "In Progress",            "color": "#F59E0B"},
+    "test_submitted":           {"label": "Test Submitted",         "color": "#EA580C"},
+    "under_approval":           {"label": "Under Approval",         "color": "#7C3AED"},
+    "approved":                 {"label": "Approved",               "color": "#16A34A"},
+    "rejected":                 {"label": "Rejected",               "color": "#EF4444"},
+    "procurement_initiated":    {"label": "Procurement Initiated",  "color": "#38BDF8"},
+    "completed":                {"label": "Completed",              "color": "#16A34A"},
+    "under_review":             {"label": "Under Review",           "color": "#EA580C"},
+    "finance_pending":          {"label": "Finance Pending",        "color": "#38BDF8"},
+    "outcome_active":           {"label": "Outcome Active",         "color": "#16A34A"},
+    "commissioned":             {"label": "Commissioned",           "color": "#0F766E"},
+    "closed":                   {"label": "Closed",                 "color": "#6B7280"},
+    "pending_assignment":       {"label": "Pending Assignment",     "color": "#0891B2"},
+}
 
 
 class TestingRequestService:
