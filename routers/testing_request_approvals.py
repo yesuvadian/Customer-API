@@ -193,6 +193,41 @@ def get_available_tester_roles(
             detail="Testing request not found"
         )
 
+    # Stage-scoped hand-off targets (tr_wf_* cascade path): if this stage has
+    # roles explicitly marked can_act_as_tester, those roles ARE the eligible
+    # hand-off list — bypasses the module-permission config below entirely,
+    # since that legacy mechanism can't express "a different target role per
+    # stage" (e.g. Manager hands to Lead at one stage, Lead hands to Member
+    # at the next, on the same workflow).
+    if wf_stage_id:
+        from models import TrWfStageRole as _TrWfStageRole
+        stage_tester_roles = db.query(_TrWfStageRole).filter(
+            _TrWfStageRole.stage_id == wf_stage_id,
+            _TrWfStageRole.can_act_as_tester.is_(True),
+        ).all()
+        if stage_tester_roles:
+            caller_depts = _caller_dept_ids(db, current_user)
+            result = []
+            for sr in stage_tester_roles:
+                role = db.query(OrgRole).filter(
+                    OrgRole.id == sr.role_id, OrgRole.is_active == True
+                ).first()
+                if not role:
+                    continue
+                uq = db.query(OrgUserRole).filter(
+                    OrgUserRole.org_role_id == role.id,
+                    OrgUserRole.is_active == True,
+                )
+                if caller_depts:
+                    uq = uq.filter(OrgUserRole.department_id.in_(caller_depts))
+                result.append({
+                    "role_id": str(role.id),
+                    "role_name": role.name,
+                    "description": role.description,
+                    "user_count": uq.count(),
+                })
+            return result
+
     # Stage-scoped lookup for tr_wf_* path
     if wf_stage_id:
         config = db.query(TesterRoleModuleRequirement).filter(
@@ -990,7 +1025,20 @@ def tr_wf_l2_approve_route(
     if not req:
         raise HTTPException(status_code=404, detail="Testing request not found")
 
-    if req.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
+    # The legacy status guard below only makes sense for the very first
+    # (entry-point) call. Once a tr_wf_* instance exists and is currently
+    # sitting on a stage with use_l2_route=true, allow re-entry regardless
+    # of the legacy status field (it gets frozen at pending_assignment after
+    # the first routing call and no longer reflects per-stage state).
+    already_on_routed_stage = False
+    if req.wf_instance_id:
+        from models import TrWfInstance as _TrWfInstance, TrWfStage as _TrWfStage
+        _inst = db.query(_TrWfInstance).filter(_TrWfInstance.id == req.wf_instance_id).first()
+        if _inst and _inst.current_stage_id:
+            _stage = db.query(_TrWfStage).filter(_TrWfStage.id == _inst.current_stage_id).first()
+            already_on_routed_stage = bool(_stage and _stage.use_l2_route)
+
+    if not already_on_routed_stage and req.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
         raise HTTPException(
             status_code=400,
             detail=f"Request must be pending_approval or submitted, currently: {req.status.value}",
