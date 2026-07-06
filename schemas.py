@@ -1170,6 +1170,8 @@ class TestingRequestResponse(BaseModel):
     # ─────────────────────────────────────────────
     wf_status_name:  Optional[str] = None
     wf_status_color: Optional[str] = None
+    wf_stage_name:   Optional[str] = None
+    wf_stage_roles:  Optional[list] = None
 
     # ─────────────────────────────────────────────
     # TR Workflow current stage flags
