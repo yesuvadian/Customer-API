@@ -856,6 +856,15 @@ def tr_wf_get_pending_queue(
         if not current_stage:
             return True
 
+        # Role-scoped stages: routing already resolved which single role
+        # owns this request. When set, that takes priority over generic
+        # stage-role membership below — other roles attached to the same
+        # shared stage must not see a request routing didn't send to them.
+        if current_stage.is_role_scoped:
+            resolved_role_id = inst.resolved_l3_role_id or inst.resolved_tester_role_id
+            if resolved_role_id and str(resolved_role_id) not in set(caller_role_ids):
+                return False
+
         # Check if caller has can_approve on the current stage —
         # approvers/reviewers always see every request in their stage.
         caller_can_approve = db.query(TrWfStageRole).filter(
