@@ -509,39 +509,79 @@ class GenericWorkflowService:
         if not instance or instance.status != "active" or not instance.current_stage_id:
             return []
 
-        # Role scoping — per-stage, stateless: evaluate the rules MAPPED to
-        # this stage against the entity's attributes; a matching mapped
-        # rule's roles are the only ones who may act here. Falls back to
-        # the stored instance resolution (legacy data), then open.
-        from services.tr_workflow_routing_service import stage_mapped_roles
-        mapped_role_ids = stage_mapped_roles(
-            self.db,
-            self.adapter.get_org_id(entity),
-            instance.current_stage_id,
-            request_type=self.adapter.get_request_type(entity),
-            equipment_type_id=getattr(entity, "equipment_type_id", None),
-            test_type_id=getattr(entity, "test_type_id", None),
-        )
-        if mapped_role_ids:
-            if not (set(mapped_role_ids) & set(user_role_ids or [])):
-                return []
-        else:
-            resolved_role_ids = {l.role_id for l in instance.resolved_role_links}
-            if not resolved_role_ids:
-                _legacy = instance.resolved_l3_role_id or instance.resolved_tester_role_id
-                if _legacy:
-                    resolved_role_ids = {_legacy}
-            if resolved_role_ids:
-                stage_role_ids = {
-                    sr.role_id
-                    for sr in self.db.query(TrWfStageRole)
-                    .filter(TrWfStageRole.stage_id == instance.current_stage_id)
-                    .all()
-                    if sr.role_id
-                }
-                if stage_role_ids & resolved_role_ids:
-                    if not (resolved_role_ids & set(user_role_ids or [])):
-                        return []
+        # Overrides that always grant action visibility, evaluated BEFORE
+        # routing-rule scoping below — otherwise an approver, the assigned
+        # user, or a tester delegate whose role isn't the rule-resolved one
+        # for this stage would get excluded before these ever run.
+        # 1) Approvers/reviewers always act on their stage.
+        caller_can_approve = self.db.query(TrWfStageRole).filter(
+            TrWfStageRole.stage_id == instance.current_stage_id,
+            TrWfStageRole.role_id.in_(user_role_ids or []),
+            TrWfStageRole.can_approve.is_(True),
+        ).first() is not None
+
+        # 2) The user this stage instance is assigned to.
+        assigned_to_caller = False
+        if user_id:
+            active_si = (
+                self.db.query(TrWfStageInstance)
+                .filter(
+                    TrWfStageInstance.wf_instance_id == instance.id,
+                    TrWfStageInstance.stage_id == instance.current_stage_id,
+                    TrWfStageInstance.status == "in_progress",
+                    TrWfStageInstance.assigned_user_id == user_id,
+                )
+                .first()
+            )
+            assigned_to_caller = active_si is not None
+
+        # 3) Callers whose role has can_act_as_tester on ANY stage of this
+        # workflow definition can act on behalf of the assigned user,
+        # regardless of which stage their own act_as_tester flag is on.
+        caller_is_workflow_tester = self.db.query(TrWfStageRole).join(
+            TrWfStage, TrWfStageRole.stage_id == TrWfStage.id
+        ).filter(
+            TrWfStageRole.role_id.in_(user_role_ids or []),
+            TrWfStageRole.can_act_as_tester.is_(True),
+            TrWfStage.wf_definition_id == instance.wf_definition_id,
+        ).first() is not None
+
+        bypass_rule_scoping = caller_can_approve or assigned_to_caller or caller_is_workflow_tester
+
+        if not bypass_rule_scoping:
+            # Role scoping — per-stage, stateless: evaluate the rules MAPPED to
+            # this stage against the entity's attributes; a matching mapped
+            # rule's roles are the only ones who may act here. Falls back to
+            # the stored instance resolution (legacy data), then open.
+            from services.tr_workflow_routing_service import stage_mapped_roles
+            mapped_role_ids = stage_mapped_roles(
+                self.db,
+                self.adapter.get_org_id(entity),
+                instance.current_stage_id,
+                request_type=self.adapter.get_request_type(entity),
+                equipment_type_id=getattr(entity, "equipment_type_id", None),
+                test_type_id=getattr(entity, "test_type_id", None),
+            )
+            if mapped_role_ids:
+                if not (set(mapped_role_ids) & set(user_role_ids or [])):
+                    return []
+            else:
+                resolved_role_ids = {l.role_id for l in instance.resolved_role_links}
+                if not resolved_role_ids:
+                    _legacy = instance.resolved_l3_role_id or instance.resolved_tester_role_id
+                    if _legacy:
+                        resolved_role_ids = {_legacy}
+                if resolved_role_ids:
+                    stage_role_ids = {
+                        sr.role_id
+                        for sr in self.db.query(TrWfStageRole)
+                        .filter(TrWfStageRole.stage_id == instance.current_stage_id)
+                        .all()
+                        if sr.role_id
+                    }
+                    if stage_role_ids & resolved_role_ids:
+                        if not (resolved_role_ids & set(user_role_ids or [])):
+                            return []
 
         allowed_role = (
             self.db.query(TrWfStageRole)
@@ -576,7 +616,12 @@ class GenericWorkflowService:
                     if originator_role_ids and set(user_role_ids or []) & originator_role_ids:
                         is_originator_role = True
 
-        if not allowed_role and not is_originator_role:
+        if (
+            not allowed_role
+            and not is_originator_role
+            and not assigned_to_caller
+            and not caller_is_workflow_tester
+        ):
             return []
 
         transitions = (
