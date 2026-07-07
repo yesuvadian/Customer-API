@@ -128,38 +128,7 @@ class TestingRequestWorkflowService:
             testing_request.status = TestingRequestStatus[new_state_code]
             testing_request.modified_by = user.id
             self.db.commit()
-
-            try:
-                from services.notification_service import NotificationService
-                _changed_by = (
-                    getattr(user, "full_name", None)
-                    or getattr(user, "firstname", None)
-                    or str(user.id)
-                )
-                NotificationService(self.db).fire(
-                    event_type="status_changed",
-                    context={
-                        "request.number":  testing_request.request_number or str(testing_request.id),
-                        "request.status":  new_state_code,
-                        "request.title":   getattr(testing_request, "title", "") or "",
-                        "status_from":     from_state,
-                        "status_to":       new_state_code,
-                        "changed_by":      _changed_by,
-                    },
-                    organization_id=testing_request.organization_id,
-                    department_id=getattr(testing_request, "department_id", None),
-                    source_id=testing_request.id,
-                    source_type="testing_request",
-                    severity="info",
-                    workflow_type=self.WORKFLOW_TYPE,
-                    equipment_type=(testing_request.equipment_type.name if testing_request.equipment_type else None),
-                    test_type=(testing_request.request_category.value if testing_request.request_category else None),
-                    status_from=from_state,
-                    status_to=new_state_code,
-                )
-            except Exception as _em:
-                import logging
-                logging.getLogger(__name__).warning(f"Status change notification failed: {_em}")
+            # tr_wf_status_changed is fired by generic_workflow_service on every stage advance
 
         return success, message
 
@@ -664,6 +633,51 @@ class TestingRequestWorkflowService:
                     testing_request=testing_request,
                     performed_by_id=user.id,
                 )
+            else:
+                # Re-entry at a deeper stage: re-resolve roles ONLY when this
+                # stage has its own scoped rules — derived from data, not a
+                # stage flag. Entry-point resolution already happened once,
+                # inside instantiate_workflow(), and must not be repeated
+                # here: a flag-based check would re-run against an empty
+                # scoped-rule set and overwrite the entry resolution with
+                # workflow defaults.
+                from models import TrWfStage as _TrWfStage, TrWfRoutingRule as _TrWfRoutingRule
+                current_stage = self.db.query(_TrWfStage).filter(
+                    _TrWfStage.id == instance.current_stage_id
+                ).first()
+                has_scoped_rules = current_stage is not None and (
+                    self.db.query(_TrWfRoutingRule)
+                    .filter(
+                        _TrWfRoutingRule.org_id == testing_request.organization_id,
+                        _TrWfRoutingRule.is_active.is_(True),
+                        _TrWfRoutingRule.source_stage_id == current_stage.id,
+                    )
+                    .first() is not None
+                )
+                if has_scoped_rules:
+                    _defn, resolved_l3_role_id, resolved_tester_role_id, resolved_role_ids = routing_svc.resolve_routing(
+                        org_id=testing_request.organization_id,
+                        request_type=testing_request.request_type,
+                        equipment_type_id=testing_request.equipment_type_id,
+                        test_type_id=testing_request.test_type_id,
+                        source_stage_id=current_stage.id,
+                    )
+                    instance.resolved_l3_role_id = resolved_l3_role_id
+                    instance.resolved_tester_role_id = resolved_tester_role_id
+                    # Replace (not accumulate) the resolved-roles list — only
+                    # the latest resolution should grant visibility, not
+                    # roles resolved at an earlier, now-passed stage.
+                    import uuid as _uuid
+                    from models import TrWfInstanceResolvedRole as _TrWfInstanceResolvedRole
+                    self.db.query(_TrWfInstanceResolvedRole).filter(
+                        _TrWfInstanceResolvedRole.wf_instance_id == instance.id
+                    ).delete()
+                    for role_id in resolved_role_ids:
+                        self.db.add(_TrWfInstanceResolvedRole(
+                            id=_uuid.uuid4(),
+                            wf_instance_id=instance.id,
+                            role_id=role_id,
+                        ))
 
             # Advance past l2_approve_route / fr_l2_review stage
             routing_svc.advance_stage(
@@ -677,25 +691,7 @@ class TestingRequestWorkflowService:
             testing_request.status = TestingRequestStatus.pending_assignment
             testing_request.modified_by = user.id
 
-            try:
-                from services.notification_service import NotificationService
-                NotificationService(self.db).fire(
-                    event_type="status_changed",
-                    context={
-                        "request.number": testing_request.request_number or str(testing_request.id),
-                        "request.status": "pending_assignment",
-                        "changed_by": getattr(user, "full_name", None) or getattr(user, "email", ""),
-                    },
-                    organization_id=testing_request.organization_id,
-                    department_id=getattr(testing_request, "department_id", None),
-                    source_id=testing_request.id,
-                    source_type="testing_request",
-                    severity="info",
-                )
-            except Exception as _ne:
-                import logging
-                logging.getLogger(__name__).warning(f"L2 route notification failed: {_ne}")
-
+            # tr_wf_status_changed is fired by generic_workflow_service on stage advance
             return True, f"Request approved and routed to workflow '{instance.wf_definition_id}'"
 
         except WorkflowConfigError as wce:
@@ -798,6 +794,8 @@ class TestingRequestWorkflowService:
                 comment=comment,
             )
             testing_request.modified_by = user.id
+            if action_code == "submit_results":
+                testing_request.completed_by_id = user.id
             return True, f"Action '{action_code}' applied"
 
         except WorkflowConfigError as wce:

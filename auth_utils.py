@@ -243,6 +243,45 @@ def login_user(db: Session, email: str, password: str):
                 detail="Account is inactive. Please contact administrator."
             )
 
+        # Step 2b: Block login if the organisation is disabled or trial has expired
+        if user.organization_id:
+            from models import Organization
+            org = db.query(Organization).filter_by(id=user.organization_id).first()
+            if org and not org.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your organisation has been disabled. Please contact support.",
+                )
+            print(f"[TRIAL-LOGIN] org={org and org.name} is_trial={org and org.is_trial} trial_end={org and org.trial_end_date} now={now}")
+            if org and org.is_trial and org.trial_end_date:
+                print(f"[TRIAL-LOGIN] expired={org.trial_end_date < now}")
+                if org.trial_end_date < now:
+                    first_expiry = org.trial_status != "expired"
+                    if first_expiry:
+                        org.trial_status = "expired"
+                        db.commit()
+                    # Short-lived payment token (1 hr, scope=billing only)
+                    payment_token = create_access_token(
+                        {"org_id": str(org.id), "scope": "billing"},
+                        expires_delta=timedelta(hours=1),
+                    )
+                    # Send Razorpay payment link email on first expiry
+                    if first_expiry:
+                        try:
+                            from services.billing_service import send_payment_link
+                            send_payment_link(db, org)
+                        except Exception as e:
+                            print(f"[BILLING] Failed to send payment link: {e}")
+                    from fastapi.responses import JSONResponse
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="TRIAL_EXPIRED",
+                        headers={
+                            "X-Payment-Token": payment_token,
+                            "X-Org-Name": org.name,
+                        },
+                    )
+
         # Step 3: Security record
         security = db.query(UserSecurity).filter_by(user_id=user.id).first()
         if not security:
@@ -345,9 +384,10 @@ def login_user(db: Session, email: str, password: str):
                     "plan_limit": plan_obj.plan_limit,
                 }
 
-        from models import Organization
+        from models import Organization, SystemConfig
 
         organization_name = None
+        trial_info = {}
 
         if user.organization_id:
             org = db.query(Organization).filter(
@@ -356,6 +396,24 @@ def login_user(db: Session, email: str, password: str):
 
             if org:
                 organization_name = org.name
+                days_remaining = None
+                alert_active = False
+                if org.is_trial and org.trial_end_date:
+                    delta = (org.trial_end_date - now).days
+                    days_remaining = max(0, delta)
+                    alert_row = db.query(SystemConfig).filter(SystemConfig.key == "trial_alert_days").first()
+                    alert_days = int(alert_row.value) if alert_row else 7
+                    alert_active = days_remaining <= alert_days
+                effective_onboarding_complete = bool(org.onboarding_complete)
+                print(f"[DEBUG] org={org.name} is_trial={org.is_trial} raw_onboarding={org.onboarding_complete!r} effective={effective_onboarding_complete}")
+                trial_info = {
+                    "is_trial": org.is_trial,
+                    "trial_status": org.trial_status,
+                    "days_remaining": days_remaining,
+                    "trial_end_date": org.trial_end_date.isoformat() if org.trial_end_date else None,
+                    "alert_active": alert_active,
+                    "onboarding_complete": effective_onboarding_complete,
+                }
 
         # Create tokens
         access_token = create_access_token({"sub": str(user.id)})
@@ -394,11 +452,13 @@ def login_user(db: Session, email: str, password: str):
                 "roles": role_names,
                 "dashboard_type": dashboard_type,
                 "plan": plan,
+                **trial_info,
             },
             "privileges": filtered_privileges
         }
 
         print(f"[DEBUG] dashboard_type in result: {result['user'].get('dashboard_type')}")
+        print(f"[DEBUG] onboarding_complete in result: {result['user'].get('onboarding_complete')}")
         return result
 
     except HTTPException:

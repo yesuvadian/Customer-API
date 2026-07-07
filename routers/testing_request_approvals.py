@@ -170,17 +170,18 @@ def get_available_tester_roles(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Get all tester roles available for the testing request's organization.
-    Returns ONLY roles that have FULL permissions on EXACTLY the configured modules.
+    Get the tester role(s) eligible to be assigned for this request. The
+    caller is sitting at an "assign" stage (e.g. L3 Tester Assignment) — the
+    tester being picked will actually work the stage that the "assign"
+    transition leads to (e.g. L4 Test Execution), so the routing rule is
+    evaluated against THAT target stage, not the assign stage itself.
 
-    When wf_stage_id is provided (new configurable workflow path), the module
-    requirement lookup prefers a stage-scoped TesterRoleModuleRequirement row
-    (wf_stage_id match) before falling back to the org/global default.
-
-    Logic:
-    1. Get module requirement configuration (stage-scoped > org-specific > global default)
-    2. For each role in organization, check if it has FULL permissions on those modules
-    3. Return only matching roles with user counts
+    Resolution is stateless and rule-driven: the target stage's routing rule
+    mapping (tr_wf_routing_rule_roles) is evaluated against the request's
+    request_type/equipment_type/test_type to pick exactly one rule-mapped
+    role (see stage_mapped_roles()). If no rule is mapped to the target
+    stage, falls back to ALL roles configured on that stage
+    (tr_wf_stage_roles) rather than an empty list.
     """
     # Get the testing request
     testing_request = db.query(TestingRequest).filter(
@@ -193,85 +194,48 @@ def get_available_tester_roles(
             detail="Testing request not found"
         )
 
-    # Stage-scoped lookup for tr_wf_* path
-    if wf_stage_id:
-        config = db.query(TesterRoleModuleRequirement).filter(
-            TesterRoleModuleRequirement.is_active == True,
-            TesterRoleModuleRequirement.wf_stage_id == wf_stage_id,
-        ).first()
-        if config:
-            # Use stage-scoped config directly
-            pass
-        else:
-            # Fall through to org/global default below
-            wf_stage_id = None
-
-    if not wf_stage_id:
-        # Get tester role module requirements configuration
-        # Priority: org-specific config > global default
-        config = db.query(TesterRoleModuleRequirement).filter(
-            TesterRoleModuleRequirement.is_active == True,
-            TesterRoleModuleRequirement.wf_stage_id.is_(None),
-            or_(
-                TesterRoleModuleRequirement.organization_id == testing_request.organization_id,
-                TesterRoleModuleRequirement.organization_id.is_(None)  # Global default
-            )
-        ).order_by(
-            # Org-specific first (NULL last)
-            TesterRoleModuleRequirement.organization_id.desc().nullslast()
-        ).first()
-
-    if not config:
+    stage_id = wf_stage_id or testing_request.current_wf_stage_id
+    if not stage_id or not testing_request.organization_id:
         return []
 
-    required_modules = set(config.required_module_ids)
+    from models import TrWfStageTransition
+    assign_transition = db.query(TrWfStageTransition).filter(
+        TrWfStageTransition.from_stage_id == stage_id,
+        TrWfStageTransition.action_code == "assign",
+    ).first()
+    if not assign_transition or not assign_transition.to_stage_id:
+        return []
+    target_stage_id = assign_transition.to_stage_id
 
-    # If the workflow instance has a resolved tester role, restrict to that role only
-    resolved_tester_role_id = None
-    if testing_request.wf_instance_id:
-        from models import TrWfInstance as TrWfInstanceModel
-        wf_inst = db.query(TrWfInstanceModel).filter(
-            TrWfInstanceModel.id == testing_request.wf_instance_id
-        ).first()
-        if wf_inst:
-            resolved_tester_role_id = wf_inst.resolved_tester_role_id
-
-    # Get active roles in organization — scoped to resolved tester role if set
-    roles_q = db.query(OrgRole).filter(
-        OrgRole.organization_id == testing_request.organization_id,
-        OrgRole.is_active == True
+    from services.tr_workflow_routing_service import stage_mapped_roles
+    resolved_role_ids = stage_mapped_roles(
+        db,
+        testing_request.organization_id,
+        target_stage_id,
+        request_type=testing_request.request_type,
+        equipment_type_id=testing_request.equipment_type_id,
+        test_type_id=testing_request.test_type_id,
     )
-    if resolved_tester_role_id:
-        roles_q = roles_q.filter(OrgRole.id == resolved_tester_role_id)
-    all_roles = roles_q.all()
 
-    # Filter roles: must have FULL permissions on AT LEAST the required modules
-    # (having additional permissions is acceptable — a role is eligible if it covers
-    #  the required modules, even if it also covers other modules)
-    eligible_roles = []
+    if not resolved_role_ids:
+        # No rule mapped to the target stage — fall back to all roles
+        # configured on that stage.
+        from models import TrWfStageRole
+        resolved_role_ids = [
+            r.role_id for r in db.query(TrWfStageRole).filter(
+                TrWfStageRole.stage_id == target_stage_id,
+                TrWfStageRole.role_id.isnot(None),
+            ).all()
+        ]
 
-    for role in all_roles:
-        # Get ALL permissions for this role
-        permissions = db.query(OrgRolePermission).filter(
-            OrgRolePermission.org_role_id == role.id
-        ).all()
+    if not resolved_role_ids:
+        return []
 
-        # Find modules where role has FULL permissions (view, add, edit required for testers)
-        full_permission_modules = set()
-        for perm in permissions:
-            if (perm.can_view and
-                perm.can_add and
-                perm.can_edit):
-                full_permission_modules.add(perm.module_id)
-
-        # Check that role has AT LEAST the required modules (subset check)
-        if required_modules.issubset(full_permission_modules):
-            eligible_roles.append(role)
-            print(f"[DEBUG] Role '{role.name}' eligible (has modules: {full_permission_modules})")
-        else:
-            print(f"[DEBUG] Role '{role.name}' excluded (missing required: {required_modules - full_permission_modules})")
-
-    print(f"[DEBUG] {len(eligible_roles)} eligible tester roles found")
+    eligible_roles = db.query(OrgRole).filter(
+        OrgRole.id.in_(resolved_role_ids),
+        OrgRole.organization_id == testing_request.organization_id,
+        OrgRole.is_active == True,
+    ).all()
 
     # Department subtree for caller — user counts are dept-scoped too
     caller_depts = _caller_dept_ids(db, current_user)
@@ -756,7 +720,8 @@ def tr_wf_get_pending_queue(
     Each item includes available_actions[] for UI button rendering.
     """
     from models import (
-        TrWfInstance, TrWfStageRole, TrWfStage, OrgUserRole as OURModel
+        TrWfInstance, TrWfStageRole, TrWfStage, OrgUserRole as OURModel,
+        TrWfRoutingRule as TrWfRoutingRuleModel,
     )
     from services.tr_workflow_routing_service import WorkflowRoutingService
     from sqlalchemy.orm import joinedload
@@ -765,9 +730,9 @@ def tr_wf_get_pending_queue(
     if not org_id:
         raise HTTPException(status_code=400, detail="organization_id required")
 
-    # Caller's active role IDs
+    # Caller's active role IDs (normalised to str for safe comparison)
     caller_role_ids = [
-        r.org_role_id for r in db.query(OURModel).filter(
+        str(r.org_role_id) for r in db.query(OURModel).filter(
             OURModel.user_id == current_user.id,
             OURModel.is_active.is_(True),
         ).all()
@@ -781,20 +746,55 @@ def tr_wf_get_pending_queue(
             TrWfStageRole.role_id.in_(caller_role_ids),
         ).all()
     ]
-    if not allowed_stage_ids:
+
+    # Stage IDs where caller has can_act_as_tester — only those specific stages
+    act_as_tester_stage_ids = [
+        sr.stage_id for sr in db.query(TrWfStageRole)
+        .filter(
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_act_as_tester.is_(True),
+        ).all()
+        if sr.stage_id not in allowed_stage_ids  # avoid duplicates
+    ]
+
+    if not allowed_stage_ids and not act_as_tester_stage_ids:
         return []
 
     # Department subtree for this caller — scope to caller's dept + descendants
     caller_dept_ids = _caller_dept_ids(db, current_user)
 
-    # Active instances at those stages in this org
+    all_visible_stage_ids = list(set(allowed_stage_ids + act_as_tester_stage_ids))
+
+    # Workflow definition IDs where caller has can_act_as_tester on any stage —
+    # used to show assigned-execution TRs even if the current stage isn't in allowed_stage_ids
+    from models import TrWfStage as _TrWfStage
+    tester_wf_def_ids = [
+        str(sr.stage.wf_definition_id)
+        for sr in db.query(TrWfStageRole)
+        .join(_TrWfStage, _TrWfStage.id == TrWfStageRole.stage_id)
+        .filter(
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_act_as_tester.is_(True),
+        ).all()
+        if sr.stage and sr.stage.wf_definition_id
+    ]
+
+    from sqlalchemy import or_
+    filters = []
+    if all_visible_stage_ids:
+        filters.append(TrWfInstance.current_stage_id.in_(all_visible_stage_ids))
+    if tester_wf_def_ids:
+        filters.append(TrWfInstance.wf_definition_id.in_(tester_wf_def_ids))
+    combined_filter = or_(*filters) if filters else or_(False)
+    from models import TrWfStageInstance
     instances_q = (
         db.query(TrWfInstance)
         .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+        .options(joinedload(TrWfInstance.stage_instances))
         .filter(
             TrWfInstance.org_id == org_id,
             TrWfInstance.status == "active",
-            TrWfInstance.current_stage_id.in_(allowed_stage_ids),
+            combined_filter,
         )
     )
     if caller_dept_ids:
@@ -805,16 +805,99 @@ def tr_wf_get_pending_queue(
 
     from models import TrWfStage as TrWfStageModel
 
+    tester_def_ids = set(tester_wf_def_ids)
+
     def _caller_sees_instance(inst: TrWfInstance) -> bool:
-        if not inst.resolved_l3_role_id:
-            return True  # no role restriction — all eligible roles see it
+        active_si = next(
+            (si for si in inst.stage_instances
+             if si.stage_id == inst.current_stage_id
+             and si.status not in ("completed", "rejected")),
+            None,
+        )
+
         current_stage = db.query(TrWfStageModel).filter(
             TrWfStageModel.id == inst.current_stage_id
         ).first()
-        if not current_stage or not current_stage.is_role_scoped:
-            return True  # role filter only applies at role-scoped stages
-        # Caller must have the resolved AEE role for this stream
-        return inst.resolved_l3_role_id in caller_role_ids
+        if not current_stage:
+            return True
+
+        # Overrides that always grant visibility, evaluated BEFORE routing-
+        # rule scoping below — otherwise an approver or a tester delegate
+        # whose role isn't the rule-resolved one for this stage would get
+        # excluded before these ever run.
+        # 1) Approvers/reviewers always see every request in their stage.
+        caller_can_approve = db.query(TrWfStageRole).filter(
+            TrWfStageRole.stage_id == inst.current_stage_id,
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_approve.is_(True),
+        ).first() is not None
+
+        if caller_can_approve:
+            return True
+
+        # 2) If this stage instance is assigned to a specific user, the
+        # assigned user always sees it. Callers whose role has
+        # can_act_as_tester on ANY stage of this workflow definition also
+        # see it — they can execute on behalf of the assigned tester,
+        # regardless of which stage their own act_as_tester flag happens to
+        # be configured on.
+        if active_si and active_si.assigned_user_id:
+            if str(active_si.assigned_user_id) == str(current_user.id):
+                return True
+            if str(inst.wf_definition_id) in tester_def_ids:
+                return True
+
+        # Role scoping — rules are shared definitions; each stage evaluates
+        # the rules MAPPED to it against this request's attributes, per
+        # stage, statelessly. When a mapped rule matches, only its mapped
+        # roles see the request here. When no mapped rule matches (or the
+        # stage has no mappings), fall back to the stored instance
+        # resolution (legacy data), then to open stage-role visibility.
+        from services.tr_workflow_routing_service import stage_mapped_roles
+        _req = inst.testing_request
+        mapped_role_ids = stage_mapped_roles(
+            db, org_id, current_stage.id,
+            request_type=_req.request_type if _req else None,
+            equipment_type_id=_req.equipment_type_id if _req else None,
+            test_type_id=_req.test_type_id if _req else None,
+        )
+        if mapped_role_ids:
+            if not ({str(r) for r in mapped_role_ids} & set(caller_role_ids)):
+                return False
+        else:
+            # Legacy fallback: stored resolution from before per-stage
+            # mappings existed. Applies only where the stage's own roles
+            # intersect the resolved set (shared checkpoints stay open).
+            resolved_role_ids = {str(l.role_id) for l in inst.resolved_role_links}
+            if not resolved_role_ids:
+                legacy_role_id = inst.resolved_l3_role_id or inst.resolved_tester_role_id
+                if legacy_role_id:
+                    resolved_role_ids = {str(legacy_role_id)}
+            if resolved_role_ids:
+                stage_role_ids = {str(r.role_id) for r in current_stage.roles if r.role_id}
+                if stage_role_ids & resolved_role_ids:
+                    if not (resolved_role_ids & set(caller_role_ids)):
+                        return False
+
+        # If assigned to someone else and neither override above matched,
+        # only the assigned user sees it.
+        if active_si and active_si.assigned_user_id:
+            return str(active_si.assigned_user_id) == str(current_user.id)
+
+        # Unassigned — routing via can_act_as_tester group:
+        # only callers who have can_act_as_tester on this stage can see it.
+        stage_tester_role_ids = {
+            str(r.role_id) for r in current_stage.roles
+            if r.role_id and r.can_act_as_tester
+        }
+        if stage_tester_role_ids:
+            return bool(stage_tester_role_ids & set(caller_role_ids))
+
+        # No routing rule configured — fall back to any role member on this stage.
+        current_stage_role_ids = {str(r.role_id) for r in current_stage.roles if r.role_id}
+        if not current_stage_role_ids:
+            return True
+        return bool(current_stage_role_ids & set(caller_role_ids))
 
     instances = [inst for inst in instances if _caller_sees_instance(inst)]
 
@@ -836,7 +919,7 @@ def tr_wf_get_pending_queue(
         if not req:
             continue
 
-        actions = routing_svc.get_available_actions(req, caller_role_ids)
+        actions = routing_svc.get_available_actions(req, caller_role_ids, caller_user_id=current_user.id)
 
         eq = req.equipment
         result.append({
@@ -871,12 +954,25 @@ def tr_wf_get_pending_queue(
                 "stage_code": _cur_stage.code,
                 "stage_show_recommendation": _cur_stage.show_recommendation,
                 "stage_is_result_stage": _cur_stage.is_result_stage,
-                "stage_use_l2_route": _cur_stage.use_l2_route,
+                # Derived, not the stage flag: approve should hit the routing
+                # endpoint when this stage has its own scoped rules (deeper
+                # bifurcation) or the request hasn't done its first routing
+                # approval yet (entry point, legacy status still pre-approval).
+                "stage_use_l2_route": (
+                    req.status in (TestingRequestStatus.pending_approval, TestingRequestStatus.submitted)
+                    or db.query(TrWfRoutingRuleModel).filter(
+                        TrWfRoutingRuleModel.org_id == org_id,
+                        TrWfRoutingRuleModel.is_active.is_(True),
+                        TrWfRoutingRuleModel.source_stage_id == _cur_stage.id,
+                    ).first() is not None
+                ),
+                "stage_can_act_as_tester": any(r.can_act_as_tester for r in _cur_stage.roles),
             } if (_cur_stage := db.query(TrWfStage).filter(TrWfStage.id == inst.current_stage_id).first()) else {
                 "stage_code": None,
                 "stage_show_recommendation": False,
                 "stage_is_result_stage": False,
                 "stage_use_l2_route": False,
+                "stage_can_act_as_tester": False,
             }),
             "wf_instance_id": str(inst.id),
             "resolved_tester_role_id": str(inst.resolved_tester_role_id) if inst.resolved_tester_role_id else None,
@@ -889,6 +985,7 @@ def tr_wf_get_pending_queue(
         })
 
     return result
+
 
 
 @router.post("/{request_id}/tr-wf/l2-approve-route", response_model=ApprovalResponse)
@@ -907,7 +1004,24 @@ def tr_wf_l2_approve_route(
     if not req:
         raise HTTPException(status_code=404, detail="Testing request not found")
 
-    if req.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
+    # The legacy status guard below only makes sense for the very first
+    # (entry-point) call. Once a tr_wf_* instance exists and is currently
+    # sitting on a stage that has its own scoped routing rules (derived
+    # from data, not a stage flag), allow re-entry regardless of the legacy
+    # status field (it gets frozen at pending_assignment after the first
+    # routing call and no longer reflects per-stage state).
+    already_on_routed_stage = False
+    if req.wf_instance_id:
+        from models import TrWfInstance as _TrWfInstance, TrWfRoutingRule as _TrWfRoutingRule
+        _inst = db.query(_TrWfInstance).filter(_TrWfInstance.id == req.wf_instance_id).first()
+        if _inst and _inst.current_stage_id:
+            already_on_routed_stage = db.query(_TrWfRoutingRule).filter(
+                _TrWfRoutingRule.org_id == req.organization_id,
+                _TrWfRoutingRule.is_active.is_(True),
+                _TrWfRoutingRule.source_stage_id == _inst.current_stage_id,
+            ).first() is not None
+
+    if not already_on_routed_stage and req.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
         raise HTTPException(
             status_code=400,
             detail=f"Request must be pending_approval or submitted, currently: {req.status.value}",
@@ -1003,15 +1117,14 @@ def tr_wf_advance_stage(
     )
 
 
-@router.get("/{request_id}/tr-wf/audit-log", response_model=List[dict])
+@router.get("/{request_id}/tr-wf/audit-log")
 def tr_wf_get_audit_log(
     request_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return the full audit trail for the request's configurable workflow instance."""
-    from models import TrWfAuditLog, TrWfStage, User as UserModel
-    from sqlalchemy.orm import joinedload
+    """Return the full audit trail plus pending future stages for the request's workflow instance."""
+    from models import TrWfAuditLog, TrWfStage, TrWfInstance, User as UserModel
 
     logs = (
         db.query(TrWfAuditLog)
@@ -1034,7 +1147,7 @@ def tr_wf_get_audit_log(
             return None
         return f"{u.firstname or ''} {u.lastname or ''}".strip() or u.email
 
-    return [
+    entries = [
         {
             "id": str(log.id),
             "from_stage": _stage_name(log.from_stage_id),
@@ -1050,3 +1163,30 @@ def tr_wf_get_audit_log(
         }
         for log in logs
     ]
+
+    # Build pending stages: ordered stages in the workflow def beyond the current stage
+    pending_stages: list = []
+    instance = (
+        db.query(TrWfInstance)
+        .filter(
+            TrWfInstance.testing_request_id == request_id,
+            TrWfInstance.status == "active",
+        )
+        .first()
+    )
+    if instance and instance.current_stage_id and instance.wf_definition_id:
+        cur = db.query(TrWfStage).filter(TrWfStage.id == instance.current_stage_id).first()
+        if cur:
+            future = (
+                db.query(TrWfStage)
+                .filter(
+                    TrWfStage.wf_definition_id == instance.wf_definition_id,
+                    TrWfStage.sequence > cur.sequence,
+                    TrWfStage.is_active.is_(True),
+                )
+                .order_by(TrWfStage.sequence)
+                .all()
+            )
+            pending_stages = [{"name": s.name, "order_index": s.sequence} for s in future]
+
+    return {"entries": entries, "pending_stages": pending_stages}

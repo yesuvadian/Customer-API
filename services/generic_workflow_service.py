@@ -11,6 +11,7 @@ the appropriate adapter, not directly.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Session
 from models import (
     TrWfDefinition,
     TrWfInstance,
+    TrWfInstanceResolvedRole,
     TrWfStage,
     TrWfStageInstance,
     TrWfStageRole,
@@ -54,15 +56,25 @@ class GenericWorkflowService:
         self,
         org_id: UUID,
         request_type: Optional[str],
-    ) -> tuple[TrWfDefinition, Optional[UUID], Optional[UUID]]:
-        rules = (
-            self.db.query(TrWfRoutingRule)
-            .filter(
-                TrWfRoutingRule.org_id == org_id,
-                TrWfRoutingRule.is_active.is_(True),
-            )
-            .all()
+        source_stage_id: Optional[UUID] = None,
+    ) -> tuple[TrWfDefinition, Optional[UUID], Optional[UUID], list[UUID]]:
+        # source_stage_id scopes which rules are considered, mirroring
+        # WorkflowRoutingService.resolve_routing:
+        #   None → entry-point rules only (source_stage_id IS NULL) — stage-
+        #   scoped rules belong to a specific stage's re-routing and must
+        #   not leak into entity-level resolution.
+        #   A stage id → only that stage's own rules (deeper bifurcation).
+        rules_q = self.db.query(TrWfRoutingRule).filter(
+            TrWfRoutingRule.org_id == org_id,
+            TrWfRoutingRule.is_active.is_(True),
         )
+        if source_stage_id is None:
+            rules_q = rules_q.filter(TrWfRoutingRule.source_stage_id.is_(None))
+        else:
+            rules_q = rules_q.filter(TrWfRoutingRule.source_stage_id == source_stage_id)
+        rules = rules_q.all()
+        # A disabled master rule disables all its condition rows
+        rules = [r for r in rules if r.rule_master is None or r.rule_master.is_active]
 
         def _matches(r: TrWfRoutingRule) -> bool:
             if r.request_type is not None and r.request_type != request_type:
@@ -135,7 +147,22 @@ class GenericWorkflowService:
             best_rule.override_tester_role_id if (best_rule and best_rule.override_tester_role_id)
             else defn.default_tester_role_id
         )
-        return defn, resolved_l3_role_id, resolved_tester_role_id
+
+        # Legacy stored-resolution role list: only rule-GLOBAL rows
+        # (stage_id NULL) — per-stage mapping rows are evaluated statelessly
+        # at each stage (stage_mapped_roles) and must not leak in here.
+        _global_role_ids = [
+            rr.role_id for rr in (best_rule.rule_roles if best_rule else [])
+            if rr.stage_id is None
+        ]
+        if _global_role_ids:
+            resolved_role_ids = _global_role_ids
+        else:
+            resolved_role_ids = [
+                rid for rid in (resolved_l3_role_id, resolved_tester_role_id) if rid
+            ]
+
+        return defn, resolved_l3_role_id, resolved_tester_role_id, resolved_role_ids
 
     # ------------------------------------------------------------------
     # Instantiate workflow
@@ -162,7 +189,7 @@ class GenericWorkflowService:
         org_id = self.adapter.get_org_id(entity)
         request_type = self.adapter.get_request_type(entity)
 
-        defn, resolved_l3_role_id, resolved_tester_role_id = self._resolve_routing(org_id, request_type)
+        defn, resolved_l3_role_id, resolved_tester_role_id, resolved_role_ids = self._resolve_routing(org_id, request_type)
 
         first_stage: Optional[TrWfStage] = (
             self.db.query(TrWfStage)
@@ -196,6 +223,13 @@ class GenericWorkflowService:
         )
         self.db.add(instance)
         self.db.flush()
+
+        for _role_id in resolved_role_ids:
+            self.db.add(TrWfInstanceResolvedRole(
+                id=uuid.uuid4(),
+                wf_instance_id=instance.id,
+                role_id=_role_id,
+            ))
 
         self.db.add(TrWfStageInstance(
             wf_instance_id=instance.id,
@@ -275,6 +309,41 @@ class GenericWorkflowService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Action '{action_code}' requires a comment.",
             )
+
+        # Derived re-routing (mirrors the TR path): when an 'approve' fires
+        # on a stage that has its own scoped rules, re-resolve and replace
+        # the instance's resolved roles — a deeper bifurcation point. No
+        # stage flag involved; stages without scoped rules just advance.
+        if action_code == "approve" and not transition.is_rejection:
+            org_id = self.adapter.get_org_id(entity)
+            has_scoped_rules = (
+                self.db.query(TrWfRoutingRule)
+                .filter(
+                    TrWfRoutingRule.org_id == org_id,
+                    TrWfRoutingRule.is_active.is_(True),
+                    TrWfRoutingRule.source_stage_id == current_stage_id,
+                )
+                .first() is not None
+            )
+            if has_scoped_rules:
+                _defn, _l3, _tester, _role_ids = self._resolve_routing(
+                    org_id,
+                    self.adapter.get_request_type(entity),
+                    source_stage_id=current_stage_id,
+                )
+                instance.resolved_l3_role_id = _l3
+                instance.resolved_tester_role_id = _tester
+                # Replace (not accumulate): only the latest resolution
+                # grants visibility, not roles from an earlier, passed stage.
+                self.db.query(TrWfInstanceResolvedRole).filter(
+                    TrWfInstanceResolvedRole.wf_instance_id == instance.id
+                ).delete()
+                for _role_id in _role_ids:
+                    self.db.add(TrWfInstanceResolvedRole(
+                        id=uuid.uuid4(),
+                        wf_instance_id=instance.id,
+                        role_id=_role_id,
+                    ))
 
         from_status_code = instance.current_status_code
         is_terminal = False
@@ -440,6 +509,80 @@ class GenericWorkflowService:
         if not instance or instance.status != "active" or not instance.current_stage_id:
             return []
 
+        # Overrides that always grant action visibility, evaluated BEFORE
+        # routing-rule scoping below — otherwise an approver, the assigned
+        # user, or a tester delegate whose role isn't the rule-resolved one
+        # for this stage would get excluded before these ever run.
+        # 1) Approvers/reviewers always act on their stage.
+        caller_can_approve = self.db.query(TrWfStageRole).filter(
+            TrWfStageRole.stage_id == instance.current_stage_id,
+            TrWfStageRole.role_id.in_(user_role_ids or []),
+            TrWfStageRole.can_approve.is_(True),
+        ).first() is not None
+
+        # 2) The user this stage instance is assigned to.
+        assigned_to_caller = False
+        if user_id:
+            active_si = (
+                self.db.query(TrWfStageInstance)
+                .filter(
+                    TrWfStageInstance.wf_instance_id == instance.id,
+                    TrWfStageInstance.stage_id == instance.current_stage_id,
+                    TrWfStageInstance.status == "in_progress",
+                    TrWfStageInstance.assigned_user_id == user_id,
+                )
+                .first()
+            )
+            assigned_to_caller = active_si is not None
+
+        # 3) Callers whose role has can_act_as_tester on ANY stage of this
+        # workflow definition can act on behalf of the assigned user,
+        # regardless of which stage their own act_as_tester flag is on.
+        caller_is_workflow_tester = self.db.query(TrWfStageRole).join(
+            TrWfStage, TrWfStageRole.stage_id == TrWfStage.id
+        ).filter(
+            TrWfStageRole.role_id.in_(user_role_ids or []),
+            TrWfStageRole.can_act_as_tester.is_(True),
+            TrWfStage.wf_definition_id == instance.wf_definition_id,
+        ).first() is not None
+
+        bypass_rule_scoping = caller_can_approve or assigned_to_caller or caller_is_workflow_tester
+
+        if not bypass_rule_scoping:
+            # Role scoping — per-stage, stateless: evaluate the rules MAPPED to
+            # this stage against the entity's attributes; a matching mapped
+            # rule's roles are the only ones who may act here. Falls back to
+            # the stored instance resolution (legacy data), then open.
+            from services.tr_workflow_routing_service import stage_mapped_roles
+            mapped_role_ids = stage_mapped_roles(
+                self.db,
+                self.adapter.get_org_id(entity),
+                instance.current_stage_id,
+                request_type=self.adapter.get_request_type(entity),
+                equipment_type_id=getattr(entity, "equipment_type_id", None),
+                test_type_id=getattr(entity, "test_type_id", None),
+            )
+            if mapped_role_ids:
+                if not (set(mapped_role_ids) & set(user_role_ids or [])):
+                    return []
+            else:
+                resolved_role_ids = {l.role_id for l in instance.resolved_role_links}
+                if not resolved_role_ids:
+                    _legacy = instance.resolved_l3_role_id or instance.resolved_tester_role_id
+                    if _legacy:
+                        resolved_role_ids = {_legacy}
+                if resolved_role_ids:
+                    stage_role_ids = {
+                        sr.role_id
+                        for sr in self.db.query(TrWfStageRole)
+                        .filter(TrWfStageRole.stage_id == instance.current_stage_id)
+                        .all()
+                        if sr.role_id
+                    }
+                    if stage_role_ids & resolved_role_ids:
+                        if not (resolved_role_ids & set(user_role_ids or [])):
+                            return []
+
         allowed_role = (
             self.db.query(TrWfStageRole)
             .filter(
@@ -473,7 +616,12 @@ class GenericWorkflowService:
                     if originator_role_ids and set(user_role_ids or []) & originator_role_ids:
                         is_originator_role = True
 
-        if not allowed_role and not is_originator_role:
+        if (
+            not allowed_role
+            and not is_originator_role
+            and not assigned_to_caller
+            and not caller_is_workflow_tester
+        ):
             return []
 
         transitions = (

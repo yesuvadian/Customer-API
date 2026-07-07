@@ -319,12 +319,15 @@ class HealthScorer:
     def score_test(
         template_data: dict,
         evaluation_result: dict,
+        test_data: dict | None = None,
     ) -> tuple[float, list[dict]]:
         """
         Returns (health_score 0–100, critical_findings list).
 
         evaluation_result is the JSONB stored in TestResult.evaluation_result,
         which has {overall, fields: [{key, label, status, ...}]}.
+        test_data is the raw submitted form data — when provided, table fields
+        are re-evaluated fresh so that row_label/breach_limit are available.
         """
         if not evaluation_result:
             return None, []
@@ -355,6 +358,23 @@ class HealthScorer:
             if isinstance(f, dict) and "key" in f
         }
 
+        # For table fields: re-evaluate fresh from test_data so that row_label
+        # and breach_limit are available (stored evaluation_result may be stale).
+        if test_data:
+            from services.evaluation_service import EvaluationService as _EvalSvc
+            for section in template_data.get("sections", []):
+                for field in section.get("fields", []):
+                    if field.get("type") == "table":
+                        fkey = field.get("key", "")
+                        fresh = (
+                            _EvalSvc._eval_table_field(field, test_data)
+                            or _EvalSvc._eval_threshold_table(field, test_data)
+                        )
+                        if fresh:
+                            # Merge fresh result over the stored one (keep status from stored)
+                            stored = eval_field_map.get(fkey, {})
+                            eval_field_map[fkey] = {**stored, **fresh}
+
         for fkey, status in field_statuses.items():
             field = field_defs.get(fkey, {})
             ef    = eval_field_map.get(fkey, {})
@@ -384,8 +404,25 @@ class HealthScorer:
                     or thresholds.get("alert_max")
                 )
 
-                # For TABLE fields: pull the individual row failures instead
+                # For TABLE fields: pull the individual row failures instead.
+                # evaluation_service returns column_results (one entry per cell)
+                # with row_label and breach_limit already populated.
                 row_results = ef.get("row_results") or []
+                col_results = ef.get("column_results") or []
+
+                # Build row_results from col_results when the legacy key is absent.
+                if not row_results and col_results:
+                    for _cr in col_results:
+                        if _cr.get("status") not in ("CRITICAL", "ALERT"):
+                            continue
+                        row_results.append({
+                            "row_id":       _cr.get("row_label") or f"Row {_cr.get('row', 0) + 1}",
+                            "value":        _cr.get("value"),
+                            "status":       _cr.get("status"),
+                            "breach_limit": _cr.get("breach_limit"),
+                            "unit":         field.get("unit") or "",
+                        })
+
                 critical_rows = [r for r in row_results if r.get("status") in ("CRITICAL", "ALERT")]
 
                 # Build a lookup of allowable limits from template threshold config
@@ -518,7 +555,7 @@ class AnalyticsEngine:
 
         # Score the test
         health_score, critical_findings = HealthScorer.score_test(
-            template_data, evaluation_result
+            template_data, evaluation_result, test_data=test_data
         )
 
         # Fallback for calibration templates (DATE_ADD rule) where evaluation_result
@@ -612,6 +649,7 @@ class AnalyticsEngine:
                     status    = field_ev.get("status") if field_ev else None
                     condition = _CONDITION.get(status, "Poor") if status else None
                     score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
+
 
                     history  = history_map.get(field_key, [])
                     analysis = ParameterAnalyzer.analyse(history, ev)
@@ -750,7 +788,20 @@ class AnalyticsEngine:
         if not equipment:
             return None
 
-        rows = (
+        from models import TestResult as _TR2, TestingRequest as _TReq, TestingRequestStatus as _TRS, TrWfInstance as _TWI
+
+        _OPEN_STATUSES = {
+            _TRS.draft, _TRS.submitted, _TRS.assigned,
+            _TRS.accepted, _TRS.in_progress,
+        }
+        # IDs of TRs that are wf-active (not yet completed)
+        _wf_active_tr_ids = {
+            row.testing_request_id
+            for row in self.db.query(_TWI.testing_request_id)
+            .filter(_TWI.status == "active").all()
+        }
+
+        all_rows = (
             self.db.query(TestAnalytics)
             .filter(TestAnalytics.equipment_id == equipment_id)
             .order_by(
@@ -759,6 +810,21 @@ class AnalyticsEngine:
             )
             .all()
         )
+
+        # Filter out analytics whose TR is still open/in-progress
+        _tr_id_map: dict = {}
+        for _ta in all_rows:
+            if _ta.test_result_id not in _tr_id_map:
+                _res = self.db.get(_TR2, _ta.test_result_id)
+                _tr_id_map[_ta.test_result_id] = _res
+
+        rows = [
+            _ta for _ta in all_rows
+            if (_res := _tr_id_map.get(_ta.test_result_id)) is not None
+            and _res.testing_request is not None
+            and _res.testing_request.status not in _OPEN_STATUSES
+            and _res.testing_request_id not in _wf_active_tr_ids
+        ]
 
         if not rows:
             return None

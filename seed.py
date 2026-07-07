@@ -1211,25 +1211,42 @@ def assign_viewer_role_to_new_users(session, new_user_ids, role_ids):
 
 def seed_plans(session):
     plans_data = [
-        {"planname": "Basic", "plan_description": "Basic plan with limited access", "plan_limit": 10, "isactive": True},
-        {"planname": "Standard", "plan_description": "Standard plan with moderate access", "plan_limit": 50, "isactive": True},
-        {"planname": "Premium", "plan_description": "Premium plan with full access", "plan_limit": 100, "isactive": True},
+        {
+            "planname": "Basic",
+            "plan_description": "Up to 5 users, core features",
+            "plan_limit": 5,
+            "isactive": True,
+            "price_paise": 99900,
+            "billing_cycle": "monthly",
+            "duration_days": 30,
+        },
+        {
+            "planname": "Standard",
+            "plan_description": "Up to 20 users, all features",
+            "plan_limit": 20,
+            "isactive": True,
+            "price_paise": 249900,
+            "billing_cycle": "monthly",
+            "duration_days": 30,
+        },
+        {
+            "planname": "Premium",
+            "plan_description": "Unlimited users, priority support",
+            "plan_limit": 9999,
+            "isactive": True,
+            "price_paise": 2399900,
+            "billing_cycle": "yearly",
+            "duration_days": 365,
+        },
     ]
 
     for p in plans_data:
         existing_plan = session.query(Plan).filter_by(planname=p["planname"]).first()
         if not existing_plan:
-            plan = Plan(
-                planname=p["planname"],
-                plan_description=p["plan_description"],
-                plan_limit=p["plan_limit"],
-                isactive=p["isactive"]
-            )
-            session.add(plan)
+            session.add(Plan(**p))
         else:
-            existing_plan.plan_description = p["plan_description"]
-            existing_plan.plan_limit = p["plan_limit"]
-            existing_plan.isactive = p["isactive"]
+            for k, v in p.items():
+                setattr(existing_plan, k, v)
     session.commit()
     print("[OK] Plans seeded successfully.")
 def seed_category_master(session):
@@ -3010,6 +3027,13 @@ def seed_test_type_categories(session, master_ids):
         # Add types for each category (test, maintenance, inspection, repair_lifecycle)
         for category_type, type_list in categories.items():
             for type_name in type_list:
+                # For test types, only create a CategoryDetails row if we have a
+                # template defined — prevents unimplemented test types (e.g. "Load Test")
+                # from appearing in the Data Import test type picker.
+                if category_type == "test":
+                    from test_templates import TEST_TYPE_TO_TEMPLATE, get_template_for_test_type
+                    if type_name not in TEST_TYPE_TO_TEMPLATE and get_template_for_test_type(type_name) is None:
+                        continue
                 _get_or_create_category_detail(
                     session,
                     name=type_name,
@@ -3502,7 +3526,7 @@ def seed_role_templates(session):
             "name": "System Administrator",
             "rename_from": "System Administrator",
             "description": "Manages organisation structure: users, roles and departments.",
-            "is_org_admin": False,
+            "is_org_admin": True,
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
@@ -3538,7 +3562,7 @@ def seed_role_templates(session):
             "rename_from": "Maintenance Officer",
             "description": "Field-level maintenance responsible officer. Key repair and overhaul workflow actor.",
             "is_org_admin": False,
-            "is_dept_admin": False,
+            "is_dept_admin": True,
             "auto_provision": True,
             "default_module_id": modules_by_name.get("Asset Dashboard"),
             "permissions_template": (
@@ -3820,6 +3844,125 @@ def seed_role_templates(session):
                 _readwrite(dashboard_module) +
                 _readwrite(procurement_modules) +
                 _readwrite(breakdown_workflows_module)
+            ),
+        },
+
+        # ── 15. AE-R&T ────────────────────────────────────────────────────────
+        {
+            "name": "AE-R&T",
+            "rename_from": "AE-R&T",
+            "description": "Assistant Engineer (Repair & Testing) — executes testing and acts on TR approval queue.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _full([modules_by_name["Testing"]] if "Testing" in modules_by_name else [])
+            ),
+        },
+
+        # ── 16. AE-R&D ────────────────────────────────────────────────────────
+        {
+            "name": "AE-R&D",
+            "rename_from": "AE-R&D",
+            "description": "Assistant Engineer (Research & Development) — executes testing and acts on TR approval queue.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _full([modules_by_name["Testing"]] if "Testing" in modules_by_name else [])
+            ),
+        },
+
+        # ── 17. AEE R&T ───────────────────────────────────────────────────────
+        {
+            "name": "AEE R&T",
+            "rename_from": "AEE R&T",
+            "description": "Assistant Executive Engineer (Repair & Testing) — approves TR queue and reviews results.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _readwrite([modules_by_name["TR Result Review"]] if "TR Result Review" in modules_by_name else [])
+            ),
+        },
+
+        # ── 18. AEE-R&D ───────────────────────────────────────────────────────
+        {
+            "name": "AEE-R&D",
+            "rename_from": "AEE-R&D",
+            "description": "Assistant Executive Engineer (Research & Development) — approves TR queue and reviews results.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _readwrite([modules_by_name["TR Result Review"]] if "TR Result Review" in modules_by_name else [])
+            ),
+        },
+
+        # ── 19. EE-R&T ────────────────────────────────────────────────────────
+        {
+            "name": "EE-R&T",
+            "rename_from": "EE-R&T",
+            "description": "Executive Engineer (Repair & Testing) — senior field officer on the RT track.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _approve(testing_request_approvals_module) +
+                _approve(approvals_module) +
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module)
+            ),
+        },
+
+        # ── 20. EE-R&D ────────────────────────────────────────────────────────
+        {
+            "name": "EE-R&D",
+            "rename_from": "EE-R&D",
+            "description": "Executive Engineer (Research & Development) — senior field officer on the RD track.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _readonly(dashboard_module) +
+                _approve(testing_request_approvals_module) +
+                _approve(approvals_module) +
+                _readonly(testing_requests_module) +
+                _readwrite(testing_module)
+            ),
+        },
+
+        # ── 21. Dev Support ───────────────────────────────────────────────────
+        {
+            "name": "Dev Support",
+            "rename_from": "Dev Support",
+            "description": "Document support agent — handles document support queue and receives notifications.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _approve([modules_by_name["Document Support Queue"]] if "Document Support Queue" in modules_by_name else []) +
+                _readonly([modules_by_name["Notifications"]] if "Notifications" in modules_by_name else [])
+            ),
+        },
+
+        # ── 22. Dev Support Manager ───────────────────────────────────────────
+        {
+            "name": "Dev Support Manager",
+            "rename_from": "Dev Support Manager",
+            "description": "Document support manager — full access to document support and queue, receives notifications.",
+            "is_org_admin": False,
+            "is_dept_admin": False,
+            "auto_provision": True,
+            "permissions_template": (
+                _approve([modules_by_name["Document Support"]] if "Document Support" in modules_by_name else []) +
+                _approve([modules_by_name["Document Support Queue"]] if "Document Support Queue" in modules_by_name else []) +
+                _readonly([modules_by_name["Notifications"]] if "Notifications" in modules_by_name else [])
             ),
         },
     ]
@@ -10966,6 +11109,33 @@ def _seed_notification_templates(session) -> int:
         ),
     )
 
+    # ── TR Configurable Workflow Engine ───────────────────────────────────────
+    _tmpl("tr_wf_status_changed",
+        _e(
+            "[TEST REQUEST] {{request_number}} — {{status_name}}",
+            "<h3 style='color:#3FA9F5'>Test Request Status Update</h3>"
+            "<p>The status of your test request has changed.</p>"
+            + _html([
+                ("Request No.", "request_number"),
+                ("Equipment",   "equipment"),
+                ("New Status",  "status_name"),
+                ("Stage",       "stage_name"),
+            ])
+            + "<p style='margin-top:20px;'>Please log in to <strong>SEACMS</strong> to "
+            "view the request details or take any required action.</p>",
+            ["@originator", "@assignee"],
+        ),
+        _s(
+            "[SEACMS] Test request {{request_number}} ({{equipment}}) status: {{status_name}}. Login for details.",
+            ["@originator", "@assignee"],
+        ),
+        _i(
+            "Test request {{request_number}} — {{status_name}}",
+            "Your test request {{request_number}} for {{equipment}} has moved to: {{status_name}} ({{stage_name}}).",
+            ["@originator", "@assignee"],
+        ),
+    )
+
     # ── Upsert into DB ────────────────────────────────────────────────────────
     inserted = 0
     for tpl in _TEMPLATES:
@@ -11293,44 +11463,44 @@ def _seed_notification_routing_rules(session) -> int:
         # ── Equipment Register ────────────────────────────────────────────────
         ("equipment_replacement",
          [], [],
-         ["email", "sms", "inapp"],
-         "Equipment Replacement — Email + SMS + in-app"),
+         ["inapp"],
+         "Equipment Replacement — In-app"),
 
         ("equipment_registered",
          [], [],
-         ["email", "sms", "inapp"],
-         "Equipment Registered — Email + SMS + in-app"),
+         ["inapp"],
+         "Equipment Registered — In-app"),
 
         ("equipment_retired",
          [], [],
-         ["email", "sms", "inapp"],
-         "Equipment Retired — Email + SMS + in-app"),
+         ["inapp"],
+         "Equipment Retired — In-app"),
 
         # ── Evaluation results ────────────────────────────────────────────────
         ("eval_critical",
          ["testing_request", "taqc_inspection"], [],
-         ["email", "sms", "inapp"],
-         "Critical Evaluation — all channels"),
+         ["inapp"],
+         "Critical Evaluation — In-app"),
 
         ("eval_alert",
          ["testing_request", "taqc_inspection"], [],
-         ["email", "sms", "inapp"],
-         "Alert Evaluation — Email + SMS + Dashboard"),
+         ["inapp"],
+         "Alert Evaluation — In-app"),
 
         # ── Test lifecycle — testing_request workflow (test/maintenance/inspection) ──
         ("request_submitted",
          ["testing_request"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Test Request Submitted"),
 
         ("request_submitted",
          ["testing_request"], ["maintenance"],
-         ["email", "sms", "inapp"],
-         "Maintenance Request Submitted — Email + SMS"),
+         ["inapp"],
+         "Maintenance Request Submitted — In-app"),
 
         ("request_submitted",
          ["failure_registry"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Failure Registry Submitted"),
 
         ("request_submitted",
@@ -11341,196 +11511,202 @@ def _seed_notification_routing_rules(session) -> int:
         # ── Tester workflow ───────────────────────────────────────────────────
         ("tester_assigned",
          ["testing_request"], [],
-         ["email", "sms", "inapp"],
-         "Tester Assigned — all channels"),
+         ["inapp"],
+         "Tester Assigned — In-app"),
 
         ("tester_assigned",
          ["taqc_inspection"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "TAQC Inspector Assigned"),
 
         ("tester_declined",
          [], [],
-         ["email", "inapp"],
-         "Tester Declined — all workflows"),
+         ["inapp"],
+         "Tester Declined — In-app"),
 
         ("test_submitted",
          ["testing_request", "taqc_inspection"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Test Results Submitted"),
 
         ("status_changed",
          ["testing_request", "taqc_inspection"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Test Request Status Changed"),
 
         # ── Recommendations ───────────────────────────────────────────────────
         ("recommendation_approved",
          [], [],
-         ["email", "inapp"],
-         "Recommendation Approved — all workflows"),
+         ["inapp"],
+         "Recommendation Approved — In-app"),
 
         ("recommendation_rejected",
          [], [],
-         ["email", "inapp"],
-         "Recommendation Rejected — all workflows"),
+         ["inapp"],
+         "Recommendation Rejected — In-app"),
 
         ("request_rejected",
          ["testing_request"], [],
-         ["email", "inapp"],
-         "Request Rejected — all workflows"),
+         ["inapp"],
+         "Request Rejected — In-app"),
 
         # ── Failure Registry ──────────────────────────────────────────────────
         ("fr_submitted",
          ["failure_registry"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Failure Registry Submitted"),
 
         ("fr_approved",
          ["failure_registry"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Failure Registry Approved"),
 
         ("fr_rejected",
          ["failure_registry"], [],
-         ["email", "inapp"],
+         ["inapp"],
          "Failure Registry Rejected"),
 
         # ── Scheduling / Reminders ────────────────────────────────────────────
         ("due_reminder",
          ["testing_request"], _ALL_TEST_TYPES,
-         ["email", "sms", "inapp"],
-         "15-Day Test Due Reminder — Email + SMS"),
+         ["inapp"],
+         "15-Day Test Due Reminder — In-app"),
 
         ("due_reminder_final",
          ["testing_request"], _ALL_TEST_TYPES,
-         ["email", "sms", "inapp"],
-         "7-Day Final Reminder — Email + SMS"),
+         ["inapp"],
+         "7-Day Final Reminder — In-app"),
 
         ("overdue_alert",
          [], _ALL_TEST_TYPES,
-         ["email", "sms", "inapp"],
-         "Test Overdue — Email + SMS + Dashboard"),
+         ["inapp"],
+         "Test Overdue — In-app"),
 
         ("overdue_escalation",
          [], [],
-         ["email", "sms", "inapp"],
-         "Overdue Escalation — Email + SMS"),
+         ["inapp"],
+         "Overdue Escalation — In-app"),
 
         # Maintenance-specific: higher urgency
         ("maintenance_due",
          ["testing_request"], ["maintenance"],
-         ["email", "sms", "inapp"],
-         "Maintenance Due (15 days) — Email + SMS"),
+         ["inapp"],
+         "Maintenance Due (15 days) — In-app"),
 
         # Inspection reminders: lower urgency
         ("due_reminder",
          ["testing_request"], ["inspection"],
-         ["email", "inapp"],
-         "Due Reminder — Inspection: email + in-app"),
+         ["inapp"],
+         "Due Reminder — Inspection: In-app"),
 
         # ── Compliance / Remedial ─────────────────────────────────────────────
         ("remedial_action_due",
          [], [],
-         ["email", "sms"],
-         "Remedial Action Compliance Due — Email + SMS"),
+         ["inapp"],
+         "Remedial Action Compliance Due — In-app"),
 
         ("taqc_observation_overdue",
          ["taqc_inspection"], [],
-         ["email", "sms"],
-         "TA&QC Observation Compliance Overdue — Email + SMS"),
+         ["inapp"],
+         "TA&QC Observation Compliance Overdue — In-app"),
 
         # ── Repair Lifecycle ──────────────────────────────────────────────────
         ("repair_stage_changed",
          ["repair_lifecycle"], [],
-         ["email", "inapp"],
-         "Repair Stage Advanced — Email + in-app"),
+         ["inapp"],
+         "Repair Stage Advanced — In-app"),
 
         ("overhaul_recommended",
          ["repair_lifecycle"], [],
-         ["email", "sms"],
-         "Overhaul Recommended — Email + SMS"),
+         ["inapp"],
+         "Overhaul Recommended — In-app"),
 
         ("repair_delay",
          ["repair_lifecycle"], [],
-         ["email", "sms", "inapp"],
-         "Repair Stage Delay — Email + SMS + in-app"),
+         ["inapp"],
+         "Repair Stage Delay — In-app"),
 
         ("repair_cancelled",
          [], [],
-         ["email", "inapp"],
-         "Repair Workflow Cancelled — Email + in-app"),
+         ["inapp"],
+         "Repair Workflow Cancelled — In-app"),
 
         ("overhaul_cancelled",
          [], [],
-         ["email", "inapp"],
-         "Overhaul Workflow Cancelled — Email + in-app"),
+         ["inapp"],
+         "Overhaul Workflow Cancelled — In-app"),
 
         ("calibration_cancelled",
          [], [],
-         ["email", "inapp"],
-         "Calibration Workflow Cancelled — Email + in-app"),
+         ["inapp"],
+         "Calibration Workflow Cancelled — In-app"),
 
         ("surveillance_cancelled",
          [], [],
-         ["email", "inapp"],
-         "Surveillance Workflow Cancelled — Email + in-app"),
+         ["inapp"],
+         "Surveillance Workflow Cancelled — In-app"),
 
         # ── Overhaul Lifecycle ────────────────────────────────────────────────
         ("overhaul_stage_changed",
          [], [],
-         ["email", "inapp"],
-         "Overhaul Stage Advanced — Email + in-app"),
+         ["inapp"],
+         "Overhaul Stage Advanced — In-app"),
 
         ("overhaul_stage_delay",
          [], [],
-         ["email", "sms", "inapp"],
-         "Overhaul Stage Delay — Email + SMS + in-app"),
+         ["inapp"],
+         "Overhaul Stage Delay — In-app"),
 
         # ── Calibration Lifecycle ─────────────────────────────────────────────
         ("calibration_stage_changed",
          [], [],
-         ["email", "inapp"],
-         "Calibration Stage Advanced — Email + in-app"),
+         ["inapp"],
+         "Calibration Stage Advanced — In-app"),
 
         ("calibration_stage_delay",
          [], [],
-         ["email", "sms", "inapp"],
-         "Calibration Stage Delay — Email + SMS + in-app"),
+         ["inapp"],
+         "Calibration Stage Delay — In-app"),
 
         # ── Surveillance Lifecycle ────────────────────────────────────────────
         ("surveillance_stage_changed",
          [], [],
-         ["email", "inapp"],
-         "Surveillance Stage Advanced — Email + in-app"),
+         ["inapp"],
+         "Surveillance Stage Advanced — In-app"),
 
         ("surveillance_stage_delay",
          [], [],
-         ["email", "sms", "inapp"],
-         "Surveillance Stage Delay — Email + SMS + in-app"),
+         ["inapp"],
+         "Surveillance Stage Delay — In-app"),
 
         # ── Design / Systemic ─────────────────────────────────────────────────
         ("design_problem_alert",
          [], [],
-         ["email", "sms"],
-         "Design Problem Alert — Email + SMS"),
+         ["inapp"],
+         "Design Problem Alert — In-app"),
 
         # ── Reports ───────────────────────────────────────────────────────────
         ("monthly_mis_report",
          [], [],
-         ["email"],
-         "Monthly MIS Report — Email only"),
+         ["inapp"],
+         "Monthly MIS Report — In-app"),
 
         # ── Procurement ───────────────────────────────────────────────────────
         ("procurement_pending",
          [], [],
-         ["email", "inapp"],
-         "Procurement Raised — email + in-app"),
+         ["inapp"],
+         "Procurement Raised — In-app"),
 
         ("procurement_decision",
          [], [],
-         ["email", "inapp"],
-         "Procurement Decision — email + in-app"),
+         ["inapp"],
+         "Procurement Decision — In-app"),
+
+        # ── TR Configurable Workflow Engine ───────────────────────────────────
+        ("tr_wf_status_changed",
+         [], [],
+         ["inapp"],
+         "TR Workflow Status Changed — In-app"),
     ]
 
     inserted = 0
@@ -11903,6 +12079,17 @@ def run_seed():
             seed_system_admin_permissions(session)
         except Exception as _e:
             print(f"[WARN] System Administrator permissions failed (non-fatal): {_e}")
+
+        # Org Registration Config — system_config rows + fix any existing orgs
+        # with no admin role (idempotent, safe to run every time)
+        print("\n--- Org Registration Config ---")
+        try:
+            from seed_org_registration_config import seed_all as seed_org_reg_config
+            seed_org_reg_config(session)
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Org registration config seed failed (non-fatal): {_e}")
+            traceback.print_exc()
 
         # Zoho + Notifications — after seacms so roles and users exist
         seed_zoho_import_mapping(session, kptcl_org)

@@ -268,6 +268,12 @@ class RepairStageDefinition(Base):
 
     default_duration_days = Column(Integer, nullable=True)
 
+    # Stage-status gates — which instance statuses activate each permission.
+    # Defaults reflect the standard lifecycle; override per stage in seed JSON.
+    assign_statuses  = Column(JSONB, nullable=False, server_default='["pending","not_started"]')
+    edit_statuses    = Column(JSONB, nullable=False, server_default='["assigned","in_progress"]')
+    approve_statuses = Column(JSONB, nullable=False, server_default='["submitted"]')
+
     created_at = Column(DateTime, server_default=func.now())
 
     modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -858,10 +864,13 @@ class TrWfStageRole(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="CASCADE"), nullable=False)
-    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=True)
+    system_token = Column(String, nullable=True)
     can_approve = Column(Boolean, default=False)
     can_assign = Column(Boolean, default=False)
     can_edit = Column(Boolean, default=False)
+    can_act_as_tester = Column(Boolean, default=False)
+    can_view = Column(Boolean, default=False)
 
     __table_args__ = (
         UniqueConstraint("stage_id", "role_id", name="uq_tr_wf_stage_role"),
@@ -925,6 +934,25 @@ class TrWfInstance(Base):
     stage_instances = relationship("TrWfStageInstance", back_populates="wf_instance", cascade="all, delete-orphan")
     audit_logs = relationship("TrWfAuditLog", back_populates="wf_instance", cascade="all, delete-orphan")
     testing_request = relationship("TestingRequest", foreign_keys="TestingRequest.wf_instance_id", back_populates=None, uselist=False, overlaps="wf_instance")
+    # Many-to-many replacement for the 2-slot resolved_l3_role/resolved_tester_role
+    # cap above. Those 2 columns stay for backward compatibility; queue
+    # visibility and the tester-picker should prefer this list when non-empty.
+    resolved_role_links = relationship("TrWfInstanceResolvedRole", back_populates="wf_instance", cascade="all, delete-orphan")
+
+
+class TrWfInstanceResolvedRole(Base):
+    """Many-to-many: a workflow instance can have any number of resolved
+    roles (one per routing decision made so far), not just the 2 named
+    slots on TrWfInstance."""
+    __tablename__ = "tr_wf_instance_resolved_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    wf_instance_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    wf_instance = relationship("TrWfInstance", back_populates="resolved_role_links")
+    role = relationship("OrgRole", foreign_keys=[role_id])
 
 
 class TrWfStageInstance(Base):
@@ -975,34 +1003,205 @@ class TrWfAuditLog(Base):
     to_stage = relationship("TrWfStage", foreign_keys=[to_stage_id])
     performer = relationship("User", foreign_keys=[performed_by])
     role = relationship("OrgRole", foreign_keys=[role_id])
+class TrWfRoutingRuleMaster(Base):
+    """
+    Routing Rule Master.
+    One row represents one logical routing rule.
+    """
 
+    __tablename__ = "tr_wf_routing_rule_master"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    org_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    rule_name = Column(String(150), nullable=False)
+
+    priority = Column(Integer, default=0)
+
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+        nullable=True,
+    )
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    modified_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    routing_rules = relationship(
+        "TrWfRoutingRule",
+        back_populates="rule_master",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id",
+            "rule_name",
+            name="uq_tr_wf_rule_master_name",
+        ),
+    )
 
 class TrWfRoutingRule(Base):
     """Maps (request_type, equipment_type, test_type) → a workflow definition.
     Lookup order by specificity: all three set > two set > one set > catch-all.
     Priority column breaks ties at equal specificity.
     """
+
     __tablename__ = "tr_wf_routing_rules"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    wf_definition_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_definitions.id", ondelete="CASCADE"), nullable=True)
-    override_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
-    override_tester_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
-    request_type = Column(String(50), nullable=True)       # normal | failure | special | NULL=any
-    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="SET NULL"), nullable=True)
-    test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"), nullable=True)
-    priority = Column(Integer, default=0)                  # higher wins on equal specificity
-    is_active = Column(Boolean, default=True)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    wf_definition = relationship("TrWfDefinition", foreign_keys=[wf_definition_id])
-    override_role = relationship("OrgRole", foreign_keys=[override_role_id])
-    override_tester_role = relationship("OrgRole", foreign_keys=[override_tester_role_id])
-    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
-    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    # NEW
+    rule_master_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tr_wf_routing_rule_master.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    org_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    wf_definition_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tr_wf_definitions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    override_role_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.org_roles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    override_tester_role_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.org_roles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # NULL = entry-point rule (fires once, at workflow instantiation). Set =
+    # this rule only applies when re-routing FROM that specific stage.
+    source_stage_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tr_wf_stages.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    request_type = Column(String(50), nullable=True)
+
+    equipment_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryMaster.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    test_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Keep these if you don't want to migrate them to the master yet
+    priority = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+        nullable=True,
+    )
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    modified_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # ----------------------------
+    # Relationships
+    # ----------------------------
+
+    rule_master = relationship(
+        "TrWfRoutingRuleMaster",
+        back_populates="routing_rules",
+    )
+
+    wf_definition = relationship(
+        "TrWfDefinition",
+        foreign_keys=[wf_definition_id],
+    )
+
+    override_role = relationship(
+        "OrgRole",
+        foreign_keys=[override_role_id],
+    )
+
+    override_tester_role = relationship(
+        "OrgRole",
+        foreign_keys=[override_tester_role_id],
+    )
+
+    source_stage = relationship(
+        "TrWfStage",
+        foreign_keys=[source_stage_id],
+    )
+
+    equipment_type = relationship(
+        "CategoryMaster",
+        foreign_keys=[equipment_type_id],
+    )
+
+    test_type = relationship(
+        "CategoryDetails",
+        foreign_keys=[test_type_id],
+    )
+
+    rule_roles = relationship(
+        "TrWfRoutingRuleRole",
+        back_populates="rule",
+        cascade="all, delete-orphan",
+    )
+
+
+class TrWfRoutingRuleRole(Base):
+    """Rule ↔ stage ↔ role mapping. A logical rule (TrWfRoutingRuleMaster,
+    with its condition rows) is mapped to a stage with the stage's roles
+    selected to handle matching requests — same rule reusable on N stages
+    with different role sets. New rows reference rule_master_id; rule_id
+    (condition-row level) is legacy from before the master existed."""
+    __tablename__ = "tr_wf_routing_rule_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rule_master_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_routing_rule_master.id", ondelete="CASCADE"), nullable=True, index=True)
+    rule_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_routing_rules.id", ondelete="CASCADE"), nullable=True, index=True)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="CASCADE"), nullable=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    rule_master = relationship("TrWfRoutingRuleMaster", foreign_keys=[rule_master_id])
+    rule = relationship("TrWfRoutingRule", back_populates="rule_roles")
+    role = relationship("OrgRole", foreign_keys=[role_id])
+    stage = relationship("TrWfStage", foreign_keys=[stage_id])
 
 
 class TrWfRoutingDefault(Base):
@@ -1202,6 +1401,8 @@ class PreCommissionRequest(Base):
     rejected_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     rejected_at = Column(DateTime(timezone=True), nullable=True)
 
+    dept_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True, index=True)
+
     # Links set after events
     workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True, index=True)
     equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -1215,6 +1416,7 @@ class PreCommissionRequest(Base):
     # Relationships
     organization = relationship("Organization", foreign_keys=[organization_id])
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    department = relationship("OrgDepartment", foreign_keys=[dept_id])
     workflow = relationship("RepairWorkflow", foreign_keys=[workflow_id])
     equipment = relationship("Equipment", foreign_keys=[equipment_id])
     approver = relationship("User", foreign_keys=[approved_by])
@@ -1241,6 +1443,11 @@ class Plan(Base):
     plan_description = Column(String)
     plan_limit = Column(Integer, nullable=False, default=0)
     isactive = Column(Boolean, default=True)
+
+    # Billing / subscription fields
+    price_paise = Column(Integer, nullable=True)           # price in INR paise (e.g. 99900 = ₹999)
+    billing_cycle = Column(String(20), nullable=True)      # monthly | yearly
+    duration_days = Column(Integer, nullable=True)         # 30 | 365
 
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -1321,6 +1528,16 @@ class Organization(Base):
     erp_error_message = Column(Text)
     erp_external_id = Column(String(255))
 
+    # Trial fields
+    is_trial = Column(Boolean, default=True)
+    trial_start_date = Column(DateTime(timezone=True), nullable=True)
+    trial_end_date = Column(DateTime(timezone=True), nullable=True)
+    trial_status = Column(String(20), default="active")  # active | expired | converted
+
+    # Onboarding
+    onboarding_complete = Column(Boolean, default=False)
+    onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     plan = relationship("Plan", back_populates="organizations", foreign_keys=[plan_id])
     users = relationship("User", back_populates="organization", foreign_keys=lambda: [User.organization_id])
@@ -1328,6 +1545,7 @@ class Organization(Base):
     departments = relationship("OrgDepartment", back_populates="organization", cascade="all, delete-orphan")
     roles = relationship("OrgRole", back_populates="organization", cascade="all, delete-orphan")
     invitations = relationship("OrgInvitation", back_populates="organization", cascade="all, delete-orphan")
+    onboarding_steps = relationship("OrgOnboardingSteps", back_populates="organization", uselist=False, cascade="all, delete-orphan")
 
 
 # ------------------------------
@@ -1653,6 +1871,39 @@ class OrgInvitation(Base):
     department = relationship("OrgDepartment", foreign_keys=[department_id])
     inviter = relationship("User", foreign_keys=[invited_by], post_update=True)
     accepted_by_user = relationship("User", foreign_keys=[accepted_by_user_id], post_update=True)
+
+
+class OrgOnboardingSteps(Base):
+    __tablename__ = "org_onboarding_steps"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, unique=True)
+
+    step_org_profile    = Column(Boolean, default=False)
+    step_dept_hierarchy = Column(Boolean, default=False)
+    step_roles_confirmed = Column(Boolean, default=True)   # auto-provisioned on org create
+    step_equip_types    = Column(Boolean, default=False)
+    step_users_invited  = Column(Boolean, default=False)
+
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    organization = relationship("Organization", back_populates="onboarding_steps")
+
+
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    key = Column(String(100), unique=True, nullable=False)
+    value = Column(Text, nullable=False)
+    value_type = Column(String(10), default="str")  # str | int | bool | json
+    description = Column(Text)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class UserAddress(Base):
@@ -2754,6 +3005,7 @@ class TestingRequest(Base):
     # Assignments
     originator_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
     assigned_tester_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    completed_by_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     assigned_at = Column(DateTime(timezone=True), nullable=True)
     accepted_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -2851,6 +3103,7 @@ class TestingRequest(Base):
     # Relationships
     originator = relationship("User", foreign_keys=[originator_id])
     assigned_tester = relationship("User", foreign_keys=[assigned_tester_id])
+    completed_by = relationship("User", foreign_keys=[completed_by_id])
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
@@ -4704,7 +4957,7 @@ class NotificationRoutingRule(Base):
     applicable_status_to        = Column(String(100), nullable=True)
 
     # ── Output ────────────────────────────────────────────────────────────────
-    channels_enabled            = Column(JSONB, nullable=False, server_default='["email","sms","inapp"]')
+    channels_enabled            = Column(JSONB, nullable=False, server_default='["inapp"]')
     recipient_roles_override    = Column(JSONB, nullable=True)   # NULL = use template default
     advanced_conditions         = Column(JSONB, nullable=True)   # e.g. {"activity_types": ["Short Circuit Test HV-IV"]}
     followup_action             = Column(JSONB, nullable=True)   # auto follow-up ticket on alert/critical
@@ -5300,6 +5553,37 @@ class DocumentRequest(Base):
     assigned_manager = relationship("User", foreign_keys=[assigned_manager_id])
     assigned_processor = relationship("User", foreign_keys=[assigned_processor_id])
     org = relationship("Organization", foreign_keys=[org_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RAZORPAY BILLING
+# ═══════════════════════════════════════════════════════════════════════════
+
+class BillingOrder(Base):
+    __tablename__ = "billing_orders"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=False)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
+
+    razorpay_order_id = Column(String(100), unique=True, nullable=True)    # set for in-app checkout
+    razorpay_payment_link_id = Column(String(100), nullable=True)          # set for email link flow
+    razorpay_payment_id = Column(String(100), nullable=True)
+    razorpay_signature = Column(String(255), nullable=True)
+
+    amount = Column(Integer, nullable=False)       # in paise (INR)
+    currency = Column(String(10), default="INR")
+    duration_days = Column(Integer, default=365)
+
+    # pending | paid | failed
+    status = Column(String(20), default="pending")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    org = relationship("Organization", foreign_keys=[org_id])
+    plan = relationship("Plan", foreign_keys=[plan_id])
 
 
 # ═══════════════════════════════════════════════════════════════════════════

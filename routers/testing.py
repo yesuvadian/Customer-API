@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import Recommendation, TestingRequest, TestingRequestStatus, User
+from models import Recommendation, TestingRequest, TestingRequestStatus, TrWfInstance, User
 from schemas import (
     TestingRequestResponse,
     TestResultResponse,
@@ -49,6 +49,28 @@ def _enrich(req):
         req.assigned_tester_name = f"{req.assigned_tester.firstname or ''} {req.assigned_tester.lastname or ''}".strip() or req.assigned_tester.email
     else:
         req.assigned_tester_name = None
+
+    _LEGACY_CLOSED = {
+        "approved", "completed", "closed", "rejected",
+        "pass", "fail", "cancelled",
+    }
+    try:
+        _status_val = req.status.value if hasattr(req.status, "value") else str(req.status)
+        if _status_val in _LEGACY_CLOSED:
+            req.is_closed = True
+        elif req.wf_instance_id:
+            _inst = (
+                req._sa_instance_state.session
+                .query(TrWfInstance)
+                .filter(TrWfInstance.id == req.wf_instance_id)
+                .first()
+            )
+            req.is_closed = bool(_inst and _inst.status in ("completed", "terminated"))
+        else:
+            req.is_closed = False
+    except Exception:
+        req.is_closed = False
+
     return req
 
 
@@ -61,7 +83,24 @@ def get_my_assignments(
 ):
     service = TestingService(db)
     assignments = service.get_my_assignments(tester_id=current_user.id, skip=skip, limit=limit)
-    return [_enrich(req) for req in assignments]
+    result = []
+    for req in assignments:
+        _enrich(req)
+        instance = (
+            db.query(TrWfInstance)
+            .filter(
+                TrWfInstance.testing_request_id == req.id,
+                TrWfInstance.status == "active",
+            )
+            .first()
+        )
+        req.current_stage_can_act_as_tester = bool(
+            instance
+            and instance.current_stage
+            and any(r.can_act_as_tester for r in instance.current_stage.roles)
+        )
+        result.append(req)
+    return result
 
 
 @router.put("/{request_id}/accept", response_model=TestingRequestResponse)

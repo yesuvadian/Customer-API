@@ -62,12 +62,21 @@ class RepairWorkflowService:
         return datetime.now(timezone.utc)
 
     def _user_org_role_ids(self, user_id: UUID) -> list:
-        rows = (
-            self.db.query(OrgUserRole.org_role_id)
+        # Get the names of all active roles the user holds
+        name_rows = (
+            self.db.query(OrgRole.name)
+            .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
             .filter(OrgUserRole.user_id == user_id, OrgUserRole.is_active.is_(True))
+            .distinct()
             .all()
         )
-        return [r[0] for r in rows]
+        if not name_rows:
+            return []
+        names = [r[0] for r in name_rows]
+        # Return ALL org_role IDs sharing those names (across orgs) so that
+        # RepairStageRole entries seeded from any org still match.
+        id_rows = self.db.query(OrgRole.id).filter(OrgRole.name.in_(names)).all()
+        return [r[0] for r in id_rows]
 
     def _check_stage_rbac(self, stage_id: UUID, user_id: UUID) -> None:
         role_ids = self._user_org_role_ids(user_id)
@@ -742,7 +751,7 @@ class RepairWorkflowService:
             return {"message": "Workflow completed", "status": "completed", "progress": 100}
 
         workflow.current_stage_id = next_stage_id
-       
+
         workflow.assignment_pending = True
         self._complete_queue_entry(workflow_id, current_stage_id)
 
@@ -1324,29 +1333,26 @@ class RepairWorkflowService:
 
         stage_status = instance.status
 
-        # can_assign: coordinator (can_assign=True) when stage awaits assignment
-        if self._can_assign_stage(user_id, instance.stage_id):
-            if stage_status in ("pending", "not_started"):
+        # Load stage definition for config-driven status gates
+        stage_def = self.db.query(RepairStageDefinition).filter(
+            RepairStageDefinition.id == current_stage_id
+        ).first()
+        assign_statuses  = stage_def.assign_statuses  if stage_def else ["pending", "not_started"]
+        edit_statuses    = stage_def.edit_statuses    if stage_def else ["assigned", "in_progress"]
+        approve_statuses = stage_def.approve_statuses if stage_def else ["submitted"]
+
+        # can_assign: coordinator role AND stage is in an assignable status
+        if stage_status in assign_statuses:
+            if self._can_assign_stage(user_id, instance.stage_id):
                 result["can_assign"] = True
 
-        # can_submit: assigned actor with can_edit=True
-        if stage_status in ("assigned", "in_progress"):
-
-            is_assignee = (
-                instance.assigned_user_id
-                and str(instance.assigned_user_id) == str(user_id)
-            )
-
-            has_edit = self._has_stage_edit(
-                current_stage_id,
-                user_id,
-            )
-
-            if is_assignee and has_edit:
+        # can_submit: edit role AND stage is in an editable status
+        if stage_status in edit_statuses:
+            if self._has_stage_edit(current_stage_id, user_id):
                 result["can_submit"] = True
 
-        # can_approve / can_reject: stage actor (can_approve=True) when submitted
-        if stage_status == "submitted":
+        # can_approve / can_reject: approve role AND stage is in an approvable status
+        if stage_status in approve_statuses:
             if self._has_stage_approve(current_stage_id, user_id):
                 result["can_approve"] = True
                 result["can_reject"] = True

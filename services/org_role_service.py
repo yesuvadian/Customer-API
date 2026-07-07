@@ -4,7 +4,7 @@ from uuid import UUID
 from typing import List, Optional, Dict
 from fastapi import HTTPException, status
 
-from models import OrgRole, Organization, Module, OrgRolePermission
+from models import OrgRole, OrgUserRole, Organization, Module, OrgRolePermission
 from schemas import OrgRoleCreate, OrgRoleUpdate, PermissionSet
 from utils.common_service import UTCDateTimeMixin
 
@@ -12,6 +12,9 @@ from utils.common_service import UTCDateTimeMixin
 class OrgRoleService(UTCDateTimeMixin):
     def __init__(self, db: Session):
         self.db = db
+    from models import OrgUserRole
+
+    
 
     def create_role(
         self,

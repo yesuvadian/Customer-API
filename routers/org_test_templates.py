@@ -665,35 +665,51 @@ def pdf_template(
     )
 
     styles = getSampleStyleSheet()
-    DARK = colors.HexColor("#0a1929")
-    ACCENT = colors.HexColor("#3fa9f5")
-    LIGHT = colors.HexColor("#e0e6f0")
-    MUTED = colors.HexColor("#7a9ab5")
-    ORANGE = colors.HexColor("#ffb347")
+    # ── Nexus palette ────────────────────────────────────────────────────────
+    NAVY        = colors.HexColor("#0F2B6B")   # headings / section bg
+    BLUE        = colors.HexColor("#1A56DB")   # accent line / title
+    PANEL_BG    = colors.HexColor("#EFF4FF")   # alternate row tint
+    ICON_BG     = colors.HexColor("#DBEAFE")   # label cell bg
+    BORDER_CLR  = colors.HexColor("#CBD5E1")   # grid lines
+    TEXT_PRI    = colors.HexColor("#1E293B")   # body text
+    TEXT_SEC    = colors.HexColor("#64748B")   # label text
+    WHITE       = colors.white
+    ORANGE      = colors.HexColor("#D97706")   # read-only hint
+    SEC_FG      = WHITE                         # section header foreground
 
-    title_style = ParagraphStyle("title", fontSize=16, textColor=ACCENT,
+    title_style = ParagraphStyle("title", fontSize=18, textColor=NAVY,
                                   fontName="Helvetica-Bold", spaceAfter=2)
-    sub_style = ParagraphStyle("sub", fontSize=8, textColor=MUTED,
-                                fontName="Helvetica", spaceAfter=14, leading=12)
-    sec_style = ParagraphStyle("sec", fontSize=10, textColor=ACCENT,
-                                fontName="Helvetica-Bold", spaceBefore=10, spaceAfter=6)
-    label_style = ParagraphStyle("lbl", fontSize=8, textColor=MUTED, fontName="Helvetica")
-    value_style = ParagraphStyle("val", fontSize=10, textColor=LIGHT, fontName="Helvetica")
-    ro_style = ParagraphStyle("ro", fontSize=10, textColor=ORANGE, fontName="Helvetica")
+    sub_style   = ParagraphStyle("sub",   fontSize=8,  textColor=TEXT_SEC,
+                                  fontName="Helvetica", spaceAfter=14, leading=12)
+    sec_style   = ParagraphStyle("sec",   fontSize=9,  textColor=SEC_FG,
+                                  fontName="Helvetica-Bold", spaceBefore=0, spaceAfter=0,
+                                  leftIndent=6)
+    label_style = ParagraphStyle("lbl",   fontSize=8,  textColor=TEXT_SEC,
+                                  fontName="Helvetica", leftIndent=4)
+    value_style = ParagraphStyle("val",   fontSize=10, textColor=TEXT_PRI,
+                                  fontName="Helvetica", leftIndent=4)
+    ro_style    = ParagraphStyle("ro",    fontSize=10, textColor=ORANGE,
+                                  fontName="Helvetica-Oblique", leftIndent=4)
 
     story = [
         Paragraph(name, title_style),
         Paragraph("Test Template  ·  Read-only Preview", sub_style),
-        HRFlowable(width="100%", color=ACCENT, thickness=0.5, spaceAfter=10),
+        HRFlowable(width="100%", color=BLUE, thickness=1.2, spaceAfter=12),
     ]
 
     for sec in sections:
-        story.append(Paragraph(sec.get("title", "Section").upper(), sec_style))
-        story.append(HRFlowable(width="100%", color=colors.HexColor("#1e3a55"),
-                                 thickness=0.4, spaceAfter=6))
+        # ── Section header row (navy band) ───────────────────────────────────
+        sec_title = Paragraph(sec.get("title", "Section").upper(), sec_style)
+        hdr_table = Table([[sec_title]], colWidths=[doc.width])
+        hdr_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+            ("TOPPADDING",    (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ]))
+        story.append(hdr_table)
 
         fields = sec.get("fields", [])
-        # Render fields in a 2-column grid
         cells = []
         for f in fields:
             label = f.get("label", f.get("key", ""))
@@ -708,7 +724,7 @@ def pdf_template(
             lbl_para = Paragraph(f"{label}{req_mark}", label_style)
 
             if ftype in ("boolean", "checkbox"):
-                val_text = "☑ Yes / Done" if default.lower() in ("true", "1", "yes") else "☐ No / Pending"
+                val_text = "☑  Yes / Done" if default.lower() in ("true", "1", "yes") else "☐  No / Pending"
             elif ftype == "dropdown":
                 val_text = f"[{' / '.join(opts[:4])}{'...' if len(opts) > 4 else ''}]" if opts else "[Dropdown]"
             elif ftype == "table":
@@ -723,32 +739,36 @@ def pdf_template(
                 max_kb = f.get("max_size_kb", 10240)
                 val_text = f"[File Upload — {accepted_label}, max {max_kb // 1024} MB]"
             else:
-                disp = f"{default} {unit}".strip() if default else f"___ {unit}".strip()
+                disp = f"{default} {unit}".strip() if default else f"___"
                 val_text = disp
 
-            val_style = ro_style if read_only else value_style
-            val_para = Paragraph(val_text, val_style)
+            val_para = Paragraph(val_text, ro_style if read_only else value_style)
             cells.append([lbl_para, val_para])
 
         # Pair into 2 columns
         rows = []
         for i in range(0, len(cells), 2):
-            left = cells[i]
+            left  = cells[i]
             right = cells[i + 1] if i + 1 < len(cells) else [Paragraph("", label_style), Spacer(1, 1)]
             rows.append([left[0], left[1], right[0], right[1]])
 
         if rows:
             col_w = doc.width / 4
-            tbl = Table(rows, colWidths=[col_w * 0.6, col_w * 1.4, col_w * 0.6, col_w * 1.4])
-            tbl.setStyle(TableStyle([
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            tbl = Table(rows, colWidths=[col_w * 0.7, col_w * 1.3, col_w * 0.7, col_w * 1.3])
+            ts = TableStyle([
+                ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING",    (0, 0), (-1, -1), 6),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor("#1e3a55")),
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0d1f35")),
-            ]))
+                ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
+                ("GRID",          (0, 0), (-1, -1), 0.4, BORDER_CLR),
+                # alternate row shading
+                *[("BACKGROUND", (0, r), (-1, r), PANEL_BG if r % 2 == 0 else WHITE)
+                  for r in range(len(rows))],
+            ])
+            tbl.setStyle(ts)
             story.append(tbl)
-        story.append(Spacer(1, 6))
+        story.append(Spacer(1, 10))
 
     doc.build(story)
     buf.seek(0)

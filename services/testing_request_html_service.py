@@ -188,6 +188,9 @@ class TestingRequestHTMLService:
                 joinedload(TestingRequest.test_type),
                 joinedload(TestingRequest.department),
                 joinedload(TestingRequest.equipment),
+                joinedload(TestingRequest.originator),
+                joinedload(TestingRequest.assigned_tester),
+                joinedload(TestingRequest.completed_by),
             )
             .filter(TestingRequest.id == request_id)
             .first()
@@ -216,13 +219,35 @@ class TestingRequestHTMLService:
 
         nameplate_html = self._nameplate_header_html(req)
 
+        def _user_name(u) -> str:
+            if not u:
+                return "—"
+            return (f"{u.firstname or ''} {u.lastname or ''}".strip()) or u.email or "—"
+
+        originator_name = _user_name(req.originator)
+        originator_email = req.originator.email if req.originator else "—"
+        tester_name = _user_name(req.assigned_tester)
+        completed_by_name = _user_name(req.completed_by)
+
         meta_html = f"""
         <div class="meta-grid">
           <div class="meta-item"><label>Request #</label><span>{req_num}</span></div>
           <div class="meta-item"><label>Equipment</label><span>{eq_name}</span></div>
           <div class="meta-item"><label>Status</label><span>{status_str}</span></div>
           <div class="meta-item"><label>Tested At</label><span>{tested_str}</span></div>
-        </div>"""
+        </div>
+        <div class="section-title">Submitter Details</div>
+        <table class="data"><tbody>
+          <tr>
+            <td style='padding:6px 10px;border:1px solid #CBD5E1;color:#555;font-size:12px;width:35%;font-weight:600'>Requested By</td>
+            <td style='padding:6px 10px;border:1px solid #CBD5E1;font-size:13px'>{originator_name}<br/><span style='color:#888;font-size:11px'>{originator_email}</span></td>
+          </tr>
+          <tr>
+            <td style='padding:6px 10px;border:1px solid #CBD5E1;color:#555;font-size:12px;font-weight:600'>Assigned Tester</td>
+            <td style='padding:6px 10px;border:1px solid #CBD5E1;font-size:13px'>{tester_name}</td>
+          </tr>
+          {"<tr><td style='padding:6px 10px;border:1px solid #CBD5E1;color:#555;font-size:12px;font-weight:600'>Tested By</td><td style='padding:6px 10px;border:1px solid #CBD5E1;font-size:13px'>" + completed_by_name + "</td></tr>" if req.completed_by_id else ""}
+        </tbody></table>"""
 
         body_sections = ""
 

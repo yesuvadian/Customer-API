@@ -29,6 +29,8 @@ PUBLIC_ENDPOINTS = [
     "/files/",
     "/zoho_register/",
     "/zohocontacts/",
+    "/billing/webhook",   # Razorpay webhook — no auth
+    "/billing/plans",     # Plan list — no auth needed
 ]
 ZOHO_PREFIXES = (
     "/zoho",
@@ -119,6 +121,12 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                 detail="Invalid or expired token",
             )
 
+        # Payment token (scope=billing) — allow only /billing/* paths
+        if payload.get("scope") == "billing":
+            if path.startswith("/billing/"):
+                return await call_next(request)
+            raise HTTPException(status_code=403, detail="Payment token only valid for billing endpoints")
+
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(
@@ -132,6 +140,34 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                 status_code=401,
                 detail="User not found",
             )
+
+        # Block all requests if the user's organisation is disabled or trial expired
+        print(f"[TRIAL-DEBUG] user={user.id} org_id={user.organization_id}")
+        if user.organization_id:
+            from models import Organization
+            from datetime import datetime, timezone
+            org = db.query(Organization).filter_by(id=user.organization_id).first()
+            print(f"[TRIAL-DEBUG] org={org and org.name} is_trial={org and org.is_trial} trial_end={org and org.trial_end_date} is_active={org and org.is_active}")
+            if org and not org.is_active:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Your organisation has been disabled. Please contact support.",
+                )
+            if org and org.is_trial and org.trial_end_date:
+                now = datetime.now(timezone.utc)
+                trial_end = org.trial_end_date if org.trial_end_date.tzinfo else org.trial_end_date.replace(tzinfo=timezone.utc)
+                print(f"[TRIAL] org={org.name} trial_end={trial_end} now={now} expired={trial_end < now}")
+                if trial_end < now:
+                    if org.trial_status != "expired":
+                        org.trial_status = "expired"
+                        try:
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Your 30-day free trial has ended. Please contact us to continue using the platform.",
+                    )
 
         request.state.user = user
 

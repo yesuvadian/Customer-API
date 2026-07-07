@@ -641,12 +641,20 @@ class UserResponse(BaseModel):
     roles: list[str]
     plan: Optional[UserPlanResponse] = None
 
+    # Trial / onboarding fields
+    is_trial: Optional[bool] = None
+    trial_status: Optional[str] = None
+    days_remaining: Optional[int] = None
+    trial_end_date: Optional[str] = None
+    alert_active: Optional[bool] = None
+    onboarding_complete: Optional[bool] = None
+
     class Config:
         from_attributes = True
 
 
 
-    
+
 class LoginResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -1129,6 +1137,8 @@ class TestingRequestResponse(BaseModel):
     requester_email: Optional[str] = None  # For Flutter UI (originator email)
     assigned_tester_id: Optional[UUID] = None
     assigned_tester_name: Optional[str] = None
+    completed_by_id: Optional[UUID] = None
+    completed_by_name: Optional[str] = None
     assigned_at: Optional[datetime] = None
     accepted_at: Optional[datetime] = None
     requested_date: Optional[datetime] = None
@@ -1148,6 +1158,26 @@ class TestingRequestResponse(BaseModel):
     # Lifecycle flags — stamped at creation from template flags
     is_cumulative: Optional[bool] = False
     is_calibration: Optional[bool] = False
+
+    # ─────────────────────────────────────────────
+    # Closed flag — true for both legacy closed statuses and
+    # completed/terminated TR workflow instances
+    # ─────────────────────────────────────────────
+    is_closed: bool = False
+
+    # ─────────────────────────────────────────────
+    # Dynamic workflow status (from TrWfStatus config)
+    # ─────────────────────────────────────────────
+    wf_status_name:  Optional[str] = None
+    wf_status_color: Optional[str] = None
+    wf_stage_name:   Optional[str] = None
+    wf_stage_roles:  Optional[list] = None
+
+    # ─────────────────────────────────────────────
+    # TR Workflow current stage flags
+    # ─────────────────────────────────────────────
+    current_stage_show_recommendation: Optional[bool] = False
+    current_stage_can_act_as_tester: Optional[bool] = False
 
     # ─────────────────────────────────────────────
     # Repair Workflow Projection

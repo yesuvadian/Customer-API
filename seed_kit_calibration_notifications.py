@@ -155,15 +155,15 @@ _KIT_TEMPLATES = [
 _KIT_ROUTING_RULES = [
     dict(
         event_type="kit_calibration_due",
-        label="Test Kit Calibration Due Soon — Email + in-app",
-        channels_enabled=["email", "inapp"],
+        label="Test Kit Calibration Due Soon — In-app",
+        channels_enabled=["inapp"],
         priority=0,
         is_active=True,
     ),
     dict(
         event_type="kit_calibration_overdue",
-        label="Test Kit Calibration Overdue — Email + in-app",
-        channels_enabled=["email", "inapp"],
+        label="Test Kit Calibration Overdue — In-app",
+        channels_enabled=["inapp"],
         priority=0,
         is_active=True,
     ),

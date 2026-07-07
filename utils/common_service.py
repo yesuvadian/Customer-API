@@ -30,6 +30,24 @@ def get_dept_subtree_ids(db: Session, dept_id: UUID) -> List[UUID]:
     return [row[0] for row in result.fetchall()]
 
 
+def get_dept_root_ancestor(db: Session, dept_id: UUID) -> Optional[UUID]:
+    """Walk up the org_departments tree and return the root ancestor ID.
+
+    Used to scope zone cards to a dept-scoped user's top-level zone.
+    Returns None if the department is not found.
+    """
+    from models import OrgDepartment
+    current = db.query(OrgDepartment).filter_by(id=dept_id).first()
+    if not current:
+        return None
+    while current.parent_department_id:
+        parent = db.query(OrgDepartment).filter_by(id=current.parent_department_id).first()
+        if not parent:
+            break
+        current = parent
+    return current.id
+
+
 def get_user_dept_scope(db: Session, user_id: UUID, org_id: Optional[UUID]) -> Tuple[bool, Optional[UUID]]:
     """Return (is_org_admin, department_id).
 

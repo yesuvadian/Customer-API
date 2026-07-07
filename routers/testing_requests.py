@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from models import RepairWorkflow
+from models import RepairWorkflow, TrWfInstance
 from auth_utils import get_current_user
 from database import get_db
 from models import User
@@ -90,6 +90,15 @@ def _enrich(req):
     else:
         req.assigned_tester_name = None
 
+    # Completed by (who actually submitted test results)
+    if req.completed_by:
+        req.completed_by_name = (
+            f"{req.completed_by.firstname or ''} "
+            f"{req.completed_by.lastname or ''}"
+        ).strip() or req.completed_by.email
+    else:
+        req.completed_by_name = None
+
     # ─────────────────────────────────────────────
     # Repair Workflow Enrichment
     # ─────────────────────────────────────────────
@@ -139,6 +148,78 @@ def _enrich(req):
     except Exception:
         pass
 
+    # ─────────────────────────────────────────────
+    # is_closed — supports both legacy and TR workflow requests
+    # Legacy: status in known closed enum values
+    # TR workflow: active TrWfInstance is completed or terminated
+    # ─────────────────────────────────────────────
+    _LEGACY_CLOSED = {
+        "approved", "completed", "closed", "rejected",
+        "pass", "fail", "cancelled",
+    }
+    try:
+        _status_val = req.status.value if hasattr(req.status, "value") else str(req.status)
+        if _status_val in _LEGACY_CLOSED:
+            req.is_closed = True
+        elif req.wf_instance_id:
+            _inst = (
+                req._sa_instance_state.session
+                .query(TrWfInstance)
+                .filter(TrWfInstance.id == req.wf_instance_id)
+                .first()
+            )
+            req.is_closed = bool(_inst and _inst.status in ("completed", "terminated"))
+        else:
+            req.is_closed = False
+    except Exception:
+        req.is_closed = False
+
+    # wf_status_name / wf_status_color — current workflow stage status (dynamic)
+    req.wf_status_name  = None
+    req.wf_status_color = None
+    req.wf_stage_name   = None
+    req.wf_stage_roles  = []
+    try:
+        if req.wf_instance_id:
+            from models import TrWfStage, TrWfStatus as _TrWfStatus
+            _inst2 = (
+                req._sa_instance_state.session
+                .query(TrWfInstance)
+                .filter(TrWfInstance.id == req.wf_instance_id)
+                .first()
+            )
+            if _inst2:
+                if _inst2.status in ("completed", "terminated"):
+                    req.wf_status_name  = "Completed"
+                    req.wf_status_color = "#16A34A"
+                elif _inst2.current_stage_id:
+                    _stage = (
+                        req._sa_instance_state.session
+                        .query(TrWfStage)
+                        .filter(TrWfStage.id == _inst2.current_stage_id)
+                        .first()
+                    )
+                    if _stage and _stage.status_id:
+                        _st = (
+                            req._sa_instance_state.session
+                            .query(_TrWfStatus)
+                            .filter(_TrWfStatus.id == _stage.status_id)
+                            .first()
+                        )
+                        if _st:
+                            req.wf_status_name  = _st.status_name
+                            req.wf_status_color = _st.color
+                    if not req.wf_status_name and _stage:
+                        req.wf_status_name = _stage.name
+                    if _stage:
+                        req.wf_stage_name = _stage.name
+                        req.wf_stage_roles = [
+                            r.role.name for r in _stage.roles
+                            if r.role_id and r.role
+                        ]
+    except Exception:
+        pass
+
     # session_types — resolved from template for multi-session requests
     req.session_types = None
     try:
@@ -167,15 +248,66 @@ def _enrich(req):
 def get_department_hierarchy(
     org_id: Optional[UUID] = None,
     parent_id: Optional[UUID] = None,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Returns department hierarchy for location selection.
 
-    - Get all organizations:           /department_hierarchy
     - Get root depts for an org:       /department_hierarchy?org_id=<uuid>
     - Get children of a department:    /department_hierarchy?org_id=<uuid>&parent_id=<uuid>
+
+    When fetching root depts (no parent_id), org-admin sees all zones;
+    dept-scoped users see only their root ancestor zone.
     """
-    return TestingRequestService(db).get_department_hierarchy(org_id, parent_id)
+    svc = TestingRequestService(db)
+
+    # When drilling into children, never restrict — parent_id is explicit
+    if parent_id is not None:
+        return svc.get_department_hierarchy(org_id, parent_id)
+
+    # For root-level fetch, scope to user's zone if dept-scoped
+    if org_id is not None:
+        is_admin, user_dept_id = get_user_dept_scope(db, current_user.id, org_id)
+        if not is_admin and user_dept_id:
+            return svc.get_department_hierarchy(org_id, parent_id=None, root_id=user_dept_id)
+
+    return svc.get_department_hierarchy(org_id, parent_id)
+
+
+@router.get("/department_root/{dept_id}")
+def get_department_root(dept_id: UUID, db: Session = Depends(get_db)):
+    """Walk up the hierarchy and return the root ancestor of the given department."""
+    from models import OrgDepartment
+    current = db.query(OrgDepartment).filter_by(id=dept_id).first()
+    if not current:
+        raise HTTPException(status_code=404, detail="Department not found")
+    while current.parent_department_id:
+        parent = db.query(OrgDepartment).filter_by(id=current.parent_department_id).first()
+        if not parent:
+            break
+        current = parent
+    return {"id": str(current.id), "name": current.name}
+
+
+@router.get("/department_ancestors/{dept_id}")
+def get_department_ancestors(dept_id: UUID, db: Session = Depends(get_db)):
+    """Return the chain from the root down to the given dept (exclusive of dept itself).
+    e.g. [KPTCL, Bangalore Zone, BMAZ South, Hoody] for dept=400kV Hoody"""
+    from models import OrgDepartment
+    chain = []
+    current = db.query(OrgDepartment).filter_by(id=dept_id).first()
+    if not current:
+        raise HTTPException(status_code=404, detail="Department not found")
+    # walk up, collect ancestors (not the dept itself)
+    node = current
+    while node.parent_department_id:
+        parent = db.query(OrgDepartment).filter_by(id=node.parent_department_id).first()
+        if not parent:
+            break
+        chain.append({"id": str(parent.id), "name": parent.name})
+        node = parent
+    chain.reverse()  # root first
+    return chain
 
 
 # ─── Equipment Types (for form dropdowns) ───────────────────
@@ -327,6 +459,7 @@ def list_testing_requests(
     capacity_mva: Optional[str] = Query(None, description="Asset-dashboard filter: capacity label"),
     date_from: Optional[str] = Query(None, description="Filter completed_at >= YYYY-MM-DD"),
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
+    is_closed: Optional[bool] = Query(None, description="True = legacy-closed or wf-completed; False = still active"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -339,12 +472,15 @@ def list_testing_requests(
     if department_id is None and organization_id:
         is_admin, scoped_dept = service.get_user_scope(current_user.id, organization_id)
         if not is_admin and scoped_dept:
-            department_id = scoped_dept
+            # Don't narrow by dept for users who have approver roles in any TR workflow stage
+            user_is_approver = service.user_has_tr_wf_approver_role(current_user.id, organization_id)
+            if not user_is_approver:
+                department_id = scoped_dept
 
     dept_ids = None
     if department_id:
         subtree = get_dept_subtree_ids(db, department_id)
-        if len(subtree) > 1:
+        if len(subtree) >= 1:
             dept_ids = subtree
 
     from datetime import date as _date
@@ -356,6 +492,7 @@ def list_testing_requests(
 
     common = dict(
         status_filter=status,
+        is_closed=is_closed,
         category_filter=category,
         originator_id=originator_id,
         tester_id=tester_id,
@@ -415,7 +552,7 @@ def get_testing_request_breakdown(
     dept_ids = None
     if department_id:
         subtree = get_dept_subtree_ids(db, department_id)
-        if len(subtree) > 1:
+        if len(subtree) >= 1:
             dept_ids = subtree
 
     from datetime import date as _date
@@ -447,7 +584,21 @@ def get_testing_request(
     current_user: User = Depends(get_current_user),
 ):
     service = TestingRequestService(db)
-    return _enrich(service.get_request(request_id))
+    req = _enrich(service.get_request(request_id))
+
+    # Attach current TR workflow stage flags
+    instance = (
+        db.query(TrWfInstance)
+        .filter(
+            TrWfInstance.testing_request_id == request_id,
+            TrWfInstance.status == "active",
+        )
+        .first()
+    )
+    req.current_stage_show_recommendation = bool(
+        instance and instance.current_stage and instance.current_stage.show_recommendation
+    )
+    return req
 
 
 @router.put("/{request_id}", response_model=TestingRequestResponse)

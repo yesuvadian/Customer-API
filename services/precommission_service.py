@@ -24,6 +24,7 @@ from models import (
     User,
 )
 from services.repair_workflow_service import RepairWorkflowService
+from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
 
 WORKFLOW_CODE   = "PRE_COMMISSION"
 ENTITY_TYPE     = "precommission_request"
@@ -100,6 +101,8 @@ class PreCommissionService:
             "id":                     str(pcr.id),
             "request_number":         pcr.request_number,
             "organization_id":        str(pcr.organization_id),
+            "dept_id":                str(pcr.dept_id) if pcr.dept_id else None,
+            "dept_name":              pcr.department.name if pcr.department else None,
             "equipment_type_id":      pcr.equipment_type_id,
             "vendor_name":            pcr.vendor_name,
             "purchase_order_number":  pcr.purchase_order_number,
@@ -133,6 +136,7 @@ class PreCommissionService:
         pcr = PreCommissionRequest(
             request_number=self._next_number(),
             organization_id=user.organization_id,
+            dept_id=data.get("dept_id"),
             equipment_type_id=data.get("equipment_type_id"),
             vendor_name=data["vendor_name"],
             purchase_order_number=data["purchase_order_number"],
@@ -159,12 +163,25 @@ class PreCommissionService:
         self,
         user: User,
         approval_status: Optional[str] = None,
+        department_id: Optional[UUID] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> list[dict]:
         q = self.db.query(PreCommissionRequest).filter(
             PreCommissionRequest.organization_id == user.organization_id
         )
+
+        # Dept scoping — mirrors Testing Requests pattern
+        if department_id is None:
+            is_admin, scoped_dept = get_user_dept_scope(self.db, user.id, user.organization_id)
+            if not is_admin and scoped_dept:
+                department_id = scoped_dept
+
+        if department_id:
+            dept_ids = get_dept_subtree_ids(self.db, department_id)
+            if dept_ids:
+                q = q.filter(PreCommissionRequest.dept_id.in_(dept_ids))
+
         if approval_status and approval_status != "all":
             q = q.filter(PreCommissionRequest.approval_status == approval_status)
         rows = q.order_by(PreCommissionRequest.cts.desc()).offset(skip).limit(limit).all()

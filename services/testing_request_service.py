@@ -14,8 +14,37 @@ from models import (
     OrgRole, OrgUserRole,
     OrgTestTemplate,
     Equipment,
+    TrWfStageRole,
+    TrWfInstance,
+    TrWfStatus,
 )
 from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
+
+# Legacy TestingRequestStatus enum -> display label/color, used to label
+# get_breakdown() buckets for requests that never entered the tr_wf_* engine
+# (current_status_code is NULL). Mirrors the color choices already used by
+# the Flutter _statusColor() switch in testing_requests_screen.dart.
+_LEGACY_STATUS_CATALOG = {
+    "draft":                  {"label": "Draft",                  "color": "#9CA3AF"},
+    "submitted":               {"label": "Submitted",              "color": "#3FA9F5"},
+    "pending_approval":        {"label": "Pending Approval",       "color": "#7C3AED"},
+    "assigned":                {"label": "Assigned",               "color": "#0891B2"},
+    "accepted":                {"label": "Accepted",               "color": "#0F766E"},
+    "scheduled":                {"label": "Scheduled",              "color": "#0891B2"},
+    "in_progress":              {"label": "In Progress",            "color": "#F59E0B"},
+    "test_submitted":           {"label": "Test Submitted",         "color": "#EA580C"},
+    "under_approval":           {"label": "Under Approval",         "color": "#7C3AED"},
+    "approved":                 {"label": "Approved",               "color": "#16A34A"},
+    "rejected":                 {"label": "Rejected",               "color": "#EF4444"},
+    "procurement_initiated":    {"label": "Procurement Initiated",  "color": "#38BDF8"},
+    "completed":                {"label": "Completed",              "color": "#16A34A"},
+    "under_review":             {"label": "Under Review",           "color": "#EA580C"},
+    "finance_pending":          {"label": "Finance Pending",        "color": "#38BDF8"},
+    "outcome_active":           {"label": "Outcome Active",         "color": "#16A34A"},
+    "commissioned":             {"label": "Commissioned",           "color": "#0F766E"},
+    "closed":                   {"label": "Closed",                 "color": "#6B7280"},
+    "pending_assignment":       {"label": "Pending Assignment",     "color": "#0891B2"},
+}
 
 
 class TestingRequestService:
@@ -208,6 +237,7 @@ class TestingRequestService:
     def _base_request_query(
         self,
         status_filter: Optional[str] = None,
+        is_closed: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -255,13 +285,19 @@ class TestingRequestService:
                 )
 
             elif status_filter == "closed":
+                completed_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                    TrWfInstance.status.in_(["completed", "terminated"])
+                ).scalar_subquery()
                 query = query.filter(
-                    TestingRequest.status.in_([
-                        TestingRequestStatus.closed,
-                        TestingRequestStatus.completed,
-                        TestingRequestStatus.approved,
-                        TestingRequestStatus.rejected,
-                    ])
+                    or_(
+                        TestingRequest.status.in_([
+                            TestingRequestStatus.closed,
+                            TestingRequestStatus.completed,
+                            TestingRequestStatus.approved,
+                            TestingRequestStatus.rejected,
+                        ]),
+                        TestingRequest.id.in_(completed_wf_ids),
+                    )
                 )
 
             elif status_filter == "rejected":
@@ -269,21 +305,61 @@ class TestingRequestService:
                     TestingRequest.status == TestingRequestStatus.rejected
                 )
 
-            # Direct enum values (for existing API compatibility)
+            # Direct status codes — either a legacy TestingRequestStatus enum
+            # value, or a live tr_wf_* stage code (current_status_code). The
+            # two code spaces never overlap, so matching either is safe.
             else:
                 statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+                _closed_like = {"completed", "closed", "approved", "rejected"}
+                _include_wf = bool(_closed_like.intersection(set(statuses)))
 
-                if len(statuses) == 1:
-                    query = query.filter(
-                        TestingRequest.status == TestingRequestStatus(statuses[0])
-                    )
+                def _status_conditions(tokens):
+                    conds = [TestingRequest.current_status_code.in_(tokens)]
+                    enum_vals = []
+                    for t in tokens:
+                        try:
+                            enum_vals.append(TestingRequestStatus(t))
+                        except ValueError:
+                            pass
+                    if enum_vals:
+                        conds.append(TestingRequest.status.in_(enum_vals))
+                    return or_(*conds)
 
-                elif statuses:
+                if _include_wf:
+                    completed_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                        TrWfInstance.status.in_(["completed", "terminated"])
+                    ).scalar_subquery()
                     query = query.filter(
-                        TestingRequest.status.in_(
-                            [TestingRequestStatus(s) for s in statuses]
+                        or_(
+                            _status_conditions(statuses),
+                            TestingRequest.id.in_(completed_wf_ids),
                         )
                     )
+                elif statuses:
+                    query = query.filter(_status_conditions(statuses))
+        if is_closed is not None:
+            _LEGACY_CLOSED_STATUSES = [
+                TestingRequestStatus.approved,
+                TestingRequestStatus.completed,
+                TestingRequestStatus.closed,
+                TestingRequestStatus.rejected,
+            ]
+            wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                TrWfInstance.status.in_(["completed", "terminated"])
+            ).scalar_subquery()
+            if is_closed:
+                query = query.filter(
+                    or_(
+                        TestingRequest.status.in_(_LEGACY_CLOSED_STATUSES),
+                        TestingRequest.id.in_(wf_done_ids),
+                    )
+                )
+            else:
+                query = query.filter(
+                    TestingRequest.status.notin_(_LEGACY_CLOSED_STATUSES),
+                    TestingRequest.id.notin_(wf_done_ids),
+                )
+
         if category_filter:
             query = query.filter(TestingRequest.request_category == category_filter)
         if originator_id:
@@ -365,6 +441,7 @@ class TestingRequestService:
         skip: int = 0,
         limit: int = 100,
         status_filter: Optional[str] = None,
+        is_closed: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -384,6 +461,7 @@ class TestingRequestService:
     ) -> List[TestingRequest]:
         query = self._base_request_query(
             status_filter=status_filter,
+            is_closed=is_closed,
             category_filter=category_filter,
             originator_id=originator_id,
             tester_id=tester_id,
@@ -486,13 +564,21 @@ class TestingRequestService:
             for c in self.db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
         } if type_ids else {}
 
+        # Workflow status catalog (label/color/sequence per status_code), for
+        # requests whose effective status is a tr_wf_* stage rather than the
+        # legacy enum. Small table — one query covers every org's definitions.
+        wf_status_catalog = {
+            s.status_code: {"label": s.status_name, "color": s.color, "sequence": s.sequence}
+            for s in self.db.query(TrWfStatus).all()
+        }
+
         by_voltage = {}
         by_type = {}
         by_make = {}
         by_year = {}
         by_failure_year = {}
         by_capacity = {}
-        by_status = {}
+        by_status_count = {}
         by_category = {}
 
         def _inc(bucket: dict, key: str):
@@ -500,7 +586,14 @@ class TestingRequestService:
 
         for req in requests:
             eq = equipment_map.get(req.equipment_id)
-            _inc(by_status, getattr(req.status, "value", str(req.status)) if req.status else "Unknown")
+            # Effective status: live tr_wf_* stage code if the request has
+            # ever entered the workflow engine, else the legacy enum value.
+            # current_status_code is denormalized/kept in sync on every stage
+            # transition by TrWorkflowRoutingService.
+            effective_status = req.current_status_code or (
+                getattr(req.status, "value", str(req.status)) if req.status else "unknown"
+            )
+            _inc(by_status_count, effective_status)
             _inc(by_category, getattr(req.request_category, "value", str(req.request_category)) if req.request_category else "Unknown")
             _inc(by_voltage, (eq.voltage_class or "").strip() if eq and eq.voltage_class else "Unknown")
             _inc(by_type, type_map.get(eq.equipment_type_id) if eq and eq.equipment_type_id else "Unknown")
@@ -512,6 +605,20 @@ class TestingRequestService:
         def _sort_count(d: dict) -> dict:
             return dict(sorted(d.items(), key=lambda item: (-item[1], item[0])))
 
+        def _status_bucket(counts: dict) -> dict:
+            """Attach label/color/sequence to each status code, wf catalog
+            first (live workflow stage), then legacy catalog, then a
+            best-effort fallback — so every code is always labeled."""
+            out = {}
+            for code, count in counts.items():
+                meta = wf_status_catalog.get(code) or _LEGACY_STATUS_CATALOG.get(code)
+                if meta:
+                    label, color, sequence = meta.get("label", code), meta.get("color"), meta.get("sequence", 999)
+                else:
+                    label, color, sequence = code.replace("_", " ").title(), None, 999
+                out[code] = {"count": count, "label": label, "color": color, "sequence": sequence}
+            return dict(sorted(out.items(), key=lambda kv: (kv[1]["sequence"], -kv[1]["count"], kv[0])))
+
         return {
             "total": len(requests),
             "by_voltage_class": _sort_count(by_voltage),
@@ -520,7 +627,7 @@ class TestingRequestService:
             "by_commissioned_year": dict(sorted(by_year.items())),
             "by_failure_year": dict(sorted(by_failure_year.items())),
             "by_capacity_mva": _sort_count(by_capacity),
-            "by_status": _sort_count(by_status),
+            "by_status": _status_bucket(by_status_count),
             "by_category": _sort_count(by_category),
         }
 
@@ -559,13 +666,19 @@ class TestingRequestService:
                 )
 
             elif status_filter == "closed":
+                completed_wf_ids2 = self.db.query(TrWfInstance.testing_request_id).filter(
+                    TrWfInstance.status.in_(["completed", "terminated"])
+                ).scalar_subquery()
                 query = query.filter(
-                    TestingRequest.status.in_([
-                        TestingRequestStatus.closed,           # <-- add this
-                        TestingRequestStatus.completed,
-                        TestingRequestStatus.approved,
-                        TestingRequestStatus.rejected,         # <-- add this
-                    ])
+                    or_(
+                        TestingRequest.status.in_([
+                            TestingRequestStatus.closed,
+                            TestingRequestStatus.completed,
+                            TestingRequestStatus.approved,
+                            TestingRequestStatus.rejected,
+                        ]),
+                        TestingRequest.id.in_(completed_wf_ids2),
+                    )
                 )
 
             elif status_filter == "rejected":
@@ -588,6 +701,26 @@ class TestingRequestService:
             .limit(limit)
             .all()
         )
+
+    def user_has_tr_wf_approver_role(self, user_id: UUID, organization_id: UUID) -> bool:
+        """Return True if the user holds any org role that has can_approve on any TR workflow stage."""
+        user_role_ids = [
+            r.org_role_id for r in
+            self.db.query(OrgUserRole.org_role_id)
+            .filter(OrgUserRole.user_id == user_id)
+            .all()
+        ]
+        if not user_role_ids:
+            return False
+        count = (
+            self.db.query(func.count(TrWfStageRole.id))
+            .filter(
+                TrWfStageRole.role_id.in_(user_role_ids),
+                TrWfStageRole.can_approve.is_(True),
+            )
+            .scalar()
+        )
+        return (count or 0) > 0
 
     def update_request(self, request_id: UUID, data: dict, modified_by: UUID) -> TestingRequest:
         request = self.get_request(request_id)
@@ -838,6 +971,7 @@ class TestingRequestService:
         self,
         org_id: Optional[UUID] = None,
         parent_id: Optional[UUID] = None,
+        root_id: Optional[UUID] = None,
     ) -> list:
         """Return organisations (when org_id is None) or departments.
 
@@ -865,11 +999,12 @@ class TestingRequestService:
             OrgDepartment.is_active.is_(True),
         )
 
-        q = (
-            q.filter(OrgDepartment.parent_department_id.is_(None))
-            if parent_id is None
-            else q.filter(OrgDepartment.parent_department_id == parent_id)
-        )
+        if root_id is not None:
+            q = q.filter(OrgDepartment.id == root_id)
+        elif parent_id is None:
+            q = q.filter(OrgDepartment.parent_department_id.is_(None))
+        else:
+            q = q.filter(OrgDepartment.parent_department_id == parent_id)
 
         depts = q.order_by(OrgDepartment.name).all()
 
@@ -1032,6 +1167,7 @@ class TestingRequestService:
                 CategoryMaster.description == "Testing Equipment",
                 CategoryMaster.is_active.is_(True),
                 CategoryDetails.is_active.is_(True),
+                CategoryDetails.category_type != "nameplate",
             )
         )
         if category:

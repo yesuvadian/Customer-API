@@ -2507,16 +2507,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Operations Reading",
                 "fields": [
-                    {"key": "reading",       "label": "Operations Counter Reading", "type": "number", "required": True,  "unit": "ops",
-                     "evaluation": {
-                         "type": "THRESHOLD",
-                         "weight": 2.0,
-                         "thresholds": [
-                             {"max": 1400,  "status": "Pass",    "label": "Within safe range"},
-                             {"max": 1800,  "status": "Warning", "label": "Approaching overhaul threshold"},
-                             {"max": 2000,  "status": "Fail",    "label": "At or beyond overhaul threshold"},
-                         ],
-                     }},
+                    {"key": "reading",       "label": "Operations Counter Reading", "type": "number", "required": True,  "unit": "ops"},
                     {"key": "reading_date",  "label": "Reading Date",              "type": "date",   "required": True},
                     {"key": "reading_by",    "label": "Recorded By",               "type": "text",   "required": False},
                     {"key": "notes",         "label": "Notes / Observations",      "type": "textarea","required": False},
@@ -2564,16 +2555,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Operations Reading",
                 "fields": [
-                    {"key": "reading",       "label": "Tap-Change Counter Reading", "type": "number", "required": True,  "unit": "ops",
-                     "evaluation": {
-                         "type": "THRESHOLD",
-                         "weight": 2.0,
-                         "thresholds": [
-                             {"max": 3500,  "status": "Pass",    "label": "Within safe range"},
-                             {"max": 4500,  "status": "Warning", "label": "Approaching overhaul threshold"},
-                             {"max": 5000,  "status": "Fail",    "label": "At or beyond overhaul threshold"},
-                         ],
-                     }},
+                    {"key": "reading",       "label": "Tap-Change Counter Reading", "type": "number", "required": True,  "unit": "ops"},
                     {"key": "reading_date",  "label": "Reading Date",               "type": "date",   "required": True},
                     {"key": "reading_by",    "label": "Recorded By",                "type": "text",   "required": False},
                     {"key": "notes",         "label": "Notes / Observations",       "type": "textarea","required": False},
