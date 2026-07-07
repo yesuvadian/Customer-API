@@ -31,6 +31,8 @@ from models import (
     TrWfDefinition,
     TrWfRoutingDefault,
     TrWfRoutingRule,
+    TrWfRoutingRuleMaster,
+    TrWfRoutingRuleRole,
     TrWfStage,
     TrWfStageRole,
     TrWfStageTransition,
@@ -158,8 +160,11 @@ def _get_or_create_status(session, wf, code, name, seq, color,
 def _get_or_create_stage(
     session, wf, status, name, code, seq,
     show_recommendation=False, is_result_stage=False,
-    use_l2_route=False, is_role_scoped=False,
 ):
+    # NOTE: use_l2_route / is_role_scoped are no longer seeded — routing
+    # re-run and queue role-scoping are derived at runtime from the routing
+    # rules (source_stage_id) and the resolved-roles ∩ stage-roles
+    # intersection. The columns still exist but are ignored.
     s = session.query(TrWfStage).filter_by(
         wf_definition_id=wf.id, code=code
     ).first()
@@ -176,8 +181,6 @@ def _get_or_create_stage(
             is_active=True,
             show_recommendation=show_recommendation,
             is_result_stage=is_result_stage,
-            use_l2_route=use_l2_route,
-            is_role_scoped=is_role_scoped,
         )
         session.add(s)
         session.flush()
@@ -188,8 +191,6 @@ def _get_or_create_stage(
         for attr, val in [
             ("show_recommendation", show_recommendation),
             ("is_result_stage", is_result_stage),
-            ("use_l2_route", use_l2_route),
-            ("is_role_scoped", is_role_scoped),
         ]:
             if getattr(s, attr) != val:
                 setattr(s, attr, val)
@@ -242,6 +243,54 @@ def _get_or_create_transition(session, from_stage, to_stage, action_code,
             is_rejection=is_rejection,
             terminal_status_id=terminal_status.id if terminal_status else None,
             post_action=post_action,
+        ))
+
+
+def _get_or_create_rule_master(session, org_id, rule_name, priority):
+    """One master row = one named logical rule; its condition rows live in
+    tr_wf_routing_rules under rule_master_id."""
+    m = session.query(TrWfRoutingRuleMaster).filter_by(
+        org_id=org_id, rule_name=rule_name
+    ).first()
+    if not m:
+        m = TrWfRoutingRuleMaster(
+            id=uuid.uuid4(),
+            org_id=org_id,
+            rule_name=rule_name,
+            priority=priority,
+            is_active=True,
+        )
+        session.add(m)
+        session.flush()
+        print(f"  [NEW] TrWfRoutingRuleMaster: {rule_name} (P{priority})")
+    return m
+
+
+def _ensure_master_stage_maps(session, master, stage_role_pairs):
+    """Idempotently sync the named rule's per-stage mappings to exactly the
+    given (stage, [roles]) pairs — WHERE the rule applies and WHICH of that
+    stage's roles handle its matching requests."""
+    wanted = set()
+    for stage, roles in stage_role_pairs:
+        for role in roles:
+            if role:
+                wanted.add((stage.id, role.id))
+    existing = session.query(TrWfRoutingRuleRole).filter_by(
+        rule_master_id=master.id
+    ).all()
+    have = set()
+    for rr in existing:
+        key = (rr.stage_id, rr.role_id)
+        if key in wanted:
+            have.add(key)
+        else:
+            session.delete(rr)
+    for (stage_id, role_id) in wanted - have:
+        session.add(TrWfRoutingRuleRole(
+            id=uuid.uuid4(),
+            rule_master_id=master.id,
+            stage_id=stage_id,
+            role_id=role_id,
         ))
 
 
@@ -350,10 +399,13 @@ def seed_tr_wf_workflow(session, org=None):
     session.flush()
 
     # ── Stages for Normal workflow ────────────────────────────────────────────
-    sg_l2    = _get_or_create_stage(session, wf_normal, st_l2_pending, "L2 Approval & Route",  "l2_approve_route",  1, use_l2_route=True)
-    sg_l3a   = _get_or_create_stage(session, wf_normal, st_l3_pending, "L3 Tester Assignment", "l3_assign_tester",  2, is_role_scoped=True)
+    # Routing/scoping behavior is derived from the routing rules seeded below
+    # (entry rules resolve at instantiation; queue scoping applies wherever a
+    # stage's roles intersect the resolved roles) — no per-stage flags needed.
+    sg_l2    = _get_or_create_stage(session, wf_normal, st_l2_pending, "L2 Approval & Route",  "l2_approve_route",  1)
+    sg_l3a   = _get_or_create_stage(session, wf_normal, st_l3_pending, "L3 Tester Assignment", "l3_assign_tester",  2)
     sg_l4    = _get_or_create_stage(session, wf_normal, st_testing,    "L4 Test Execution",    "l4_test_execution", 3)
-    sg_l3rev = _get_or_create_stage(session, wf_normal, st_review,     "L3 Result Review",     "l3_review_result",  4, show_recommendation=True, is_result_stage=True, is_role_scoped=True)
+    sg_l3rev = _get_or_create_stage(session, wf_normal, st_review,     "L3 Result Review",     "l3_review_result",  4, show_recommendation=True, is_result_stage=True)
     session.flush()
 
     # ── Stage roles ───────────────────────────────────────────────────────────
@@ -416,12 +468,16 @@ def seed_tr_wf_workflow(session, org=None):
         print("  [DEL] TrWfRoutingRule: stale request_type='failure' removed")
 
     for req_type, wf_def in [("failure_registry", wf_failure), ("special", wf_special)]:
-        if not session.query(TrWfRoutingRule).filter_by(
+        _rt_master = _get_or_create_rule_master(
+            session, org.id, f"{wf_def.name} Routing", 10)
+        existing_rt = session.query(TrWfRoutingRule).filter_by(
             org_id=org.id, request_type=req_type,
             equipment_type_id=None, test_type_id=None,
-        ).first():
+        ).first()
+        if not existing_rt:
             session.add(TrWfRoutingRule(
                 id=uuid.uuid4(),
+                rule_master_id=_rt_master.id,
                 org_id=org.id,
                 wf_definition_id=wf_def.id,
                 request_type=req_type,
@@ -429,6 +485,8 @@ def seed_tr_wf_workflow(session, org=None):
                 is_active=True,
             ))
             print(f"  [NEW] TrWfRoutingRule: request_type={req_type} -> {wf_def.name}")
+        elif existing_rt.rule_master_id != _rt_master.id:
+            existing_rt.rule_master_id = _rt_master.id
 
     # ── Failure Registry Workflow: stages + transitions ───────────────────────
     # 2-stage flow: EE_TLSS initial review → EE_TLSS/Senior technical approval
@@ -482,14 +540,18 @@ def seed_tr_wf_workflow(session, org=None):
     #   68  Sweep Frequency Response Analysis (SFRA)
     #   75  SFRA — Routine
     rd_test_type_ids = [64, 65, 70, 71, 72, 136, 186, 66, 68, 75]
+    # ONE named logical rule for the whole R&D stream; the per-test-type
+    # rows below are its condition rows.
+    rd_master = _get_or_create_rule_master(session, org.id, "R&D Stream", 20)
     for tt_id in rd_test_type_ids:
         existing = session.query(TrWfRoutingRule).filter_by(
             org_id=org.id, test_type_id=tt_id,
             equipment_type_id=None, request_type=None,
         ).first()
         if not existing:
-            session.add(TrWfRoutingRule(
+            rule = TrWfRoutingRule(
                 id=uuid.uuid4(),
+                rule_master_id=rd_master.id,
                 org_id=org.id,
                 wf_definition_id=wf_normal.id,
                 override_role_id=role_aee_rd.id,
@@ -497,10 +559,14 @@ def seed_tr_wf_workflow(session, org=None):
                 test_type_id=tt_id,
                 priority=20,
                 is_active=True,
-            ))
-            print(f"  [NEW] TrWfRoutingRule: test_type_id={tt_id} -> override_role=AEE-R&D, tester=AE-R&D")
+            )
+            session.add(rule)
+            print(f"  [NEW] TrWfRoutingRule: test_type_id={tt_id} -> R&D Stream")
         else:
             changed = False
+            if existing.rule_master_id != rd_master.id:
+                existing.rule_master_id = rd_master.id
+                changed = True
             if existing.override_role_id is None and role_aee_rd:
                 existing.override_role_id = role_aee_rd.id
                 existing.wf_definition_id = wf_normal.id
@@ -509,7 +575,17 @@ def seed_tr_wf_workflow(session, org=None):
                 existing.override_tester_role_id = role_ae_rd.id
                 changed = True
             if changed:
-                print(f"  [UPD] TrWfRoutingRule: test_type_id={tt_id} -> AEE-R&D / AE-R&D")
+                print(f"  [UPD] TrWfRoutingRule: test_type_id={tt_id} -> R&D Stream")
+
+    session.flush()
+    # Per-stage mappings for the NAMED R&D rule: it applies at the
+    # assignment stage (AEE-R&D assigns), the execution stage (AE-R&D
+    # executes), and the review stage (AEE-R&D reviews).
+    _ensure_master_stage_maps(session, rd_master, [
+        (sg_l3a,   [role_aee_rd]),
+        (sg_l4,    [role_ae_rd]),
+        (sg_l3rev, [role_aee_rd]),
+    ])
 
     session.flush()
     print("  [OK] TR Configurable Workflow Engine seeding complete")

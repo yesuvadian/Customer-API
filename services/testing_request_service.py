@@ -305,33 +305,38 @@ class TestingRequestService:
                     TestingRequest.status == TestingRequestStatus.rejected
                 )
 
-            # Direct enum values (for existing API compatibility)
+            # Direct status codes — either a legacy TestingRequestStatus enum
+            # value, or a live tr_wf_* stage code (current_status_code). The
+            # two code spaces never overlap, so matching either is safe.
             else:
                 statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
                 _closed_like = {"completed", "closed", "approved", "rejected"}
                 _include_wf = bool(_closed_like.intersection(set(statuses)))
 
+                def _status_conditions(tokens):
+                    conds = [TestingRequest.current_status_code.in_(tokens)]
+                    enum_vals = []
+                    for t in tokens:
+                        try:
+                            enum_vals.append(TestingRequestStatus(t))
+                        except ValueError:
+                            pass
+                    if enum_vals:
+                        conds.append(TestingRequest.status.in_(enum_vals))
+                    return or_(*conds)
+
                 if _include_wf:
                     completed_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
                         TrWfInstance.status.in_(["completed", "terminated"])
                     ).scalar_subquery()
-                    enum_statuses = [TestingRequestStatus(s) for s in statuses]
                     query = query.filter(
                         or_(
-                            TestingRequest.status.in_(enum_statuses),
+                            _status_conditions(statuses),
                             TestingRequest.id.in_(completed_wf_ids),
                         )
                     )
-                elif len(statuses) == 1:
-                    query = query.filter(
-                        TestingRequest.status == TestingRequestStatus(statuses[0])
-                    )
                 elif statuses:
-                    query = query.filter(
-                        TestingRequest.status.in_(
-                            [TestingRequestStatus(s) for s in statuses]
-                        )
-                    )
+                    query = query.filter(_status_conditions(statuses))
         if is_closed is not None:
             _LEGACY_CLOSED_STATUSES = [
                 TestingRequestStatus.approved,
@@ -559,13 +564,21 @@ class TestingRequestService:
             for c in self.db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
         } if type_ids else {}
 
+        # Workflow status catalog (label/color/sequence per status_code), for
+        # requests whose effective status is a tr_wf_* stage rather than the
+        # legacy enum. Small table — one query covers every org's definitions.
+        wf_status_catalog = {
+            s.status_code: {"label": s.status_name, "color": s.color, "sequence": s.sequence}
+            for s in self.db.query(TrWfStatus).all()
+        }
+
         by_voltage = {}
         by_type = {}
         by_make = {}
         by_year = {}
         by_failure_year = {}
         by_capacity = {}
-        by_status = {}
+        by_status_count = {}
         by_category = {}
 
         def _inc(bucket: dict, key: str):
@@ -573,7 +586,14 @@ class TestingRequestService:
 
         for req in requests:
             eq = equipment_map.get(req.equipment_id)
-            _inc(by_status, getattr(req.status, "value", str(req.status)) if req.status else "Unknown")
+            # Effective status: live tr_wf_* stage code if the request has
+            # ever entered the workflow engine, else the legacy enum value.
+            # current_status_code is denormalized/kept in sync on every stage
+            # transition by TrWorkflowRoutingService.
+            effective_status = req.current_status_code or (
+                getattr(req.status, "value", str(req.status)) if req.status else "unknown"
+            )
+            _inc(by_status_count, effective_status)
             _inc(by_category, getattr(req.request_category, "value", str(req.request_category)) if req.request_category else "Unknown")
             _inc(by_voltage, (eq.voltage_class or "").strip() if eq and eq.voltage_class else "Unknown")
             _inc(by_type, type_map.get(eq.equipment_type_id) if eq and eq.equipment_type_id else "Unknown")
@@ -585,6 +605,20 @@ class TestingRequestService:
         def _sort_count(d: dict) -> dict:
             return dict(sorted(d.items(), key=lambda item: (-item[1], item[0])))
 
+        def _status_bucket(counts: dict) -> dict:
+            """Attach label/color/sequence to each status code, wf catalog
+            first (live workflow stage), then legacy catalog, then a
+            best-effort fallback — so every code is always labeled."""
+            out = {}
+            for code, count in counts.items():
+                meta = wf_status_catalog.get(code) or _LEGACY_STATUS_CATALOG.get(code)
+                if meta:
+                    label, color, sequence = meta.get("label", code), meta.get("color"), meta.get("sequence", 999)
+                else:
+                    label, color, sequence = code.replace("_", " ").title(), None, 999
+                out[code] = {"count": count, "label": label, "color": color, "sequence": sequence}
+            return dict(sorted(out.items(), key=lambda kv: (kv[1]["sequence"], -kv[1]["count"], kv[0])))
+
         return {
             "total": len(requests),
             "by_voltage_class": _sort_count(by_voltage),
@@ -593,7 +627,7 @@ class TestingRequestService:
             "by_commissioned_year": dict(sorted(by_year.items())),
             "by_failure_year": dict(sorted(by_failure_year.items())),
             "by_capacity_mva": _sort_count(by_capacity),
-            "by_status": _sort_count(by_status),
+            "by_status": _status_bucket(by_status_count),
             "by_category": _sort_count(by_category),
         }
 

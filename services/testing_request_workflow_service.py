@@ -633,6 +633,51 @@ class TestingRequestWorkflowService:
                     testing_request=testing_request,
                     performed_by_id=user.id,
                 )
+            else:
+                # Re-entry at a deeper stage: re-resolve roles ONLY when this
+                # stage has its own scoped rules — derived from data, not a
+                # stage flag. Entry-point resolution already happened once,
+                # inside instantiate_workflow(), and must not be repeated
+                # here: a flag-based check would re-run against an empty
+                # scoped-rule set and overwrite the entry resolution with
+                # workflow defaults.
+                from models import TrWfStage as _TrWfStage, TrWfRoutingRule as _TrWfRoutingRule
+                current_stage = self.db.query(_TrWfStage).filter(
+                    _TrWfStage.id == instance.current_stage_id
+                ).first()
+                has_scoped_rules = current_stage is not None and (
+                    self.db.query(_TrWfRoutingRule)
+                    .filter(
+                        _TrWfRoutingRule.org_id == testing_request.organization_id,
+                        _TrWfRoutingRule.is_active.is_(True),
+                        _TrWfRoutingRule.source_stage_id == current_stage.id,
+                    )
+                    .first() is not None
+                )
+                if has_scoped_rules:
+                    _defn, resolved_l3_role_id, resolved_tester_role_id, resolved_role_ids = routing_svc.resolve_routing(
+                        org_id=testing_request.organization_id,
+                        request_type=testing_request.request_type,
+                        equipment_type_id=testing_request.equipment_type_id,
+                        test_type_id=testing_request.test_type_id,
+                        source_stage_id=current_stage.id,
+                    )
+                    instance.resolved_l3_role_id = resolved_l3_role_id
+                    instance.resolved_tester_role_id = resolved_tester_role_id
+                    # Replace (not accumulate) the resolved-roles list — only
+                    # the latest resolution should grant visibility, not
+                    # roles resolved at an earlier, now-passed stage.
+                    import uuid as _uuid
+                    from models import TrWfInstanceResolvedRole as _TrWfInstanceResolvedRole
+                    self.db.query(_TrWfInstanceResolvedRole).filter(
+                        _TrWfInstanceResolvedRole.wf_instance_id == instance.id
+                    ).delete()
+                    for role_id in resolved_role_ids:
+                        self.db.add(_TrWfInstanceResolvedRole(
+                            id=_uuid.uuid4(),
+                            wf_instance_id=instance.id,
+                            role_id=role_id,
+                        ))
 
             # Advance past l2_approve_route / fr_l2_review stage
             routing_svc.advance_stage(

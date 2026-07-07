@@ -11,6 +11,7 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -23,15 +24,100 @@ from models import (
     TestingRequest,
     TrWfDefinition,
     TrWfInstance,
+    TrWfInstanceResolvedRole,
     TrWfStage,
     TrWfStageInstance,
     TrWfStageRole,
     TrWfStageTransition,
     TrWfRoutingDefault,
     TrWfRoutingRule,
+    TrWfRoutingRuleRole,
     TrWfAuditLog,
     TestingRequestStatus,
 )
+
+
+def _rule_row_matches(r: TrWfRoutingRule, request_type, equipment_type_id, test_type_id) -> bool:
+    if r.request_type is not None and r.request_type != request_type:
+        return False
+    if r.equipment_type_id is not None and r.equipment_type_id != equipment_type_id:
+        return False
+    if r.test_type_id is not None and r.test_type_id != test_type_id:
+        return False
+    return True
+
+
+def _rule_row_specificity(r: TrWfRoutingRule) -> int:
+    return (
+        (4 if r.request_type is not None else 0)
+        + (2 if r.equipment_type_id is not None else 0)
+        + (1 if r.test_type_id is not None else 0)
+    )
+
+
+def stage_mapped_roles(
+    db: Session,
+    org_id,
+    stage_id,
+    request_type: Optional[str] = None,
+    equipment_type_id: Optional[int] = None,
+    test_type_id: Optional[int] = None,
+) -> list:
+    """
+    Per-stage, stateless rule resolution at the MASTER level.
+
+    A logical rule = TrWfRoutingRuleMaster (named) + its condition rows in
+    tr_wf_routing_rules. A stage maps masters to its roles via
+    tr_wf_routing_rule_roles(rule_master_id, stage_id, role_id). A master
+    matches a request when ANY of its condition rows matches; the best
+    master wins by (max matching row specificity, master priority). Returns
+    that master's mapped role ids — or [] when nothing matches (stage stays
+    open to its roles).
+    """
+    from models import TrWfRoutingRuleMaster
+    rows = (
+        db.query(TrWfRoutingRuleRole)
+        .filter(TrWfRoutingRuleRole.stage_id == stage_id)
+        .all()
+    )
+    if not rows:
+        return []
+
+    candidates = []
+
+    # Master-level mappings (current model)
+    by_master: dict = {}
+    for rr in rows:
+        if rr.rule_master_id:
+            by_master.setdefault(rr.rule_master_id, []).append(rr.role_id)
+    for master_id, role_ids in by_master.items():
+        master = db.query(TrWfRoutingRuleMaster).filter(
+            TrWfRoutingRuleMaster.id == master_id,
+            TrWfRoutingRuleMaster.org_id == org_id,
+            TrWfRoutingRuleMaster.is_active.is_(True),
+        ).first()
+        if not master:
+            continue
+        matching_specs = [
+            _rule_row_specificity(row)
+            for row in master.routing_rules
+            if row.is_active and _rule_row_matches(row, request_type, equipment_type_id, test_type_id)
+        ]
+        if matching_specs:
+            candidates.append((max(matching_specs), master.priority or 0, role_ids))
+
+    # Legacy row-level mappings (pre-master data)
+    for rr in rows:
+        if rr.rule_master_id is None and rr.rule is not None:
+            r = rr.rule
+            if r.org_id == org_id and r.is_active and _rule_row_matches(
+                    r, request_type, equipment_type_id, test_type_id):
+                candidates.append((_rule_row_specificity(r), r.priority or 0, [rr.role_id]))
+
+    if not candidates:
+        return []
+    best = max(candidates, key=lambda c: (c[0], c[1]))
+    return [rid for rid in best[2] if rid]
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +165,7 @@ class WorkflowRoutingService:
         request_type: Optional[str],
         equipment_type_id: Optional[int],
         test_type_id: Optional[int],
+        source_stage_id: Optional[UUID] = None,
     ) -> tuple[TrWfDefinition, Optional[UUID]]:
         """
         Return (TrWfDefinition, resolved_l3_role_id) for a request.
@@ -96,39 +183,45 @@ class WorkflowRoutingService:
 
         Specificity: request_type+equip+test > equip+test > request_type > all-NULL.
         Priority breaks ties at equal specificity.
-        """
-        rules: list[TrWfRoutingRule] = (
-            self.db.query(TrWfRoutingRule)
-            .filter(
-                TrWfRoutingRule.org_id == org_id,
-                TrWfRoutingRule.is_active.is_(True),
-            )
-            .all()
-        )
 
-        def _specificity(r: TrWfRoutingRule) -> int:
-            score = 0
-            if r.request_type is not None:
-                score += 4
-            if r.equipment_type_id is not None:
-                score += 2
-            if r.test_type_id is not None:
-                score += 1
-            return score
+        source_stage_id scopes which rules are even considered:
+          - None (default) → only entry-point rules (source_stage_id IS NULL),
+            same behavior as before this parameter existed.
+          - A stage id → only rules scoped to that specific stage, so a
+            deeper stage can independently bifurcate without its rules
+            competing against the entry rule's matches.
+        """
+        rules_q = self.db.query(TrWfRoutingRule).filter(
+            TrWfRoutingRule.org_id == org_id,
+            TrWfRoutingRule.is_active.is_(True),
+        )
+        if source_stage_id is None:
+            rules_q = rules_q.filter(TrWfRoutingRule.source_stage_id.is_(None))
+        else:
+            rules_q = rules_q.filter(TrWfRoutingRule.source_stage_id == source_stage_id)
+        rules: list[TrWfRoutingRule] = rules_q.all()
+
+        # Condition rows belong to a named master rule — a disabled master
+        # disables all its rows; the master's priority is authoritative.
+        rules = [
+            r for r in rules
+            if r.rule_master is None or r.rule_master.is_active
+        ]
+
+        def _priority(r: TrWfRoutingRule) -> int:
+            if r.rule_master is not None and r.rule_master.priority is not None:
+                return r.rule_master.priority
+            return r.priority or 0
+
+        _specificity = _rule_row_specificity
 
         def _matches(r: TrWfRoutingRule) -> bool:
-            if r.request_type is not None and r.request_type != request_type:
-                return False
-            if r.equipment_type_id is not None and r.equipment_type_id != equipment_type_id:
-                return False
-            if r.test_type_id is not None and r.test_type_id != test_type_id:
-                return False
-            return True
+            return _rule_row_matches(r, request_type, equipment_type_id, test_type_id)
 
         candidates = [r for r in rules if _matches(r)]
         best_rule: Optional[TrWfRoutingRule] = None
         if candidates:
-            best_rule = max(candidates, key=lambda r: (_specificity(r), r.priority))
+            best_rule = max(candidates, key=lambda r: (_specificity(r), _priority(r)))
 
         # Resolve definition
         defn: Optional[TrWfDefinition] = None
@@ -179,7 +272,23 @@ class WorkflowRoutingService:
         elif defn.default_tester_role_id:
             resolved_tester_role_id = defn.default_tester_role_id
 
-        return defn, resolved_l3_role_id, resolved_tester_role_id
+        # Legacy stored-resolution role list: only rule-GLOBAL rows
+        # (stage_id NULL) participate — per-stage mapping rows are evaluated
+        # statelessly at each stage (stage_mapped_roles) and must not leak
+        # into the instance-level snapshot. Falls back to the 2 legacy
+        # override fields for rules with no global rows.
+        _global_role_ids = [
+            rr.role_id for rr in (best_rule.rule_roles if best_rule else [])
+            if rr.stage_id is None
+        ]
+        if _global_role_ids:
+            resolved_role_ids = _global_role_ids
+        else:
+            resolved_role_ids = [
+                rid for rid in (resolved_l3_role_id, resolved_tester_role_id) if rid
+            ]
+
+        return defn, resolved_l3_role_id, resolved_tester_role_id, resolved_role_ids
 
     def lookup_routing_rule(
         self,
@@ -189,7 +298,7 @@ class WorkflowRoutingService:
         test_type_id: Optional[int],
     ) -> TrWfDefinition:
         """Backward-compat wrapper — returns only the definition."""
-        defn, _, __ = self.resolve_routing(org_id, request_type, equipment_type_id, test_type_id)
+        defn, _, __, ___ = self.resolve_routing(org_id, request_type, equipment_type_id, test_type_id)
         return defn
 
     # ------------------------------------------------------------------
@@ -211,7 +320,7 @@ class WorkflowRoutingService:
                 f"Request {testing_request.id} already has a workflow instance."
             )
 
-        defn, resolved_l3_role_id, resolved_tester_role_id = self.resolve_routing(
+        defn, resolved_l3_role_id, resolved_tester_role_id, resolved_role_ids = self.resolve_routing(
             org_id=testing_request.organization_id,
             request_type=testing_request.request_type,
             equipment_type_id=testing_request.equipment_type_id,
@@ -246,6 +355,13 @@ class WorkflowRoutingService:
         )
         self.db.add(instance)
         self.db.flush()  # get instance.id
+
+        for role_id in resolved_role_ids:
+            self.db.add(TrWfInstanceResolvedRole(
+                id=uuid.uuid4(),
+                wf_instance_id=instance.id,
+                role_id=role_id,
+            ))
 
         stage_inst = TrWfStageInstance(
             wf_instance_id=instance.id,

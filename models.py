@@ -934,6 +934,25 @@ class TrWfInstance(Base):
     stage_instances = relationship("TrWfStageInstance", back_populates="wf_instance", cascade="all, delete-orphan")
     audit_logs = relationship("TrWfAuditLog", back_populates="wf_instance", cascade="all, delete-orphan")
     testing_request = relationship("TestingRequest", foreign_keys="TestingRequest.wf_instance_id", back_populates=None, uselist=False, overlaps="wf_instance")
+    # Many-to-many replacement for the 2-slot resolved_l3_role/resolved_tester_role
+    # cap above. Those 2 columns stay for backward compatibility; queue
+    # visibility and the tester-picker should prefer this list when non-empty.
+    resolved_role_links = relationship("TrWfInstanceResolvedRole", back_populates="wf_instance", cascade="all, delete-orphan")
+
+
+class TrWfInstanceResolvedRole(Base):
+    """Many-to-many: a workflow instance can have any number of resolved
+    roles (one per routing decision made so far), not just the 2 named
+    slots on TrWfInstance."""
+    __tablename__ = "tr_wf_instance_resolved_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    wf_instance_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    wf_instance = relationship("TrWfInstance", back_populates="resolved_role_links")
+    role = relationship("OrgRole", foreign_keys=[role_id])
 
 
 class TrWfStageInstance(Base):
@@ -984,34 +1003,205 @@ class TrWfAuditLog(Base):
     to_stage = relationship("TrWfStage", foreign_keys=[to_stage_id])
     performer = relationship("User", foreign_keys=[performed_by])
     role = relationship("OrgRole", foreign_keys=[role_id])
+class TrWfRoutingRuleMaster(Base):
+    """
+    Routing Rule Master.
+    One row represents one logical routing rule.
+    """
 
+    __tablename__ = "tr_wf_routing_rule_master"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    org_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    rule_name = Column(String(150), nullable=False)
+
+    priority = Column(Integer, default=0)
+
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+        nullable=True,
+    )
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    modified_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    routing_rules = relationship(
+        "TrWfRoutingRule",
+        back_populates="rule_master",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id",
+            "rule_name",
+            name="uq_tr_wf_rule_master_name",
+        ),
+    )
 
 class TrWfRoutingRule(Base):
     """Maps (request_type, equipment_type, test_type) → a workflow definition.
     Lookup order by specificity: all three set > two set > one set > catch-all.
     Priority column breaks ties at equal specificity.
     """
+
     __tablename__ = "tr_wf_routing_rules"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    wf_definition_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_definitions.id", ondelete="CASCADE"), nullable=True)
-    override_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
-    override_tester_role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="SET NULL"), nullable=True)
-    request_type = Column(String(50), nullable=True)       # normal | failure | special | NULL=any
-    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="SET NULL"), nullable=True)
-    test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"), nullable=True)
-    priority = Column(Integer, default=0)                  # higher wins on equal specificity
-    is_active = Column(Boolean, default=True)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    modified_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    wf_definition = relationship("TrWfDefinition", foreign_keys=[wf_definition_id])
-    override_role = relationship("OrgRole", foreign_keys=[override_role_id])
-    override_tester_role = relationship("OrgRole", foreign_keys=[override_tester_role_id])
-    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
-    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    # NEW
+    rule_master_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tr_wf_routing_rule_master.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    org_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    wf_definition_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tr_wf_definitions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    override_role_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.org_roles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    override_tester_role_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.org_roles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # NULL = entry-point rule (fires once, at workflow instantiation). Set =
+    # this rule only applies when re-routing FROM that specific stage.
+    source_stage_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tr_wf_stages.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    request_type = Column(String(50), nullable=True)
+
+    equipment_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryMaster.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    test_type_id = Column(
+        Integer,
+        ForeignKey("public.CategoryDetails.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Keep these if you don't want to migrate them to the master yet
+    priority = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+
+    created_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id"),
+        nullable=True,
+    )
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    modified_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # ----------------------------
+    # Relationships
+    # ----------------------------
+
+    rule_master = relationship(
+        "TrWfRoutingRuleMaster",
+        back_populates="routing_rules",
+    )
+
+    wf_definition = relationship(
+        "TrWfDefinition",
+        foreign_keys=[wf_definition_id],
+    )
+
+    override_role = relationship(
+        "OrgRole",
+        foreign_keys=[override_role_id],
+    )
+
+    override_tester_role = relationship(
+        "OrgRole",
+        foreign_keys=[override_tester_role_id],
+    )
+
+    source_stage = relationship(
+        "TrWfStage",
+        foreign_keys=[source_stage_id],
+    )
+
+    equipment_type = relationship(
+        "CategoryMaster",
+        foreign_keys=[equipment_type_id],
+    )
+
+    test_type = relationship(
+        "CategoryDetails",
+        foreign_keys=[test_type_id],
+    )
+
+    rule_roles = relationship(
+        "TrWfRoutingRuleRole",
+        back_populates="rule",
+        cascade="all, delete-orphan",
+    )
+
+
+class TrWfRoutingRuleRole(Base):
+    """Rule ↔ stage ↔ role mapping. A logical rule (TrWfRoutingRuleMaster,
+    with its condition rows) is mapped to a stage with the stage's roles
+    selected to handle matching requests — same rule reusable on N stages
+    with different role sets. New rows reference rule_master_id; rule_id
+    (condition-row level) is legacy from before the master existed."""
+    __tablename__ = "tr_wf_routing_rule_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rule_master_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_routing_rule_master.id", ondelete="CASCADE"), nullable=True, index=True)
+    rule_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_routing_rules.id", ondelete="CASCADE"), nullable=True, index=True)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"), nullable=False)
+    stage_id = Column(UUID(as_uuid=True), ForeignKey("tr_wf_stages.id", ondelete="CASCADE"), nullable=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    rule_master = relationship("TrWfRoutingRuleMaster", foreign_keys=[rule_master_id])
+    rule = relationship("TrWfRoutingRule", back_populates="rule_roles")
+    role = relationship("OrgRole", foreign_keys=[role_id])
+    stage = relationship("TrWfStage", foreign_keys=[stage_id])
 
 
 class TrWfRoutingDefault(Base):
