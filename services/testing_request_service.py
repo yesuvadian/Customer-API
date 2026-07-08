@@ -238,6 +238,7 @@ class TestingRequestService:
         self,
         status_filter: Optional[str] = None,
         is_closed: Optional[bool] = None,
+        wf_active: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -360,6 +361,15 @@ class TestingRequestService:
                     TestingRequest.id.notin_(wf_done_ids),
                 )
 
+        if wf_active is not None:
+            active_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                TrWfInstance.status == "active"
+            ).scalar_subquery()
+            if wf_active:
+                query = query.filter(TestingRequest.id.in_(active_wf_ids))
+            else:
+                query = query.filter(TestingRequest.id.notin_(active_wf_ids))
+
         if category_filter:
             query = query.filter(TestingRequest.request_category == category_filter)
         if originator_id:
@@ -442,6 +452,7 @@ class TestingRequestService:
         limit: int = 100,
         status_filter: Optional[str] = None,
         is_closed: Optional[bool] = None,
+        wf_active: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -462,6 +473,7 @@ class TestingRequestService:
         query = self._base_request_query(
             status_filter=status_filter,
             is_closed=is_closed,
+            wf_active=wf_active,
             category_filter=category_filter,
             originator_id=originator_id,
             tester_id=tester_id,
@@ -484,6 +496,8 @@ class TestingRequestService:
     def count_requests(
         self,
         status_filter: Optional[str] = None,
+        is_closed: Optional[bool] = None,
+        wf_active: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -504,6 +518,8 @@ class TestingRequestService:
     ) -> int:
         query = self._base_request_query(
             status_filter=status_filter,
+            is_closed=is_closed,
+            wf_active=wf_active,
             category_filter=category_filter,
             originator_id=originator_id,
             tester_id=tester_id,
@@ -526,6 +542,7 @@ class TestingRequestService:
     def get_breakdown(
         self,
         status_filter: Optional[str] = None,
+        is_closed: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -539,6 +556,7 @@ class TestingRequestService:
     ) -> dict:
         query = self._base_request_query(
             status_filter=status_filter,
+            is_closed=is_closed,
             category_filter=category_filter,
             originator_id=originator_id,
             tester_id=tester_id,

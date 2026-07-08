@@ -460,6 +460,7 @@ def list_testing_requests(
     date_from: Optional[str] = Query(None, description="Filter completed_at >= YYYY-MM-DD"),
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
     is_closed: Optional[bool] = Query(None, description="True = legacy-closed or wf-completed; False = still active"),
+    wf_active: Optional[bool] = Query(None, description="True = only TRs with an active workflow instance (Kanban use)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -493,6 +494,7 @@ def list_testing_requests(
     common = dict(
         status_filter=status,
         is_closed=is_closed,
+        wf_active=wf_active,
         category_filter=category,
         originator_id=originator_id,
         tester_id=tester_id,
@@ -538,6 +540,7 @@ def get_testing_request_breakdown(
     equipment_id: Optional[UUID] = None,
     date_from: Optional[str] = Query(None, description="Filter completed_at >= YYYY-MM-DD"),
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
+    is_closed: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -564,6 +567,7 @@ def get_testing_request_breakdown(
 
     return service.get_breakdown(
         status_filter=status,
+        is_closed=is_closed,
         category_filter=category,
         originator_id=originator_id,
         tester_id=tester_id,

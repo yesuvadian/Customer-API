@@ -1168,6 +1168,7 @@ class TestingRequestResponse(BaseModel):
     # ─────────────────────────────────────────────
     # Dynamic workflow status (from TrWfStatus config)
     # ─────────────────────────────────────────────
+    current_status_code: Optional[str] = None
     wf_status_name:  Optional[str] = None
     wf_status_color: Optional[str] = None
     wf_stage_name:   Optional[str] = None
