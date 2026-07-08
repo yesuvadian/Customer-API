@@ -50,6 +50,7 @@ def create_role(
     return service.create_role(role_data, created_by=current_user.id)
 
 
+
 @router.get("/", response_model=List[OrgRoleOut])
 def list_roles(
     org_id: UUID,

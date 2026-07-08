@@ -178,8 +178,9 @@ def _resolve_role(session, org_id, *name_fragments) -> OrgRole | None:
     return None
 
 
-def seed_doc_support_workflow(session):
-    org = _org(session)
+def seed_doc_support_workflow(session, org=None):
+    if org is None:
+        org = _org(session)
     org_id = org.id
     print(f"\n[DS-WF] Seeding Document Support Workflow for org: {org.name} ({org_id})")
 

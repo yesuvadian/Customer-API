@@ -219,6 +219,24 @@ class EvaluationService:
         agg_result = None
         col_results: list[dict] = []
 
+        # Find the first readonly/text column to use as row label
+        _label_col = next(
+            (c.get("key") for c in field.get("columns", [])
+             if c.get("type") in ("readonly", "text") and c.get("key")),
+            None,
+        )
+
+        # Build breach-limit lookup from column_evaluations
+        _col_limits: dict = {}
+        for _ck, _cev in (ev.get("column_evaluations") or {}).items():
+            _lim = (
+                _cev.get("critical_above")
+                or _cev.get("normal_max")
+                or _cev.get("alert_max")
+            )
+            if _lim is not None:
+                _col_limits[_ck] = _lim
+
         if table_ev_enabled:
             # Aggregate evaluation
             if ev.get("aggregate_type") and ev.get("aggregate_column"):
@@ -235,11 +253,14 @@ class EvaluationService:
                     try:
                         num_val = float(val)
                         col_status = EvaluationService._classify_number(num_val, col_ev)
+                        _row_label = (row.get(_label_col) if _label_col else None) or f"Row {row_idx + 1}"
                         col_results.append({
-                            "column": col_key,
-                            "row": row_idx,
-                            "value": num_val,
-                            "status": col_status,
+                            "column":       col_key,
+                            "row":          row_idx,
+                            "row_label":    _row_label,
+                            "value":        num_val,
+                            "status":       col_status,
+                            "breach_limit": _col_limits.get(col_key),
                         })
                         if _STATUS_RANK[col_status] > _STATUS_RANK[agg_status]:
                             agg_status = col_status
@@ -260,11 +281,13 @@ class EvaluationService:
                     if val is None:
                         continue
                     col_status = col_ev.get(str(val), NORMAL)
+                    _row_label = (row.get(_label_col) if _label_col else None) or f"Row {row_idx + 1}"
                     col_results.append({
-                        "column": col_key,
-                        "row": row_idx,
-                        "value": val,
-                        "status": col_status,
+                        "column":    col_key,
+                        "row":       row_idx,
+                        "row_label": _row_label,
+                        "value":     val,
+                        "status":    col_status,
                     })
                     if _STATUS_RANK.get(col_status, 0) > _STATUS_RANK[agg_status]:
                         agg_status = col_status
@@ -280,6 +303,7 @@ class EvaluationService:
             "status": agg_status,
             "aggregate_result": agg_result,
             "column_results": col_results,
+            "column_evaluations": _col_limits,
             "remedial_action_text": ev.get("remedial_action_text")
                 if agg_status in (ALERT, CRITICAL) else None,
             "suggested_products": ev.get("suggested_products") or []

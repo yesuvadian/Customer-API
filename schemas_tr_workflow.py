@@ -312,6 +312,12 @@ class TrWfRoutingRuleOut(BaseModel):
     override_role_name: Optional[str]
     override_tester_role_id: Optional[UUID]
     override_tester_role_name: Optional[str]
+    # Many-to-many replacement for the 2 override fields above — an
+    # unlimited list of roles this rule resolves to.
+    role_ids: List[UUID] = []
+    role_names: List[str] = []
+    source_stage_id: Optional[UUID]
+    source_stage_name: Optional[str]
     request_type: Optional[str]
     equipment_type_id: Optional[int]
     equipment_type_name: Optional[str]
@@ -328,6 +334,8 @@ class TrWfRoutingRuleCreate(BaseModel):
     wf_definition_id: UUID
     override_role_id: Optional[UUID] = None
     override_tester_role_id: Optional[UUID] = None
+    role_ids: Optional[List[UUID]] = None    # None = fall back to the 2 override fields above
+    source_stage_id: Optional[UUID] = None   # None = entry-point rule (default)
     request_type: Optional[str] = None       # normal | failure | special | None=any
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None
@@ -338,6 +346,8 @@ class TrWfRoutingRulePatch(BaseModel):
     wf_definition_id: Optional[UUID] = None
     override_role_id: Optional[UUID] = None
     override_tester_role_id: Optional[UUID] = None
+    role_ids: Optional[List[UUID]] = None
+    source_stage_id: Optional[UUID] = None
     request_type: Optional[str] = None
     equipment_type_id: Optional[int] = None
     test_type_id: Optional[int] = None

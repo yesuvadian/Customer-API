@@ -475,6 +475,12 @@ def run(db: Session) -> None:
 if __name__ == "__main__":
     db = SessionLocal()
     try:
+        # Ensure CategoryDetails rows exist before running recommendations
+        from seed import seed_category_master, seed_category_details, seed_test_type_categories
+        master_ids = seed_category_master(db)
+        seed_category_details(db, master_ids)
+        seed_test_type_categories(db, master_ids)
+        db.commit()
         run(db)
     except Exception as e:
         db.rollback()

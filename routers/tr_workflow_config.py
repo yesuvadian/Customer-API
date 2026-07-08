@@ -39,14 +39,19 @@ from models import (
     TrWfDefinition,
     TrWfRoutingDefault,
     TrWfRoutingRule,
+    TrWfRoutingRuleMaster,
+    TrWfRoutingRuleRole,
     TrWfStage,
     TrWfStageRole,
     TrWfStageTransition,
     TrWfStatus,
+    TrWfInstance,
     User,
     CategoryMaster,
     CategoryDetails,
+    TestingRequest,
 )
+import uuid
 
 router = APIRouter(prefix="/tr-workflow-config", tags=["Workflow Config"])
 
@@ -55,8 +60,30 @@ router = APIRouter(prefix="/tr-workflow-config", tags=["Workflow Config"])
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _stage_out(s: TrWfStage) -> dict:
+def _stage_out(s: TrWfStage, db: Session = None) -> dict:
+    # Per-stage rule mappings: WHICH named rules (masters) apply at this
+    # stage and WHICH of this stage's roles handle their matching requests.
+    rule_maps = []
+    if db is not None:
+        _rows = db.query(TrWfRoutingRuleRole).filter(
+            TrWfRoutingRuleRole.stage_id == s.id,
+            TrWfRoutingRuleRole.rule_master_id.isnot(None),
+        ).all()
+        _by_master: dict = {}
+        for _rr in _rows:
+            _by_master.setdefault(str(_rr.rule_master_id), []).append(_rr)
+        rule_maps = [
+            {
+                "rule_master_id": _mid,
+                "rule_name": next(
+                    (x.rule_master.rule_name for x in _lst if x.rule_master), None),
+                "role_ids": [str(x.role_id) for x in _lst],
+                "role_names": [x.role.name for x in _lst if x.role],
+            }
+            for _mid, _lst in _by_master.items()
+        ]
     return {
+        "rule_maps": rule_maps,
         "id": str(s.id),
         "wf_definition_id": str(s.wf_definition_id),
         "status_id": str(s.status_id) if s.status_id else None,
@@ -79,11 +106,13 @@ def _stage_out(s: TrWfStage) -> dict:
         "roles": [
             {
                 "id": str(r.id),
-                "role_id": str(r.role_id),
-                "role_name": r.role.name if r.role else None,
+                "role_id": str(r.role_id) if r.role_id else None,
+                "role_name": r.role.name if r.role else r.system_token,
+                "system_token": r.system_token,
                 "can_approve": r.can_approve,
                 "can_assign": r.can_assign,
                 "can_edit": r.can_edit,
+                "can_act_as_tester": r.can_act_as_tester,
             }
             for r in s.roles
         ],
@@ -149,6 +178,24 @@ def _rule_out(r: TrWfRoutingRule) -> dict:
         "override_role_name": r.override_role.name if r.override_role else None,
         "override_tester_role_id": str(r.override_tester_role_id) if r.override_tester_role_id else None,
         "override_tester_role_name": r.override_tester_role.name if r.override_tester_role else None,
+        # Legacy rule-global roles (stage_id NULL rows) — kept for old data.
+        "role_ids": [str(rr.role_id) for rr in r.rule_roles if rr.stage_id is None],
+        "role_names": [rr.role.name for rr in r.rule_roles if rr.role and rr.stage_id is None],
+        # Per-stage mappings: WHERE this shared rule applies and WHICH of
+        # that stage's roles handle matching requests.
+        "stage_maps": [
+            {
+                "stage_id": str(sid),
+                "stage_name": next((rr.stage.name for rr in r.rule_roles
+                                    if rr.stage_id == sid and rr.stage), None),
+                "role_ids": [str(rr.role_id) for rr in r.rule_roles if rr.stage_id == sid],
+                "role_names": [rr.role.name for rr in r.rule_roles
+                               if rr.stage_id == sid and rr.role],
+            }
+            for sid in {rr.stage_id for rr in r.rule_roles if rr.stage_id}
+        ],
+        "source_stage_id": str(r.source_stage_id) if r.source_stage_id else None,
+        "source_stage_name": r.source_stage.name if r.source_stage else None,
         "request_type": r.request_type,
         "equipment_type_id": r.equipment_type_id,
         "equipment_type_name": r.equipment_type.name if r.equipment_type else None,
@@ -171,18 +218,27 @@ def _get_org_id(current_user: User) -> UUID:
 
 @router.get("/definitions")
 def list_definitions(
+    name: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     org_id = _get_org_id(current_user)
-    defs = (
-        db.query(TrWfDefinition)
-        .options(joinedload(TrWfDefinition.stages), joinedload(TrWfDefinition.statuses))
-        .filter(TrWfDefinition.org_id == org_id)
-        .all()
-    )
-    return [_def_out(d) for d in defs]
 
+    query = (
+        db.query(TrWfDefinition)
+        .options(
+            joinedload(TrWfDefinition.stages),
+            joinedload(TrWfDefinition.statuses),
+        )
+        .filter(TrWfDefinition.org_id == org_id)
+    )
+
+    if name:
+        query = query.filter(TrWfDefinition.name == name)
+
+    defs = query.all()
+
+    return [_def_out(d) for d in defs]
 
 @router.post("/definitions", status_code=status.HTTP_201_CREATED)
 def create_definition(
@@ -367,6 +423,29 @@ def delete_status(
 # Stages
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _active_instance_count(db: Session, def_id) -> int:
+    """Return number of active TrWfInstances using this workflow definition."""
+    return (
+        db.query(TrWfInstance)
+        .filter(
+            TrWfInstance.wf_definition_id == def_id,
+            TrWfInstance.status == "active",
+        )
+        .count()
+    )
+
+
+def _assert_no_active_instances(db: Session, def_id) -> None:
+    """Raise 409 if there are active TR instances using this workflow definition."""
+    count = _active_instance_count(db, def_id)
+    if count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This workflow has {count} active Testing Request{'s' if count != 1 else ''}. "
+                   f"Stage structure cannot be modified while requests are in progress.",
+        )
+
+
 def _load_stage(db: Session, stage_id: UUID) -> TrWfStage:
     stage = (
         db.query(TrWfStage)
@@ -402,7 +481,16 @@ def list_stages(
         .order_by(TrWfStage.sequence)
         .all()
     )
-    return [_stage_out(s) for s in stages]
+    return [_stage_out(s, db) for s in stages]
+
+
+@router.get("/definitions/{def_id}/active-instance-count")
+def get_active_instance_count(
+    def_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return {"count": _active_instance_count(db, def_id)}
 
 
 @router.post("/definitions/{def_id}/stages", status_code=status.HTTP_201_CREATED)
@@ -412,6 +500,7 @@ def create_stage(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _assert_no_active_instances(db, def_id)
     stage = TrWfStage(
         wf_definition_id=def_id,
         status_id=body.get("status_id"),
@@ -425,7 +514,7 @@ def create_stage(
     )
     db.add(stage)
     db.commit()
-    return _stage_out(_load_stage(db, stage.id))
+    return _stage_out(_load_stage(db, stage.id), db)
 
 
 @router.patch("/stages/{stage_id}")
@@ -440,13 +529,16 @@ def patch_stage(
     stage = db.query(TrWfStage).filter(TrWfStage.id == stage_id).first()
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
+    _STRUCTURAL_FIELDS = {"name", "code", "sequence", "weight", "status_id", "is_mandatory", "is_active", "default_duration_days"}
+    if any(k in body for k in _STRUCTURAL_FIELDS):
+        _assert_no_active_instances(db, stage.wf_definition_id)
     for k in ("name", "code", "sequence", "weight", "status_id",
               "is_mandatory", "is_active", "default_duration_days",
               "show_recommendation", "is_result_stage", "use_l2_route", "is_role_scoped"):
         if k in body:
             setattr(stage, k, body[k])
     db.commit()
-    return _stage_out(_load_stage(db, stage.id))
+    return _stage_out(_load_stage(db, stage.id), db)
 
 
 @router.delete("/stages/{stage_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -460,6 +552,7 @@ def delete_stage(
     stage = db.query(TrWfStage).filter(TrWfStage.id == stage_id).first()
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
+    _assert_no_active_instances(db, stage.wf_definition_id)
     db.delete(stage)
     db.commit()
 
@@ -481,16 +574,25 @@ def replace_stage_roles(
     db.query(TrWfStageRole).filter(TrWfStageRole.stage_id == stage_id).delete()
     db.flush()
 
+    seen_roles: set = set()
     for r in body:
+        role_id = r.get("role_id")
+        system_token = r.get("system_token") or (role_id if role_id and role_id.startswith("@") else None)
+        key = system_token if system_token else role_id
+        if key in seen_roles:
+            continue
+        seen_roles.add(key)
         db.add(TrWfStageRole(
             stage_id=stage_id,
-            role_id=r["role_id"],
+            role_id=None if system_token else role_id,
+            system_token=system_token,
             can_approve=r.get("can_approve", False),
             can_assign=r.get("can_assign", False),
             can_edit=r.get("can_edit", False),
+            can_act_as_tester=r.get("can_act_as_tester", False),
         ))
     db.commit()
-    return _stage_out(_load_stage(db, stage_id))
+    return _stage_out(_load_stage(db, stage_id), db)
 
 
 # ── Stage Transitions (full replace) ──────────────────────────────────────────
@@ -523,7 +625,213 @@ def replace_stage_transitions(
             post_action=t.get("post_action") or None,
         ))
     db.commit()
-    return _stage_out(_load_stage(db, stage_id))
+    return _stage_out(_load_stage(db, stage_id), db)
+
+
+# ── Stage Rule Maps (full replace) ────────────────────────────────────────────
+# Rules are shared, NAMED definitions (masters); a stage maps N of them to
+# its own roles. Body: [{rule_master_id, role_ids: [...]}] — role_ids must
+# be roles attached to this stage (empty role_ids = mapped, but no role
+# scoping: everyone on the stage gets access to matching requests).
+
+@router.put("/stages/{stage_id}/rule-maps")
+def replace_stage_rule_maps(
+    stage_id: UUID,
+    body: list = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    org_id = _get_org_id(current_user)
+    stage = db.query(TrWfStage).filter(TrWfStage.id == stage_id).first()
+    if not stage:
+        raise HTTPException(status_code=404, detail="Stage not found")
+
+    stage_role_ids = {
+        str(sr.role_id)
+        for sr in db.query(TrWfStageRole).filter(TrWfStageRole.stage_id == stage_id).all()
+        if sr.role_id
+    }
+
+    # Full replace of this stage's mappings (legacy stage_id-NULL rows untouched)
+    db.query(TrWfRoutingRuleRole).filter(
+        TrWfRoutingRuleRole.stage_id == stage_id
+    ).delete()
+    db.flush()
+
+    for m in body:
+        master = db.query(TrWfRoutingRuleMaster).filter(
+            TrWfRoutingRuleMaster.id == m["rule_master_id"],
+            TrWfRoutingRuleMaster.org_id == org_id,
+        ).first()
+        if not master:
+            raise HTTPException(status_code=404, detail=f"Rule {m['rule_master_id']} not found")
+        role_ids = m.get("role_ids") or []
+        bad = [rid for rid in role_ids if str(rid) not in stage_role_ids]
+        if bad:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Roles {bad} are not attached to this stage — add them on the Roles tab first.",
+            )
+        # Zero-role mappings insert nothing: with no scoping rows the stage
+        # falls through to open access for its roles — the declared
+        # "no roles selected → everyone on the stage" semantic.
+        for rid in role_ids:
+            db.add(TrWfRoutingRuleRole(
+                id=uuid.uuid4(),
+                rule_master_id=master.id,
+                stage_id=stage_id,
+                role_id=rid,
+            ))
+    db.commit()
+    return _stage_out(_load_stage(db, stage_id), db)
+
+
+# ── Rule Masters (named logical rules) ────────────────────────────────────────
+# One master = one named rule; its condition rows (request_type / equipment /
+# test type combinations) live in tr_wf_routing_rules under rule_master_id.
+
+def _master_out(m: TrWfRoutingRuleMaster, db: Session) -> dict:
+    maps = db.query(TrWfRoutingRuleRole).filter(
+        TrWfRoutingRuleRole.rule_master_id == m.id,
+        TrWfRoutingRuleRole.stage_id.isnot(None),
+    ).all()
+    by_stage: dict = {}
+    for rr in maps:
+        by_stage.setdefault(str(rr.stage_id), []).append(rr)
+    return {
+        "id": str(m.id),
+        "rule_name": m.rule_name,
+        "priority": m.priority or 0,
+        "is_active": m.is_active,
+        "conditions": [
+            {
+                "id": str(r.id),
+                "wf_definition_id": str(r.wf_definition_id) if r.wf_definition_id else None,
+                "wf_definition_name": r.wf_definition.name if r.wf_definition else None,
+                "request_type": r.request_type,
+                "equipment_type_id": r.equipment_type_id,
+                "equipment_type_name": r.equipment_type.name if r.equipment_type else None,
+                "test_type_id": r.test_type_id,
+                "test_type_name": r.test_type.name if r.test_type else None,
+            }
+            for r in m.routing_rules
+        ],
+        "stage_maps": [
+            {
+                "stage_id": sid,
+                "stage_name": next((x.stage.name for x in lst if x.stage), None),
+                "role_ids": [str(x.role_id) for x in lst],
+                "role_names": [x.role.name for x in lst if x.role],
+            }
+            for sid, lst in by_stage.items()
+        ],
+    }
+
+
+@router.get("/routing/rule-masters")
+def list_rule_masters(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    org_id = _get_org_id(current_user)
+    masters = (
+        db.query(TrWfRoutingRuleMaster)
+        .filter(TrWfRoutingRuleMaster.org_id == org_id)
+        .order_by(TrWfRoutingRuleMaster.priority.desc())
+        .all()
+    )
+    return [_master_out(m, db) for m in masters]
+
+
+def _replace_master_conditions(db: Session, org_id, master, conditions, user_id):
+    db.query(TrWfRoutingRule).filter(
+        TrWfRoutingRule.rule_master_id == master.id
+    ).delete()
+    db.flush()
+    for c in conditions:
+        db.add(TrWfRoutingRule(
+            rule_master_id=master.id,
+            org_id=org_id,
+            wf_definition_id=c.get("wf_definition_id") or None,
+            request_type=c.get("request_type"),
+            equipment_type_id=c.get("equipment_type_id"),
+            test_type_id=c.get("test_type_id"),
+            priority=master.priority or 0,
+            is_active=True,
+            created_by=user_id,
+        ))
+
+
+@router.post("/routing/rule-masters", status_code=status.HTTP_201_CREATED)
+def create_rule_master(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    org_id = _get_org_id(current_user)
+    name = (body.get("rule_name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="rule_name is required")
+    master = TrWfRoutingRuleMaster(
+        org_id=org_id,
+        rule_name=name,
+        priority=body.get("priority", 0),
+        is_active=body.get("is_active", True),
+        created_by=current_user.id,
+    )
+    db.add(master)
+    db.flush()
+    _replace_master_conditions(db, org_id, master, body.get("conditions") or [], current_user.id)
+    db.commit()
+    db.refresh(master)
+    return _master_out(master, db)
+
+
+@router.patch("/routing/rule-masters/{master_id}")
+def patch_rule_master(
+    master_id: UUID,
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    org_id = _get_org_id(current_user)
+    master = db.query(TrWfRoutingRuleMaster).filter(
+        TrWfRoutingRuleMaster.id == master_id,
+        TrWfRoutingRuleMaster.org_id == org_id,
+    ).first()
+    if not master:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    if "rule_name" in body and (body["rule_name"] or "").strip():
+        master.rule_name = body["rule_name"].strip()
+    if "priority" in body:
+        master.priority = body["priority"]
+    if "is_active" in body:
+        master.is_active = body["is_active"]
+    if "conditions" in body:
+        _replace_master_conditions(db, org_id, master, body["conditions"] or [], current_user.id)
+    db.commit()
+    db.refresh(master)
+    return _master_out(master, db)
+
+
+@router.delete("/routing/rule-masters/{master_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_rule_master(
+    master_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    org_id = _get_org_id(current_user)
+    master = db.query(TrWfRoutingRuleMaster).filter(
+        TrWfRoutingRuleMaster.id == master_id,
+        TrWfRoutingRuleMaster.org_id == org_id,
+    ).first()
+    if not master:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    db.query(TrWfRoutingRuleRole).filter(
+        TrWfRoutingRuleRole.rule_master_id == master.id
+    ).delete()
+    db.delete(master)
+    db.commit()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -542,13 +850,30 @@ def list_routing_rules(
             joinedload(TrWfRoutingRule.wf_definition),
             joinedload(TrWfRoutingRule.override_role),
             joinedload(TrWfRoutingRule.override_tester_role),
+            joinedload(TrWfRoutingRule.source_stage),
             joinedload(TrWfRoutingRule.equipment_type),
             joinedload(TrWfRoutingRule.test_type),
+            joinedload(TrWfRoutingRule.rule_roles).joinedload(TrWfRoutingRuleRole.role),
         )
         .filter(TrWfRoutingRule.org_id == org_id)
         .all()
     )
     return [_rule_out(r) for r in rules]
+
+
+def _set_rule_roles(db: Session, rule: TrWfRoutingRule, role_ids):
+    """Replace a rule's many-to-many role list wholesale."""
+    db.query(TrWfRoutingRuleRole).filter(
+        TrWfRoutingRuleRole.rule_id == rule.id
+    ).delete()
+    for role_id in role_ids:
+        if not role_id:
+            continue
+        db.add(TrWfRoutingRuleRole(
+            id=uuid.uuid4(),
+            rule_id=rule.id,
+            role_id=role_id,
+        ))
 
 
 @router.post("/routing/rules", status_code=status.HTTP_201_CREATED)
@@ -558,11 +883,30 @@ def create_routing_rule(
     current_user: User = Depends(get_current_user),
 ):
     org_id = _get_org_id(current_user)
+    # Legacy endpoint — condition rows require a named master now. Attach
+    # to the caller-provided rule_name's master, creating it if needed.
+    _name = (body.get("rule_name") or f"Rule P{body.get('priority', 0)}").strip()
+    master = db.query(TrWfRoutingRuleMaster).filter(
+        TrWfRoutingRuleMaster.org_id == org_id,
+        TrWfRoutingRuleMaster.rule_name == _name,
+    ).first()
+    if not master:
+        master = TrWfRoutingRuleMaster(
+            org_id=org_id,
+            rule_name=_name,
+            priority=body.get("priority", 0),
+            is_active=True,
+            created_by=current_user.id,
+        )
+        db.add(master)
+        db.flush()
     rule = TrWfRoutingRule(
+        rule_master_id=master.id,
         org_id=org_id,
         wf_definition_id=body.get("wf_definition_id") or None,
         override_role_id=body.get("override_role_id") or None,
         override_tester_role_id=body.get("override_tester_role_id") or None,
+        source_stage_id=body.get("source_stage_id") or None,
         request_type=body.get("request_type"),
         equipment_type_id=body.get("equipment_type_id"),
         test_type_id=body.get("test_type_id"),
@@ -571,6 +915,14 @@ def create_routing_rule(
         created_by=current_user.id,
     )
     db.add(rule)
+    db.flush()  # get rule.id
+    # role_ids (many-to-many) — unlimited list. If not provided, fall back
+    # to the 2 legacy override fields so old clients keep working unchanged.
+    role_ids = body.get("role_ids")
+    if role_ids is None:
+        role_ids = [rid for rid in (rule.override_role_id, rule.override_tester_role_id) if rid]
+    if role_ids:
+        _set_rule_roles(db, rule, role_ids)
     db.commit()
     db.refresh(rule)
     return _rule_out(rule)
@@ -591,13 +943,15 @@ def patch_routing_rule(
     if not rule:
         raise HTTPException(status_code=404, detail="Routing rule not found")
     allowed = {
-        "override_role_id", "override_tester_role_id", "wf_definition_id", "request_type",
+        "override_role_id", "override_tester_role_id", "source_stage_id", "wf_definition_id", "request_type",
         "equipment_type_id", "test_type_id", "priority", "is_active",
     }
     for k, v in body.items():
         if k in allowed:
             # allow explicit null to clear a field
             setattr(rule, k, v if v != "" else None)
+    if "role_ids" in body:
+        _set_rule_roles(db, rule, body["role_ids"] or [])
     db.commit()
     db.refresh(rule)
     return _rule_out(rule)
@@ -758,10 +1112,11 @@ def get_org_roles(
         .order_by(OrgRole.name)
         .all()
     )
-    return [
-        {"id": str(r.id), "name": r.name, "description": r.description}
-        for r in rows
+    tokens = [
+        {"id": "@originator", "name": "@ Originator (Submitter)", "description": "Automatically assigns this stage to the person who created the request.", "is_system_token": True},
     ]
+    org_roles = [{"id": str(r.id), "name": r.name, "description": r.description, "is_system_token": False} for r in rows]
+    return tokens + org_roles
 
 
 @router.get("/options/action-codes")

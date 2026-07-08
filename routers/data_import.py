@@ -296,7 +296,12 @@ def list_categories(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """Return all import categories with their available test types."""
+    """Return all import categories with their available test types.
+
+    CategoryDetails.is_active is synced by the template toggle endpoint,
+    so the existing is_active filter in get_test_types_for_category handles
+    disabled templates automatically.
+    """
     result = []
     for key, cfg in IMPORT_CATEGORIES.items():
         test_types = get_test_types_for_category(key, db)
@@ -401,8 +406,9 @@ def download_schema(
         if not editable_cols:
             continue
 
-        # Sheet name: truncate to 31 chars (Excel limit)
-        sheet_name = tbl_label[:31]
+        # Sheet name: strip Excel-invalid chars, truncate to 31 chars
+        import re as _re
+        sheet_name = _re.sub(r'[:\\/?*\[\]]', '', tbl_label)[:31]
         tws = wb.create_sheet(title=sheet_name)
 
         # Row 1: visible label  Row 2: machine key (hidden)  Row 3: unit hint

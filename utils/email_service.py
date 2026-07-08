@@ -282,6 +282,55 @@ class EmailService:
         finally:
             server.quit()
 
+    def send_org_welcome(
+        self,
+        to_email: str,
+        org_name: str,
+        admin_firstname: str,
+        temp_password: str,
+        trial_days: int,
+        login_url: str,
+    ):
+        body = f"""
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #e0e0e0;border-radius:8px;">
+            <h2 style="color:#1a237e;">Welcome to Cogniwatt, {admin_firstname}!</h2>
+            <p>Your organisation <strong>{org_name}</strong> has been registered successfully.</p>
+            <p>You have a <strong>{trial_days}-day free trial</strong> to explore all features.</p>
+            <hr style="border:none;border-top:1px solid #e0e0e0;margin:16px 0;">
+            <h3>Your Login Credentials</h3>
+            <table style="border-collapse:collapse;width:100%;">
+                <tr><td style="padding:6px 0;color:#555;">Email</td><td style="padding:6px 0;font-weight:bold;">{to_email}</td></tr>
+                <tr><td style="padding:6px 0;color:#555;">Temporary Password</td><td style="padding:6px 0;font-weight:bold;">{temp_password}</td></tr>
+            </table>
+            <p style="color:#888;font-size:13px;">To change your password, use the <strong>Forgot Password</strong> option on the login page after signing in.</p>
+            <br>
+            <a href="{login_url}" style="background:#1a237e;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;font-weight:bold;">Sign In Now</a>
+            <br><br>
+            <p style="color:#888;font-size:12px;">If you did not request this, please contact support.</p>
+        </div>
+        """
+        self.send_email_starttls(to_email, f"Welcome to Cogniwatt — {org_name}", body)
+
+    def send_trial_expiry_alert(
+        self,
+        to_email: str,
+        admin_firstname: str,
+        org_name: str,
+        days_remaining: int,
+        login_url: str,
+    ):
+        body = f"""
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #ffa000;border-radius:8px;">
+            <h2 style="color:#e65100;">Trial Expiring Soon — {org_name}</h2>
+            <p>Hi {admin_firstname},</p>
+            <p>Your free trial for <strong>{org_name}</strong> will expire in <strong>{days_remaining} day{"s" if days_remaining != 1 else ""}</strong>.</p>
+            <p>To continue using Cogniwatt without interruption, please contact your account manager or upgrade your plan.</p>
+            <br>
+            <a href="{login_url}" style="background:#e65100;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;font-weight:bold;">Go to Dashboard</a>
+        </div>
+        """
+        self.send_email_starttls(to_email, f"Action Required: Your Cogniwatt trial expires in {days_remaining} day{'s' if days_remaining != 1 else ''}", body)
+
     @staticmethod
     def _fetch_attachment(url: str) -> Optional[bytes]:
         """

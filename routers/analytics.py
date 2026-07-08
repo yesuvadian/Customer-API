@@ -42,7 +42,10 @@ from models import (
     EquipmentAnalytics,
     HierarchyAnalytics,
     OrgDepartment,
+    OrgTestTemplate,
+    OverhaulRecommendation,
     ParameterAnalytics,
+    RepairWorkflow,
     TestAnalytics,
     TestResult,
     TestingRequest,
@@ -110,6 +113,7 @@ def get_asset_breakdown(
       - dept_equipment_counts: { "<dept-id>": 120, ... }  (direct children)
       - total             : total equipment count in scope
     """
+    org_id   = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
     dept_ids = _collect_department_ids(department_id, db) if department_id else None
 
     # Resolve Testing Kit category IDs to exclude from asset counts
@@ -122,6 +126,8 @@ def get_asset_breakdown(
 
     # Active equipment — split into real assets vs test kits
     active_q = db.query(Equipment).filter(Equipment.status != "retired")
+    if org_id:
+        active_q = active_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
         active_q = active_q.filter(Equipment.department_id.in_(dept_ids))
     _all_active: list[Equipment] = active_q.all()
@@ -308,9 +314,12 @@ def get_analytics_dashboard(
       - department_scores  : one-level child breakdown (for drill-down)
     """
     # ── 1. Resolve equipment IDs in scope ────────────────────────────────────
+    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
     dept_ids = _collect_department_ids(department_id, db) if department_id else None
 
     eq_query = db.query(EquipmentAnalytics)
+    if org_id:
+        eq_query = eq_query.filter(EquipmentAnalytics.organization_id == org_id)
     if dept_ids:
         eq_query = eq_query.filter(EquipmentAnalytics.department_id.in_(dept_ids))
     all_ea: list[EquipmentAnalytics] = eq_query.all()
@@ -321,6 +330,8 @@ def get_analytics_dashboard(
 
     # All equipment IDs in scope (from Equipment table — includes untested equipment)
     _scope_eq_q = db.query(Equipment.id).filter(Equipment.status != "retired")
+    if org_id:
+        _scope_eq_q = _scope_eq_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
         _scope_eq_q = _scope_eq_q.filter(Equipment.department_id.in_(dept_ids))
     all_scope_eq_ids: set = {row[0] for row in _scope_eq_q.all()}
@@ -581,28 +592,21 @@ def get_analytics_dashboard(
         )
     else:
         # No dept selected: return root departments (parent_department_id IS NULL)
-        child_ha_rows = (
-            db.query(HierarchyAnalytics)
-            .filter(HierarchyAnalytics.parent_department_id.is_(None))
-            .all()
+        _scope_org_id = org_id  # use authenticated user's org directly
+        _ha_q = db.query(HierarchyAnalytics).filter(
+            HierarchyAnalytics.parent_department_id.is_(None)
         )
-        # Determine org from scope equipment (or dept_obj if available)
-        _org_id = None
-        if dept_obj:
-            _org_id = dept_obj.organization_id
-        else:
-            _sample = db.query(Equipment.organization_id).filter(
-                Equipment.id.in_(list(all_scope_eq_ids)[:1])
-            ).scalar() if all_scope_eq_ids else None
-            _org_id = _sample
+        if _scope_org_id:
+            _ha_q = _ha_q.filter(HierarchyAnalytics.organization_id == _scope_org_id)
+        child_ha_rows = _ha_q.all()
         all_child_depts = (
             db.query(OrgDepartment)
             .filter(
                 OrgDepartment.parent_department_id.is_(None),
-                OrgDepartment.organization_id == _org_id,
+                OrgDepartment.organization_id == _scope_org_id,
             )
             .all()
-        ) if _org_id else []
+        ) if _scope_org_id else []
 
     # Build lookup from HierarchyAnalytics by department_id
     ha_map: dict = {c.department_id: c for c in child_ha_rows}
@@ -743,10 +747,36 @@ def recompute_all_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
-    """Re-runs score_test + equipment aggregation for every TestResult in the DB.
+    """Re-runs score_test + equipment aggregation for every submitted TestResult in the DB.
+    Skips results whose testing request is still in draft/in-progress/assigned state.
     Use after changing the scoring formula to backfill historical scores."""
-    from models import TestResult
+    from models import TestResult, TestingRequest, TestingRequestStatus, TrWfInstance
+    from sqlalchemy import or_
+
+    _SKIP_STATUSES = {
+        TestingRequestStatus.draft,
+        TestingRequestStatus.submitted,
+        TestingRequestStatus.assigned,
+        TestingRequestStatus.accepted,
+        TestingRequestStatus.in_progress,
+    }
+
+    # Collect IDs of TRs that are wf-active (not yet completed)
+    wf_active_ids = {
+        row.testing_request_id
+        for row in db.query(TrWfInstance.testing_request_id).filter(
+            TrWfInstance.status == "active"
+        ).all()
+    }
+
     results = db.query(TestResult).all()
+    # Filter: only run on results whose TR is in a terminal/submitted state
+    results = [
+        r for r in results
+        if r.testing_request
+        and r.testing_request.status not in _SKIP_STATUSES
+        and r.testing_request_id not in wf_active_ids
+    ]
     engine  = AnalyticsEngine(db)
     done, failed = 0, 0
     for tr in results:
@@ -1098,9 +1128,35 @@ def get_equipment_test_history(
       - template_key, tested_at, health_score, risk_level, critical_findings
       - links.analytics, links.raw
     """
+    from models import TestResult as _TR2, TestingRequest as _TReq, TestingRequestStatus as _TRS, TrWfInstance as _TWI
+    from sqlalchemy import or_ as _or
+
+    _SKIP = [
+        _TRS.draft, _TRS.submitted, _TRS.assigned,
+        _TRS.accepted, _TRS.in_progress,
+    ]
+    # Sub-select: test_result_ids whose TR is closed/completed
+    _wf_done = db.query(_TWI.testing_request_id).filter(
+        _TWI.status.in_(["completed", "terminated"])
+    ).scalar_subquery()
+    _closed_result_ids = (
+        db.query(_TR2.id)
+        .join(_TReq, _TR2.testing_request_id == _TReq.id)
+        .filter(
+            _or(
+                _TReq.status.notin_(_SKIP),
+                _TReq.id.in_(_wf_done),
+            )
+        )
+        .scalar_subquery()
+    )
+
     q = (
         db.query(TestAnalytics)
-        .filter(TestAnalytics.equipment_id == equipment_id)
+        .filter(
+            TestAnalytics.equipment_id == equipment_id,
+            TestAnalytics.test_result_id.in_(_closed_result_ids),
+        )
         .order_by(TestAnalytics.calculated_at.desc())
     )
     if template_key:
@@ -1269,10 +1325,109 @@ def get_parameter_history(
         for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
     }
 
-    return [
-        _serialize_parameter_history_point(row, results_map.get(row.test_result_id))
-        for row in rows
-    ]
+    # For cumulative templates (OLTC ops, CB ops): derive condition from the
+    # running cumulative diff at each reading vs the overhaul threshold.
+    # This is exactly the same logic that triggers the workflow ticket.
+    cumulative_condition_map: dict = {}
+    cumulative_raw_readings: list = []
+    cumulative_equipment_id = None
+    if rows:
+        tpl_key = rows[0].template_key
+        tpl_row = (
+            db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.template_key == tpl_key)
+            .first()
+        )
+        tpl_data = tpl_row.template_data if tpl_row else {}
+        if tpl_data.get("enable_cumulative"):
+            rules = tpl_data.get("rules", [])
+            threshold = next(
+                (r["config"].get("default_threshold")
+                 for r in rules if r.get("type") == "CUMULATIVE_DIFF"),
+                None,
+            )
+            if threshold:
+                # Build readings list ordered by reading_date
+                raw_readings = []
+                for row in rows:
+                    tr = results_map.get(row.test_result_id)
+                    td = (tr.test_data or {}) if tr else {}
+                    reading_val = td.get("reading")
+                    order_val   = td.get("reading_date") or (tr.cts.isoformat() if tr and tr.cts else "")
+                    if reading_val is not None:
+                        eq_id = getattr(tr, "equipment_id", None)
+                        if eq_id and not cumulative_equipment_id:
+                            cumulative_equipment_id = eq_id
+                        raw_readings.append({
+                            "result_id":    row.test_result_id,
+                            "reading_time": order_val,
+                            "reading":      float(reading_val),
+                        })
+                raw_readings.sort(key=lambda x: x["reading_time"])
+                cumulative_raw_readings = raw_readings
+                # Running cumulative diff with reset on drop (same as CumulativeService)
+                running  = 0.0
+                prev_val = None
+                for pt in raw_readings:
+                    val = pt["reading"]
+                    if prev_val is not None:
+                        diff = val - prev_val
+                        if diff > 0:
+                            running += diff
+                        elif diff < 0:
+                            running = 0.0  # counter reset after overhaul
+                    prev_val = val
+                    pct = running / threshold
+                    cond = "Poor" if pct >= 1.0 else "Fair" if pct >= 0.7 else "Good"
+                    cumulative_condition_map[pt["result_id"]] = (cond, round(running, 1))
+
+    # Build overhaul ticket map: result_id → (workflow_number, rec_status)
+    overhaul_ticket_map: dict = {}
+    if cumulative_condition_map and cumulative_equipment_id:
+        overhaul_recs = (
+            db.query(OverhaulRecommendation, RepairWorkflow)
+            .outerjoin(RepairWorkflow, RepairWorkflow.id == OverhaulRecommendation.workflow_id)
+            .filter(OverhaulRecommendation.equipment_id == cumulative_equipment_id)
+            .order_by(OverhaulRecommendation.triggered_at)
+            .all()
+        )
+        if overhaul_recs:
+            rec_timeline = [
+                {
+                    "triggered_at": rec.triggered_at,
+                    "workflow_number": wf.workflow_number if wf else None,
+                    "status": rec.status,
+                }
+                for rec, wf in overhaul_recs
+            ]
+            for pt_dict in cumulative_raw_readings:
+                rid = pt_dict["result_id"]
+                if cumulative_condition_map.get(rid, ("Good", 0))[0] != "Poor":
+                    continue
+                reading_time_str = pt_dict.get("reading_time", "")
+                matched = None
+                for rec_entry in rec_timeline:
+                    ta = rec_entry["triggered_at"]
+                    ta_str = ta.isoformat() if ta else ""
+                    if ta_str <= reading_time_str:
+                        matched = rec_entry
+                if matched:
+                    overhaul_ticket_map[rid] = (matched["workflow_number"], matched["status"])
+
+    points = []
+    for row in rows:
+        tr  = results_map.get(row.test_result_id)
+        pt  = _serialize_parameter_history_point(row, tr)
+        if row.test_result_id in cumulative_condition_map:
+            cond, cum_val = cumulative_condition_map[row.test_result_id]
+            pt["condition"]        = cond
+            pt["cumulative_value"] = cum_val
+        if row.test_result_id in overhaul_ticket_map:
+            wf_num, rec_status = overhaul_ticket_map[row.test_result_id]
+            pt["overhaul_ticket_number"] = wf_num
+            pt["overhaul_ticket_status"] = rec_status
+        points.append(pt)
+    return points
 
 
 # ─────────────────────────────────────────────────────────────────────────────

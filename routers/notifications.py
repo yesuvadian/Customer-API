@@ -1360,7 +1360,7 @@ class RoutingRuleCreate(BaseModel):
     applicable_test_types:      List[str] = Field(default=[], description="Empty = all test categories")
     applicable_status_from: Optional[str] = None
     applicable_status_to:   Optional[str] = None
-    channels_enabled:    List[str] = Field(default=["email", "sms", "inapp"])
+    channels_enabled:    List[str] = Field(default=["inapp"])
     recipient_roles_override: Optional[List[str]] = None
     priority: int = Field(default=10, description="Higher priority wins. Default 10 for org rules.")
     followup_action: Optional[dict] = None  # auto follow-up ticket on alert/critical
@@ -1446,20 +1446,20 @@ def _get_stages_by_workflow(db: Session) -> dict:
     - repair_lifecycle uses RepairStageDefinition names from DB.
     - Equipment and standalone types get their own fixed event stages.
     """
-    from models import RepairStageDefinition
+    from models import RepairStageDefinition, TrWfStatus
 
-    tr_statuses = [
-        {"value": "submitted",       "label": "Submitted"},
-        {"value": "assigned",        "label": "Assigned"},
-        {"value": "accepted",        "label": "Accepted"},
-        {"value": "in_progress",     "label": "In Progress"},
-        {"value": "under_review",    "label": "Under Review"},
-        {"value": "test_submitted",  "label": "Test Submitted"},
-        {"value": "under_approval",  "label": "Under Approval"},
-        {"value": "approved",        "label": "Approved"},
-        {"value": "rejected",        "label": "Rejected"},
-        {"value": "completed",       "label": "Completed"},
-    ]
+    # Load live statuses from all active TR workflow definitions (deduplicated by status_code)
+    seen_codes: set = set()
+    tr_statuses = []
+    for s in (
+        db.query(TrWfStatus)
+        .filter(TrWfStatus.is_active.is_(True))
+        .order_by(TrWfStatus.sequence)
+        .all()
+    ):
+        if s.status_code not in seen_codes:
+            seen_codes.add(s.status_code)
+            tr_statuses.append({"value": s.status_code, "label": s.status_name})
 
     repair_stages = [
         {"value": s.name, "label": s.name}
@@ -1775,7 +1775,7 @@ def update_routing_rule(
             channels_enabled=(
                 data.channels_enabled
                 if data.channels_enabled is not None
-                else list(rule.channels_enabled or ["email", "sms", "inapp"])
+                else list(rule.channels_enabled or ["inapp"])
             ),
             recipient_roles_override=(
                 data.recipient_roles_override
@@ -1929,7 +1929,7 @@ def clone_routing_rule_as_org_override(
         applicable_status_to=data.applicable_status_to or source.applicable_status_to,
         channels_enabled=data.channels_enabled
             if data.channels_enabled is not None
-            else list(source.channels_enabled or ["email", "sms", "inapp"]),
+            else list(source.channels_enabled or ["inapp"]),
         recipient_roles_override=data.recipient_roles_override or source.recipient_roles_override,
         advanced_conditions=data.advanced_conditions if data.advanced_conditions is not None else source.advanced_conditions,
         followup_action=data.followup_action if data.followup_action is not None else source.followup_action,

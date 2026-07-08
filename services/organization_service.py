@@ -88,6 +88,9 @@ class OrganizationService(UTCDateTimeMixin):
             # 2b. Clone PermissionMatrix entries so new org gets workflow permissions
             self._provision_workflow_permissions(org.id, default_roles)
 
+            # 2c. Provision all stage workflows for new org
+            self._provision_all_workflows(org.id)
+
             # 3. Create admin user
             admin_user = User(
                 email=admin_email,
@@ -138,12 +141,12 @@ class OrganizationService(UTCDateTimeMixin):
 
     def _provision_default_roles(self, org_id: UUID) -> List[OrgRole]:
         """
-        Provision default roles from templates for a new organization.
+        Provision default roles for a new org from RoleTemplate (auto_provision=True).
+        All canonical roles live in role_templates — KPTCL is a customer org, not a template.
         """
         templates = self.db.query(RoleTemplate)\
             .filter(RoleTemplate.auto_provision == True)\
             .all()
-
         roles = []
         for template in templates:
             role = OrgRole(
@@ -159,11 +162,9 @@ class OrganizationService(UTCDateTimeMixin):
             )
             self.db.add(role)
             self.db.flush()
-
-            # Create permissions from template
             if template.permissions_template:
                 for perm_data in template.permissions_template:
-                    permission = OrgRolePermission(
+                    self.db.add(OrgRolePermission(
                         org_role_id=role.id,
                         module_id=perm_data.get("module_id"),
                         can_view=perm_data.get("can_view", False),
@@ -176,11 +177,8 @@ class OrganizationService(UTCDateTimeMixin):
                         can_import=perm_data.get("can_import", False),
                         cts=self._utc_now(),
                         mts=self._utc_now()
-                    )
-                    self.db.add(permission)
-
+                    ))
             roles.append(role)
-
         return roles
 
     def _provision_workflow_permissions(self, org_id: UUID, new_roles: list) -> None:
@@ -251,6 +249,47 @@ class OrganizationService(UTCDateTimeMixin):
                         ))
         except Exception as e:
             print(f"[WARN] _provision_workflow_permissions failed: {e}")
+
+    def _provision_all_workflows(self, org_id: UUID) -> None:
+        """
+        Provision all stage workflows for a new org.
+        Each seed function is org-aware and idempotent.
+        """
+        import traceback
+        from models import Organization as OrgModel
+
+        org = self.db.query(OrgModel).filter_by(id=org_id).first()
+
+        def _run(label, fn, *args, **kwargs):
+            try:
+                fn(*args, **kwargs)
+                print(f"[INFO] {label} provisioned for org {org_id}")
+            except Exception as e:
+                print(f"[WARN] {label} failed (non-fatal): {e}\n{traceback.format_exc()}")
+
+        from seed_tr_wf_workflow import seed_tr_wf_workflow
+        _run("TR workflow", seed_tr_wf_workflow, self.db, org=org)
+
+        from seed_overhaul_workflow import seed_overhaul_role_mappings
+        _run("Overhaul role mappings", seed_overhaul_role_mappings, self.db, org_id)
+
+        from seed_calibration_workflow import seed_calibration_role_mappings
+        _run("Calibration role mappings", seed_calibration_role_mappings, self.db, org_id)
+
+        from seed_surveillance_workflow import seed_surveillance_role_mappings
+        _run("Surveillance role mappings", seed_surveillance_role_mappings, self.db, org_id)
+
+        from seed_precommission_workflow import seed_precommission_role_mappings
+        _run("Pre-commission role mappings", seed_precommission_role_mappings, self.db, org_id)
+
+        from seed_annual_audit import seed_annual_audit_role_mappings
+        _run("Annual audit role mappings", seed_annual_audit_role_mappings, self.db, org_id)
+
+        from seed_doc_support_workflow import seed_doc_support_workflow
+        _run("Doc support workflow", seed_doc_support_workflow, self.db, org=org)
+
+        from seed_repair_workflow import seed_repair_role_mappings
+        _run("Repair role mappings", seed_repair_role_mappings, self.db, org_id)
 
     def get_organization(self, org_id: UUID) -> Optional[Organization]:
         """Get organization by ID."""

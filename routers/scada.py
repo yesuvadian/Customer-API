@@ -252,7 +252,7 @@ def list_readings(
     db:              Session          = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user.organization_id)
+    org_id = user.organization_id
     q = db.query(ScadaReading).filter(ScadaReading.organization_id == org_id)
     if equipment_id:
         q = q.filter(ScadaReading.equipment_id == equipment_id)
@@ -331,7 +331,7 @@ def equipment_analytics(
     user: User         = Depends(get_current_user),
 ):
     """Analytics summary for all tags of one equipment."""
-    org_id = UUID(user.organization_id)
+    org_id = user.organization_id
     rows = (
         db.query(ScadaParameterAnalytics)
         .filter(
@@ -424,7 +424,7 @@ def list_alert_rules(
     db:           Session        = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user.organization_id)
+    org_id = user.organization_id
     q = db.query(ScadaAlertRule).filter(
         ScadaAlertRule.organization_id == org_id,
         ScadaAlertRule.is_active == True,
@@ -456,7 +456,7 @@ def create_alert_rule(
     db:        Session = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user.organization_id)
+    org_id = user.organization_id
     if not body.equipment_id and not body.equipment_type_id:
         raise HTTPException(400, "Provide equipment_id or equipment_type_id")
     rule = ScadaAlertRule(
@@ -488,7 +488,7 @@ def update_alert_rule(
     db:        Session = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user.organization_id)
+    org_id = user.organization_id
     rule = db.query(ScadaAlertRule).filter(
         ScadaAlertRule.id == rule_id,
         ScadaAlertRule.organization_id == org_id,
@@ -509,7 +509,7 @@ def deactivate_alert_rule(
     db:        Session = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user.organization_id)
+    org_id = user.organization_id
     rule = db.query(ScadaAlertRule).filter(
         ScadaAlertRule.id == rule_id,
         ScadaAlertRule.organization_id == org_id,
@@ -528,7 +528,7 @@ def list_tag_map(
     db:        Session = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user.organization_id)
+    org_id = user.organization_id
     rows = db.query(ScadaTagMap).filter(
         ScadaTagMap.organization_id == org_id,
         ScadaTagMap.is_active == True,
@@ -604,7 +604,7 @@ def list_unresolved(
     db:        Session = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
-    org_id = UUID(user.organization_id)
+    org_id = user.organization_id
     rows = db.query(ScadaUnresolved).filter(
         ScadaUnresolved.organization_id == org_id,
         ScadaUnresolved.resolved == False,
@@ -630,7 +630,7 @@ def trigger_analytics_run(
     user: User         = Depends(get_current_user),
 ):
     """Manually trigger the scheduled analytics runner for this org."""
-    org_id = UUID(user.organization_id)
+    org_id = user.organization_id
 
     def _run():
         from database import get_vendor_db

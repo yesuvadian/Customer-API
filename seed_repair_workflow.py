@@ -10,7 +10,7 @@ from models import (
     RepairStageTransition,
     OrgRole,
     CategoryMaster,
-    CategoryDetail
+    CategoryDetails
 )
 
 
@@ -25,7 +25,7 @@ def seed_all(db, templates, stages, roles, transitions):
     for key, t in templates.items():
 
         category = db.query(CategoryMaster).filter_by(code=t["category_code"]).first()
-        category_detail = db.query(CategoryDetail).filter_by(code=t["category_detail_code"]).first()
+        category_detail = db.query(CategoryDetails).filter_by(code=t["category_detail_code"]).first()
 
         existing = db.query(OrgTestTemplate).filter_by(template_key=key).first()
 
@@ -105,3 +105,48 @@ def seed_all(db, templates, stages, roles, transitions):
     db.commit()
 
     print("✅ FULL WORKFLOW SEEDED")
+
+def seed_repair_role_mappings(db, org_id) -> int:
+    """
+    Org-specific repair stage role mappings.
+    Wires the org's OrgRoles to the global RepairStageDefinitions by name.
+    Safe to call multiple times (skips existing mappings via UniqueConstraint).
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    ROLE_STAGE_MAP = [
+        ("AE_JE",                    ["RECEIPT", "PRELIMINARY_TEST", "ACTIVE_REPAIR", "FINAL_TEST"]),
+        ("AEE_MAINTENANCE",          ["RECEIPT", "PRELIMINARY_TEST", "ACTIVE_REPAIR", "FINAL_TEST", "DISPATCH"]),
+        ("EE_TLSS",                  ["DISPATCH"]),
+        ("EE_RT",                    ["DISPATCH"]),
+        ("Test & Work Coordinator",  ["RECEIPT", "DISPATCH"]),
+        ("Transformer Repair Coordinator", ["RECEIPT", "ACTIVE_REPAIR", "DISPATCH"]),
+    ]
+
+    stages = {s.code: s.id for s in db.query(RepairStageDefinition).all()}
+    org_roles = {r.name: r.id for r in db.query(OrgRole).filter_by(organization_id=org_id).all()}
+
+    upserted = 0
+    for role_name, stage_codes in ROLE_STAGE_MAP:
+        role_id = org_roles.get(role_name)
+        if not role_id:
+            continue
+        for code in stage_codes:
+            stage_id = stages.get(code)
+            if not stage_id:
+                continue
+            exists = db.query(RepairStageRole).filter_by(
+                stage_id=stage_id, role_id=role_id
+            ).first()
+            if not exists:
+                db.add(RepairStageRole(
+                    stage_id=stage_id,
+                    role_id=role_id,
+                    can_edit=True,
+                    can_approve=True,
+                ))
+                upserted += 1
+
+    db.flush()
+    print(f"[OK] Repair role mappings: {upserted} added for org {org_id}")
+    return upserted

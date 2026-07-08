@@ -176,10 +176,10 @@ class EquipmentService:
           - Substation department (depth=3) must have a 4-char code
         """
         zone_dept = cls._get_department_ancestor(db, department_id, target_level=0)
-        if not zone_dept or not zone_dept.code or len(zone_dept.code) != 2:
+        if not zone_dept or not zone_dept.code:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Zone department has invalid code '{getattr(zone_dept, 'code', None)}' — must be exactly 2 characters. Update OrgDepartment.code before registering equipment.",
+                detail=f"Zone department has no code set. Update OrgDepartment.code before registering equipment.",
             )
 
         substation = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
@@ -189,7 +189,7 @@ class EquipmentService:
                 detail=f"Department '{department_id}' not found.",
             )
 
-        zone_code = zone_dept.code.upper()
+        zone_code = zone_dept.code.upper()[:2]
 
         if substation.code and len(substation.code) == 4:
             substation_code = substation.code.upper()

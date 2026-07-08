@@ -14,7 +14,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 from database import get_db
 from middleware.org_auth import require_org_member, require_org_admin
-from models import User, OrgRole
+from models import User, OrgRole, OrgUserRole, OrgDepartment
 from schemas import (
     OrgUserCreate,
     OrgUserUpdate,
@@ -38,70 +38,118 @@ router = APIRouter(
 def download_bulk_import_schema(
     org_id: UUID,
     department_name: Optional[str] = None,
+    export_existing: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_org_member)
 ):
     """
     Download an Excel template for bulk user import.
-    Sheet 1 'Users': headers + example row.
-    Sheet 2 'Available Roles': lists all role names in the org.
+    Pass ?export_existing=true to pre-fill with all current users (email, name,
+    phone, employee_id, department, role) so you can review or extend them.
+    Sheet 2 'Available Roles' always lists current org roles.
     """
     wb = openpyxl.Workbook()
 
-    # ── Sheet 1: Users template ────────────────────────────────────────────
+    HEADERS = ["email", "firstname", "lastname", "phone_number",
+               "employee_id", "department_name", "role_name"]
+
+    header_fill   = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
+    header_font   = Font(bold=True, color="FFFFFF")
+    existing_fill = PatternFill(start_color="F0FFF4", end_color="F0FFF4", fill_type="solid")
+    example_font  = Font(color="6B7280")
+
+    # ── Sheet 1: Users ─────────────────────────────────────────────────────
     ws = wb.active
     ws.title = "Users"
 
-    headers = ["email", "firstname", "lastname", "phone_number",
-               "employee_id", "department_name", "role_name"]
-
-    header_fill = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF")
-
-    for col_idx, header in enumerate(headers, start=1):
+    for col_idx, header in enumerate(HEADERS, start=1):
         cell = ws.cell(row=1, column=col_idx, value=header)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center")
-        ws.column_dimensions[cell.column_letter].width = 22
+        ws.column_dimensions[cell.column_letter].width = 26
 
-    # Example row in grey (pre-fill department if provided)
-    example = ["user@example.com", "John", "Doe", "+919876543210",
-               "EMP001", department_name or "Bagalkot Zone", "Field Engineer"]
-    example_font = Font(color="6B7280")
-    for col_idx, value in enumerate(example, start=1):
-        cell = ws.cell(row=2, column=col_idx, value=value)
-        cell.font = example_font
+    if export_existing:
+        # Build lookup maps
+        dept_map  = {d.id: d.name for d in db.query(OrgDepartment).filter_by(
+            organization_id=org_id, is_active=True).all()}
+        role_map  = {r.id: r.name for r in db.query(OrgRole).filter_by(
+            organization_id=org_id, is_active=True).all()}
+
+        # Fetch every user in the org with their primary role assignment
+        users = db.query(User).filter_by(
+            organization_id=org_id, isactive=True).order_by(User.email).all()
+
+        if users:
+            # Build user→(dept, role) from OrgUserRole — take the first active one per user
+            user_role_rows = (
+                db.query(OrgUserRole)
+                .filter(OrgUserRole.org_role_id.in_(list(role_map.keys())),
+                        OrgUserRole.is_active == True)
+                .all()
+            )
+            user_to_dept  = {}
+            user_to_role  = {}
+            for ur in user_role_rows:
+                uid = str(ur.user_id)
+                if uid not in user_to_role:
+                    user_to_role[uid] = role_map.get(ur.org_role_id, "")
+                    user_to_dept[uid] = dept_map.get(ur.department_id, "") if ur.department_id else ""
+
+            for row_num, u in enumerate(users, start=2):
+                uid = str(u.id)
+                row_data = [
+                    u.email or "",
+                    u.firstname or "",
+                    u.lastname or "",
+                    u.phone_number or "",
+                    u.employee_id or "",
+                    user_to_dept.get(uid, ""),
+                    user_to_role.get(uid, ""),
+                ]
+                for col_idx, val in enumerate(row_data, start=1):
+                    cell = ws.cell(row=row_num, column=col_idx, value=val)
+                    cell.fill = existing_fill
+                    cell.font = Font(name="Arial", size=10)
+        else:
+            # No users yet — show example row
+            _write_example_row(ws, department_name, example_font)
+    else:
+        _write_example_row(ws, department_name, example_font)
 
     # ── Sheet 2: Available Roles ───────────────────────────────────────────
     ws_roles = wb.create_sheet("Available Roles")
-    role_header_cell = ws_roles.cell(row=1, column=1,
-                                      value="Role Name (use exactly as shown)")
-    role_header_cell.fill = header_fill
-    role_header_cell.font = header_font
+    ws_roles.cell(row=1, column=1, value="Role Name (use exactly as shown)").fill = header_fill
+    ws_roles.cell(row=1, column=1).font = header_font
     ws_roles.column_dimensions["A"].width = 38
 
     roles = db.query(OrgRole).filter(
-        OrgRole.organization_id == org_id,
-        OrgRole.is_active == True
+        OrgRole.organization_id == org_id, OrgRole.is_active == True
     ).order_by(OrgRole.name).all()
 
     for row_idx, role in enumerate(roles, start=2):
         ws_roles.cell(row=row_idx, column=1, value=role.name)
-
     if not roles:
         ws_roles.cell(row=2, column=1, value="(No roles created yet)")
 
-    # ── Stream response ────────────────────────────────────────────────────
+    # ── Stream ─────────────────────────────────────────────────────────────
+    filename = "users_export.xlsx" if export_existing else "bulk_users_import_schema.xlsx"
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=bulk_users_import_schema.xlsx"}
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+def _write_example_row(ws, department_name, font):
+    example = ["user@example.com", "John", "Doe", "+919876543210",
+               "EMP001", department_name or "Bagalkot Zone", "Field Engineer"]
+    for col_idx, value in enumerate(example, start=1):
+        cell = ws.cell(row=2, column=col_idx, value=value)
+        cell.font = font
 
 
 @router.post("/bulk-import", response_model=BulkUserImportResponse)

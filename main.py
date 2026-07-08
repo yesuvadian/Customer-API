@@ -126,6 +126,8 @@ from routers import scada as scada_router               # SCADA Integration
 from routers import tr_workflow_config as tr_wf_config_router  # TR Configurable Workflow Admin
 from routers import doc_support as doc_support_router          # Document Support Workflow
 from routers import file_upload as file_upload_router          # Generic file upload
+from routers.public_registration import router as public_reg_router  # Org self-registration
+from routers import billing as billing_router                          # Razorpay billing
 
 # Workflow Engine
 from routers import workflows
@@ -253,6 +255,73 @@ scheduler.add_job(
     trigger="interval",
     minutes=5,
     id="notification_retry_job",
+    max_instances=1,
+    coalesce=True,
+)
+
+
+# ── Trial expiry check (runs daily at 01:00 UTC) ──────────────────────────────
+def _check_trial_expiry():
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    try:
+        from models import Organization, SystemConfig, User
+        from utils.email_service import EmailService
+        import os
+
+        now = datetime.now(timezone.utc)
+        alert_row = db.query(SystemConfig).filter(SystemConfig.key == "trial_alert_days").first()
+        alert_days = int(alert_row.value) if alert_row else 7
+        login_url = os.getenv("BASE_URL", "http://localhost:3000")
+        email_svc = EmailService()
+
+        active_trials = db.query(Organization).filter(
+            Organization.is_trial == True,
+            Organization.trial_status == "active",
+            Organization.trial_end_date != None,
+        ).all()
+
+        for org in active_trials:
+            delta = (org.trial_end_date - now).days
+
+            if delta < 0:
+                # Expire
+                org.trial_status = "expired"
+                logger.info(f"[Trial] Expired org={org.id} name={org.name}")
+
+            elif delta <= alert_days:
+                # Send alert email to org admin
+                admin = db.query(User).filter(
+                    User.organization_id == org.id,
+                    User.isactive == True,
+                    User.usertype == "org_admin",
+                ).first()
+                if admin:
+                    try:
+                        email_svc.send_trial_expiry_alert(
+                            to_email=admin.email,
+                            admin_firstname=admin.firstname or "Admin",
+                            org_name=org.name,
+                            days_remaining=max(0, delta),
+                            login_url=login_url,
+                        )
+                        logger.info(f"[Trial] Alert sent org={org.id} days_remaining={delta}")
+                    except Exception as e:
+                        logger.error(f"[Trial] Alert email failed org={org.id}: {e}")
+
+        db.commit()
+    except Exception as e:
+        logger.error(f"[Trial] Expiry job error: {e}")
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_trial_expiry,
+    trigger="cron",
+    hour=1,
+    minute=0,
+    id="trial_expiry_job",
     max_instances=1,
     coalesce=True,
 )
@@ -953,6 +1022,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Payment-Token", "X-Org-Name"],
 )
 
 # ── Global Middleware ─────────────────────────────────────────────────────────
@@ -1106,6 +1176,10 @@ app.include_router(vendor_directory_router)
 app.include_router(doc_support_router.router)
 app.include_router(file_upload_router.router)
 
+# Public (no-auth) routes
+app.include_router(public_reg_router)
+app.include_router(billing_router.router)         # Razorpay billing
+
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
@@ -1152,13 +1226,12 @@ async def startup_event():
     # Seed DFR + Tan-Delta/IDAX templates — idempotent upsert on every restart
     try:
         _db = SessionLocal()
-        from seed import seed_dfr_template, seed_tan_delta_templates
-        seed_dfr_template(_db)
-        seed_tan_delta_templates(_db)
+
+        # Template seeding disabled
+
         _db.close()
-        logger.info("[Seed] DFR + Tan-Delta/IDAX templates upserted on startup")
     except Exception as _e:
-        logger.warning(f"[Seed] DFR/Tan-Delta template seed failed on startup (non-fatal): {_e}")
+        logger.warning(f"...")
 
     # Seed all notification defaults (event catalogue, variables, templates,
     # schedule rules, routing rules) — idempotent, safe to run on every restart
