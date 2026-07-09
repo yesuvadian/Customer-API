@@ -1644,7 +1644,7 @@ class Equipment(Base):
     # UEIC components
     voltage_class = Column(String(20), nullable=True)   # "400", "220", "110", "66", "400/220/33"
     bay_number = Column(String(255), nullable=True)      # bay name text, e.g. "Hoody-Begur line"
-    serial_in_bay = Column(String(10), nullable=True)    # "01"
+    serial_in_bay = Column(String(150), nullable=True) 
 
     # Nameplate data — dynamic JSONB (template-driven, same pattern as OrgTestTemplate)
     nameplate_data = Column(JSONB, nullable=True)
