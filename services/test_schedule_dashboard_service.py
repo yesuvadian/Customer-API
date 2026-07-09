@@ -233,12 +233,19 @@ class TestScheduleDashboardService:
                 if _STATUS_PRIORITY[status] > _STATUS_PRIORITY[worst_status]:
                     worst_status = status
 
+                end_date_val = sched.end_date
+                end_date_str = None
+                if end_date_val:
+                    end_d = end_date_val.date() if isinstance(end_date_val, datetime) else end_date_val
+                    end_date_str = end_d.isoformat()
+
                 cells[str(tid)] = {
                     "next_due":      next_date.isoformat() if next_date else None,
                     "days_until_due": days,
                     "last_tested":   last_tested_str,
                     "status":        status,
                     "frequency":     sched.frequency.value if sched.frequency else None,
+                    "end_date":      end_date_str,
                 }
 
             health = _health_index(cells)
@@ -262,7 +269,34 @@ class TestScheduleDashboardService:
         # 7. KPIs
         kpis = self._compute_kpis(rows, columns)
 
-        return {"columns": columns, "kpis": kpis, "rows": rows}
+        # 8. Upcoming schedule counts per time window
+        # Counts distinct schedules that have next_run_date within each window
+        # and whose end_date (if set) has not already passed.
+        today_dt = self._today
+        d30 = d180 = d365 = 0
+        for s in schedules:
+            nr = s.next_run_date
+            if not nr:
+                continue
+            nr_date = nr.date() if isinstance(nr, datetime) else nr
+            days = (nr_date - today_dt).days
+            if days < 0:
+                continue  # overdue — not "upcoming"
+            # Clamp: if next_run is beyond end_date, no valid run
+            if s.end_date:
+                end_d = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
+                if nr_date > end_d:
+                    continue
+            if days <= 30:
+                d30 += 1
+            if days <= 180:
+                d180 += 1
+            if days <= 365:
+                d365 += 1
+
+        upcoming_counts = {"30": d30, "180": d180, "365": d365}
+
+        return {"columns": columns, "kpis": kpis, "rows": rows, "upcoming_counts": upcoming_counts}
 
     # ─────────────────────────────────────────────────────────────
     # Public — equipment detail (upcoming + recent)
