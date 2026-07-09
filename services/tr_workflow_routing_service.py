@@ -646,6 +646,39 @@ class WorkflowRoutingService:
         except Exception as _n_err:  # never let notification failure kill the workflow
             log.warning("TR-WF notification failed (non-fatal): %s", _n_err)
 
+        # ── Terminal: close the TestingRequest ─────────────────────────────
+        # When the WF instance reaches a terminal state, sync the TR status.
+        # For non-rejection terminals (complete/close) also auto-dispatch any
+        # pending recommendation so that follow-up actions (schedules, etc.) fire.
+        if is_terminal:
+            from models import TestingRequestStatus as _TRS, Recommendation as _Rec
+            from datetime import datetime as _dt, timezone as _tz
+            if transition.is_rejection:
+                testing_request.status = _TRS.closed
+            else:
+                # Check for pending recommendation → dispatch (handles outcome)
+                rec = (
+                    self.db.query(_Rec)
+                    .filter(_Rec.testing_request_id == testing_request.id)
+                    .order_by(_Rec.created_at.desc())
+                    .first()
+                )
+                if rec and rec.approval_status == "pending":
+                    rec.approval_status = "approved"
+                    rec.approved_by = performed_by_id
+                    rec.approved_at = _dt.now(_tz.utc)
+                    self.db.flush()
+                    try:
+                        from services.workflow_dispatch_service import WorkflowDispatchService
+                        WorkflowDispatchService(self.db).dispatch(testing_request, rec, performed_by_id)
+                    except Exception as _de:
+                        log.warning("Dispatch after terminal action failed (non-fatal): %s", _de)
+                        testing_request.status = _TRS.closed
+                        testing_request.completed_at = _dt.now(_tz.utc)
+                else:
+                    testing_request.status = _TRS.closed
+                    testing_request.completed_at = _dt.now(_tz.utc)
+
         return instance
 
     # ------------------------------------------------------------------
@@ -817,9 +850,15 @@ class WorkflowRoutingService:
                     if to_stage.status:
                         to_status_code = to_stage.status.status_code
 
+            # Prefer the transition's custom label; fall back to the action-code map.
+            display_label = (
+                t.label.strip()
+                if t.label and t.label.strip()
+                else ACTION_CODE_LABELS.get(t.action_code, t.action_code.replace("_", " ").title())
+            )
             result.append({
                 "action_code": t.action_code,
-                "label": ACTION_CODE_LABELS.get(t.action_code, t.action_code.replace("_", " ").title()),
+                "label": display_label,
                 "requires_comment": t.requires_comment,
                 "is_rejection": t.is_rejection,
                 "to_stage_id": t.to_stage_id,

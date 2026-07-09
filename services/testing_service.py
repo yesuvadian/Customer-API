@@ -323,16 +323,21 @@ class TestingService:
     def submit_test_results(self, request_id: UUID, tester_id: UUID, replacement_products=None) -> TestingRequest:
         request = self._get_request(request_id)
         _prev_status = request.status.value
-        if request.status not in (TestingRequestStatus.in_progress, TestingRequestStatus.test_submitted):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only in-progress or test_submitted requests can have results submitted",
-            )
-        if str(request.assigned_tester_id) != str(tester_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the assigned tester can submit results",
-            )
+
+        from models import RequestCategory as _RC
+        _is_fr = request.request_category == _RC.failure_registry
+
+        if not _is_fr:
+            if request.status not in (TestingRequestStatus.in_progress, TestingRequestStatus.test_submitted):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Only in-progress or test_submitted requests can have results submitted",
+                )
+            if str(request.assigned_tester_id) != str(tester_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only the assigned tester can submit results",
+                )
 
         results = self.get_test_results(request_id)
         if not results:
@@ -353,16 +358,18 @@ class TestingService:
             .filter(Recommendation.testing_request_id == request_id)
             .first()
         )
+        rec_obj = None
         if existing_rec:
             existing_rec.recommendation_type = rec_type
             existing_rec.summary = summary
             existing_rec.replacement_products = merged_products
             existing_rec.approval_status = "pending"
             existing_rec.modified_by = tester_id
+            rec_obj = existing_rec
         else:
-            recommendation = Recommendation(
+            rec_obj = Recommendation(
                 testing_request_id=request_id,
-                organization_id=request.organization_id,  # Auto-populate from testing_request
+                organization_id=request.organization_id,
                 recommendation_type=rec_type,
                 summary=summary,
                 detailed_notes=None,
@@ -372,25 +379,63 @@ class TestingService:
                 approval_status="pending",
                 created_by=tester_id,
             )
-            self.db.add(recommendation)
+            self.db.add(rec_obj)
 
-        # Multi-session check: only transition to under_approval if all sessions complete
-        if request.is_multi_session and request.total_sessions_planned:
-            # Count completed sessions for this request
-            completed_sessions = self.db.query(TestSession).filter(
-                TestSession.testing_request_id == request_id,
-                TestSession.status == "completed"
-            ).count()
+        # ── FR: check if current WF stage has only terminal transitions ──────────
+        # If every transition out of the current stage is terminal (no next stage),
+        # auto-complete the request now instead of parking it in under_approval.
+        if _is_fr and request.wf_instance_id:
+            from models import TrWfInstance, TrWfStage, TrWfStageTransition, TrWfStatus as _TrWfStatus
+            instance = self.db.query(TrWfInstance).filter(
+                TrWfInstance.id == request.wf_instance_id
+            ).first()
+            _auto_closed = False
+            if instance and instance.current_stage_id:
+                transitions = self.db.query(TrWfStageTransition).filter(
+                    TrWfStageTransition.from_stage_id == instance.current_stage_id
+                ).all()
+                all_terminal = transitions and all(t.to_stage_id is None for t in transitions)
+                if all_terminal:
+                    # Find the "complete" (non-rejection, non-cancel) terminal transition
+                    complete_t = next(
+                        (t for t in transitions
+                         if not t.is_rejection and t.action_code not in ('reject', 'cancel')),
+                        transitions[0],  # fallback to first if no clear complete action
+                    )
+                    # Apply terminal WF status
+                    if complete_t.terminal_status_id:
+                        term_status = self.db.query(_TrWfStatus).filter(
+                            _TrWfStatus.id == complete_t.terminal_status_id
+                        ).first()
+                        if term_status:
+                            request.current_status_code = term_status.status_code
+                            instance.current_stage_id = None
+                            instance.status = "completed"
+                    # Auto-approve the recommendation and dispatch
+                    self.db.flush()
+                    rec_obj.approval_status = "approved"
+                    rec_obj.approved_by = tester_id
+                    rec_obj.approved_at = UTCDateTimeMixin._utc_now()
+                    self.db.flush()
+                    from services.workflow_dispatch_service import WorkflowDispatchService
+                    WorkflowDispatchService(self.db).dispatch(request, rec_obj, tester_id)
+                    _auto_closed = True
 
-            # Only transition to approval if all sessions complete
-            if completed_sessions >= request.total_sessions_planned:
+            if not _auto_closed:
                 request.status = TestingRequestStatus.under_approval
+        elif not _is_fr:
+            # Multi-session check: only transition to under_approval if all sessions complete
+            if request.is_multi_session and request.total_sessions_planned:
+                completed_sessions = self.db.query(TestSession).filter(
+                    TestSession.testing_request_id == request_id,
+                    TestSession.status == "completed"
+                ).count()
+                if completed_sessions >= request.total_sessions_planned:
+                    request.status = TestingRequestStatus.under_approval
+                else:
+                    request.status = TestingRequestStatus.in_progress
             else:
-                # Keep in_progress - more sessions to complete
-                request.status = TestingRequestStatus.in_progress
-        else:
-            # Single-session: proceed to approval immediately
-            request.status = TestingRequestStatus.under_approval
+                request.status = TestingRequestStatus.under_approval
 
         request.modified_by = tester_id
         self.db.commit()
@@ -618,23 +663,20 @@ class TestingService:
         """Create a structured test result with JSONB data."""
         from test_templates import get_template_by_key
         request = self._get_request(request_id)
-        allowed = (
-            TestingRequestStatus.in_progress,
-            TestingRequestStatus.accepted,
-            TestingRequestStatus.test_submitted,
-            TestingRequestStatus.pending_assignment,  # tr_wf: L2 approved, tester filling results
-            TestingRequestStatus.scheduled,
-        )
-        if request.status not in allowed:
-            # For workflow-driven TRs, allow submission when current_status_code maps to
-            # an active execution stage (not terminal, not approval-gated, not assignment-pending)
-            # in the request's own workflow definition.
-            wf_execution_codes: set[str] = set()
+        # FR records have their own status lifecycle — skip TR status gate entirely.
+        from models import RequestCategory as _RC
+        _is_fr = request.request_category == _RC.failure_registry
+
+        if not _is_fr:
             if request.wf_instance_id:
+                # Workflow-driven TR: derive allowed statuses from the WF definition.
+                # Any status that belongs to a non-terminal, non-approval, non-assignment
+                # stage is an execution stage where results can be submitted.
                 from models import TrWfInstance, TrWfStatus as _TrWfStatus
                 instance = self.db.query(TrWfInstance).filter(
                     TrWfInstance.id == request.wf_instance_id
                 ).first()
+                wf_execution_codes: set[str] = set()
                 if instance:
                     rows = self.db.query(_TrWfStatus).filter(
                         _TrWfStatus.wf_definition_id == instance.wf_definition_id,
@@ -644,11 +686,25 @@ class TestingService:
                         _TrWfStatus.is_active.is_(True),
                     ).all()
                     wf_execution_codes = {r.status_code for r in rows}
-            if request.current_status_code not in wf_execution_codes:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Test results can only be saved for accepted, in-progress, or test_submitted requests",
+                if request.current_status_code not in wf_execution_codes:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Test results cannot be submitted at this workflow stage",
+                    )
+            else:
+                # Legacy TR without a workflow instance — use the fixed status list.
+                allowed = (
+                    TestingRequestStatus.in_progress,
+                    TestingRequestStatus.accepted,
+                    TestingRequestStatus.test_submitted,
+                    TestingRequestStatus.pending_assignment,
+                    TestingRequestStatus.scheduled,
                 )
+                if request.status not in allowed:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Test results can only be saved for accepted, in-progress, or test_submitted requests",
+                    )
 
         template = get_template_by_key(template_key)
         if template:
