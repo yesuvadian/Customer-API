@@ -2513,7 +2513,7 @@ def get_applicable_tests(
     existing = EquipmentService.get_equipment(db, equipment_id)
     if not existing or existing.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Equipment not found")
-    tests = EquipmentService.get_applicable_tests(db, equipment_id)
+    tests = EquipmentService.get_applicable_tests(db, equipment_id, org_id=org_id)
     from models import OrgTestTemplate
     def _template_flags(test_type_id: int) -> dict:
         tpl = (

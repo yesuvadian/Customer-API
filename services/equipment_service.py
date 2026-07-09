@@ -656,14 +656,18 @@ class EquipmentService:
         )
 
     @classmethod
-    def get_applicable_tests(cls, db: Session, equipment_id: UUID) -> list:
-        """Get test types applicable to an equipment's type."""
+    def get_applicable_tests(cls, db: Session, equipment_id: UUID, org_id=None) -> list:
+        """Return only test types that have a template (canonical, same logic as TR form)."""
         from models import CategoryDetails
+        from services.org_test_template_service import OrgTestTemplateService
+
         equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
         if not equipment:
             raise HTTPException(status_code=404, detail="Equipment not found")
 
-        return (
+        canonical = OrgTestTemplateService(db).canonical_templates_for_org(org_id=org_id)
+
+        all_types = (
             db.query(CategoryDetails)
             .filter(
                 CategoryDetails.category_master_id == equipment.equipment_type_id,
@@ -672,6 +676,8 @@ class EquipmentService:
             .order_by(CategoryDetails.name)
             .all()
         )
+
+        return [t for t in all_types if t.id in canonical]
 
     @classmethod
     def get_equipment_count(

@@ -11,6 +11,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -131,6 +132,48 @@ def get_by_request_category(
     return tmpl
 
 
+# ─── Template for equipment type + category (used by PM/maintenance/inspection TRs) ──
+
+@router.get("/for-equipment/{equipment_type_id}/category/{category_type}")
+def get_for_equipment_category(
+    equipment_type_id: int,
+    category_type: str,
+    org_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return the canonical template for a given equipment type + category type.
+    Respects org override: org template wins over global.
+    Used when a TR has no specific test_type_id (e.g. PM workflow).
+    """
+    from models import CategoryDetails
+    from services.org_test_template_service import OrgTestTemplateService
+
+    canonical = OrgTestTemplateService(db).canonical_templates_for_org(org_id=org_id)
+
+    # Find the first CategoryDetail for this equipment + category that has a template
+    detail = (
+        db.query(CategoryDetails)
+        .filter(
+            CategoryDetails.category_master_id == equipment_type_id,
+            CategoryDetails.category_type == category_type,
+            CategoryDetails.is_active == True,
+        )
+        .order_by(CategoryDetails.id)
+        .all()
+    )
+    for d in detail:
+        tpl = canonical.get(d.id)
+        if tpl:
+            return tpl
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"No template found for equipment_type_id={equipment_type_id}, category_type={category_type}",
+    )
+
+
 # ─── List by category_type (e.g., "nameplate") ───────────────────────────────
 
 @router.get("/by-category-type/{category_type}")
@@ -204,6 +247,70 @@ def create_template(
         org_id=body.org_id,
         created_by=current_user.id,
     )
+
+
+# ─── New test type + org template (atomic) ────────────────────────────────────
+
+class _NewTypeRequest(BaseModel):
+    equipment_master_id: int
+    category_type: str          # test | maintenance | inspection | repair
+    template_key: str
+    template_data: dict
+    org_id: Optional[UUID] = None
+
+    class Config:
+        extra = "forbid"
+
+
+@router.post("/new-type", response_model=OrgTestTemplateResponse, status_code=201)
+def create_new_type_template(
+    body: _NewTypeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Create a brand-new test type (CategoryDetail) for an equipment master
+    and immediately link it to a new org-specific OrgTestTemplate.
+    """
+    from models import CategoryDetails, CategoryMaster
+    from services.org_test_template_service import OrgTestTemplateService
+
+    # Validate equipment master exists
+    master = db.query(CategoryMaster).filter(CategoryMaster.id == body.equipment_master_id).first()
+    if not master:
+        raise HTTPException(status_code=404, detail="Equipment master not found")
+
+    valid_types = {"test", "maintenance", "inspection", "repair"}
+    if body.category_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"category_type must be one of {valid_types}")
+
+    type_name = body.template_data.get("name", "").strip()
+    if not type_name:
+        raise HTTPException(status_code=400, detail="template_data.name is required")
+
+    # Create CategoryDetail (the new test type)
+    detail = CategoryDetails(
+        category_master_id=body.equipment_master_id,
+        name=type_name,
+        category_type=body.category_type,
+        is_active=True,
+        created_by=current_user.id,
+    )
+    db.add(detail)
+    db.flush()  # get detail.id
+
+    # Create org-specific OrgTestTemplate linked to the new type
+    org_id = body.org_id or current_user.organization_id
+    svc = OrgTestTemplateService(db)
+    tpl = svc.create_template(
+        template_key=body.template_key,
+        template_data=body.template_data,
+        test_type_id=detail.id,
+        org_id=org_id,
+        created_by=current_user.id,
+    )
+    db.commit()
+    return tpl
 
 
 # ─── Update (designer save) ───────────────────────────────────────────────────
