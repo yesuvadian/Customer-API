@@ -501,40 +501,56 @@ def seed_tr_wf_workflow(session, org=None):
             existing_rt.rule_master_id = _rt_master.id
 
     # ── PM Workflow: stages + transitions ────────────────────────────────────
-    # 2-stage flow: EE_TLSS initial review → EE_TLSS/Senior technical approval
-    # Terminal approve fires recommendation_finalize (same as normal workflow)
-    # which marks the recommendation approved and calls WorkflowDispatchService.
-    st_fr_l2   = _get_or_create_status(session, wf_failure, "fr_pending_l2",      "Pending L2 Review",       10, "#F59E0B", approval=True)
-    st_fr_tech = _get_or_create_status(session, wf_failure, "fr_under_approval",  "Under Technical Approval",20, "#7C3AED", approval=True)
-    st_fr_done = _get_or_create_status(session, wf_failure, "fr_approved",        "FR Approved",             30, "#10B981", terminal=True)
-    st_fr_rej  = _get_or_create_status(session, wf_failure, "fr_rejected",        "FR Rejected",             40, "#EF4444", terminal=True)
-    st_fr_can  = _get_or_create_status(session, wf_failure, "fr_cancelled",       "FR Cancelled",            50, "#6B7280", terminal=True)
+    # 3-stage flow:
+    #   1. fr_pending_l2      — L2 reviews the PM request (approval)
+    #   2. fr_under_approval  — Technical sign-off (approval)
+    #   3. fr_approved        — Approved / In Execution: AE/JE performs PM and
+    #                           submits results (NOT terminal — work happens here)
+    # Terminal statuses: pm_completed (success), fr_rejected, fr_cancelled.
+    st_fr_l2   = _get_or_create_status(session, wf_failure, "fr_pending_l2",    "Pending L2 Review",       10, "#F59E0B", approval=True)
+    st_fr_tech = _get_or_create_status(session, wf_failure, "fr_under_approval","Under Technical Approval",20, "#7C3AED", approval=True)
+    st_fr_exec = _get_or_create_status(session, wf_failure, "fr_approved",      "Approved / In Progress",  30, "#3B82F6")  # execution — not terminal
+    st_fr_done = _get_or_create_status(session, wf_failure, "pm_completed",     "PM Completed",            35, "#10B981", terminal=True)
+    st_fr_rej  = _get_or_create_status(session, wf_failure, "fr_rejected",      "FR Rejected",             40, "#EF4444", terminal=True)
+    st_fr_can  = _get_or_create_status(session, wf_failure, "fr_cancelled",     "FR Cancelled",            50, "#6B7280", terminal=True)
+
+    # Ensure fr_approved is NOT terminal in DB (it was previously seeded as terminal)
+    if st_fr_exec.is_terminal:
+        st_fr_exec.is_terminal = False
+        st_fr_exec.approval_required = False
+        st_fr_exec.assignment_required = False
+        print("  [FIX] fr_approved: is_terminal -> False (execution stage)")
     session.flush()
 
     sg_fr_l2   = _get_or_create_stage(session, wf_failure, st_fr_l2,   "L2 Initial Review",  "fr_l2_review",    1)
     sg_fr_tech = _get_or_create_stage(session, wf_failure, st_fr_tech, "Technical Approval", "fr_tech_approve", 2, show_recommendation=True)
+    sg_fr_exec = _get_or_create_stage(session, wf_failure, st_fr_exec, "PM Execution",       "pm_execution",    3, is_result_stage=True)
     session.flush()
 
-    # EE_TLSS handles both stages (initial forward + technical sign-off)
+    # EE_TLSS handles both approval stages
     if role_ee_tlss:
         _get_or_create_stage_role(session, sg_fr_l2,   role_ee_tlss, can_approve=True)
         _get_or_create_stage_role(session, sg_fr_tech, role_ee_tlss, can_approve=True)
 
-    # L2 → forward to tech approve
+    # L2 → Technical Approval
     _get_or_create_transition(session, sg_fr_l2,   sg_fr_tech, "approve")
     _get_or_create_transition(session, sg_fr_l2,   None,       "reject",
                                requires_comment=True, is_rejection=True, terminal_status=st_fr_rej)
     _get_or_create_transition(session, sg_fr_l2,   None,       "cancel",
                                requires_comment=True, terminal_status=st_fr_can)
-    # Tech approve → terminal (triggers recommendation dispatch)
-    _get_or_create_transition(session, sg_fr_tech, None,       "approve",
-                               terminal_status=st_fr_done, post_action="recommendation_finalize")
+    # Technical Approval → PM Execution (not terminal — AE/JE will execute and submit results)
+    _get_or_create_transition(session, sg_fr_tech, sg_fr_exec, "approve")
     _get_or_create_transition(session, sg_fr_tech, None,       "reject",
                                requires_comment=True, is_rejection=True, terminal_status=st_fr_rej)
     _get_or_create_transition(session, sg_fr_tech, None,       "cancel",
                                requires_comment=True, terminal_status=st_fr_can)
+    # PM Execution → Completed (triggers recommendation dispatch)
+    _get_or_create_transition(session, sg_fr_exec, None,       "complete",
+                               terminal_status=st_fr_done, post_action="recommendation_finalize")
+    _get_or_create_transition(session, sg_fr_exec, None,       "cancel",
+                               requires_comment=True, terminal_status=st_fr_can)
     session.flush()
-    print("  [OK] Failure Registry Workflow stages seeded")
+    print("  [OK] PM Workflow stages seeded")
 
     # ── R&D role override rules ───────────────────────────────────────────────
     # For these test types the override_role (AEE-R&D) takes precedence over the

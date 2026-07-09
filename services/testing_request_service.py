@@ -1129,7 +1129,7 @@ class TestingRequestService:
         "Generic",
     }
 
-    def list_equipment_types(self) -> list:
+    def list_equipment_types(self, org_id=None) -> list:
         """Return active CategoryMaster rows that represent real equipment types,
         grouped by their CategoryDetails request category.
 
@@ -1155,7 +1155,16 @@ class TestingRequestService:
             .order_by(CategoryMaster.name)
             .all()
         )
+        # Build canonical test_type_id → template map: system templates as base,
+        # org templates override where the org has customised them.
+        # This is the exact same set the Template Designer renders — single source of truth.
+        from services.org_test_template_service import OrgTestTemplateService
+        canonical: dict[int, OrgTestTemplate] = (
+            OrgTestTemplateService(self.db).canonical_templates_for_org(org_id=org_id)
+        )
+
         result = []
+        _CAT_ALIAS = {"repair": "repair_lifecycle"}
         for m in masters:
             all_types = (
                 self.db.query(CategoryDetails)
@@ -1169,25 +1178,18 @@ class TestingRequestService:
             types_by_category: dict = {
                 "test": [], "maintenance": [], "inspection": [], "repair_lifecycle": []
             }
-            # Map seed value 'repair' to the TR bucket 'repair_lifecycle'
-            _CAT_ALIAS = {"repair": "repair_lifecycle"}
             for t in all_types:
+                # Only include if Template Designer has a canonical template for this type
+                tpl = canonical.get(t.id)
+                if tpl is None:
+                    continue
+                tpl_data = tpl.template_data or {}
+                # Skip if toggled inactive in the Designer
+                if tpl_data.get("is_active") is False:
+                    continue
                 raw_cat = t.category_type or "test"
                 cat = _CAT_ALIAS.get(raw_cat, raw_cat)
                 bucket = types_by_category.get(cat, types_by_category["test"])
-                # Look up linked OrgTestTemplate to expose lifecycle flags
-                tpl = (
-                    self.db.query(OrgTestTemplate)
-                    .filter(OrgTestTemplate.test_type_id == t.id)
-                    .order_by(OrgTestTemplate.version.desc())
-                    .first()
-                )
-                if tpl is None:
-                    continue  # skip test types that have no linked template
-                tpl_data = tpl.template_data or {}
-                # Skip if the template has been toggled inactive in the designer
-                if tpl_data.get("is_active") is False:
-                    continue
                 bucket.append({
                     "id": t.id,
                     "name": t.name,

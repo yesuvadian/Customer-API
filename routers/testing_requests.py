@@ -312,9 +312,12 @@ def get_department_ancestors(dept_id: UUID, db: Session = Depends(get_db)):
 
 # ─── Equipment Types (for form dropdowns) ───────────────────
 @router.get("/equipment_types")
-def list_equipment_types(db: Session = Depends(get_db)):
+def list_equipment_types(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Returns equipment types grouped by request category."""
-    return TestingRequestService(db).list_equipment_types()
+    return TestingRequestService(db).list_equipment_types(org_id=current_user.organization_id)
 
 
 # ─── Kit Sub-Types (Testing Kit CategoryDetails) ────────────

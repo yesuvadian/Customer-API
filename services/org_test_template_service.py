@@ -66,6 +66,25 @@ class OrgTestTemplateService:
             unique.append(r)
         return unique
 
+    def canonical_templates_for_org(self, org_id: Optional[UUID] = None) -> dict[int, "OrgTestTemplate"]:
+        """Return a test_type_id → template mapping that mirrors what the Template
+        Designer renders: system templates as base, org-specific templates override
+        where they exist.  Only test types with a template in this map should appear
+        in the TR form (no template = no testing).
+        """
+        # Start with system (global) templates
+        system = self.list_templates(org_id=None)
+        merged: dict[int, OrgTestTemplate] = {
+            t.test_type_id: t for t in system if t.test_type_id is not None
+        }
+        # Org templates override system for the same test_type_id
+        if org_id:
+            org_tpls = self.list_templates(org_id=org_id)
+            for t in org_tpls:
+                if t.test_type_id is not None:
+                    merged[t.test_type_id] = t
+        return merged
+
     OVERALL_KEY = "overall_assessment"
 
     def get_overall_assessment(self, org_id: Optional[UUID] = None) -> OrgTestTemplate:

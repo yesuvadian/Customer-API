@@ -626,10 +626,29 @@ class TestingService:
             TestingRequestStatus.scheduled,
         )
         if request.status not in allowed:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Test results can only be saved for accepted, in-progress, or test_submitted requests",
-            )
+            # For workflow-driven TRs, allow submission when current_status_code maps to
+            # an active execution stage (not terminal, not approval-gated, not assignment-pending)
+            # in the request's own workflow definition.
+            wf_execution_codes: set[str] = set()
+            if request.wf_instance_id:
+                from models import TrWfInstance, TrWfStatus as _TrWfStatus
+                instance = self.db.query(TrWfInstance).filter(
+                    TrWfInstance.id == request.wf_instance_id
+                ).first()
+                if instance:
+                    rows = self.db.query(_TrWfStatus).filter(
+                        _TrWfStatus.wf_definition_id == instance.wf_definition_id,
+                        _TrWfStatus.is_terminal.is_(False),
+                        _TrWfStatus.approval_required.is_(False),
+                        _TrWfStatus.assignment_required.is_(False),
+                        _TrWfStatus.is_active.is_(True),
+                    ).all()
+                    wf_execution_codes = {r.status_code for r in rows}
+            if request.current_status_code not in wf_execution_codes:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Test results can only be saved for accepted, in-progress, or test_submitted requests",
+                )
 
         template = get_template_by_key(template_key)
         if template:
