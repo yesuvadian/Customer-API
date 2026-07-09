@@ -365,8 +365,10 @@ class DirectSubmissionService:
         if own_only:
             query = query.filter(TestingRequest.originator_id == user.id)
 
-        records = query.offset(skip).limit(limit).all()
-        return [self._serialize(r) for r in records]
+        records = query.offset(skip).limit(limit + 1).all()
+        has_more = len(records) > limit
+        items = [self._serialize(r) for r in records[:limit]]
+        return {"items": items, "has_more": has_more}
 
     def get_submission(self, request_id: UUID, user: User) -> dict:
         """Return single submission with its test result."""
