@@ -181,7 +181,6 @@ class OrgTestTemplateService:
             template_data=template_data,
             is_system=False,
             version=1,
-            created_by=created_by,
         )
         self.db.add(tmpl)
         self.db.commit()
@@ -550,7 +549,6 @@ class OrgTestTemplateService:
                 template_data=g.template_data,
                 is_system=False,
                 version=g.version,
-                created_by=created_by,
             )
             self.db.add(clone)
             inserted += 1
