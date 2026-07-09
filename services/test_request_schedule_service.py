@@ -558,6 +558,10 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 TestingRequestStatus.submitted
             )
 
+            # Maintenance schedules route to PM Workflow
+            if str(getattr(schedule, "request_category", "") or "").lower() == "maintenance":
+                new_request.request_type = "pm"
+
             db.flush()
 
             # Enroll in TR workflow engine so the ticket enters the L2→L3→L4

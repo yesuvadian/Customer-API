@@ -154,11 +154,15 @@ class DirectSubmissionService:
                 pass
 
         # ── TestingRequest ────────────────────────────────────────────────────
-        request_type = (
-            "failure_registry"
-            if category == RequestCategory.failure_registry
-            else category.value  # e.g. "taqc_inspection"
-        )
+        # FR + next_action=Maintenance → PM Workflow; all others → Standard Test Workflow
+        if category == RequestCategory.failure_registry:
+            request_type = (
+                "pm"
+                if (_td.get("next_action") or "").lower() == "maintenance"
+                else "normal"
+            )
+        else:
+            request_type = category.value  # e.g. "taqc_inspection"
 
         req = TestingRequest(
             request_number=self._generate_request_number(category),

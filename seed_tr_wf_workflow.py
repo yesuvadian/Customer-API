@@ -367,7 +367,18 @@ def seed_tr_wf_workflow(session, org=None):
     # ── Workflow definitions ──────────────────────────────────────────────────
     wf_normal  = _get_or_create_definition(session, org.id, "Standard Test Workflow",    "normal",            is_default=True)
     wf_rnd     = _get_or_create_definition(session, org.id, "Standard R&D Workflow",     None)
-    wf_failure = _get_or_create_definition(session, org.id, "Failure Registry Workflow", "failure_registry")
+
+    # Rename "Failure Registry Workflow" → "PM Workflow" if old name exists
+    _old_fr = session.query(TrWfDefinition).filter_by(
+        org_id=org.id, name="Failure Registry Workflow"
+    ).first()
+    if _old_fr:
+        _old_fr.name = "PM Workflow"
+        _old_fr.request_type = "pm"
+        session.flush()
+        print("  [REN] TrWfDefinition: Failure Registry Workflow -> PM Workflow")
+
+    wf_failure = _get_or_create_definition(session, org.id, "PM Workflow", "pm")
     wf_special = _get_or_create_definition(session, org.id, "Special Test Workflow",     "special")
 
     # Set default L3 role + default tester role on Standard Test Workflow
@@ -458,16 +469,17 @@ def seed_tr_wf_workflow(session, org=None):
         ))
         print("  [NEW] TrWfRoutingDefault -> Standard Test Workflow")
 
-    # Remove stale routing rule created before request_type was renamed
-    stale = session.query(TrWfRoutingRule).filter_by(
-        org_id=org.id, request_type="failure",
-        equipment_type_id=None, test_type_id=None,
-    ).first()
-    if stale:
-        session.delete(stale)
-        print("  [DEL] TrWfRoutingRule: stale request_type='failure' removed")
+    # Remove stale routing rules from old names
+    for _stale_type in ("failure", "failure_registry"):
+        _stale = session.query(TrWfRoutingRule).filter_by(
+            org_id=org.id, request_type=_stale_type,
+            equipment_type_id=None, test_type_id=None,
+        ).first()
+        if _stale:
+            session.delete(_stale)
+            print(f"  [DEL] TrWfRoutingRule: stale request_type='{_stale_type}' removed")
 
-    for req_type, wf_def in [("failure_registry", wf_failure), ("special", wf_special)]:
+    for req_type, wf_def in [("pm", wf_failure), ("special", wf_special)]:
         _rt_master = _get_or_create_rule_master(
             session, org.id, f"{wf_def.name} Routing", 10)
         existing_rt = session.query(TrWfRoutingRule).filter_by(
@@ -488,7 +500,7 @@ def seed_tr_wf_workflow(session, org=None):
         elif existing_rt.rule_master_id != _rt_master.id:
             existing_rt.rule_master_id = _rt_master.id
 
-    # ── Failure Registry Workflow: stages + transitions ───────────────────────
+    # ── PM Workflow: stages + transitions ────────────────────────────────────
     # 2-stage flow: EE_TLSS initial review → EE_TLSS/Senior technical approval
     # Terminal approve fires recommendation_finalize (same as normal workflow)
     # which marks the recommendation approved and calls WorkflowDispatchService.
