@@ -527,14 +527,46 @@ class TestingService:
             _org_tmpl = svc.get_for_test_type(test_type_id=test_type_id, org_id=org_id)
             template_data = copy.deepcopy(_org_tmpl.template_data)
         except FHE:
-            # Fallback: static dict (legacy / before provisioning)
-            from test_templates import get_template_for_test_type
-            template_data = get_template_for_test_type(detail.name)
-            if not template_data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"No template defined for test type: {detail.name}",
-                )
+            # Fallback 1: another template for the same equipment type + category.
+            # Only for maintenance/inspection/repair — NOT for 'test', where each
+            # test type has its own specific template and a sibling would be wrong.
+            if detail.category_master_id and detail.category_type and detail.category_type != "test":
+                sibling_ids = [
+                    row.id
+                    for row in self.db.query(CategoryDetails).filter(
+                        CategoryDetails.category_master_id == detail.category_master_id,
+                        CategoryDetails.category_type == detail.category_type,
+                        CategoryDetails.is_active.is_(True),
+                        CategoryDetails.id != test_type_id,
+                    ).all()
+                ]
+                _org_tmpl = None
+                for sid in sibling_ids:
+                    try:
+                        _org_tmpl = svc.get_for_test_type(test_type_id=sid, org_id=org_id)
+                        break
+                    except FHE:
+                        continue
+                if _org_tmpl:
+                    template_data = copy.deepcopy(_org_tmpl.template_data)
+                else:
+                    # Fallback 2: static dict (legacy / before provisioning)
+                    from test_templates import get_template_for_test_type
+                    template_data = get_template_for_test_type(detail.name)
+                    if not template_data:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No template defined for test type: {detail.name}",
+                        )
+            else:
+                # Fallback 2: static dict (legacy / before provisioning)
+                from test_templates import get_template_for_test_type
+                template_data = get_template_for_test_type(detail.name)
+                if not template_data:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"No template defined for test type: {detail.name}",
+                    )
 
         # Inject template_key so the frontend can use it for result submission
         if _org_tmpl and "key" not in template_data:
