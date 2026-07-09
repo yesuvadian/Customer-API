@@ -78,20 +78,23 @@ class RecommendationService:
                 detail="Testing request not found",
             )
 
-        allowed = [
-            TestingRequestStatus.test_submitted,
-            TestingRequestStatus.accepted,
-            TestingRequestStatus.in_progress,
-            TestingRequestStatus.under_review,
-        ]
-        if request.status not in allowed:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Cannot create recommendation for request in "
-                    f"'{request.status.value}' status"
-                ),
-            )
+        from models import RequestCategory as _RC
+        _is_fr = request.request_category == _RC.failure_registry
+        if not _is_fr:
+            allowed = [
+                TestingRequestStatus.test_submitted,
+                TestingRequestStatus.accepted,
+                TestingRequestStatus.in_progress,
+                TestingRequestStatus.under_review,
+            ]
+            if request.status not in allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Cannot create recommendation for request in "
+                        f"'{request.status.value}' status"
+                    ),
+                )
 
         # Validate recommendation_type enum
         try:

@@ -66,6 +66,25 @@ class OrgTestTemplateService:
             unique.append(r)
         return unique
 
+    def canonical_templates_for_org(self, org_id: Optional[UUID] = None) -> dict[int, "OrgTestTemplate"]:
+        """Return a test_type_id → template mapping that mirrors what the Template
+        Designer renders: system templates as base, org-specific templates override
+        where they exist.  Only test types with a template in this map should appear
+        in the TR form (no template = no testing).
+        """
+        # Start with system (global) templates
+        system = self.list_templates(org_id=None)
+        merged: dict[int, OrgTestTemplate] = {
+            t.test_type_id: t for t in system if t.test_type_id is not None
+        }
+        # Org templates override system for the same test_type_id
+        if org_id:
+            org_tpls = self.list_templates(org_id=org_id)
+            for t in org_tpls:
+                if t.test_type_id is not None:
+                    merged[t.test_type_id] = t
+        return merged
+
     OVERALL_KEY = "overall_assessment"
 
     def get_overall_assessment(self, org_id: Optional[UUID] = None) -> OrgTestTemplate:
@@ -181,7 +200,6 @@ class OrgTestTemplateService:
             template_data=template_data,
             is_system=False,
             version=1,
-            created_by=created_by,
         )
         self.db.add(tmpl)
         self.db.commit()
@@ -408,69 +426,72 @@ class OrgTestTemplateService:
         from models import CategoryMaster
 
         inserted = 0
+        from sqlalchemy.orm.attributes import flag_modified
 
         # ── Test / maintenance / inspection / repair templates ────────────────
-        # Use .all() instead of .first() so that types which appear under BOTH
-        # an equipment-specific master AND a lifecycle master (e.g. "Calibration
-        # Lifecycle") each get their own OrgTestTemplate row.  That ensures
-        # list_equipment_types() finds the template — and the enable_calibration /
-        # enable_cumulative flags — regardless of which CategoryDetails ID the
-        # equipment master uses.
+        # One OrgTestTemplate row per unique template_key (org_id=None).
+        # The first CategoryDetail whose name maps to a given key wins; subsequent
+        # details with the same name (other equipment masters) are intentionally
+        # skipped — they share the same template design.
+        # seen_keys tracks in-memory to avoid the flush-gap bug where multiple
+        # rows were created for the same key within a single session.
+        seen_keys: set = set()
+
+        # Pre-load existing system rows keyed by template_key for fast lookup
+        existing_by_key: dict = {
+            r.template_key: r
+            for r in self.db.query(OrgTestTemplate)
+            .filter(OrgTestTemplate.org_id == None)  # noqa: E711
+            .all()
+        }
+
         for type_name, template_key in TEST_TYPE_TO_TEMPLATE.items():
             template_data = TEST_TEMPLATES.get(template_key)
             if not template_data:
                 continue
 
-            details = (
+            if template_key in seen_keys:
+                continue  # already handled this key in this run
+
+            detail = (
                 self.db.query(CategoryDetails)
                 .filter(CategoryDetails.name == type_name)
-                .all()
+                .first()
             )
-            for detail in details:
-                # Check by template_key first — avoid duplicate global rows when
-                # the same activity name exists under multiple equipment masters
-                existing = (
+            if not detail:
+                continue
+
+            existing = existing_by_key.get(template_key)
+            if existing:
+                existing.template_data = template_data
+                existing.version = (existing.version or 1) + 1
+                flag_modified(existing, "template_data")
+                # Cascade to org-specific copies
+                for copy in (
                     self.db.query(OrgTestTemplate)
                     .filter(
-                        OrgTestTemplate.org_id == None,  # noqa: E711
                         OrgTestTemplate.template_key == template_key,
+                        OrgTestTemplate.org_id != None,  # noqa: E711
                     )
-                    .first()
-                )
-                if existing:
-                    # Always sync the DB row from test_templates.py so that
-                    # adding new sections/fields/formulas to the static dict
-                    # is immediately reflected without a manual DB edit.
-                    from sqlalchemy.orm.attributes import flag_modified
-                    existing.template_data = template_data
-                    existing.template_key  = template_key
-                    existing.version       = (existing.version or 1) + 1
-                    flag_modified(existing, "template_data")
-                    # Cascade to org-specific copies (same key, non-null org_id)
-                    # so that all orgs always see the latest template definition.
-                    org_copies = (
-                        self.db.query(OrgTestTemplate)
-                        .filter(
-                            OrgTestTemplate.template_key == template_key,
-                            OrgTestTemplate.org_id != None,  # noqa: E711
-                        )
-                        .all()
-                    )
-                    for copy in org_copies:
-                        copy.template_data = template_data
-                        copy.version = existing.version
-                        flag_modified(copy, "template_data")
-                    continue
-
-                self.db.add(OrgTestTemplate(
+                    .all()
+                ):
+                    copy.template_data = template_data
+                    copy.version = existing.version
+                    flag_modified(copy, "template_data")
+            else:
+                new_row = OrgTestTemplate(
                     org_id=None,
                     template_key=template_key,
                     test_type_id=detail.id,
                     template_data=template_data,
                     is_system=True,
                     version=1,
-                ))
+                )
+                self.db.add(new_row)
+                existing_by_key[template_key] = new_row
                 inserted += 1
+
+            seen_keys.add(template_key)
 
         # ── Nameplate templates ───────────────────────────────────────────────
         from seed import NAMEPLATE_TEMPLATES, NAMEPLATE_TYPE_TO_TEMPLATE
@@ -550,7 +571,6 @@ class OrgTestTemplateService:
                 template_data=g.template_data,
                 is_system=False,
                 version=g.version,
-                created_by=created_by,
             )
             self.db.add(clone)
             inserted += 1

@@ -238,6 +238,7 @@ class TestingRequestService:
         self,
         status_filter: Optional[str] = None,
         is_closed: Optional[bool] = None,
+        wf_active: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -360,6 +361,15 @@ class TestingRequestService:
                     TestingRequest.id.notin_(wf_done_ids),
                 )
 
+        if wf_active is not None:
+            active_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                TrWfInstance.status == "active"
+            ).scalar_subquery()
+            if wf_active:
+                query = query.filter(TestingRequest.id.in_(active_wf_ids))
+            else:
+                query = query.filter(TestingRequest.id.notin_(active_wf_ids))
+
         if category_filter:
             query = query.filter(TestingRequest.request_category == category_filter)
         if originator_id:
@@ -442,6 +452,7 @@ class TestingRequestService:
         limit: int = 100,
         status_filter: Optional[str] = None,
         is_closed: Optional[bool] = None,
+        wf_active: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -462,6 +473,7 @@ class TestingRequestService:
         query = self._base_request_query(
             status_filter=status_filter,
             is_closed=is_closed,
+            wf_active=wf_active,
             category_filter=category_filter,
             originator_id=originator_id,
             tester_id=tester_id,
@@ -484,6 +496,8 @@ class TestingRequestService:
     def count_requests(
         self,
         status_filter: Optional[str] = None,
+        is_closed: Optional[bool] = None,
+        wf_active: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -504,6 +518,8 @@ class TestingRequestService:
     ) -> int:
         query = self._base_request_query(
             status_filter=status_filter,
+            is_closed=is_closed,
+            wf_active=wf_active,
             category_filter=category_filter,
             originator_id=originator_id,
             tester_id=tester_id,
@@ -526,6 +542,7 @@ class TestingRequestService:
     def get_breakdown(
         self,
         status_filter: Optional[str] = None,
+        is_closed: Optional[bool] = None,
         category_filter: Optional[str] = None,
         originator_id: Optional[UUID] = None,
         tester_id: Optional[UUID] = None,
@@ -539,6 +556,7 @@ class TestingRequestService:
     ) -> dict:
         query = self._base_request_query(
             status_filter=status_filter,
+            is_closed=is_closed,
             category_filter=category_filter,
             originator_id=originator_id,
             tester_id=tester_id,
@@ -1101,19 +1119,52 @@ class TestingRequestService:
 
         return result
 
-    def list_equipment_types(self) -> list:
-        """Return CategoryMaster rows where description='Testing Equipment'
-        with their CategoryDetails grouped by request category."""
+    # Non-equipment masters — same exclusion list as the Flutter Template Designer.
+    _NON_EQUIPMENT_MASTERS = {
+        "Annual Audit Categories",
+        "Calibration Lifecycle",
+        "Cumulative Lifecycle",
+        "Repair Lifecycle",
+        "Inspection Types",
+        "Generic",
+    }
+
+    def list_equipment_types(self, org_id=None) -> list:
+        """Return active CategoryMaster rows that represent real equipment types,
+        grouped by their CategoryDetails request category.
+
+        Inclusion rule: any active master whose name is NOT in the non-equipment
+        exclusion list AND that either carries description='Testing Equipment' OR
+        has at least one active CategoryDetail — so newly created equipment types
+        appear here as soon as they have test/maintenance types defined."""
         masters = (
             self.db.query(CategoryMaster)
             .filter(
-                CategoryMaster.description == "Testing Equipment",
                 CategoryMaster.is_active.is_(True),
+                ~CategoryMaster.name.in_(self._NON_EQUIPMENT_MASTERS),
+                # Must have description='Testing Equipment' OR have active details
+                (
+                    (CategoryMaster.description == "Testing Equipment") |
+                    CategoryMaster.id.in_(
+                        self.db.query(CategoryDetails.category_master_id)
+                        .filter(CategoryDetails.is_active.is_(True))
+                        .distinct()
+                    )
+                ),
             )
             .order_by(CategoryMaster.name)
             .all()
         )
+        # Build canonical test_type_id → template map: system templates as base,
+        # org templates override where the org has customised them.
+        # This is the exact same set the Template Designer renders — single source of truth.
+        from services.org_test_template_service import OrgTestTemplateService
+        canonical: dict[int, OrgTestTemplate] = (
+            OrgTestTemplateService(self.db).canonical_templates_for_org(org_id=org_id)
+        )
+
         result = []
+        _CAT_ALIAS = {"repair": "repair_lifecycle"}
         for m in masters:
             all_types = (
                 self.db.query(CategoryDetails)
@@ -1128,16 +1179,17 @@ class TestingRequestService:
                 "test": [], "maintenance": [], "inspection": [], "repair_lifecycle": []
             }
             for t in all_types:
-                cat = t.category_type or "test"
+                # Only include if Template Designer has a canonical template for this type
+                tpl = canonical.get(t.id)
+                if tpl is None:
+                    continue
+                tpl_data = tpl.template_data or {}
+                # Skip if toggled inactive in the Designer
+                if tpl_data.get("is_active") is False:
+                    continue
+                raw_cat = t.category_type or "test"
+                cat = _CAT_ALIAS.get(raw_cat, raw_cat)
                 bucket = types_by_category.get(cat, types_by_category["test"])
-                # Look up linked OrgTestTemplate to expose lifecycle flags
-                tpl = (
-                    self.db.query(OrgTestTemplate)
-                    .filter(OrgTestTemplate.test_type_id == t.id)
-                    .order_by(OrgTestTemplate.version.desc())
-                    .first()
-                )
-                tpl_data = (tpl.template_data or {}) if tpl else {}
                 bucket.append({
                     "id": t.id,
                     "name": t.name,

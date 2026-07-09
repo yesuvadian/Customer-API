@@ -939,7 +939,9 @@ def tr_wf_get_pending_queue(
             "equipment_vector_group": eq.vector_group if eq else None,
             "equipment_rated_mva": (eq.nameplate_data or {}).get("rated_mva") if eq else None,
             "test_type": req.test_type.name if req.test_type else None,
-            "test_type_id": req.test_type_id,
+            "test_type_id": req.test_type_id or (
+                ((req.form_data or {}).get("test_types") or [{}])[0].get("id")
+            ),
             "equipment_id": str(req.equipment_id) if req.equipment_id else None,
             "equipment_type_id": req.equipment_type_id,
             "department": req.department.name if req.department else None,

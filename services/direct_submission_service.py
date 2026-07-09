@@ -154,11 +154,15 @@ class DirectSubmissionService:
                 pass
 
         # ── TestingRequest ────────────────────────────────────────────────────
-        request_type = (
-            "failure_registry"
-            if category == RequestCategory.failure_registry
-            else category.value  # e.g. "taqc_inspection"
-        )
+        # FR + next_action=Maintenance → PM Workflow; all others → Standard Test Workflow
+        if category == RequestCategory.failure_registry:
+            request_type = (
+                "pm"
+                if (_td.get("next_action") or "").lower() == "maintenance"
+                else "normal"
+            )
+        else:
+            request_type = category.value  # e.g. "taqc_inspection"
 
         req = TestingRequest(
             request_number=self._generate_request_number(category),
@@ -361,8 +365,10 @@ class DirectSubmissionService:
         if own_only:
             query = query.filter(TestingRequest.originator_id == user.id)
 
-        records = query.offset(skip).limit(limit).all()
-        return [self._serialize(r) for r in records]
+        records = query.offset(skip).limit(limit + 1).all()
+        has_more = len(records) > limit
+        items = [self._serialize(r) for r in records[:limit]]
+        return {"items": items, "has_more": has_more}
 
     def get_submission(self, request_id: UUID, user: User) -> dict:
         """Return single submission with its test result."""
