@@ -660,7 +660,7 @@ class WorkflowRoutingService:
                 rec = (
                     self.db.query(_Rec)
                     .filter(_Rec.testing_request_id == testing_request.id)
-                    .order_by(_Rec.created_at.desc())
+                    .order_by(_Rec.cts.desc())
                     .first()
                 )
                 if rec and rec.approval_status == "pending":
