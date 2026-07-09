@@ -1182,7 +1182,9 @@ class TestingRequestService:
                     .order_by(OrgTestTemplate.version.desc())
                     .first()
                 )
-                tpl_data = (tpl.template_data or {}) if tpl else {}
+                if tpl is None:
+                    continue  # skip test types that have no linked template
+                tpl_data = tpl.template_data or {}
                 bucket.append({
                     "id": t.id,
                     "name": t.name,
